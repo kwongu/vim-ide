@@ -1,0 +1,457 @@
+pane	0	0	1	:*	0	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	1	bash	:
+pane	0	0	1	:*	1	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main	0	bash	:
+pane	0	0	1	:*	2	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	0	bash	:
+pane	0	0	1	:*	3	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub	0	bash	:
+pane	0	0	1	:*	4	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	0	bash	:
+pane	0	0	1	:*	5	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0	0	bash	:
+pane	0	0	1	:*	6	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-utils/1.2.1-r0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-utils/1.2.1-r0	0	bash	:
+pane	0	0	1	:*	7	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/tcc8050_sub-telechips-linux/perf/1.0-r9/package	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-sub/tmp/work/tcc8050_sub-telechips-linux/perf/1.0-r9/package	0	bash	:
+pane	0	0	1	:*	8	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work/aarch64-telechips-linux/t-sound-utils/1.0.0-r0/t-sound-utils-1.0.0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work/aarch64-telechips-linux/t-sound-utils/1.0.0-r0/t-sound-utils-1.0.0	0	bash	:
+pane	0	0	1	:*	9	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0	0	bash	:
+pane	0	0	1	:*	10	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work/aarch64-telechips-linux/uftrace/0.13.1-r0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work/aarch64-telechips-linux/uftrace/0.13.1-r0	0	bash	:
+pane	0	1	0	:-	0	B130111@S093:/home/B130111/_opensource/meta-openembedded	:/home/B130111/_opensource/meta-openembedded	1	bash	:
+pane	0	2	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0	0	bash	:
+pane	0	2	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-core/recipes-devtools/uftrace	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-core/recipes-devtools/uftrace	0	bash	:
+pane	0	2	0	:	2	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/build/tcc8030-main/tmp/work/aarch64-telechips-linux/t-sound-utils/1.0.0-r0/package/usr/bin	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/build/tcc8030-main/tmp/work/aarch64-telechips-linux/t-sound-utils/1.0.0-r0/package/usr/bin	0	bash	:
+pane	0	2	0	:	3	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/build/tcc8030-sub/tmp/work/cortexa7hf-neon-telechips-linux-gnueabi/t-sound/1.1.0-r0/git	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/build/tcc8030-sub/tmp/work/cortexa7hf-neon-telechips-linux-gnueabi/t-sound/1.1.0-r0/git	0	bash	:
+pane	0	2	0	:	4	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/tsnd_patch/TCC805x_Linux_IVI_K5.4_1.0.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.4_1.0.0/tsnd_patch/TCC805x_Linux_IVI_K5.4_1.0.0	1	bash	:
+pane	0	3	0	:Z	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0	0	bash	:
+pane	0	3	0	:Z	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux/linux-telechips/4.14.202-r0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux/linux-telechips/4.14.202-r0	0	bash	:
+pane	0	3	0	:Z	2	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/build/tcc8030-sub/tmp/work/tcc8030_sub-telechips-linux-gnueabi/linux-telechips/4.14.202-r0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/build/tcc8030-sub/tmp/work/tcc8030_sub-telechips-linux-gnueabi/linux-telechips/4.14.202-r0	0	bash	:
+pane	0	3	0	:Z	3	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/tsnd_patch	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_YP3.1_1.0.0/tsnd_patch	1	bash	:
+pane	0	4	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	1	bash	:
+pane	0	4	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/subcore	0	bash	:
+pane	0	4	0	:	2	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	0	bash	:
+pane	0	4	0	:	3	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0	0	bash	:
+pane	0	5	0	:Z	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-main	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-main	0	bash	:
+pane	0	5	0	:Z	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub	0	bash	:
+pane	0	5	0	:Z	2	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0	1	bash	:
+pane	0	5	0	:Z	3	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/t-sound-patch	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/t-sound-patch	0	bash	:
+pane	0	6	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0	0	bash	:
+pane	0	6	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-sub	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-sub	0	bash	:
+pane	0	6	0	:	2	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-main	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-main	0	bash	:
+pane	0	6	0	:	3	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-main/tmp/deploy	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/build/tcc8030-main/tmp/deploy	0	bash	:
+pane	0	6	0	:	4	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	0	7	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	0	bash	:
+pane	0	7	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	1	bash	:
+pane	0	8	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/t-sound-patch	:/home/B130111/tsnd/work/official/t-sound-patch	1	bash	:
+pane	0	8	0	:	1	B130111@S093:/home/B130111/tsnd/dgit/t-sound-803x	:/home/B130111/tsnd/dgit/t-sound-803x	0	bash	:
+pane	0	8	0	:	2	B130111@S093:/home/B130111/tsnd/rgit/t-sound_803x	:/home/B130111/tsnd/rgit/t-sound_803x	0	bash	:
+pane	0	9	0	:	0	B130111@S093:/home/B130111/audio/git/dev/audio_asrc	:/home/B130111/audio/git/dev/audio_asrc	1	bash	:
+pane	0	10	0	:	0	B130111@S093:/home/B130111/t-sound/git/dev/t-sound-803x	:/home/B130111/t-sound/git/dev/t-sound-803x	1	bash	:
+pane	0	10	0	:	1	B130111@S093:/home/B130111/t-sound/git/rel/t-sound_805x	:/home/B130111/t-sound/git/rel/t-sound_805x	0	bash	:
+pane	0	11	0	:	0	B130111@S093:/home/B130111/git/bitbucket/kernel-5.10-audio	:/home/B130111/git/bitbucket/kernel-5.10-audio	0	bash	:
+pane	0	11	0	:	1	B130111@S093:/home/B130111/git/bitbucket/kernel-5.10	:/home/B130111/git/bitbucket/kernel-5.10	1	bash	:
+pane	1	0	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/boot-firmware	1	bash	:
+pane	1	1	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/boot-firmware	0	bash	:
+pane	1	1	0	:	1	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/u-boot-core	0	bash	:
+pane	1	1	0	:	2	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/main/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/main/kernel-5.10-audio	0	bash	:
+pane	1	1	0	:	3	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	1	bash	:
+pane	1	2	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/main/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/main/u-boot-core	0	bash	:
+pane	1	2	0	:	1	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/boot-firmware	0	bash	:
+pane	1	2	0	:	2	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/main/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/main/kernel-5.10-audio	0	bash	:
+pane	1	2	0	:	3	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/sub/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/sub/u-boot-core	0	bash	:
+pane	1	2	0	:	4	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8059/sub/kernel-5.10-audio	1	bash	:
+pane	1	3	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/main/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/main/u-boot-core	0	bash	:
+pane	1	3	0	:	1	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/boot-firmware	0	bash	:
+pane	1	3	0	:	2	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/boot-firmware	0	bash	:
+pane	1	3	0	:	3	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/main/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803x/main/kernel-5.10-audio	1	bash	:
+pane	1	4	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/u-boot-core	0	bash	:
+pane	1	4	0	:	1	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/boot-firmware	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/boot-firmware	0	bash	:
+pane	1	4	0	:	2	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/u-boot-core	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/u-boot-core	0	bash	:
+pane	1	4	0	:	3	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc803xPE/main/kernel-5.10-audio	1	bash	:
+pane	1	5	1	:*	0	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux	:/home/B130111/kernel/bitbucket/yocto/build-autolinux	1	bash	:
+pane	1	5	1	:*	1	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/uftrace/0.14-r0/package	:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/uftrace/0.14-r0/package\ (deleted)	0	bash	:
+pane	1	5	1	:*	2	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/uftrace/0.14-r0/recipe-sysroot	:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/uftrace/0.14-r0/recipe-sysroot\ (deleted)	0	bash	:
+pane	1	5	1	:*	3	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main	:/home/B130111/kernel/bitbucket/yocto/build-autolinux/build/tcc8050-main	0	vim	:/home/B130111/.local/bin/vim conf/local.conf
+pane	1	5	1	:*	4	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux/poky	:/home/B130111/kernel/bitbucket/yocto/build-autolinux/poky	0	bash	:
+pane	1	5	1	:*	5	B130111@S093:/home/B130111/als/adt_tcc805x_64/sysroots	:/home/B130111/als/adt_tcc805x_64/sysroots	0	bash	:
+pane	1	5	1	:*	6	B130111@S093:/home/B130111/kernel/bitbucket/yocto/build-autolinux/poky	:/home/B130111/kernel/bitbucket/yocto/build-autolinux/poky	0	vim	:/home/B130111/.local/bin/vim ./meta/recipes-devtools/uftrace/uftrace_0.14.bb
+pane	1	5	1	:*	7	B130111@S093:/home/B130111/kernel/bitbucket/yocto/openembedded-core	:/home/B130111/kernel/bitbucket/yocto/openembedded-core	0	bash	:
+pane	1	6	0	:-	0	B130111@S093:/home/B130111/kernel/bitbucket/yocto/openembedded-core/meta/recipes-devtools/binutils	:/home/B130111/kernel/bitbucket/yocto/openembedded-core/meta/recipes-devtools/binutils	0	bash	:
+pane	1	6	0	:-	1	B130111@S093:/home/B130111/kernel/bitbucket/yocto/uftrace	:/home/B130111/kernel/bitbucket/yocto/uftrace	1	bash	:
+pane	1	7	0	:	0	B130111@S093:/home/B130111/toolchain	:/home/B130111/toolchain	1	bash	:
+pane	10	0	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	10	0	0	:Z	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux	1	bash	:
+pane	10	1	0	:Z	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	0	bash	:
+pane	10	1	0	:Z	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips/meta-core/recipes-devtools	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips/meta-core/recipes-devtools	0	bash	:
+pane	10	1	0	:Z	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/kernel	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/kernel	0	bash	:
+pane	10	1	0	:Z	3	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/externalsrc/kernel	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/externalsrc/kernel	0	bash	:
+pane	10	1	0	:Z	4	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore	0	bash	:
+pane	10	1	0	:Z	5	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/out/target/product/car_tcc8050_arm64	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/out/target/product/car_tcc8050_arm64	1	bash	:
+pane	10	2	1	:*	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	10	2	1	:*	1	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing/TCC805x_Android13_IVI_1.0.0/subcore/meta-tsound/recipes-applications/t-sound/t-sound	:/home/B130111/t-sound/git/dev/audio-sharing/TCC805x_Android13_IVI_1.0.0/subcore/meta-tsound/recipes-applications/t-sound/t-sound	0	bash	:
+pane	10	2	1	:*	2	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing	:/home/B130111/t-sound/git/dev/audio-sharing	0	bash	:
+pane	10	2	1	:*	3	B130111@S093:/home/B130111/t-sound/git/rel/audio-sharing	:/home/B130111/t-sound/git/rel/audio-sharing	1	bash	:
+pane	10	3	0	:	0	B130111@S093:/home/B130111/t-sound/git/dev/t-sound-805x	:/home/B130111/t-sound/git/dev/t-sound-805x	0	bash	:
+pane	10	3	0	:	1	B130111@S093:/home/B130111/t-sound/git/rel/t-sound_805x	:/home/B130111/t-sound/git/rel/t-sound_805x	1	bash	:
+pane	10	4	0	:-	0	B130111@S093:/home/B130111/t-sound/git/dev/t-sound-803x	:/home/B130111/t-sound/git/dev/t-sound-803x	0	bash	:
+pane	10	4	0	:-	1	B130111@S093:/home/B130111/t-sound/git/rel/t-sound_803x	:/home/B130111/t-sound/git/rel/t-sound_803x	1	bash	:
+pane	10	5	0	:	0	B130111@S093:/home/B130111/t-sound/git/dev/t-sound-patch	:/home/B130111/t-sound/git/dev/t-sound-patch	0	bash	:
+pane	10	5	0	:	1	B130111@S093:/home/B130111/t-sound/git/rel/audio-sharing	:/home/B130111/t-sound/git/rel/audio-sharing	1	bash	:
+pane	11	0	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	11	1	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	11	2	1	:*	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	11	4	0	:	0	B130111@S093:/home/B130111/issue/alpine/test_app	:/home/B130111/issue/alpine/test_app	1	bash	:
+pane	11	5	0	:-	0	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	0	bash	:
+pane	11	5	0	:-	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	0	bash	:
+pane	11	5	0	:-	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	1	bash	:
+pane	11	6	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	11	7	0	:	0	B130111@S093:/home/B130111/share/test/test code	:/home/B130111/share/test/test\ code	1	bash	:
+pane	12	0	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	12	1	0	:	0	B130111@S093:/home/B130111/local/uftrace	:/home/B130111/local/uftrace	0	bash	:
+pane	12	1	0	:	1	B130111@S093:/home/B130111/_opensource/uftrace	:/home/B130111/_opensource/uftrace\ (deleted)	0	bash	:
+pane	12	1	0	:	2	B130111@S093:/home/B130111/_opensource/uftrace/.build/elfutils-0.189	:/home/B130111/_opensource/uftrace/.build/elfutils-0.189\ (deleted)	0	bash	:
+pane	12	1	0	:	3	B130111@S093:/home/B130111/_opensource/uftrace	:/home/B130111/_opensource/uftrace\ (deleted)	0	bash	:
+pane	12	1	0	:	4	B130111@S093:/home/B130111/_opensource/uftrace	:/home/B130111/_opensource/uftrace\ (deleted)	0	bash	:
+pane	12	1	0	:	5	B130111@S093:/home/B130111/_opensource/uftrace	:/home/B130111/_opensource/uftrace\ (deleted)	1	bash	:
+pane	12	2	0	:	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/kernel	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/kernel	1	bash	:
+pane	12	3	0	:Z	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	0	bash	:
+pane	12	3	0	:Z	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips/meta-core/recipes-devtools	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips/meta-core/recipes-devtools	0	bash	:
+pane	12	3	0	:Z	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore/poky/meta-telechips	0	bash	:
+pane	12	3	0	:Z	3	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/external	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/external	0	bash	:
+pane	12	3	0	:Z	4	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/hardware	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore/hardware	1	bash	:
+pane	12	4	1	:*	0	B130111@S093:/home/B130111/issue/alpine/20231011_tsnd_alpine	:/home/B130111/issue/alpine/20231011_tsnd_alpine	1	bash	:
+pane	12	5	0	:-	0	B130111@S093:/home/B130111/issue/alpine/20231011_tsnd_alpine	:/home/B130111/issue/alpine/20231011_tsnd_alpine	1	bash	:
+pane	13	0	0	:-	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	13	1	1	:*	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	13	1	1	:*	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	13	1	1	:*	2	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	14	0	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	14	1	0	:	0	B130111@S093:/home/B130111/_opensource/linux	:/home/B130111/_opensource/linux	1	bash	:
+pane	14	2	0	:	0	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main	0	bash	:
+pane	14	2	0	:	1	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux	0	bash	:
+pane	14	2	0	:	2	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0/temp	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0/temp	0	tail	:tail -f log.task_order
+pane	14	2	0	:	3	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work-shared/tcc8030-main/kernel-source	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work-shared/tcc8030-main/kernel-source	0	bash	:
+pane	14	2	0	:	4	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	14	2	0	:	5	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips/meta-patch	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips/meta-patch	1	bash	:
+pane	14	3	0	:-Z	0	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	0	bash	:
+pane	14	3	0	:-Z	1	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux	0	bash	:
+pane	14	3	0	:-Z	2	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux	0	bash	:
+pane	14	3	0	:-Z	3	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/poky/meta-telechips	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/poky/meta-telechips	0	bash	:
+pane	14	3	0	:-Z	4	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/build/tcc8050-main	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/build/tcc8050-main	1	bash	:
+pane	14	4	1	:*Z	0	B130111@S093:/home/B130111/kernel/sta/tcc805x/k54/boot-firmware	:/home/B130111/kernel/sta/tcc805x/k54/boot-firmware	0	bash	:
+pane	14	4	1	:*Z	1	B130111@S093:/home/B130111/kernel/sta/tcc805x/k54/main/kernel-5.4	:/home/B130111/kernel/sta/tcc805x/k54/main/kernel-5.4	0	bash	:
+pane	14	4	1	:*Z	2	B130111@S093:/home/B130111/kernel/sta/tcc805x/k54	:/home/B130111/kernel/sta/tcc805x/k54	0	bash	:
+pane	14	4	1	:*Z	3	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	0	bash	:
+pane	14	4	1	:*Z	4	B130111@S093:/home/B130111/fwdn/cui/linux	:/home/B130111/fwdn/cui/linux	1	bash	:
+pane	15	0	0	:	0	B130111@S093:/home/B130111/.tmux	:/home/B130111/.tmux	1	bash	:
+pane	15	1	0	:	0	B130111@S093:/home/B130111/kernel/kernel-5.10-legacy	:/home/B130111/kernel/kernel-5.10-legacy	0	bash	:
+pane	15	1	0	:	1	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/sta/main/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/sta/main/kernel-5.10-audio	0	bash	:
+pane	15	1	0	:	2	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/sta/boot-firmware	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/sta/boot-firmware	1	bash	:
+pane	15	2	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0	0	bash	:
+pane	15	2	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub/tmp/work-shared/tcc8030-sub/kernel-source	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub/tmp/work-shared/tcc8030-sub/kernel-source	0	bash	:
+pane	15	2	0	:	2	B130111@S093:/home/B130111/kernel/kernel-5.10-audio-coverity	:/home/B130111/kernel/kernel-5.10-audio-coverity	0	bash	:
+pane	15	2	0	:	3	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/tsnd_patch	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/tsnd_patch	1	bash	:
+pane	15	3	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	3	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	3	0	:Z	2	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	3	0	:Z	3	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	3	0	:Z	4	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	0	bash	:
+pane	15	3	0	:Z	5	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio/sound/soc/telechips	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio/sound/soc/telechips	1	bash	:
+pane	15	4	1	:*	0	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio/sound/soc/telechips/asrc	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio/sound/soc/telechips/asrc	0	bash	:
+pane	15	4	1	:*	1	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	0	bash	:
+pane	15	4	1	:*	2	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	0	bash	:
+pane	15	4	1	:*	3	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	1	bash	:
+pane	15	5	0	:-	0	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux	0	bash	:
+pane	15	5	0	:-	1	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main	0	bash	:
+pane	15	5	0	:-	2	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips/meta-patch/recipes-kernel/linux/linux-telechips	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips/meta-patch/recipes-kernel/linux/linux-telechips	0	bash	:
+pane	15	5	0	:-	3	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/build/tcc8030-main/tmp/work/tcc8030_main-telechips-linux-gnueabi/linux-telechips/5.10.107-r0	0	tail	:tail -f temp/log.task_order
+pane	15	5	0	:-	4	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	5	0	:-	5	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	15	5	0	:-	6	B130111@S093:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips	:/home/B130111/als/dev/tcc803x_linux_ivi_k5.10_0.10.0/build-autolinux/poky/meta-telechips	1	bash	:
+pane	15	6	0	:	0	B130111@S093:/home/B130111/.tmux/resurrect	:/home/B130111/.tmux/resurrect	1	bash	:
+pane	15	7	0	:	0	B130111@S093:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	:/home/B130111/kernel/kglee/kernel-5.10-audio_coverity/build-autolinux/externalsrc/kernel-5.10-audio	1	bash	:
+pane	18	0	1	:*	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	2	0	0	:-	0	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/kernel/Documentation	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/kernel/Documentation	1	bash	:
+pane	2	1	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	2	1	0	:Z	1	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0/alsa-lib-1.2.1.2	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0/alsa-lib-1.2.1.2	0	bash	:
+pane	2	1	0	:Z	2	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	0	bash	:
+pane	2	1	0	:Z	3	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	0	bash	:
+pane	2	1	0	:Z	4	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/tsnd_patch	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_1.0.0/tsnd_patch	1	bash	:
+pane	2	2	0	:	0	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0/alsa-lib-1.2.1.2	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/alsa-lib/1.2.1.2-r0/alsa-lib-1.2.1.2	1	bash	:
+pane	2	3	0	:Z	0	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	0	bash	:
+pane	2	3	0	:Z	1	B130111@S093:/home/B130111/kernel/kernel-5.10-audio-dev	:/home/B130111/kernel/kernel-5.10-audio-dev	1	bash	:
+pane	2	4	0	:	0	B130111@S093:/home/B130111/kernel/kernel-5.10	:/home/B130111/kernel/kernel-5.10	1	bash	:
+pane	2	5	0	:	0	B130111@S093:/home/B130111/kernel/kernel-5.10-core	:/home/B130111/kernel/kernel-5.10-core	1	bash	:
+pane	2	6	0	:	0	B130111@S093:/home/B130111/kernel/kernel-5.10-camera	:/home/B130111/kernel/kernel-5.10-camera	1	bash	:
+pane	2	7	0	:	0	B130111@S093:/home/B130111/kernel/kernel-5.10-display	:/home/B130111/kernel/kernel-5.10-display	1	bash	:
+pane	2	8	0	:	0	B130111@S093:/home/B130111/kernel	:/home/B130111/kernel	1	bash	:
+pane	2	9	0	:	0	B130111@S093:/home/B130111/kernel	:/home/B130111/kernel	1	bash	:
+pane	2	10	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	2	11	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	2	11	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	2	12	0	:	0	B130111@S093:/home/B130111/issue/alpine/tsnd_alpine	:/home/B130111/issue/alpine/tsnd_alpine	1	bash	:
+pane	2	13	0	:Z	0	B130111@S093:/home/B130111/.cache/tags	:/home/B130111/.cache/tags	0	bash	:
+pane	2	13	0	:Z	1	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	0	bash	:
+pane	2	13	0	:Z	2	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	0	bash	:
+pane	2	13	0	:Z	3	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	0	bash	:
+pane	2	13	0	:Z	4	B130111@S093:/home/B130111/.vim/bundle	:/home/B130111/.vim/bundle	1	bash	:
+pane	2	14	0	:	0	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	0	bash	:
+pane	2	14	0	:	1	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0	0	bash	:
+pane	2	14	0	:	2	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub	0	bash	:
+pane	2	14	0	:	3	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	2	15	1	:*Z	0	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/external/tinyalsa	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/external/tinyalsa	0	bash	:
+pane	2	15	1	:*Z	1	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/kernel	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/kernel	0	bash	:
+pane	2	15	1	:*Z	2	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/subcore/build/tcc8050-sub/tmp/work/aarch64-telechips-linux/t-sound/1.1.0-r0/git	0	bash	:
+pane	2	15	1	:*Z	3	B130111@S093:/home/B130111/.cache/tags	:/home/B130111/.cache/tags	0	bash	:
+pane	2	15	1	:*Z	4	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	0	bash	:
+pane	2	15	1	:*Z	5	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	2	15	1	:*Z	6	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	1	bash	:
+pane	20	0	0	:	0	B130111@S093:/home/B130111/als/css	:/home/B130111/als/css	1	bash	:
+pane	20	1	0	:-	0	B130111@S093:/home/B130111/kernel/kernel-5.4	:/home/B130111/kernel/kernel-5.4	0	bash	:
+pane	20	1	0	:-	1	B130111@S093:/home/B130111/kernel/kernel-5.4	:/home/B130111/kernel/kernel-5.4	1	bash	:
+pane	20	2	1	:*	0	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-patch	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-patch	1	bash	:git log
+pane	21	0	0	:Z	0	B130111@S093:/home/B130111/als/self_test/build-autolinux	:/home/B130111/als/self_test/build-autolinux	0	bash	:
+pane	21	0	0	:Z	1	B130111@S093:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main	:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main	0	bash	:
+pane	21	0	0	:Z	2	B130111@S093:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/asrc-test/0.0.1-r0/package	:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux/asrc-test/0.0.1-r0/package	0	bash	:
+pane	21	0	0	:Z	3	B130111@S093:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main/tmp/work/tcc8050_main-telechips-linux/automotive-linux-platform-image/1.0-r0/rootfs/usr/share/asrc	:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main/tmp/work/tcc8050_main-telechips-linux/automotive-linux-platform-image/1.0-r0/rootfs/usr/share/asrc	0	bash	:
+pane	21	0	0	:Z	4	B130111@S093:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main	:/home/B130111/als/self_test/build-autolinux/build/tcc8050-main	0	bash	:
+pane	21	0	0	:Z	5	B130111@S093:/home/B130111/als/self_test/build-autolinux/poky/meta-telechips/meta-test	:/home/B130111/als/self_test/build-autolinux/poky/meta-telechips/meta-test	0	bash	:
+pane	21	0	0	:Z	6	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	21	1	0	:	0	B130111@S093:/home/B130111/als/self_test/build-autolinux	:/home/B130111/als/self_test/build-autolinux	1	bash	:
+pane	21	2	0	:	0	B130111@S093:/home/B130111/als/slt/tcc805x_slt/build/tcc8050-slt/tmp/work/aarch64-telechips-linux/slt-diagnostics-app/git-r0/asrc_test	:/home/B130111/als/slt/tcc805x_slt/build/tcc8050-slt/tmp/work/aarch64-telechips-linux/slt-diagnostics-app/git-r0/asrc_test	0	bash	:
+pane	21	2	0	:	1	B130111@S093:/home/B130111/als/slt/tcc805x_slt/build/tcc8050-slt/tmp/work/aarch64-telechips-linux/slt-diagnostics-app/git-r0	:/home/B130111/als/slt/tcc805x_slt/build/tcc8050-slt/tmp/work/aarch64-telechips-linux/slt-diagnostics-app/git-r0	0	bash	:
+pane	21	2	0	:	2	B130111@S093:/home/B130111/als/slt/tcc805x_slt/poky/meta-telechips/meta-slt	:/home/B130111/als/slt/tcc805x_slt/poky/meta-telechips/meta-slt	1	bash	:
+pane	21	3	0	:-Z	0	B130111@S093:/home/B130111/als/svt/build-autolinux	:/home/B130111/als/svt/build-autolinux	0	bash	:
+pane	21	3	0	:-Z	1	B130111@S093:/home/B130111/als/svt/build-autolinux/build/tcc8050-main	:/home/B130111/als/svt/build-autolinux/build/tcc8050-main	0	bash	:
+pane	21	3	0	:-Z	2	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	21	3	0	:-Z	3	B130111@S093:/home/B130111/als/svt/asrc_sv_test	:/home/B130111/als/svt/asrc_sv_test	0	bash	:
+pane	21	3	0	:-Z	4	B130111@S093:/home/B130111/als/svt/build-autolinux/poky/meta-telechips/meta-dev/meta-sv-main/recipes-kernel/linux/linux-telechips	:/home/B130111/als/svt/build-autolinux/poky/meta-telechips/meta-dev/meta-sv-main/recipes-kernel/linux/linux-telechips	0	bash	:
+pane	21	3	0	:-Z	5	B130111@S093:/home/B130111/als/svt/build-autolinux	:/home/B130111/als/svt/build-autolinux	1	bash	:
+pane	21	4	0	:	0	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	0	bash	:
+pane	21	4	0	:	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	21	4	0	:	2	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/poky/meta-telechips	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/poky/meta-telechips	0	bash	:
+pane	21	4	0	:	3	B130111@S093:/home/B130111/als	:/home/B130111/als	0	bash	:
+pane	21	4	0	:	4	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	1	bash	:
+pane	21	5	1	:*	0	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_sv/build-autolinux	:/home/B130111/als/dev/ivi/tccxxxx_linux_sv/build-autolinux	1	bash	:
+pane	22	0	1	:*	0	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux	0	bash	:
+pane	22	0	1	:*	1	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/build/tcc8050-main/tmp/work-shared/tcc8050-main/kernel-source	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/build/tcc8050-main/tmp/work-shared/tcc8050-main/kernel-source	0	bash	:
+pane	22	0	1	:*	2	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/build/tcc8050-main/tmp/work/cortexa72-telechips-linux	0	bash	:
+pane	22	0	1	:*	3	B130111@S093:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/poky/meta-telechips	:/home/B130111/als/dev/ivi/tccxxxx_linux_ivi_1.0.0/build-autolinux/poky/meta-telechips	1	bash	:
+pane	24	0	0	:-Z	0	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	0	bash	:
+pane	24	0	0	:-Z	1	B130111@S093:/home/B130111/.cache/tags	:/home/B130111/.cache/tags	1	bash	:
+pane	24	1	1	:*	0	B130111@S093:/home/B130111/audio/git/dev/d5_dev_branch/kernel-source/kernel-5.10-audio	:/home/B130111/audio/git/dev/d5_dev_branch/kernel-source/kernel-5.10-audio	0	bash	:
+pane	24	1	1	:*	1	B130111@S093:/home/B130111/kernel/kernel-5.10-audio	:/home/B130111/kernel/kernel-5.10-audio	1	bash	:
+pane	25	0	0	:	0	B130111@S093:/home/B130111/als/css	:/home/B130111/als/css	1	bash	:
+pane	25	1	0	:	0	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/build/tcc8031	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/build/tcc8031	0	bash	:
+pane	25	1	0	:	1	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/poky	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/poky	0	bash	:
+pane	25	1	0	:	2	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/poky/meta-telechips/meta-patch	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.0/poky/meta-telechips/meta-patch	1	bash	:
+pane	25	2	0	:	0	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1	0	bash	:
+pane	25	2	0	:	1	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1/build/tcc8031/tmp/work/tcc8031-telechips-linux/linux-telechips/4.14.137-r0/git	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1/build/tcc8031/tmp/work-shared/tcc8031/kernel-source	0	bash	:
+pane	25	2	0	:	2	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1/poky/meta-telechips/meta-patch	:/home/B130111/als/css/TCC803x_Linux_IVI_K414_1.0.1/poky/meta-telechips/meta-patch	1	bash	:
+pane	25	3	0	:	0	B130111@S093:/home/B130111/als/css/TCC803x_Linux_IVI_YP3.1_1.0.0	:/home/B130111/als/css/TCC803x_Linux_IVI_YP3.1_1.0.0	1	bash	:
+pane	25	4	0	:	0	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_2.0.0	:/home/B130111/als/css/TCC805x_Linux_IVI_2.0.0	1	bash	:
+pane	25	5	0	:-	0	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.10_1.0.0/build/tcc8050-main	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.10_1.0.0/build/tcc8050-main	0	bash	:
+pane	25	5	0	:-	1	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.10_1.0.0/build/tcc8050-main/tmp/work/tcc8050_main-telechips-linux/linux-telechips/5.10.177-r0/git	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.10_1.0.0/build/tcc8050-main/tmp/work-shared/tcc8050-main/kernel-source	0	bash	:
+pane	25	5	0	:-	2	B130111@S093:/home/B130111/kernel/kernel-5.10	:/home/B130111/kernel/kernel-5.10	1	bash	:
+pane	25	6	1	:*	0	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0	0	bash	:
+pane	25	6	1	:*	1	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work/tcc8050_main-telechips-linux/linux-telechips/5.4.159-r0/git	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/build/tcc8050-main/tmp/work-shared/tcc8050-main/kernel-source	0	bash	:
+pane	25	6	1	:*	2	B130111@S093:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-patch/recipes-kernel/linux	:/home/B130111/als/css/TCC805x_Linux_IVI_K5.4_1.0.0/poky/meta-telechips/meta-patch/recipes-kernel/linux	1	bash	:/home/B130111/.local/bin/vim linux-telechips_5.4.bbappend
+pane	4	0	0	:	0	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	0	bash	:
+pane	4	0	0	:	1	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	0	bash	:
+pane	4	0	0	:	2	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	0	bash	:
+pane	4	0	0	:	3	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	0	bash	:
+pane	4	0	0	:	4	B130111@S093:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	:/home/B130111/kernel/bitbucket/bsp-k5.10-release_ms2/tcc8050/sub/kernel-5.10-audio	1	bash	:
+pane	4	1	0	:Z	0	B130111@S093:/home/B130111/kernel/sta/tcc803x/k510/main/kernel-5.10	:/home/B130111/kernel/sta/tcc803x/k510/main/kernel-5.10	0	bash	:
+pane	4	1	0	:Z	1	B130111@S093:/home/B130111/kernel/sta/tcc803x/k510/main/u-boot-2022.01	:/home/B130111/kernel/sta/tcc803x/k510/main/u-boot-2022.01	0	bash	:
+pane	4	1	0	:Z	2	B130111@S093:/home/B130111/kernel/sta/tcc803x/k510/boot-firmware	:/home/B130111/kernel/sta/tcc803x/k510/boot-firmware	0	bash	:
+pane	4	1	0	:Z	3	B130111@S093:/home/B130111/kernel/sta/tcc803x/k510/sub/kernel-5.10	:/home/B130111/kernel/sta/tcc803x/k510/sub/kernel-5.10	1	bash	:
+pane	4	2	0	:Z	0	B130111@S093:/home/B130111/kernel/sta/tcc803x/k414/boot-firmware	:/home/B130111/kernel/sta/tcc803x/k414/boot-firmware	0	bash	:
+pane	4	2	0	:Z	1	B130111@S093:/home/B130111/kernel/sta/tcc803x/k414/main/u-boot	:/home/B130111/kernel/sta/tcc803x/k414/main/u-boot	0	bash	:
+pane	4	2	0	:Z	2	B130111@S093:/home/B130111/kernel/sta/tcc803x/k414/main/kernel-4.14	:/home/B130111/kernel/sta/tcc803x/k414/main/kernel-4.14	0	bash	:
+pane	4	2	0	:Z	3	B130111@S093:/home/B130111/kernel/sta/tcc803x/k414/sub/kernel-4.14	:/home/B130111/kernel/sta/tcc803x/k414/sub/kernel-4.14	1	bash	:
+pane	4	3	0	:	0	B130111@S093:/home/B130111/kernel/sta/tcc803x/k54/boot-firmware	:/home/B130111/kernel/sta/tcc803x/k54/boot-firmware	0	bash	:
+pane	4	3	0	:	1	B130111@S093:/home/B130111/kernel/sta/tcc803x/k54/main/u-boot	:/home/B130111/kernel/sta/tcc803x/k54/main/u-boot	0	bash	:
+pane	4	3	0	:	2	B130111@S093:/home/B130111/kernel/sta/tcc803x/k54/main/kernel-5.4	:/home/B130111/kernel/sta/tcc803x/k54/main/kernel-5.4	0	bash	:
+pane	4	3	0	:	3	B130111@S093:/home/B130111/kernel/sta/tcc803x/k54/sub/kernel-5.4	:/home/B130111/kernel/sta/tcc803x/k54/sub/kernel-5.4	1	bash	:
+pane	4	4	0	:-	0	B130111@S093:/home/B130111/kernel/kernel-5.10-audio-dev	:/home/B130111/kernel/kernel-5.10-audio-dev	1	bash	:
+pane	4	5	1	:*	0	B130111@S093:/home/B130111/kernel/kernel-5.10-audio-coverity	:/home/B130111/kernel/kernel-5.10-audio-coverity	1	bash	:
+pane	5	0	1	:*	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/poky/meta-telechips/meta-tsound	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/poky/meta-telechips/meta-tsound	0	bash	:
+pane	5	0	1	:*	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing	1	bash	:
+pane	5	1	0	:-	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/maincore	0	bash	:
+pane	5	1	0	:-	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	:/home/B130111/android/rel/conti/TCC805x_Android12_IVI_1.0.0/subcore	1	bash	:
+pane	5	2	0	:	0	B130111@S093:/home/B130111/t-sound/git/dev	:/home/B130111/t-sound/git/dev	1	bash	:
+pane	5	3	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	5	3	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	5	3	0	:Z	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	0	bash	:
+pane	5	3	0	:Z	3	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	5	3	0	:Z	4	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	5	4	0	:	0	B130111@S093:/home/B130111/t-sound/git/kglee/t-sound-patch	:/home/B130111/t-sound/git/kglee/t-sound-patch	1	bash	:
+pane	5	5	0	:	0	B130111@S093:/home/B130111/git/bitbucket/meta-telechips-bsp	:/home/B130111/git/bitbucket/meta-telechips-bsp	0	bash	:
+pane	5	5	0	:	1	B130111@S093:/home/B130111/git/bitbucket/meta-telechips-bsp	:/home/B130111/git/bitbucket/meta-telechips-bsp	1	bash	:
+pane	5	6	0	:Z	0	B130111@S093:/home/B130111/issue/alpine/20231011_tsnd_alpine	:/home/B130111/issue/alpine/20231011_tsnd_alpine	0	bash	:
+pane	5	6	0	:Z	1	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/hardware	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90/maincore/hardware	0	bash	:
+pane	5	6	0	:Z	2	B130111@S093:/home/B130111/issue/alpine/test_app	:/home/B130111/issue/alpine/test_app	0	bash	:
+pane	5	6	0	:Z	3	B130111@S093:/home/B130111/issue/alpine	:/home/B130111/issue/alpine	1	bash	:
+pane	5	7	0	:Z	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	5	7	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	5	8	0	:Z	0	B130111@S093:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub	:/home/B130111/tsnd/work/official/tcc803x/TCC803x_Linux_IVI_K5.10_0.10.0/build/tcc8030-sub	0	bash	:
+pane	5	8	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	5	9	0	:	0	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	0	bash	:
+pane	5	9	0	:	1	B130111@S093:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	:/home/B130111/android/rel/TCC805x_Android10_IVI_Alpine_v0.90	0	bash	:
+pane	5	9	0	:	2	B130111@S093:/home/B130111/.vim/bundle	:/home/B130111/.vim/bundle	1	bash	:
+pane	7	0	0	:	0	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	7	1	0	:	0	B130111@S093:/home/B130111/t-sound/git/kglee/audio-sharing/TCC805x_Android13_IVI_1.0.0/subcore/meta-tsound/recipes-applications/t-sound/t-sound/t-sound_805x	:/home/B130111/t-sound/git/kglee/audio-sharing/TCC805x_Android13_IVI_1.0.0/subcore/meta-tsound/recipes-applications/t-sound/t-sound/t-sound_805x	0	bash	:
+pane	7	1	0	:	1	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing/common/subcore/meta-tsound/recipes-applications/t-sound/t-sound/t-sound_805x	:/home/B130111/t-sound/git/dev/audio-sharing/common/subcore/meta-tsound/recipes-applications/t-sound/t-sound/t-sound_805x	1	bash	:
+pane	7	2	0	:	0	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore	0	bash	:
+pane	7	2	0	:	1	B130111@S093:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore/external/tinyalsa	:/home/B130111/tsnd/work/official/tcc805x/TCC805x_Android12_IVI_1.0.0/maincore/external/tinyalsa	1	bash	:
+pane	7	3	0	:	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	3	0	:	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	7	4	0	:	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	4	0	:	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	7	5	1	:*	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	5	1	:*	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	5	1	:*	2	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	5	1	:*	3	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	5	1	:*	4	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	7	6	0	:-	0	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	7	6	0	:-	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+pane	9	0	0	:Z	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/device/telechips	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/device/telechips	0	bash	:
+pane	9	0	0	:Z	1	B130111@S093:/home/B130111	:/home/B130111	0	bash	:
+pane	9	0	0	:Z	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/bootable/bootloader/u-boot/boot-firmware-tcc805x/tools/mktcimg	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/bootable/bootloader/u-boot/boot-firmware-tcc805x/tools/mktcimg	0	bash	:
+pane	9	0	0	:Z	3	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	0	bash	:
+pane	9	0	0	:Z	4	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel	1	bash	:
+pane	9	1	0	:Z	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	0	bash	:
+pane	9	1	0	:Z	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	0	bash	:
+pane	9	1	0	:Z	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore	0	bash	:
+pane	9	1	0	:Z	3	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/externalsrc/kernel	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/externalsrc/kernel	0	bash	:
+pane	9	1	0	:Z	4	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel/common	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel/common	0	bash	:
+pane	9	1	0	:Z	5	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel/common_fastbuild	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/kernel/common_fastbuild	0	bash	:
+pane	9	1	0	:Z	6	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/poky/meta-telechips	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/poky/meta-telechips	0	bash	:
+pane	9	1	0	:Z	7	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore	1	bash	:
+pane	9	2	0	:	0	B130111@S093:/home/B130111/t-sound/git/kglee/t-sound-patch	:/home/B130111/t-sound/git/kglee/t-sound-patch	0	bash	:
+pane	9	2	0	:	1	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing	:/home/B130111/t-sound/git/dev/audio-sharing	1	bash	:
+pane	9	3	0	:	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/bootable/bootloader/u-boot/boot-firmware-tcc805x/tools/mktcimg	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/bootable/bootloader/u-boot/boot-firmware-tcc805x/tools/mktcimg	0	bash	:
+pane	9	3	0	:	1	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	0	bash	:
+pane	9	3	0	:	2	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/device/telechips/car_tcc805x-kernel	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/device/telechips/car_tcc805x-kernel	0	bash	:
+pane	9	3	0	:	3	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/maincore/out/target/product/car_tcc8050_arm64	1	bash	:
+pane	9	4	0	:	0	B130111@S093:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/externalsrc/kernel	:/home/B130111/android/rel/conti/TCC805x_Android13_IVI_1.0.0_audio_sharing/subcore/externalsrc/kernel	1	bash	:
+pane	9	5	1	:*	0	B130111@S093:/home/B130111/t-sound/git/dev/t-sound-805x	:/home/B130111/t-sound/git/dev/t-sound-805x	0	bash	:
+pane	9	5	1	:*	1	B130111@S093:/home/B130111/t-sound/git/rel/t-sound_805x	:/home/B130111/t-sound/git/rel/t-sound_805x	1	bash	:
+pane	9	6	0	:Z	0	B130111@S093:/home/B130111/t-sound/git/kglee/audio-sharing	:/home/B130111/t-sound/git/kglee/audio-sharing	0	bash	:
+pane	9	6	0	:Z	1	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing	:/home/B130111/t-sound/git/dev/audio-sharing	1	bash	:
+pane	9	7	0	:-	0	B130111@S093:/home/B130111/t-sound/git/dev/audio-sharing	:/home/B130111/t-sound/git/dev/audio-sharing	0	bash	:
+pane	9	7	0	:-	1	B130111@S093:/home/B130111	:/home/B130111	1	bash	:
+window	0	0	:TCC805x_Linux_IVI_K5.4_1.0.0	1	:*	a485,271x136,0,0[271x16,0,0{135x16,0,0,1,135x16,136,0,2},271x17,0,17{135x17,0,17,3,135x17,136,17,4},271x10,0,35,5,271x10,0,46,6,271x10,0,57,7,271x10,0,68,8,271x11,0,79,9,271x22,0,91,10,271x22,0,114,11]	off
+window	0	1	:official	0	:-	5101,271x136,0,0,12	off
+window	0	2	:TCC803x_Linux_IVI_K5.4_1.0.0	0	:	1b4f,271x136,0,0[271x31,0,0,13,271x22,0,32,14,271x23,0,55,15,271x28,0,79,16,271x28,0,108,17]	off
+window	0	3	:TCC803x_Linux_IVI_YP3.1_1.0.0	0	:Z	54ac,271x136,0,0[271x50,0,0,18,271x41,0,51{135x41,0,51,19,135x41,136,51,20},271x43,0,93,21]	off
+window	0	4	:TCC805x_Android12_IVI_1.0.0	0	:	53fa,271x136,0,0[271x35,0,0,22,271x39,0,36,23,271x30,0,76,24,271x29,0,107,25]	off
+window	0	5	:TCC803x_Linux_IVI_K5.10_0.10.0	0	:Z	0daa,271x136,0,0[271x34,0,0,26,271x39,0,35,27,271x30,0,75,28,271x30,0,106,29]	off
+window	0	6	: TCC803x_Linux_IVI_K5.10_1.0.0	0	:	4d7e,271x136,0,0[271x30,0,0,30,271x22,0,31,31,271x26,0,54,32,271x27,0,81,33,271x27,0,109,34]	off
+window	0	7	:tcc803x_linux_ivi_jvckenwood	0	:	30b0,271x136,0,0[271x64,0,0,35,271x71,0,65,36]	off
+window	0	8	:tsnd_patch.git	0	:	6c0d,271x136,0,0[271x68,0,0,37,271x67,0,69{135x67,0,69,38,135x67,136,69,39}]	off
+window	0	9	:bash	0	:	d100,271x136,0,0,40	:
+window	0	10	:tsnd_patch	0	:	2948,271x136,0,0{112x136,0,0,41,158x136,113,0,42}	off
+window	0	11	:bash	0	:	b959,271x136,0,0{135x136,0,0,43,135x136,136,0,44}	:
+window	1	0	:bsp-5.10-audio_asrc	0	:	d105,271x136,0,0,45	off
+window	1	1	:tcc8050	0	:	546e,271x136,0,0{137x136,0,0[137x65,0,0,46,137x70,0,66,47],133x136,138,0[133x65,138,0,48,133x70,138,66,49]}	off
+window	1	2	:tcc8059	0	:	e773,271x136,0,0[271x64,0,0{137x64,0,0[137x58,0,0,50,137x5,0,59,51],133x64,138,0,52},271x71,0,65{137x71,0,65,53,133x71,138,65,54}]	off
+window	1	3	:tcc803x	0	:	2b89,271x136,0,0{137x136,0,0[137x40,0,0,55,137x39,0,41,56,137x55,0,81,57],133x136,138,0,58}	off
+window	1	4	:tcc803xPE	0	:	5b86,271x136,0,0{137x136,0,0[137x40,0,0,59,137x39,0,41,60,137x55,0,81,61],133x136,138,0,62}	off
+window	1	5	:yocto_kernel-5.10_for_uftrace	1	:*	1963,271x136,0,0[271x25,0,0,63,271x32,0,26{135x32,0,26,329,135x32,136,26,65},271x25,0,59,66,271x25,0,85{135x25,0,85,67,135x25,136,85,68},271x25,0,111{135x25,0,111,69,135x25,136,111,70}]	off
+window	1	6	:bash	0	:-	69ed,271x136,0,0[271x67,0,0,71,271x68,0,68,72]	:
+window	1	7	:bash	0	:	5105,271x136,0,0,73	:
+window	10	0	:conti	0	:Z	b0b1,271x136,0,0[271x64,0,0,74,271x71,0,65,75]	off
+window	10	1	:TCC805x_Android12_IVI_1.0.0	0	:Z	16c9,271x136,0,0[271x25,0,0,76,271x25,0,26,77,271x26,0,52{135x26,0,52,78,135x26,136,52,79},271x31,0,79,80,271x25,0,111,81]	off
+window	10	2	:audio-sharing-patch	1	:*	893d,271x136,0,0[271x40,0,0,82,271x39,0,41,83,271x55,0,81{135x55,0,81,84,135x55,136,81,85}]	off
+window	10	3	:t-sound-tcc805x	0	:	795d,271x136,0,0{135x136,0,0,86,135x136,136,0,87}	off
+window	10	4	:t-sound-803x	0	:-	f95e,271x136,0,0{135x136,0,0,88,135x136,136,0,89}	off
+window	10	5	:t-sound-patch	0	:	5959,271x136,0,0{135x136,0,0,90,135x136,136,0,91}	off
+window	11	0	:mk.hwang	0	:	5105,271x136,0,0,92	off
+window	11	1	:mk_server	0	:	5106,271x136,0,0,93	off
+window	11	2	:TCC807x Android-13 64bit Build & FWDN (kernel-5.10)	1	:*	5107,271x136,0,0,94	off
+window	11	4	:tsnd_alpine	0	:	5108,271x136,0,0,95	off
+window	11	5	:bash	0	:-	fdac,271x136,0,0[271x50,0,0,96,271x42,0,51,97,271x42,0,94,98]	:
+window	11	6	:bash	0	:	510c,271x136,0,0,99	:
+window	11	7	:bash	0	:	a8af,271x136,0,0,100	:
+window	12	0	:utrace	0	:	a8b0,271x136,0,0,101	off
+window	12	1	:_opensource	0	:	4404,271x136,0,0{138x136,0,0[138x67,0,0,102,138x68,0,68,103],132x136,139,0[132x30,139,0,104,132x30,139,31,105,132x30,139,62,106,132x43,139,93,107]}	off
+window	12	2	:kernel	0	:	a8b7,271x136,0,0,108	off
+window	12	3	:tinyalsa	0	:Z	74cc,271x136,0,0[271x27,0,0,109,271x27,0,28,110,271x29,0,56,111,271x24,0,86,112,271x25,0,111,113]	off
+window	12	4	:alpine_src	1	:*	28b4,271x136,0,0,114	off
+window	12	5	:bash	0	:-	28b5,271x136,0,0,115	:
+window	13	0	:kernel-5.10-audio	0	:-	28b6,271x136,0,0,116	off
+window	13	1	:dev	1	:*	e0cd,271x136,0,0[271x58,0,0,117,271x77,0,59{135x77,0,59,118,135x77,136,59,119}]	off
+window	14	0	:linux kernel dev 8th	0	:	a8b0,271x136,0,0,120	off
+window	14	1	:risv	0	:	a8b1,271x136,0,0,121	off
+window	14	2	:feature/SD803XL3-1200-s-w-coverity-audio-asrc1	0	:	9709,271x136,0,0[271x40,0,0{136x40,0,0[136x30,0,0,122,136x9,0,31,123],134x40,137,0,124},271x30,0,41,125,271x30,0,72,126,271x33,0,103,127]	off
+window	14	3	:tcc8050_kernel-5.10_asrc_coverity	0	:-Z	d15e,271x136,0,0[271x25,0,0,128,271x25,0,26,129,271x24,0,52,130,271x26,0,77,131,271x32,0,104,132]	off
+window	14	4	:sta_54	1	:*Z	9cc8,271x136,0,0[271x45,0,0,133,271x46,0,46{136x46,0,46[136x43,0,46,134,136x2,0,90,135],134x46,137,46,136},271x43,0,93,137]	off
+window	15	0	:jnk_coverity	0	:	28b9,271x136,0,0,138	off
+window	15	1	:kernel-5.10-audio	0	:	7701,271x136,0,0[271x44,0,0,139,271x43,0,45,140,271x47,0,89,141]	off
+window	15	2	:jnk_kernel-5.10_v0.10.0	0	:	838c,271x136,0,0[271x42,0,0,142,271x30,0,43,143,271x30,0,74,144,271x31,0,105,145]	off
+window	15	3	:kglee_kernel-5.10-audio	0	:Z	855f,271x136,0,0[271x27,0,0,146,271x25,0,28,147,271x24,0,54,148,271x28,0,79,149,271x28,0,108{136x28,0,108,150,134x28,137,108,151}]	off
+window	15	4	:coverity_modify_asrc	1	:*	289f,271x136,0,0[271x63,0,0{135x63,0,0,152,135x63,136,0,153},271x72,0,64{126x72,0,64,154,144x72,127,64,155}]	off
+window	15	5	:tcc803x_linux_ivi_k5.10_0.10.0	0	:-	f418,271x136,0,0[271x26,0,0,156,271x25,0,27,157,271x24,0,53,158,271x32,0,78{106x32,0,78,159,164x32,107,78[164x24,107,78,160,164x7,107,103,161]},271x25,0,111,162]	off
+window	15	6	:bash	0	:	a8b5,271x136,0,0,163	:
+window	15	7	:ATT_B130111_BSP_K510_asrc_32bit	0	:	a8b6,271x136,0,0,164	off
+window	18	0	:bash	1	:*	a8b7,271x136,0,0,165	:
+window	2	0	:work_code	0	:-	a8b8,271x136,0,0,166	off
+window	2	1	:work	0	:Z	a562,271x136,0,0[271x25,0,0,167,271x26,0,26,168,271x24,0,53,169,271x32,0,78,170,271x25,0,111,171]	off
+window	2	2	:work2	0	:	28b5,271x136,0,0,172	off
+window	2	3	:kernel-5.10-audio	0	:Z	55fc,271x136,0,0[271x59,0,0,173,271x76,0,60,174]	off
+window	2	4	:kernel-5.10	0	:	28b8,271x136,0,0,175	off
+window	2	5	:kernel-5.10-core	0	:	28b9,271x136,0,0,176	off
+window	2	6	:kernel-5.10-camera	0	:	28ba,271x136,0,0,177	off
+window	2	7	:kernel-5.10-display	0	:	28bb,271x136,0,0,178	off
+window	2	8	:kernel-5.10-vpu	0	:	28bc,271x136,0,0,179	off
+window	2	9	:kernel-5.10-gpu	0	:	a8b3,271x136,0,0,180	off
+window	2	10	:work	0	:	a8b4,271x136,0,0,181	off
+window	2	11	:conti_build	0	:Z	fa7b,271x136,0,0[271x64,0,0,182,271x71,0,65,183]	off
+window	2	12	:alpine_src	0	:	a8b7,271x136,0,0,184	off
+window	2	13	:bash	0	:Z	24eb,271x136,0,0{135x136,0,0[135x37,0,0,185,135x30,0,38,186,135x35,0,69,187,135x31,0,105,188],135x136,136,0,189}	:
+window	2	14	:alpine_android10	0	:	25fe,271x136,0,0[271x66,0,0{139x66,0,0,190,131x66,140,0[131x58,140,0,191,131x7,140,59,192]},271x69,0,67,193]	off
+window	2	15	:bash	1	:*Z	9f23,271x136,0,0[271x21,0,0,194,271x21,0,22,195,271x21,0,44,196,271x21,0,66,197,271x20,0,88,198,271x27,0,109{137x27,0,109,199,133x27,138,109,200}]	:
+window	20	0	:bash	0	:	a8c4,272x136,0,0,333	:
+window	20	1	:bash	0	:-	4951,272x136,0,0{136x136,0,0,335,135x136,137,0,338}	:
+window	20	2	:bash	1	:*	a8c8,272x136,0,0,337	:
+window	21	0	:conti_self_test	0	:Z	289c,271x136,0,0[271x30,0,0,201,271x30,0,31,202,271x33,0,62{135x33,0,62[135x30,0,62,203,135x2,0,93,204],135x33,136,62,205},271x40,0,96{135x40,0,96,206,135x40,136,96,207}]	off
+window	21	1	:fwdn	0	:	e8b7,271x136,0,0,208	off
+window	21	2	:slt_test	0	:	35ff,271x136,0,0[271x40,0,0,209,271x39,0,41,210,271x55,0,81,211]	off
+window	21	3	:sv_test	0	:-Z	16e3,271x136,0,0[271x21,0,0,212,271x21,0,22,213,271x21,0,44,214,271x24,0,66,215,271x22,0,91,216,271x22,0,114,217]	off
+window	21	4	:tccxxxx_linux_ivi_1.0.0	0	:	5055,271x136,0,0{135x136,0,0[135x33,0,0,218,135x33,0,34,219,135x34,0,68,220,135x33,0,103,221],135x136,136,0,222}	off
+window	21	5	:kernel	1	:*	e8b3,271x136,0,0,223	off
+window	22	0	:[Linux_IVI][Audio - ASRC] SW구현/개선 및 코드리뷰	1	:*	7eb2,271x136,0,0[271x40,0,0,224,271x54,0,41{135x54,0,41,225,135x54,136,41,226},271x40,0,96,227]	off
+window	24	0	:d5_development	0	:-Z	4d5f,271x136,0,0[271x66,0,0,228,271x69,0,67,229]	off
+window	24	1	:d5_dev_branch	1	:*	ff2a,271x136,0,0{135x136,0,0,230,135x136,136,0,231}	off
+window	25	0	:fanout	0	:	68b3,271x136,0,0,232	off
+window	25	1	:TCC803x_Linux_IVI_K414_1.0.0	0	:	f601,271x136,0,0[271x40,0,0,233,271x39,0,41,234,271x55,0,81,235]	off
+window	25	2	:TCC803x_Linux_IVI_K414_1.0.1	0	:	daa2,271x136,0,0[271x33,0,0,236,271x33,0,34,330,271x68,0,68,237]	off
+window	25	3	:TCC803x_Linux_IVI_YP3.1_1.0.0	0	:	68b9,271x136,0,0,238	off
+window	25	4	:TCC805x_Linux_IVI_2.0.0	0	:	68ba,271x136,0,0,239	off
+window	25	5	:TCC805x_Linux_IVI_K5.10_1.0.0	0	:-	4ade,271x136,0,0[271x34,0,0,240,271x33,0,35,332,271x67,0,69,331]	off
+window	25	6	:TCC805x_Linux_IVI_K5.4_1.0.0	1	:*	b7fa,134x75,0,0[134x13,0,0,241,134x13,0,14,336,134x47,0,28,334]	off
+window	4	0	:bash	0	:	c5f7,271x136,0,0{137x136,0,0[137x64,0,0,242,137x71,0,65,243],133x136,138,0[133x42,138,0,244,133x39,138,43,245,133x53,138,83,246]}	:
+window	4	1	:tcc803x_k510	0	:Z	fbe6,271x136,0,0{137x136,0,0[137x64,0,0,247,137x71,0,65,248],133x136,138,0[133x64,138,0,249,133x71,138,65,250]}	off
+window	4	2	:tcc803x_k414	0	:Z	f3e6,271x136,0,0{137x136,0,0[137x64,0,0,251,137x71,0,65,252],133x136,138,0[133x64,138,0,253,133x71,138,65,254]}	off
+window	4	3	:tcc803x_k54	0	:	b3e8,271x136,0,0{137x136,0,0[137x64,0,0,255,137x71,0,65,256],133x136,138,0[133x64,138,0,257,133x71,138,65,258]}	off
+window	4	4	:k510-audio	0	:-	68bb,271x136,0,0,259	off
+window	4	5	:k510-audio-dev-coverity	1	:*	e8b2,271x136,0,0,260	off
+window	5	0	:conti_virtual_ASOC	1	:*	4d5a,271x136,0,0[271x66,0,0,261,271x69,0,67,262]	off
+window	5	1	:TCC805x_Android12_IVI_1.0.0	0	:-	559c,271x136,0,0[271x67,0,0,263,271x68,0,68,264]	off
+window	5	2	:virtual-pcm	0	:	e8b7,271x136,0,0,265	off
+window	5	3	:TCC805x_Android13_IVI_1.0.0	0	:Z	b842,271x136,0,0{127x136,0,0[127x67,0,0,266,127x68,0,68,267],143x136,128,0[143x40,128,0,268,143x39,128,41,269,143x55,128,81,270]}	off
+window	5	4	:t-sound-patch	0	:	68b4,271x136,0,0,271	off
+window	5	5	:bash	0	:	7f2d,271x136,0,0{135x136,0,0,272,135x136,136,0,273}	:
+window	5	6	:bash	0	:Z	331d,271x136,0,0{131x136,0,0,274,139x136,132,0[139x42,132,0,275,139x41,132,43,276,139x51,132,85,277]}	:
+window	5	7	:subcore	0	:Z	d5a1,271x136,0,0[271x67,0,0,278,271x68,0,68,279]	off
+window	5	8	:TCC803x_Linux_IVI_K5.10_0.10.0	0	:Z	559a,271x136,0,0[271x67,0,0,280,271x68,0,68,281]	off
+window	5	9	:vim_setting	0	:	d82c,271x136,0,0{146x136,0,0[146x73,0,0,282,146x62,0,74,283],124x136,147,0,284}	off
+window	7	0	:conti_work	0	:	e8b8,271x136,0,0,285	off
+window	7	1	:t-sound-patch	0	:	42c0,271x136,0,0[271x65,0,0,286,271x70,0,66,287]	off
+window	7	2	:conti_android12_sdk	0	:	42c2,271x136,0,0[271x65,0,0,288,271x70,0,66,289]	off
+window	7	3	:conti_sub	0	:	c2ba,271x136,0,0[271x65,0,0,290,271x70,0,66,291]	off
+window	7	4	:t-sound	0	:	c2bc,271x136,0,0[271x65,0,0,292,271x70,0,66,293]	off
+window	7	5	:TCC805x_Android13_IVI_1.0.0	1	:*	b7a4,271x136,0,0{135x136,0,0[135x64,0,0,294,135x71,0,65,295],135x136,136,0[135x44,136,0,296,135x42,136,45,297,135x48,136,88,298]}	off
+window	7	6	:ipc	0	:-	a2bc,271x136,0,0[271x65,0,0,299,271x70,0,66,300]	off
+window	9	0	:conti_audio_sharing	0	:Z	fb5c,271x136,0,0[271x25,0,0,301,271x25,0,26,302,271x33,0,52,303,271x24,0,86,304,271x25,0,111,305]	off
+window	9	1	:TCC805x_Android13_IVI_1.0.0_audio_sharing	0	:Z	9886,271x136,0,0{130x136,0,0[130x18,0,0,306,130x18,0,19,307,130x18,0,38,308,130x18,0,57,309,130x18,0,76,310,130x18,0,95,311,130x22,0,114,312],140x136,131,0,313}	off
+window	9	2	:audio-sharing-patch	0	:	072d,271x136,0,0{135x136,0,0,314,135x136,136,0,315}	off
+window	9	3	:vbmeta-disable	0	:	4f10,271x136,0,0[271x35,0,0,316,271x37,0,36,317,271x30,0,74,318,271x31,0,105,319]	off
+window	9	4	:bash	0	:	28b1,271x136,0,0,320	:
+window	9	5	:bash	1	:*	792b,271x136,0,0{136x136,0,0,321,134x136,137,0,322}	:
+window	9	6	:audio-sharing	0	:Z	b72c,271x136,0,0{135x136,0,0,323,135x136,136,0,324}	off
+window	9	7	:bash	0	:-	f92d,271x136,0,0{136x136,0,0,325,134x136,137,0,326}	:
+state		
