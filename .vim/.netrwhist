@@ -1,0 +1,4 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhistcnt =2
+let g:netrw_dirhist_2='/home/B130111/work2/android/Android13_IVI_V1.0.0_gki_kernel/kernel/common/sound/soc/telechips_dpcm'
+let g:netrw_dirhist_1='/home/B130111/work1/als/lts/tcc807x_es/build/tcc8070-main/tmp/work-shared/tcc8070-main/kernel-source/sound/soc/telechips/asrc'
