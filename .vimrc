@@ -55,6 +55,219 @@ set loadplugins
 filetype off                   " required!
 
 " set the runtime path to include Vundle and initialize
+if has('nvim')
+
+call plug#begin('~/.vim/plugged')
+
+" let Vundle manage Vundle, required
+Plug 'VundleVim/Vundle.vim'
+Plug 'tpope/vim-fugitive'
+Plug 'tpope/vim-unimpaired'
+Plug 'preservim/nerdcommenter'
+Plug 'vim-airline/vim-airline'
+Plug 'vim-airline/vim-airline-themes'
+Plug 'inkarkat/vim-ingo-library'
+Plug 'inkarkat/vim-mark'
+Plug 'ervandew/supertab'
+Plug 'jlanzarotta/bufexplorer'
+Plug 'ivechan/gtags.vim'
+Plug 'ronakg/quickr-cscope.vim'
+Plug 'vim-scripts/grep.vim'
+Plug 'vim-scripts/AutoComplPop'
+"Plug 'vim-scripts/The-NERD-tree'
+"Plug 'vim-scripts/Tagbar'
+"Plug 'ryanoasis/vim-devicons'
+"Plug 'kyazdani42/nvim-web-devicons'
+Plug 'preservim/nerdtree'
+Plug 'Xuyuanp/nerdtree-git-plugin'
+Plug 'preservim/tagbar'
+Plug 'vim-utils/vim-troll-stopper'
+Plug 'Raimondi/delimitMate'
+Plug 'mhinz/vim-signify'
+Plug 'terryma/vim-smooth-scroll'
+"Plug 'ctrlpvim/ctrlp.vim'
+"Plug 'SirVer/ultisnips'
+"Plug 'honza/vim-snippets'
+"Plug 'airblade/vim-gitgutter'
+"Plug 'altercation/vim-colors-solarized'
+"Plug 'ludovicchabant/vim-gutentags'
+"Plug 'skywind3000/gutentags_plus'
+"Plug 'terryma/vim-multiple-cursors'
+"
+" coc.nvim Plugin Install
+Plug 'neovim/nvim-lspconfig'
+"Plug 'neoclide/coc.nvim', {'branch': 'release'}
+Plug 'weirongxu/coc-explorer'
+Plug 'SmiteshP/nvim-navic'
+"Plug 'liuchengxu/vista.vim'
+" nvim-tree.lua Plugin Install
+Plug 'kyazdani42/nvim-tree.lua'
+Plug 'nvim-tree/nvim-web-devicons'
+"Plug 'Shougo/defx.nvim'
+
+Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+Plug 'nvim-lua/popup.nvim'
+Plug 'nvim-lua/plenary.nvim'
+Plug 'nvim-telescope/telescope.nvim'
+Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+"Plug 'nvim-telescope/telescope.nvim', { 'tag': '0.1.5' }
+" or                                , { 'branch': '0.1.x' }
+
+Plug 'ronakg/quickr-preview.vim'
+
+call plug#end()
+" ------------------------------------
+" settings for nvim default
+" ------------------------------------
+lua << EOF
+require'nvim-web-devicons'.setup { default = true }
+EOF
+
+" ------------------------------------
+" option for lspconfig
+" ------------------------------------
+lua << EOF
+require'nvim-navic'.setup {}
+EOF
+
+"lua << EOF
+"require'lspconfig'.clangd.setup{}
+"EOF
+
+
+" ------------------------------------
+" option for nvim-tree
+" ------------------------------------
+"open_on_setup = true,
+lua << EOF
+require'nvim-tree'.setup {
+    -- 기본 설정
+  open_on_tab = false,         -- 탭에서 자동으로 열기 (기본값: false)
+  hijack_netrw = true,         -- netrw를 대체 (기본값: true)
+  update_cwd = true,           -- 현재 작업 디렉토리 업데이트 (기본값: false)
+
+  -- 렌더링 관련 설정
+  renderer = {
+    highlight_opened_files = "all", -- 열려 있는 파일 강조 (기본값: 'none')
+    icons = {
+      show = {
+	file = true,
+	folder = true,
+	folder_arrow = true,
+	git = true,
+      },
+    },
+  },
+
+  -- 필터링 관련 설정
+  filters = {
+    dotfiles = false,           -- 숨김 파일 표시 여부 (기본값: false)
+    custom = {},                 -- 사용자 정의 필터 목록 (기본값: {})
+  },
+
+  -- 진단 관련 설정
+  diagnostics = {
+    enable = false,             -- 진단 정보 표시 여부 (기본값: false)
+  },
+
+  -- Git 관련 설정
+  git = {
+    enable = true,              -- Git 상태 표시 여부 (기본값: true)
+    ignore = false,             -- Git 상태 무시 여부 (기본값: false)
+  },
+
+  -- 파일 열기 관련 설정
+  actions = {
+    open_file = {
+      quit_on_open = true,      -- 파일 열 때 자동으로 닫기 (기본값: true)
+      resize_window = true,    -- 창 크기 조정 (기본값: true)
+    },
+  },
+
+  -- 파일 찾기 관련 설정
+  view = {
+    width = 40,                 -- 사이드바의 너비 (기본값: 30)
+    side = 'right',              -- 사이드바 위치 (기본값: 'left')
+  },
+}
+EOF
+
+
+"Emphasize token under the cusor 
+"autocmd CursorHold * silent call CocActionAsync('highlight')
+" ------------------------------------
+" nvim-treesitter setting
+" ------------------------------------
+lua << EOF
+require'nvim-treesitter.configs'.setup {
+	ensure_installed = { "vim", "c", "cpp", "lua", "rust", "python"},
+	ignore_install = { "" },
+		highlight = {
+			enable = true,
+			disable = { "" },
+			additional_vim_regex_highlighting = true,
+		},
+	}
+EOF
+
+" ------------------------------------
+" nvim-telescope setting
+" ------------------------------------
+lua << EOF
+require'telescope'.setup{
+	defaults = {
+		prompt_prefix = "$ ",
+		layout_config = {
+			width = 0.80,
+			height = 0.80,
+			preview_cutoff = 120,
+		},
+	}
+}
+require'telescope'.load_extension'fzf'
+EOF
+
+" Find files using Telescope command-line sugar.
+nnoremap <leader>fi <cmd>Telescope git_commits<cr>
+nnoremap <leader>ff <cmd>Telescope find_files<cr>
+nnoremap <leader>fg <cmd>Telescope live_grep<cr>
+nnoremap <leader>fb <cmd>Telescope buffers<cr>
+nnoremap <leader>fh <cmd>Telescope help_tags<cr>
+
+" Add your own custom formats or override the defaults
+let g:NERDCustomDelimiters = { 
+			\ 'dts': { 'left': '/*', 'right': '*/', 'leftAlt': '//' },
+			\ 'dtsi': { 'left': '/*', 'right': '*/', 'leftAlt': '//' },
+			\}
+
+let g:NERDTreeGitStatusIndicatorMapCustom = {
+    \ 'Modified'  : 'M',
+    \ 'Staged'    : 'S',
+    \ 'Untracked' : '?',
+    \ 'Renamed'   : 'R',
+    \ 'Unmerged'  : 'U',
+    \ 'Deleted'   : 'D',
+    \ 'Dirty'     : '*',
+    \ 'Clean'     : 'C',
+    \ 'Unknown'   : '?'
+    \ }
+
+" ------------------------------------
+" vista
+" ------------------------------------
+"let g:vista_ctags_executable = 'ctags'
+"let g:vista_ctags_ctagsargs = '-R --exclude=.git --fields=+lS --kinds-cpp=+p --kinds-c=+p --kinds-python=+i'
+"let g:vista_default_executive = 'nvim_lsp'
+
+" ------------------------------------
+" settings for nvim
+" ------------------------------------
+"set encoding=utf-8
+"set fileencoding=utf-8
+"set guifont=3270NerdFontMono-Regular:h12
+
+else
+
 set rtp+=~/.vim/bundle/Vundle.vim
 call vundle#begin()
 
@@ -89,6 +302,8 @@ Plugin 'terryma/vim-smooth-scroll'
 "Plugin 'terryma/vim-multiple-cursors'
 
 call vundle#end()
+endif
+
 filetype plugin indent on     " required!
 
 " :PluginList          - list configured bundles
@@ -104,9 +319,9 @@ filetype plugin indent on     " required!
 "colorscheme solarized
 
 " Set airline
-set term=xterm-256color
-"set t_Co=256
-"let g:airline_powerline_fonts = 1
+"set term=xterm-256color
+set t_Co=256
+let g:airline_powerline_fonts = 1
 let g:airline_theme='hybrid'
 "let g:airline_theme='badwolf'
 "let g:airline_theme='wombat'
@@ -134,8 +349,8 @@ let g:SuperTabDefaultCompletionType = "<c-n>"
 "==============================================================================
 " vim-smooth-scroll
 "==============================================================================
-noremap <silent> <c-b> :call smooth_scroll#up(&scroll*2, 10, 9)<CR>
-noremap <silent> <c-f> :call smooth_scroll#down(&scroll*2, 10, 9)<CR>
+"noremap <silent> <c-b> :call smooth_scroll#up(&scroll*2, 10, 9)<CR>
+"noremap <silent> <c-f> :call smooth_scroll#down(&scroll*2, 10, 9)<CR>
 "noremap <silent> <c-u> :call smooth_scroll#up(&scroll, 10, 5)<CR>
 "noremap <silent> <c-d> :call smooth_scroll#down(&scroll, 10, 5)<CR>
 
@@ -212,15 +427,15 @@ let g:quickr_cscope_keymaps = 0
 let g:quickr_cscope_autoload_db = 1
 let g:quickr_cscope_use_qf_g = 1
 
-nmap <leader><leader>g <plug>(quickr_cscope_global)
-nmap <leader><leader>s <plug>(quickr_cscope_symbols)
-nmap <leader><leader>c <plug>(quickr_cscope_callers)
-nmap <leader><leader>f <plug>(quickr_cscope_files)
-nmap <leader><leader>i <plug>(quickr_cscope_includes)
-"nmap <leader><leader>t <plug>(quickr_cscope_text)
-nmap <leader><leader>d <plug>(quickr_cscope_functions)
-nmap <leader><leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR><CR>
-nmap <leader><leader>a <plug>(quickr_cscope_assignments)
+nmap <Leader><Leader>g <plug>(quickr_cscope_global)
+nmap <Leader><Leader>s <plug>(quickr_cscope_symbols)
+"nmap <Leader><Leader>c <plug>(quickr_cscope_callers)
+nmap <Leader><Leader>c :Gtags -r <C-R>=expand("<cword>") <CR><CR>
+nmap <Leader><Leader>f <plug>(quickr_cscope_files)
+nmap <Leader><Leader>i <plug>(quickr_cscope_includes)
+nmap <Leader><Leader>d <plug>(quickr_cscope_functions)
+nmap <Leader><Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR><CR>
+nmap <Leader><Leader>a <plug>(quickr_cscope_assignments)
 
 "==============================================================================
 " gtags key map
@@ -233,30 +448,31 @@ nmap <C-n> :cn<CR>
 nmap <C-p> :cp<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
-nmap <C-]> :GtagsCursor<CR>
+nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
 nmap <C-t> <C-o><CR>
 
-nnoremap <Leader>g <ESC>:Gtags<SPACE>
-nnoremap <leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>
-nnoremap <leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
-"nnoremap <Leader>e <ESC>:Cscope<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
-"nnoremap <Leader>e <ESC>:GscopeFind<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
+nmap <Leader>g <ESC>:Gtags<SPACE>
+nmap <Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>
+nmap <Leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
+"nmap <Leader>e <ESC>:Cscope<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
+"nmap <Leader>e <ESC>:GscopeFind<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
 
-"==============================================================================
-" gutentags key map
-"==============================================================================
+""==============================================================================
+"" gutentags key map
+""==============================================================================
 
-"" Set vim-gutentags and gutentags_plus
+" Set vim-gutentags and gutentags_plus
 "let g:gutentags_project_root = ['.root', 'README', '.git']
 "let g:gutentags_cache_dir = expand('~/.cache/tags')
-"let g:gutentags_modules = ['ctags', 'gtags_cscope']
-""let g:gutentags_add_default_project_roots = 0
-""let g:gutentags_trace = 1
-""let g:gutentags_define_advanced_commands = 1
-""let g:gutentags_enabled = 0
-""let g:GtagsCscope_Auto_Load = 1
-""let g:gutentags_background_update = 0
-""let g:gutentags_exclude_filetypes = []
+"let g:gutentags_modules = ['ctags', 'gtags-cscope']
+"let g:gutentags_add_default_project_roots = 0
+"let g:gutentags_trace = 1
+"let g:gutentags_debug = 1
+"let g:gutentags_define_advanced_commands = 1
+"let g:gutentags_enabled = 0
+"let g:GtagsCscope_Auto_Load = 1
+"let g:gutentags_background_update = 0
+"let g:gutentags_exclude_filetypes = []
 
 "let g:gutentags_plus_nomap = 1
 "nmap <Leader><Leader>s :GscopeFind s <C-R>=expand("<cword>") <CR><CR>
@@ -270,10 +486,10 @@ nnoremap <leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
 "nmap <Leader><Leader>a :GscopeFind a <C-R>=expand("<cword>") <CR><CR>
 "nmap <Leader><Leader>z :GscopeFind z <C-R>=expand("<cword>") <CR><CR>
 
-"" To know when Gutentags is generating tags
+" To know when Gutentags is generating tags
 "set statusline+=%{gutentags#statusline()}
 
-" To avoid conflict ctags key map
+"" To avoid conflict ctags key map
 "map <C-]> :tjump <C-R>=expand("<cword>")<CR><CR>
 
 "==============================================================================
@@ -497,6 +713,13 @@ let g:gitgutter_async = 1
 "==========================
 "= autocmd
 "==========================
+" show space and tap
+set list
+command! Q silent! q
+command! WQ silent! wq
+set backupdir=/tmp
+"set cmdheight=1
+
 autocmd BufEnter *.c        setlocal ts=8 sw=8 sts=8 noexpandtab
 autocmd BufEnter *.cpp      setlocal ts=4 sw=4 sts=4 noexpandtab
 autocmd BufEnter *.h      setlocal ts=4 sw=4 sts=4 noexpandtab
@@ -599,10 +822,13 @@ endif
 "==============================================================================
 "= NERD Tree
 "==============================================================================
-"let NERDTreeWinPos="right"
-let NERDTreeWinPos="left"
-"let g:NERDTreeWinSize=30
+"let g:NERDTreeWinPos="right"
+let g:NERDTreeWinPos="left"
+let g:NERDTreeWinSize=50
 let g:NERDTreeDirArrows=0
+let g:NERDTreeShowIcons = 1
+"let g:NERDTreeDirArrowExpandable = '→'
+"let g:NERDTreeDirArrowCollapsible = '▼'
 function! AutoLoadNERDTree()
 	exe 'NERDTree'
 endfunction
@@ -665,7 +891,9 @@ function! LoadCscope()
     set cscopeverbose
   endif
 endfunction
-au BufEnter /* call LoadCscope()
+if has('cscope.out')
+  au BufEnter /* call LoadCscope()
+endif
 
 set tags=tags;/
 
@@ -711,13 +939,36 @@ nnoremap <silent> <C-g> :Grep<CR>
 
 
 "==============================================================================
+" load Coverity command
+"==============================================================================
+let coverity_vimrc = $HOME . "/.vim/coverity.vimrc"
+if filereadable(coverity_vimrc)
+  execute "source " . fnameescape(coverity_vimrc)
+endif
+
+"==============================================================================
+" quickr-preview-vim
+"==============================================================================
+"let g:quickr_preview_keymaps = 0
+nmap <leader>p <plug>(quickr_preview)
+nmap <leader>q <plug>(quickr_preview_qf_close)
+let g:quickr_preview_position = 'below'
+let g:quickr_preview_size = '0'
+let g:quickr_preview_line_hl = "Search"
+let g:quickr_preview_options = 'number norelativenumber nofoldenable'
+let g:quickr_preview_on_cursor = 0
+let g:quickr_preview_exit_on_enter = 0
+let g:quickr_preview_modifiable = 0
+
+
+"==============================================================================
 " Shortcuts
 "==============================================================================
 
 " Help man
 func! Man()
 	let sm = expand("<cword>")
-	exe "!man -S 2:3:4:5:6:7:8:9:tcl:n:l:p:o ".sm
+	"exe "!man -S 2:3:4:5:6:7:8:9:tcl:n:l:p:o ".sm
 endfunc
 
 func! Maketags()
@@ -729,6 +980,17 @@ endfunc
 
 func! Deltags()
 	exe "!time rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags"
+endfunc
+
+func! NERDTreeOnlyLeft()
+	:TagbarClose
+	let g:NERDTreeWinPos="left"
+	:NERDTreeToggle
+endfunc
+
+func! NERDTreeOnlyRight()
+	let g:NERDTreeWinPos="right"
+	:NERDTreeToggle
 endfunc
 
 func! NERDTreeOnly()
@@ -746,16 +1008,23 @@ func! NERDTree_and_Tagbar_Toggle()
 	:TagbarToggle
 endfunc
 
-map <F1> :call Man()<cr><cr>
+"map <F1> :call Man()<cr><cr>
+map <F1> :!man <C-R>=expand("<cword>") <cr><cr>
 map <F2> :call Maketags()<cr><cr>
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
 map <F6> :BufExplorer<CR>
 map <F7> v]}zf
 map <F8> zo
-map <F9> :call NERDTreeOnly()<CR>
+"map <F9> :TagbarToggle<CR>
+"map <F10> :CocCommand explorer<CR>
+"map <F10> :NvimTreeToggle<CR>
+"map <F10> :NERDTreeToggle<CR>
+"map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
+map <F9> :call NERDTreeOnlyLeft()<CR>
 map <F10> :call TagbarOnly()<CR>
-map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
+map <F11> :call NERDTreeOnlyRight()<CR>
+"map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
 map <F12> :call Deltags()<CR>
 map ,pa :set paste<CR>		"paste
