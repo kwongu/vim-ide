@@ -46,6 +46,8 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Smooth scrolling: moves smoothly the screen when exploring source code.
 
+* Relation window (nvim only): Source Insight style panel that shows the definition, callers (with their enclosing function) and callees of the symbol under the cursor in real time. It uses the same GTAGS database created with F2. Toggle with F3.
+
 
 ## Usage (shortcut)
 
@@ -54,7 +56,7 @@ This section describes mapping keys for Vim IDE.
 ```
 F1: Show a man page for the keyword under the cursor.
 F2: Source files under the current path are indexed and cscope.files, GPATH, GRTAGS and GTAGS files are created.
-F3: Empty
+F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
@@ -106,6 +108,40 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 8 or i: Find files #including this file
 9 or a: Find places where this symbol is assigned a value
 ```
+
+## Relation window (nvim only)
+
+Press `F3` (or run `:RelationView`) to open the Source Insight style relation
+window at the bottom. While it is open, resting the cursor on a symbol in a
+source window updates the panel in real time with:
+
+```
+Definition            where the symbol is defined
+Callers / References  every reference, prefixed with its enclosing function
+Callees               functions called inside the symbol's definition
+                      ((external) means not in GTAGS, e.g. libc)
+```
+
+Keys inside the panel:
+
+```
+Enter: jump to the location under the cursor
+o:     jump but keep focus in the panel (peek)
+p:     pin - freeze the current symbol (auto update stops until unpinned)
+r:     refresh - drop the cache and query gtags again (use after F2)
+a:     toggle realtime auto update
+q:     close the panel
+```
+
+`:RelationView {symbol}` looks up an explicit symbol. Options such as
+`g:relationview_position` ('bottom' or 'right'), `g:relationview_height`,
+`g:relationview_debounce` and `g:relationview_max_refs` can be set in
+`.vimrc` - see the header of `~/.vim/plugin/relationview.lua`.
+
+Note for nvim: cscope support was removed in nvim 0.9+, so the
+`<leader><leader>` cscope shortcuts above are transparently remapped to the
+equivalent `:Gtags` queries in nvim (`<leader><leader>d` opens the relation
+window). Plain vim keeps the original cscope behavior.
 
 ## How to make gtags for multi directory
 

@@ -8,6 +8,14 @@ scripte utf-8
 " Revert all command settings before proceeding with other settings below
 set all&
 
+" 'set all&' resets 'runtimepath' too. Vim's built-in default includes
+" ~/.vim, but nvim's does not - restore it so colors/ and plugin/ keep
+" loading when this file is sourced from nvim (~/.config/nvim/init.vim).
+if has('nvim')
+    set runtimepath^=~/.vim
+    set runtimepath+=~/.vim/after
+endif
+
 " Work in Vim compatible not Vi compatible
 set nocompatible
 
@@ -457,6 +465,31 @@ nmap <Leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
 "nmap <Leader>e <ESC>:Cscope<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
 "nmap <Leader>e <ESC>:GscopeFind<SPACE>e<SPACE><C-R>=expand("<cword>")<CR>
 
+"==============================================================================
+" nvim fallback: cscope support was removed in nvim 0.9+, so the
+" quickr-cscope <plug> mappings above cannot work there. Remap them to the
+" equivalent :Gtags queries (gtags.vim does not need cscope) and route the
+" callee query to the RelationView panel. Plain vim keeps the original
+" cscope behavior untouched.
+"==============================================================================
+if has('nvim') && !has('cscope')
+    " quickr-cscope cannot 'cs add' without cscope; silence its warning
+    let g:quickr_cscope_autoload_db = 0
+    " gtags-cscope.vim (part of gtags.vim) only prints a startup warning
+    " here - preload its guard so it skips silently
+    let loaded_gtags_cscope = 1
+    nmap <Leader><Leader>g :Gtags -d <C-R>=expand("<cword>")<CR><CR>
+    nmap <Leader><Leader>s :Gtags -r <C-R>=expand("<cword>")<CR><CR>
+    nmap <Leader><Leader>f :Gtags -P <C-R>=expand("<cfile>")<CR><CR>
+    nmap <Leader><Leader>i :Gtags -g <C-R>=expand("<cfile>")<CR><CR>
+    nmap <Leader><Leader>e :Gtags -g <C-R>=expand("<cword>")<CR><CR>
+    nmap <Leader><Leader>a :Gtags -g <C-R>=expand("<cword>")<CR><CR>
+    " 'functions called by this' -> RelationView Callees section
+    nmap <Leader><Leader>d :RelationView<CR>
+    nmap <Leader>e :Gtags -g <C-R>=expand("<cword>")<CR>
+    nmap <Leader>f :Gtags -P <C-R>=expand("<cword>")<CR>
+endif
+
 ""==============================================================================
 "" gutentags key map
 ""==============================================================================
@@ -902,6 +935,14 @@ set tags=tags;/
 "= Check Symbol
 "==============================================================================
 source ${HOME}/.vim/plugin/checksymbol.vim
+
+"==============================================================================
+"= RelationView: Source Insight style relation window (nvim only)
+"  F3 toggle / :RelationView - see ~/.vim/plugin/relationview.lua
+"==============================================================================
+if has('nvim') && filereadable(expand('$HOME/.vim/plugin/relationview.lua'))
+    execute 'source' fnameescape(expand('$HOME/.vim/plugin/relationview.lua'))
+endif
 
 
 "==============================================================================
