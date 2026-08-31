@@ -13,11 +13,17 @@
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
 --   g  export the current tree as an HTML graph and open it in a browser
+--   c  toggle the context window (Source Insight style: shows the source
+--      around the location under the cursor, attached to the panel)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
 --   a  toggle realtime auto-update            q  close the panel
 --
 -- Expanding a node pins the panel automatically so a stray cursor move
 -- does not rebuild the tree; press p to unpin.
+--
+-- Jumps land on the referenced symbol itself (line AND column); if the
+-- file changed since the last gtags run, the symbol is re-located within
+-- +-30 lines of the recorded position.
 --
 -- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
@@ -28,6 +34,10 @@
 --   g:relationview_max_refs   max references per level    (default 200)
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
+--   g:relationview_context    1: open the context window with the panel
+--                             (default 1; 'c' toggles it at runtime)
+--   g:relationview_context_height  context height, 'right' layout (default 14)
+--   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
 --   g:relationview_global_cmd path of the global binary   (default auto)
 
 if vim.g.loaded_relationview then
@@ -129,17 +139,24 @@ local s = {
   auto = cfg('auto', 1) ~= 0,
   gen = 0,            -- generation counter, stale async results are dropped
   timer = nil,        -- debounce timer
-  items = {},         -- panel line number -> {node=?, loc={path,line}}
+  items = {},         -- panel line number -> {node=?, loc={path,line,sym}}
   cache = {},         -- key -> {mtime=..., data=...}
   cache_n = 0,
   roots = {},         -- dir -> gtags root (positive results only)
   procs = {},         -- in-flight vim.system handles of the current query
   inflight = {},      -- filedefs key -> list of waiting callbacks
+  ctx_win = nil,      -- context window (Source Insight style)
+  ctx_ph = nil,       -- placeholder buffer for an empty context window
+  ctx_last = nil,     -- last location shown in the context window
+  ctx_timer = nil,    -- context update debounce timer
   warned = false,
 }
 
 local A = {}          -- panel actions (jump/close/pin/...), defined below
-local render_tree     -- forward declaration
+local render_tree     -- forward declarations
+local ensure_ctx
+local update_context
+local group = api.nvim_create_augroup('RelationView', { clear = true })
 
 local function gtags_mtime(root)
   local st = uv.fs_stat(root .. '/GTAGS')
@@ -569,6 +586,9 @@ end
 -- (call sites of the parent symbol inside this caller), children (nil =
 -- not loaded yet), expanded/loading flags, cycle marker
 local function make_nodes(entries, parent, rootsym)
+  -- the symbol referenced at this level's call sites: the parent caller
+  -- for deeper levels, the queried symbol itself at the top level
+  local of_sym = parent and parent.name or rootsym
   local nodes = {}
   for _, e in ipairs(entries) do
     local node = {
@@ -576,6 +596,7 @@ local function make_nodes(entries, parent, rootsym)
       label = e.name or ('(' .. basename(e.sites[1].path) .. ')'),
       sites = e.sites,
       site = e.sites[1],
+      ref_sym = of_sym,
       parent = parent,
       expandable = e.name ~= nil,
       expanded = false,
@@ -647,10 +668,27 @@ local function ensure_buf()
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
   bmap('*', function() A.expand_all() end, 'RelationView: expand whole tree')
   bmap('g', function() A.graph() end, 'RelationView: export HTML graph')
+  bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
   bmap('a', function() A.toggle_auto() end, 'RelationView: toggle auto')
+
+  -- Source Insight style: moving in the list previews the location under
+  -- the cursor in the context window
+  api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+    group = group,
+    buffer = buf,
+    callback = function()
+      if not s.ctx_timer then
+        s.ctx_timer = uv.new_timer()
+      end
+      s.ctx_timer:stop()
+      s.ctx_timer:start(80, 0, vim.schedule_wrap(function()
+        update_context()
+      end))
+    end,
+  })
 
   s.buf = buf
   return buf
@@ -676,12 +714,18 @@ end
 
 local function panel_open()
   if panel_visible() then
+    if cfg('context', 1) ~= 0 then
+      ensure_ctx()
+    end
     return s.win
   end
   local buf = ensure_buf()
   local existing = panel_win_here()
   if existing then
     s.win = existing
+    if cfg('context', 1) ~= 0 then
+      ensure_ctx()
+    end
     return existing
   end
   local prev = api.nvim_get_current_win()
@@ -717,6 +761,9 @@ local function panel_open()
   })
   if api.nvim_win_is_valid(prev) then
     api.nvim_set_current_win(prev)
+  end
+  if cfg('context', 1) ~= 0 then
+    ensure_ctx()
   end
   return win
 end
@@ -782,6 +829,158 @@ local function section_line(title, n)
   return '── ' .. label .. ' ' .. string.rep('─', w)
 end
 
+-- ---------------------------------------------------------------------------
+-- precise landing + context window (Source Insight style)
+-- ---------------------------------------------------------------------------
+
+-- exact position of the referenced symbol: cursor lands ON the symbol, not
+-- at column 0, and if the file drifted since the last gtags run the symbol
+-- is re-located within +-30 lines of the recorded line
+local function locate(buf, line, sym)
+  if not sym then
+    return line, 0
+  end
+  local pat = '%f[%w_]' .. sym .. '%f[^%w_]'
+  local function col_at(l)
+    local txt = (api.nvim_buf_get_lines(buf, l - 1, l, false)[1]) or ''
+    local st = txt:find(pat)
+    return st and st - 1 or nil
+  end
+  local c = col_at(line)
+  if c then
+    return line, c
+  end
+  for d = 1, 30 do
+    for _, l in ipairs({ line - d, line + d }) do
+      if l >= 1 then
+        local cc = col_at(l)
+        if cc then
+          return l, cc
+        end
+      end
+    end
+  end
+  return line, 0
+end
+
+local function ctx_placeholder()
+  if s.ctx_ph and api.nvim_buf_is_valid(s.ctx_ph) then
+    return s.ctx_ph
+  end
+  local b = api.nvim_create_buf(false, true)
+  pcall(api.nvim_buf_set_name, b, 'RelationView-Context')
+  vim.bo[b].bufhidden = 'hide'
+  vim.bo[b].swapfile = false
+  api.nvim_buf_set_lines(b, 0, -1, false,
+    { '(move the cursor in the relation list to preview a location here)' })
+  vim.bo[b].modifiable = false
+  s.ctx_ph = b
+  return b
+end
+
+local function ctx_visible()
+  return s.ctx_win ~= nil and api.nvim_win_is_valid(s.ctx_win)
+      and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
+end
+
+-- open the context window attached to the panel: below the tree for the
+-- 'right' layout, beside it for the 'bottom' layout
+ensure_ctx = function()
+  if ctx_visible() then
+    return s.ctx_win
+  end
+  if not panel_visible() then
+    return nil
+  end
+  local ctx
+  api.nvim_win_call(s.win, function()
+    if cfg('position', 'bottom') == 'right' then
+      vim.cmd('noautocmd rightbelow ' .. cfg('context_height', 14) .. 'split')
+    else
+      vim.cmd('noautocmd rightbelow vertical split')
+      local w = cfg('context_width', 0)
+      if w > 0 then
+        vim.cmd('vertical resize ' .. w)
+      end
+    end
+    ctx = api.nvim_get_current_win()
+  end)
+  if not (ctx and api.nvim_win_is_valid(ctx)) then
+    return nil
+  end
+  api.nvim_win_set_buf(ctx, ctx_placeholder())
+  local wo = vim.wo[ctx]
+  wo.number = true
+  wo.relativenumber = false
+  wo.list = false
+  wo.wrap = false
+  wo.signcolumn = 'no'
+  wo.foldenable = false
+  wo.spell = false
+  wo.cursorline = true
+  wo.colorcolumn = ''
+  wo.winfixheight = true
+  wo.winfixwidth = true
+  s.ctx_win = ctx
+  s.ctx_last = nil
+  api.nvim_create_autocmd('WinClosed', {
+    pattern = tostring(ctx),
+    once = true,
+    callback = function()
+      if s.ctx_win == ctx then
+        s.ctx_win = nil
+      end
+    end,
+  })
+  return ctx
+end
+
+local function show_context(loc)
+  if not ctx_visible() then
+    return
+  end
+  local last = s.ctx_last
+  if last and last.path == loc.path and last.line == loc.line
+      and last.sym == loc.sym then
+    return
+  end
+  s.ctx_last = loc
+  local buf = vim.fn.bufadd(loc.path)
+  if not pcall(api.nvim_win_set_buf, s.ctx_win, buf) then
+    return
+  end
+  local line, col = locate(buf, loc.line, loc.sym)
+  api.nvim_win_call(s.ctx_win, function()
+    pcall(api.nvim_win_set_cursor, s.ctx_win, { line, col })
+    vim.cmd('normal! zz')
+  end)
+  local label = basename(loc.path) .. ':' .. line
+      .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
+  pcall(function()
+    vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
+  end)
+end
+
+-- preview the location under the panel cursor (falls back to the
+-- definition of the current symbol)
+update_context = function()
+  if not ctx_visible() then
+    return
+  end
+  if not (s.win and api.nvim_win_is_valid(s.win)) then
+    return
+  end
+  local lnum = api.nvim_win_get_cursor(s.win)[1]
+  local item = s.items[lnum]
+  local loc = item and item.loc
+  if not loc and s.tree and s.tree.def then
+    loc = { path = s.tree.def.path, line = s.tree.def.line, sym = s.tree.sym }
+  end
+  if loc then
+    show_context(loc)
+  end
+end
+
 -- render the whole caller tree of s.tree into the panel
 render_tree = function()
   local t = s.tree
@@ -808,7 +1007,7 @@ render_tree = function()
   if t.def then
     add(string.format('  %s:%d │ %s', rel(t.def.path), t.def.line,
         trunc(t.def.text, 90)),
-      { loc = { path = t.def.path, line = t.def.line } })
+      { loc = { path = t.def.path, line = t.def.line, sym = t.sym } })
   else
     add('  (no definition)')
   end
@@ -841,7 +1040,8 @@ render_tree = function()
       add(string.format('%s%s%s %s%s  %s:%d │ %s', prefix, branch, marker,
           nd.label, cnt, rel(nd.site.path), nd.site.line,
           trunc(nd.site.text, 70)),
-        { node = nd, loc = { path = nd.site.path, line = nd.site.line } })
+        { node = nd,
+          loc = { path = nd.site.path, line = nd.site.line, sym = nd.ref_sym } })
       nd.line = #lines
       if nd.expanded and nd.children then
         emit(nd.children, prefix .. (last and '   ' or '│  '))
@@ -855,6 +1055,7 @@ render_tree = function()
     add(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
   end
   render(lines, items)
+  vim.schedule(update_context)
 end
 
 -- ---------------------------------------------------------------------------
@@ -993,14 +1194,14 @@ end
 -- ---------------------------------------------------------------------------
 
 local function pick_src_win()
-  if s.src_win and api.nvim_win_is_valid(s.src_win)
+  if s.src_win and s.src_win ~= s.ctx_win and api.nvim_win_is_valid(s.src_win)
       and api.nvim_win_get_tabpage(s.src_win) == api.nvim_get_current_tabpage()
   then
     return s.src_win
   end
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
     local b = api.nvim_win_get_buf(w)
-    if vim.bo[b].buftype == '' and b ~= s.buf then
+    if vim.bo[b].buftype == '' and b ~= s.buf and w ~= s.ctx_win then
       return w
     end
   end
@@ -1025,8 +1226,10 @@ function A.jump(peek)
     pcall(vim.cmd, [[normal! m']])
   end)
   api.nvim_win_set_buf(win, buf)
+  -- land exactly on the referenced symbol (re-located if the file drifted)
+  local line, col = locate(buf, loc.line, loc.sym)
   api.nvim_win_call(win, function()
-    pcall(api.nvim_win_set_cursor, win, { loc.line, 0 })
+    pcall(api.nvim_win_set_cursor, win, { line, col })
     vim.cmd('normal! zz')
   end)
   if not peek then
@@ -1247,6 +1450,13 @@ function A.close()
   else
     target = panel_win_here()
   end
+  if s.ctx_win and api.nvim_win_is_valid(s.ctx_win)
+      and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
+  then
+    api.nvim_win_close(s.ctx_win, false)
+  end
+  s.ctx_win = nil
+  s.ctx_last = nil
   if target and api.nvim_win_is_valid(target) then
     api.nvim_win_close(target, false)
   end
@@ -1256,7 +1466,21 @@ function A.close()
   if s.timer then
     s.timer:stop()
   end
+  if s.ctx_timer then
+    s.ctx_timer:stop()
+  end
   kill_procs()
+end
+
+-- toggle the Source Insight style context window under/beside the panel
+function A.toggle_ctx()
+  if ctx_visible() then
+    api.nvim_win_close(s.ctx_win, false)
+    s.ctx_win = nil
+    s.ctx_last = nil
+  elseif ensure_ctx() then
+    update_context()
+  end
 end
 
 function A.pin()
@@ -1319,12 +1543,13 @@ local function on_hold()
     if now ~= sym or not is_symbol(now) then
       return
     end
-    s.src_win = win
+    if win ~= s.ctx_win then
+      s.src_win = win -- jumps go to real source windows, never the preview
+    end
     update(sym, file, false, false)
   end))
 end
 
-local group = api.nvim_create_augroup('RelationView', { clear = true })
 api.nvim_create_autocmd('CursorHold', { group = group, callback = on_hold })
 
 local function open_and_query(arg)
@@ -1334,7 +1559,10 @@ local function open_and_query(arg)
   local file = api.nvim_buf_get_name(buf)
   local explicit = arg ~= nil and arg ~= ''
   if vim.bo[buf].buftype == '' and file ~= '' and is_symbol(sym, explicit) then
-    s.src_win = api.nvim_get_current_win()
+    local cur = api.nvim_get_current_win()
+    if cur ~= s.ctx_win then
+      s.src_win = cur
+    end
     update(sym, file, false, true)
   elseif not s.sym then
     render_msg(nil, 'move the cursor onto a symbol in a source window')

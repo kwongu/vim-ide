@@ -132,19 +132,27 @@ that already appears higher up in the chain is marked `↺` (recursion) and
 stops there. Expanding a node pins the panel automatically so cursor moves
 do not rebuild the tree; press `p` to unpin.
 
+A context window (Source Insight style) is attached below the tree
+('right' layout) or beside it ('bottom' layout): moving the cursor in the
+relation list previews the source around that location, centered on the
+referenced symbol. Jumps land exactly on the referenced symbol - line and
+column - and if the file changed since the last gtags run the symbol is
+re-located within +-30 lines automatically.
+
 Keys inside the panel:
 
 ```
-Enter: jump to the call site under the cursor
+Enter: jump to the call site under the cursor (lands on the symbol)
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)
 g:     export the current tree as an HTML call graph (Source Insight
        style boxes) and open it in the browser
+c:     toggle the context window
 p:     pin - freeze the current symbol (auto update stops until unpinned)
 r:     refresh - drop the cache and query gtags again (use after F2)
 a:     toggle realtime auto update
-q:     close the panel
+q:     close the panel (and its context window)
 ```
 
 `:RelationView {symbol}` looks up an explicit symbol and
