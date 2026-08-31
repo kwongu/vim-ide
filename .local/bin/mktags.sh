@@ -1,5 +1,16 @@
 #!/bin/sh
 
+# The bundled toolchain lives in ~/.local/bin. Non-interactive shells
+# (nvim/vim ':!', GUI editors, cron) do not source ~/.zshrc/.bashrc, so
+# put it on PATH here to be runnable from anywhere on Linux and macOS.
+PATH="${HOME}/.local/bin:${PATH}"
+export PATH
+
+if ! command -v gtags >/dev/null 2>&1; then
+	echo "error: 'gtags' not found (expected in ~/.local/bin or PATH)" >&2
+	exit 1
+fi
+
 rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags
 
 DIRS=$@
