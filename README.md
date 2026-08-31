@@ -46,7 +46,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Smooth scrolling: moves smoothly the screen when exploring source code.
 
-* Relation window (nvim only): Source Insight style panel that shows the definition, callers (with their enclosing function) and callees of the symbol under the cursor in real time. It uses the same GTAGS database created with F2. Toggle with F3.
+* Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. Toggle with F3.
 
 
 ## Usage (shortcut)
@@ -112,30 +112,47 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 ## Relation window (nvim only)
 
 Press `F3` (or run `:RelationView`) to open the Source Insight style relation
-window at the bottom. While it is open, resting the cursor on a symbol in a
-source window updates the panel in real time with:
+window. While it is open, resting the cursor on a symbol in a source window
+updates the panel in real time with the definition and the caller tree:
 
 ```
-Definition            where the symbol is defined
-Callers / References  every reference, prefixed with its enclosing function
-Callees               functions called inside the symbol's definition
-                      ((external) means not in GTAGS, e.g. libc)
+── Definition ──────────────────
+  src/util.c:4 │ void util_log(const char *msg)
+── Callers (4) ─────────────────
+  ├─[+] main      src/main.c:12 │ util_log("done");
+  ├─[-] util_add  src/util.c:11 │ util_log("add");
+  │  ├─[+] helper   src/main.c:5 │ return util_add(x, 1);
+  │  └─[+] util_mul src/util.c:19 │ r = util_add(r, a);
+  └─[+] rec_a     src/util.c:30 │ util_log("a");
 ```
+
+Each node is a calling function; expanding a node queries the callers of
+that function, so the call chain can be followed to any depth. A caller
+that already appears higher up in the chain is marked `↺` (recursion) and
+stops there. Expanding a node pins the panel automatically so cursor moves
+do not rebuild the tree; press `p` to unpin.
 
 Keys inside the panel:
 
 ```
-Enter: jump to the location under the cursor
+Enter: jump to the call site under the cursor
 o:     jump but keep focus in the panel (peek)
+Space: expand/collapse the caller under the cursor (+ and - work too)
+*:     expand the whole tree (bounded by max_depth/max_nodes options)
+g:     export the current tree as an HTML call graph (Source Insight
+       style boxes) and open it in the browser
 p:     pin - freeze the current symbol (auto update stops until unpinned)
 r:     refresh - drop the cache and query gtags again (use after F2)
 a:     toggle realtime auto update
 q:     close the panel
 ```
 
-`:RelationView {symbol}` looks up an explicit symbol. Options such as
-`g:relationview_position` ('bottom' or 'right'), `g:relationview_height`,
-`g:relationview_debounce` and `g:relationview_max_refs` can be set in
+`:RelationView {symbol}` looks up an explicit symbol and
+`:RelationViewGraph` exports the graph without focusing the panel.
+Options such as `g:relationview_position` ('bottom' or 'right'),
+`g:relationview_height`, `g:relationview_width`,
+`g:relationview_debounce`, `g:relationview_max_refs`,
+`g:relationview_max_depth` and `g:relationview_max_nodes` can be set in
 `.vimrc` - see the header of `~/.vim/plugin/relationview.lua`.
 
 Note for nvim: cscope support was removed in nvim 0.9+, so the

@@ -1,25 +1,33 @@
 -- relationview.lua - Source Insight style "Relation Window" for nvim.
 --
--- Shows Definition / Callers / Callees of the symbol under the cursor in
--- real time, backed by GNU Global (gtags) - the same GTAGS database that
--- F2 (mktags.sh) already creates for this vim-ide setup.
+-- Shows the Definition and an expandable multi-depth CALLER TREE of the
+-- symbol under the cursor in real time, backed by GNU Global (gtags) -
+-- the same GTAGS database that F2 (mktags.sh) already creates.
 --
 --   F3                  toggle the relation window (was "Empty")
 --   :RelationView [sym] open the window and show relations of sym/<cword>
 --   :RelationViewToggle same as F3
 --
 -- Inside the panel:
---   <Enter> jump to location   o  jump but keep focus in the panel
---   p  pin (freeze) current symbol                 r  refresh (drop cache)
---   a  toggle realtime auto-update                 q  close the panel
+--   <Enter> jump to the call site   o  jump but keep focus in the panel
+--   <Space> expand/collapse the caller under the cursor ( + / - work too)
+--   *  expand the whole tree (bounded by max_depth/max_nodes)
+--   g  export the current tree as an HTML graph and open it in a browser
+--   p  pin (freeze) current symbol            r  refresh (drop cache)
+--   a  toggle realtime auto-update            q  close the panel
 --
--- Options (set in .vimrc before this file is sourced, all optional):
+-- Expanding a node pins the panel automatically so a stray cursor move
+-- does not rebuild the tree; press p to unpin.
+--
+-- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
 --   g:relationview_height     panel height for 'bottom'  (default 12)
 --   g:relationview_width      panel width  for 'right'   (default 60)
 --   g:relationview_auto       1: update as the cursor moves (default 1)
 --   g:relationview_debounce   idle debounce in ms         (default 250)
---   g:relationview_max_refs   max caller lines shown      (default 200)
+--   g:relationview_max_refs   max references per level    (default 200)
+--   g:relationview_max_depth  depth limit of '*'          (default 6)
+--   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_global_cmd path of the global binary   (default auto)
 
 if vim.g.loaded_relationview then
@@ -103,6 +111,10 @@ local function trunc(text, n)
   return text
 end
 
+local function basename(p)
+  return p:match('([^/]+)$') or p
+end
+
 -- ---------------------------------------------------------------------------
 -- state
 -- ---------------------------------------------------------------------------
@@ -112,11 +124,12 @@ local s = {
   win = nil,          -- panel window
   src_win = nil,      -- window the last query came from
   sym = nil,          -- symbol currently displayed
+  tree = nil,         -- current caller tree (see finish())
   pinned = false,
   auto = cfg('auto', 1) ~= 0,
   gen = 0,            -- generation counter, stale async results are dropped
   timer = nil,        -- debounce timer
-  locs = {},          -- panel line number -> {path=..., line=...}
+  items = {},         -- panel line number -> {node=?, loc={path,line}}
   cache = {},         -- key -> {mtime=..., data=...}
   cache_n = 0,
   roots = {},         -- dir -> gtags root (positive results only)
@@ -126,6 +139,7 @@ local s = {
 }
 
 local A = {}          -- panel actions (jump/close/pin/...), defined below
+local render_tree     -- forward declaration
 
 local function gtags_mtime(root)
   local st = uv.fs_stat(root .. '/GTAGS')
@@ -292,6 +306,9 @@ local function get_filedefs(root, mtime, path, cb)
   end, 4000)
 end
 
+-- last definition starting at or before the line (coarse fallback: it
+-- cannot tell where a function ENDS, so file-scope lines between two
+-- functions would be blamed on the previous one)
 local function enclosing(defs, line)
   local found = nil
   for _, d in ipairs(defs) do
@@ -304,214 +321,283 @@ local function enclosing(defs, line)
 end
 
 -- ---------------------------------------------------------------------------
--- callee extraction (treesitter first, brace scanning as fallback)
+-- precise enclosing-function detection: brace-scan the file once to turn
+-- the start lines from 'global -f' into real [start,end] ranges, so a
+-- prototype / EXPORT_SYMBOL / table between two functions is no longer
+-- misattributed to the previous function
 -- ---------------------------------------------------------------------------
 
-local CALL_QUERY = '(call_expression function: (_) @fn)'
+local MAX_SCAN_FILE = 8 * 1024 * 1024
 
--- source is a buffer number or a content string
-local function node_calls(lang, fnnode, source)
-  local okq, query = pcall(vim.treesitter.query.parse, lang, CALL_QUERY)
-  if not okq then
-    return nil
-  end
-  local calls = {}
-  for _, n in query:iter_captures(fnnode, source) do
-    local ok, text = pcall(vim.treesitter.get_node_text, n, source)
-    -- keep the trailing identifier: 'foo', 'obj->foo', 'ns::foo' -> 'foo'
-    local name = ok and text:match('([%a_][%w_]*)%s*$') or nil
-    if name and not KEYWORDS[name] then
-      calls[#calls + 1] = { name = name, line = n:start() + 1 }
+local function read_file_async(path, cb)
+  uv.fs_open(path, 'r', 438, function(oerr, fd)
+    if oerr or not fd then
+      vim.schedule(function() cb(nil) end)
+      return
     end
-  end
-  return calls
-end
-
-local function fn_node_at(root_node, defline)
-  local row = defline - 1
-  local node = root_node:named_descendant_for_range(row, 0, row, 0)
-  while node and node:type() ~= 'function_definition' do
-    node = node:parent()
-  end
-  return node
-end
-
--- reuse the incrementally-updated tree of an already-loaded buffer:
--- no file io, no from-scratch parse
-local function ts_callees_buf(bufnr, defline)
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if not ok or not parser then
-    return nil
-  end
-  local okp, trees = pcall(function() return parser:parse() end)
-  if not okp or not trees or not trees[1] then
-    return nil
-  end
-  local node = fn_node_at(trees[1]:root(), defline)
-  if not node then
-    return nil
-  end
-  return node_calls(parser:lang(), node, bufnr)
-end
-
-local function ts_callees_str(content, path, defline)
-  local ft = vim.filetype.match({ filename = path })
-  if not ft then
-    return nil
-  end
-  local lang = vim.treesitter.language.get_lang(ft) or ft
-  local ok, parser = pcall(vim.treesitter.get_string_parser, content, lang)
-  if not ok or not parser then
-    return nil
-  end
-  local okp, trees = pcall(function() return parser:parse() end)
-  if not okp or not trees or not trees[1] then
-    return nil
-  end
-  local node = fn_node_at(trees[1]:root(), defline)
-  if not node then
-    return nil
-  end
-  return node_calls(lang, node, content)
-end
-
-local function brace_callees(lines, defline)
-  local calls = {}
-  local depth, started = 0, false
-  local i = defline
-  while i <= #lines and i < defline + 4000 do
-    local code = lines[i]:gsub('//.*$', '')
-    if started or code:find('{', 1, true) then
-      for name in code:gmatch('([%a_][%w_]*)%s*%(') do
-        if not KEYWORDS[name] then
-          calls[#calls + 1] = { name = name, line = i }
-        end
+    uv.fs_fstat(fd, function(serr, st)
+      if serr or not st or st.size > MAX_SCAN_FILE then
+        uv.fs_close(fd, function() end)
+        vim.schedule(function() cb(nil) end)
+        return
       end
+      uv.fs_read(fd, st.size, 0, function(rerr, data)
+        uv.fs_close(fd, function() end)
+        vim.schedule(function() cb(rerr == nil and data or nil) end)
+      end)
+    end)
+  end)
+end
+
+-- top-level brace ranges of the file, each owned by the nearest preceding
+-- definition: functions, but also global initializers/struct bodies
+local function build_ranges(content, defs)
+  local lines = vim.split(content, '\n', { plain = true })
+  local ranges = {}
+  local depth = 0
+  local in_block = false
+  local open_owner, open_start = nil, nil
+  local di, last_def = 1, nil
+  local used = {} -- local marker: never mutate the cached defs table
+  for i, raw in ipairs(lines) do
+    while di <= #defs and defs[di].line <= i do
+      last_def = defs[di]
+      di = di + 1
+    end
+    local code = raw
+    -- crude comment/string stripping, good enough for brace counting
+    if in_block then
+      local e = code:find('*/', 1, true)
+      if e then
+        code = code:sub(e + 2)
+        in_block = false
+      else
+        code = ''
+      end
+    end
+    if code ~= '' then
+      code = code:gsub('\\[\'"]', '')
+      code = code:gsub('"[^"]*"', '""')
+      code = code:gsub("'[^']*'", "''")
+      code = code:gsub('/%*.-%*/', '')
+      local bs = code:find('/*', 1, true)
+      if bs then
+        code = code:sub(1, bs - 1)
+        in_block = true
+      end
+      code = code:gsub('//.*$', '')
     end
     local opens = select(2, code:gsub('{', ''))
     local closes = select(2, code:gsub('}', ''))
-    if not started then
-      if opens > 0 then
-        started = true
-        depth = opens - closes
-        -- drop identifiers picked up from the signature line itself
-        if i == defline then
-          calls = {}
-        end
-      elseif code:find(';') then
-        return {} -- prototype, not a definition
+    if depth == 0 and opens > 0 then
+      -- a definition owns at most ONE top-level brace range: an anonymous
+      -- block after it (e.g. a static variable initializer that gtags does
+      -- not record) must not be blamed on it again
+      if last_def and not used[last_def] then
+        open_owner = last_def
+        used[last_def] = true
+        -- include the signature line(s) above the opening brace, but never
+        -- reach back into the previous range
+        local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
+        open_start = math.max(math.min(last_def.line, i), floor_)
+      else
+        open_owner = nil
+        open_start = i
       end
-    else
-      depth = depth + opens - closes
     end
-    if started and depth <= 0 then
-      break
+    depth = depth + opens - closes
+    if depth <= 0 then
+      if open_start then
+        ranges[#ranges + 1] = { s = open_start, e = i,
+          name = open_owner and open_owner.name or nil }
+        open_start, open_owner = nil, nil
+      end
+      depth = 0 -- self-correct on miscounts
     end
-    i = i + 1
   end
-  return calls
+  if open_start then
+    ranges[#ranges + 1] = { s = open_start, e = #lines,
+      name = open_owner and open_owner.name or nil }
+  end
+  return ranges
 end
 
-local MAX_TS_FILE = 1 * 1024 * 1024   -- string-parse cutoff for unloaded files
-local MAX_READ_FILE = 8 * 1024 * 1024 -- absolute read cutoff
-
--- returns (ordered unique { name=..., line=<first call site> }, note);
--- results are cached per (path, defline) keyed by the file's own mtime
-local function extract_callees(path, defline)
+-- defs + ranges of one file, cached against BOTH the GTAGS mtime (defs)
+-- and the file's own mtime (content); concurrent requests share one scan
+local function get_fileranges(root, mtime, path, cb)
   local st = uv.fs_stat(path)
-  if not st then
-    return nil, '(cannot read file)'
-  end
-  local key = 'C\0' .. path .. '\0' .. defline
-  local hit = cache_get(key, st.mtime.sec)
+  local ck = tostring(mtime) .. ':' .. tostring(st and st.mtime.sec or -1)
+  local key = 'R\0' .. path
+  local hit = cache_get(key, ck)
   if hit then
-    return hit.calls, hit.note
+    cb(hit)
+    return
   end
-
-  local calls
-  local bufnr = -1
-  for _, b in ipairs(api.nvim_list_bufs()) do
-    if api.nvim_buf_is_loaded(b) and api.nvim_buf_get_name(b) == path then
-      bufnr = b
-      break
-    end
+  local ikey = 'IR\0' .. path
+  if s.inflight[ikey] then
+    table.insert(s.inflight[ikey], cb)
+    return
   end
-
-  if bufnr ~= -1 then
-    calls = ts_callees_buf(bufnr, defline)
-    if not calls or #calls == 0 then
-      calls = brace_callees(api.nvim_buf_get_lines(bufnr, 0, -1, false), defline)
-    end
-  else
-    if st.size > MAX_READ_FILE then
-      return nil, '(file too large)'
-    end
-    local f = io.open(path, 'r')
-    if not f then
-      return nil, '(cannot read file)'
-    end
-    local content = f:read('*a')
-    f:close()
-    if st.size <= MAX_TS_FILE then
-      calls = ts_callees_str(content, path, defline)
-    end
-    if not calls or #calls == 0 then
-      calls = brace_callees(vim.split(content, '\n', { plain = true }), defline)
+  s.inflight[ikey] = { cb }
+  local function done(res)
+    local waiters = s.inflight[ikey] or {}
+    s.inflight[ikey] = nil
+    for _, w in ipairs(waiters) do
+      w(res)
     end
   end
-
-  local seen, out = {}, {}
-  for _, c in ipairs(calls or {}) do
-    if not seen[c.name] then
-      seen[c.name] = true
-      out[#out + 1] = c
-    end
-  end
-  cache_put(key, st.mtime.sec, { calls = out })
-  return out, nil
+  get_filedefs(root, mtime, path, function(defs)
+    read_file_async(path, function(content)
+      local res = { defs = defs, ranges = content and build_ranges(content, defs) or nil }
+      cache_put(key, ck, res)
+      done(res)
+    end)
+  end)
 end
 
--- Resolve callee names to their definitions with one exact (indexed) lookup
--- per name through a small worker pool. Exact lookups hit Global's B-tree
--- index (milliseconds regardless of DB size) whereas a '^(a|b|...)$' regex
--- forces a full key scan, and each result is keyed by the queried name so
--- attribution can never be wrong. Results are cached per (root, name).
-local function resolve_callees(root, mtime, names, cb)
-  local resolved = {}
+-- the function a reference line really belongs to, nil = file scope
+local function enclosing_at(res, line)
+  if res.ranges then
+    for _, rg in ipairs(res.ranges) do
+      if rg.s > line then
+        break
+      end
+      if line <= rg.e then
+        return rg.name
+      end
+    end
+    -- a definition on the very same line still owns the reference
+    -- (single-line macro bodies: #define CALL() foo())
+    for _, d in ipairs(res.defs) do
+      if d.line == line then
+        return d.name
+      end
+      if d.line > line then
+        break
+      end
+    end
+    return nil
+  end
+  return enclosing(res.defs, line) -- unreadable/huge file: coarse fallback
+end
+
+-- ---------------------------------------------------------------------------
+-- caller tree building
+-- ---------------------------------------------------------------------------
+
+local MAX_ENCLOSE_FILES = 40
+local ENCLOSE_CONC = 5
+
+-- annotate every ref with its enclosing function (r.fn) through a small
+-- worker pool; alive() aborts stale work, done() fires when all are set
+local function annotate_pool(root, mtime, refs, alive, done)
+  local seen, order = {}, {}
+  for _, r in ipairs(refs) do
+    if not seen[r.path] then
+      seen[r.path] = true
+      order[#order + 1] = r.path
+    end
+  end
+  local n = math.min(#order, MAX_ENCLOSE_FILES)
+  if n == 0 then
+    done()
+    return
+  end
   local idx, active = 0, 0
-  local CONC = 6
   local launch
   launch = function()
-    while active < CONC and idx < #names do
-      idx = idx + 1
-      local name = names[idx]
-      local key = 'D\0' .. root .. '\0' .. name
-      local hit = cache_get(key, mtime)
-      if hit ~= nil then
-        if hit.path then
-          resolved[name] = hit
-        end
-      else
-        active = active + 1
-        run_global({ '--result=ctags-mod', '-a', '-d', name }, root,
-          function(lines)
-            if lines then
-              local d = parse_ctags_mod(lines, 2)[1] or {} -- {} = external
-              cache_put(key, mtime, d)
-              if d.path then
-                resolved[name] = d
-              end
-            end
-            active = active - 1
-            launch()
-          end, 4)
-      end
+    if not alive() then
+      return -- stale: stop dispatching, drop silently
     end
-    if active == 0 and idx >= #names then
-      cb(resolved)
+    while active < ENCLOSE_CONC and idx < n do
+      idx = idx + 1
+      local path = order[idx]
+      active = active + 1
+      get_fileranges(root, mtime, path, function(res)
+        for _, r in ipairs(refs) do
+          if r.path == path then
+            r.fn = enclosing_at(res, r.line)
+          end
+        end
+        active = active - 1
+        if active == 0 and idx >= n then
+          done()
+        else
+          launch()
+        end
+      end)
     end
   end
   launch()
+end
+
+-- callers of one symbol: annotated references, ready for grouping
+local function fetch_callers(root, mtime, sym, alive, cb)
+  local max_refs = cfg('max_refs', 200)
+  run_global({ '--result=ctags-mod', '-a', '-r', '-e', sym }, root,
+    function(lines)
+      if not alive() then
+        return
+      end
+      local refs = parse_ctags_mod(lines, max_refs)
+      annotate_pool(root, mtime, refs, alive, function()
+        if alive() then
+          cb(refs)
+        end
+      end)
+    end, max_refs + 200)
+end
+
+-- group references by their enclosing function (Source Insight shows one
+-- box per calling function, not one per call site)
+local function group_refs(refs)
+  local map, order = {}, {}
+  for _, r in ipairs(refs) do
+    local key = r.fn and ('f\0' .. r.fn) or ('p\0' .. r.path)
+    local e = map[key]
+    if not e then
+      e = { name = r.fn, sites = {} }
+      map[key] = e
+      order[#order + 1] = e
+    end
+    e.sites[#e.sites + 1] = r
+  end
+  return order
+end
+
+-- tree node: name (caller function, nil = file-scope ref), label, sites
+-- (call sites of the parent symbol inside this caller), children (nil =
+-- not loaded yet), expanded/loading flags, cycle marker
+local function make_nodes(entries, parent, rootsym)
+  local nodes = {}
+  for _, e in ipairs(entries) do
+    local node = {
+      name = e.name,
+      label = e.name or ('(' .. basename(e.sites[1].path) .. ')'),
+      sites = e.sites,
+      site = e.sites[1],
+      parent = parent,
+      expandable = e.name ~= nil,
+      expanded = false,
+    }
+    if node.name then
+      if node.name == rootsym then
+        node.cycle = true
+      end
+      local p = parent
+      while p and not node.cycle do
+        if p.name == node.name then
+          node.cycle = true
+        end
+        p = p.parent
+      end
+      if node.cycle then
+        node.expandable = false
+      end
+    end
+    nodes[#nodes + 1] = node
+  end
+  return nodes
 end
 
 -- ---------------------------------------------------------------------------
@@ -532,26 +618,35 @@ local function ensure_buf()
 
   api.nvim_buf_call(buf, function()
     vim.cmd([[
+      syntax match RvTree     /[│├└]/
       syntax match RvHeader   /^◆.*/
-      syntax match RvHint     /^  \[.*\]$/
+      syntax match RvHint     /^  \[.*/
       syntax match RvSection  /^──.*/
-      syntax match RvName     /^  \zs[^ │]\+/
+      syntax match RvMarker   /\[[-+…]\]\|↺/
+      syntax match RvName     /\%(\[[-+…]\] \|↺ \|· \)\zs[^ │]\+/
       syntax match RvLoc      /[^ │]\+:\d\+/
-      syntax match RvDim      /(external)\|(no definition)\|(none)\|(file too large)/
+      syntax match RvDim      /(no definition)\|(none)\|(x\d\+)/
     ]])
   end)
   api.nvim_set_hl(0, 'RvHeader', { link = 'Title', default = true })
   api.nvim_set_hl(0, 'RvHint', { link = 'Comment', default = true })
   api.nvim_set_hl(0, 'RvSection', { link = 'Label', default = true })
+  api.nvim_set_hl(0, 'RvMarker', { link = 'Special', default = true })
   api.nvim_set_hl(0, 'RvName', { link = 'Function', default = true })
   api.nvim_set_hl(0, 'RvLoc', { link = 'Directory', default = true })
   api.nvim_set_hl(0, 'RvDim', { link = 'Comment', default = true })
+  api.nvim_set_hl(0, 'RvTree', { link = 'Comment', default = true })
 
   local function bmap(lhs, fn, desc)
     vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, desc = desc })
   end
   bmap('<CR>', function() A.jump(false) end, 'RelationView: jump')
   bmap('o', function() A.jump(true) end, 'RelationView: peek')
+  bmap('<Space>', function() A.toggle('toggle') end, 'RelationView: expand/collapse')
+  bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
+  bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
+  bmap('*', function() A.expand_all() end, 'RelationView: expand whole tree')
+  bmap('g', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
@@ -626,9 +721,9 @@ local function panel_open()
   return win
 end
 
-local function render(lines, locs)
+local function render(lines, items)
   local buf = ensure_buf()
-  s.locs = locs or {}
+  s.items = items or {}
   vim.bo[buf].modifiable = true
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
@@ -658,7 +753,7 @@ local function header(sym, note)
   local tail = #flags > 0 and ('  [' .. table.concat(flags, ', ') .. ']') or ''
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
-    '  [Enter]jump  [o]peek  [p]pin  [r]refresh  [a]auto  [q]close  [F3]toggle',
+    '  [⏎]jump [o]peek [␣]open/close [*]all [g]graph [p]pin [r]refresh [q]close',
   }
 end
 
@@ -687,85 +782,84 @@ local function section_line(title, n)
   return '── ' .. label .. ' ' .. string.rep('─', w)
 end
 
-local function fmt_name(name)
-  if #name <= 22 then
-    return name .. string.rep(' ', 22 - #name)
+-- render the whole caller tree of s.tree into the panel
+render_tree = function()
+  local t = s.tree
+  if not t then
+    return
   end
-  return name
-end
-
--- data = { def = {..}|nil, refs = { {path,line,text,fn=} }, refs_kind,
---          refs_truncated, callees = { {name,path,line,text,external,site} },
---          callees_note }
-local function render_data(sym, root, data)
-  local lines = header(sym)
-  local locs = {}
+  local lines = header(t.sym)
+  local items = {}
   local function rel(p)
-    if p:sub(1, #root + 1) == root .. '/' then
-      return p:sub(#root + 2)
+    if p:sub(1, #t.root + 1) == t.root .. '/' then
+      return p:sub(#t.root + 2)
     end
     return p
   end
-  local function add(text, loc)
+  local function add(text, item)
     lines[#lines + 1] = text
-    if loc then
-      locs[#lines] = loc
+    if item then
+      items[#lines] = item
     end
   end
 
   add('')
   add(section_line('Definition'))
-  if data.def then
-    local d = data.def
-    add(string.format('  %s:%d │ %s', rel(d.path), d.line, trunc(d.text, 90)),
-      { path = d.path, line = d.line })
+  if t.def then
+    add(string.format('  %s:%d │ %s', rel(t.def.path), t.def.line,
+        trunc(t.def.text, 90)),
+      { loc = { path = t.def.path, line = t.def.line } })
   else
     add('  (no definition)')
   end
 
-  local title = data.refs_kind == 'symbol'
-      and 'References (undefined symbol)' or 'Callers / References'
+  local title = t.kind == 'symbol'
+      and 'References (undefined symbol)' or 'Callers'
   add('')
-  add(section_line(title, #data.refs))
-  if #data.refs == 0 then
+  add(section_line(title, #t.nodes))
+  if #t.nodes == 0 then
     add('  (none)')
   end
-  for _, r in ipairs(data.refs) do
-    add(string.format('  %s %s:%d │ %s',
-        fmt_name(r.fn or '─'), rel(r.path), r.line, trunc(r.text, 80)),
-      { path = r.path, line = r.line })
-  end
-  if data.refs_truncated and data.refs_truncated > 0 then
-    -- lower bound: the query is capped, the real total may be larger
-    add(string.format('  … %d+ more  (:Gtags -r %s)', data.refs_truncated, sym))
-  end
 
-  add('')
-  add(section_line('Callees', data.callees and #data.callees or nil))
-  if not data.callees or #data.callees == 0 then
-    add('  ' .. (data.callees_note or '(none)'))
-  else
-    for _, c in ipairs(data.callees) do
-      if c.external then
-        add(string.format('  %s (external)  call @ %s:%d',
-            fmt_name(c.name), rel(c.site.path), c.site.line),
-          { path = c.site.path, line = c.site.line })
+  local function emit(nodes, prefix)
+    for i, nd in ipairs(nodes) do
+      local last = i == #nodes
+      local branch = last and '└─' or '├─'
+      local marker
+      if nd.loading then
+        marker = '[…]'
+      elseif nd.cycle then
+        marker = ' ↺ '
+      elseif not nd.expandable then
+        marker = ' · '
+      elseif nd.expanded then
+        marker = '[-]'
       else
-        add(string.format('  %s %s:%d │ %s',
-            fmt_name(c.name), rel(c.path), c.line, trunc(c.text, 80)),
-          { path = c.path, line = c.line })
+        marker = '[+]'
+      end
+      local cnt = #nd.sites > 1 and string.format(' (x%d)', #nd.sites) or ''
+      add(string.format('%s%s%s %s%s  %s:%d │ %s', prefix, branch, marker,
+          nd.label, cnt, rel(nd.site.path), nd.site.line,
+          trunc(nd.site.text, 70)),
+        { node = nd, loc = { path = nd.site.path, line = nd.site.line } })
+      nd.line = #lines
+      if nd.expanded and nd.children then
+        emit(nd.children, prefix .. (last and '   ' or '│  '))
       end
     end
   end
-  render(lines, locs)
+  emit(t.nodes, '  ')
+
+  if t.truncated and t.truncated > 0 then
+    -- lower bound: the query is capped, the real total may be larger
+    add(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
+  end
+  render(lines, items)
 end
 
 -- ---------------------------------------------------------------------------
--- query pipeline
+-- query pipeline (root level)
 -- ---------------------------------------------------------------------------
-
-local MAX_ENCLOSE_FILES = 40
-local ENCLOSE_CONC = 5
 
 -- mtime is the GTAGS mtime captured when the query STARTED: if the database
 -- was rebuilt mid-query the result may mix old and new data, so render it
@@ -774,95 +868,20 @@ local function finish(gen, sym, root, mtime, data)
   if gen ~= s.gen then
     return
   end
+  local t = {
+    sym = sym,
+    root = root,
+    mtime = mtime,
+    def = data.def,
+    kind = data.refs_kind,
+    truncated = data.refs_truncated,
+    nodes = make_nodes(group_refs(data.refs), nil, sym),
+  }
   if gtags_mtime(root) == mtime then
-    cache_put('S\0' .. sym .. '\0' .. root, mtime, data)
+    cache_put('S\0' .. sym .. '\0' .. root, mtime, t)
   end
-  render_data(sym, root, data)
-end
-
--- annotate refs with their enclosing function through a small worker pool,
--- then finish
-local function annotate_refs(gen, sym, root, mtime, data)
-  local seen, order = {}, {}
-  for _, r in ipairs(data.refs) do
-    if not seen[r.path] then
-      seen[r.path] = true
-      order[#order + 1] = r.path
-    end
-  end
-  local n = math.min(#order, MAX_ENCLOSE_FILES)
-  if n == 0 then
-    finish(gen, sym, root, mtime, data)
-    return
-  end
-  local idx, active = 0, 0
-  local launch
-  launch = function()
-    if gen ~= s.gen then
-      return -- stale generation: stop dispatching, drop silently
-    end
-    while active < ENCLOSE_CONC and idx < n do
-      idx = idx + 1
-      local path = order[idx]
-      active = active + 1
-      get_filedefs(root, mtime, path, function(defs)
-        for _, r in ipairs(data.refs) do
-          if r.path == path then
-            r.fn = enclosing(defs, r.line)
-          end
-        end
-        active = active - 1
-        if active == 0 and idx >= n then
-          finish(gen, sym, root, mtime, data)
-        else
-          launch()
-        end
-      end)
-    end
-  end
-  launch()
-end
-
-local function gather_callees(gen, sym, root, mtime, data, then_)
-  if not data.def then
-    then_()
-    return
-  end
-  local calls, note = extract_callees(data.def.path, data.def.line)
-  if note then
-    data.callees_note = note
-  end
-  if not calls or #calls == 0 then
-    then_()
-    return
-  end
-  if #calls > 120 then
-    local t = {}
-    for i = 1, 120 do t[i] = calls[i] end
-    calls = t
-  end
-  local names = {}
-  for _, c in ipairs(calls) do
-    names[#names + 1] = c.name
-  end
-  resolve_callees(root, mtime, names, function(resolved)
-    if gen ~= s.gen then
-      return
-    end
-    local out = {}
-    for _, c in ipairs(calls) do
-      local d = resolved[c.name]
-      if d then
-        out[#out + 1] = { name = c.name, path = d.path, line = d.line,
-          text = d.text }
-      elseif c.name ~= sym then
-        out[#out + 1] = { name = c.name, external = true,
-          site = { path = data.def.path, line = c.line } }
-      end
-    end
-    data.callees = out
-    then_()
-  end)
+  s.tree = t
+  render_tree()
 end
 
 -- manual: explicit request (:RelationView / 'r'), relaxes the guards that
@@ -904,7 +923,8 @@ local function update(sym, srcfile, force, manual)
     if not force then
       local hit = cache_get('S\0' .. sym .. '\0' .. root, mtime)
       if hit then
-        render_data(sym, root, hit)
+        s.tree = hit -- expansions done earlier on this tree are kept
+        render_tree()
         return
       end
     end
@@ -913,18 +933,16 @@ local function update(sym, srcfile, force, manual)
     local max_refs = cfg('max_refs', 200)
     local data = { refs = {}, refs_kind = 'ref' }
     local pending = 2
+    local alive = function() return gen == s.gen end
 
     local function join()
       pending = pending - 1
       if pending > 0 or gen ~= s.gen then
         return
       end
-      local function resolve_rest()
-        gather_callees(gen, sym, root, mtime, data, function()
-          if gen ~= s.gen then
-            return
-          end
-          annotate_refs(gen, sym, root, mtime, data)
+      local function annotate_and_finish()
+        annotate_pool(root, mtime, data.refs, alive, function()
+          finish(gen, sym, root, mtime, data)
         end)
       end
       -- undefined symbol: fall back to '-s' references. This can scan a
@@ -942,10 +960,10 @@ local function update(sym, srcfile, force, manual)
             local refs = parse_ctags_mod(lines, max_refs)
             data.refs, data.refs_kind = refs, 'symbol'
             data.refs_truncated = refs.truncated
-            resolve_rest()
+            annotate_and_finish()
           end, max_refs + 200)
       else
-        resolve_rest()
+        annotate_and_finish()
       end
     end
 
@@ -991,7 +1009,8 @@ end
 
 function A.jump(peek)
   local lnum = api.nvim_win_get_cursor(0)[1]
-  local loc = s.locs[lnum]
+  local item = s.items[lnum]
+  local loc = item and item.loc
   if not loc then
     return
   end
@@ -1013,6 +1032,210 @@ function A.jump(peek)
   if not peek then
     api.nvim_set_current_win(win)
   end
+end
+
+-- expand/collapse the caller node under the cursor.
+-- mode: 'toggle' | 'expand' | 'collapse'
+function A.toggle(mode)
+  local lnum = api.nvim_win_get_cursor(0)[1]
+  local item = s.items[lnum]
+  local nd = item and item.node
+  if not nd or nd.loading then
+    return
+  end
+  if nd.expanded and mode ~= 'expand' then
+    nd.expanded = false
+    render_tree()
+  elseif not nd.expanded and mode ~= 'collapse' and nd.expandable then
+    -- deeper exploration should survive cursor moves: pin automatically
+    s.pinned = true
+    if nd.children then
+      nd.expanded = true
+      render_tree()
+    else
+      nd.loading = true
+      render_tree()
+      local t = s.tree
+      local alive = function() return s.tree == t end
+      fetch_callers(t.root, t.mtime, nd.name, alive, function(refs)
+        nd.loading = false
+        nd.children = make_nodes(group_refs(refs), nd, t.sym)
+        nd.expanded = true
+        if s.tree == t then
+          render_tree()
+        end
+      end)
+    end
+  else
+    return
+  end
+  if nd.line then
+    pcall(api.nvim_win_set_cursor, 0, { nd.line, 0 })
+  end
+end
+
+-- expand the whole visible tree, breadth-first, bounded by
+-- g:relationview_max_depth / g:relationview_max_nodes
+function A.expand_all()
+  local t = s.tree
+  if not t or t.expanding then
+    return
+  end
+  s.pinned = true
+  t.expanding = true
+  local maxdepth = cfg('max_depth', 6)
+  local maxnodes = cfg('max_nodes', 300)
+  local total = 0
+  local queue = {}
+  local alive = function() return s.tree == t end
+
+  local function absorb(nodes, depth)
+    for _, nd in ipairs(nodes) do
+      total = total + 1
+      if depth < maxdepth and nd.expandable and not nd.cycle then
+        queue[#queue + 1] = { nd, depth }
+      end
+    end
+  end
+  absorb(t.nodes, 1)
+
+  local function step()
+    while true do
+      if not alive() then
+        t.expanding = nil
+        return
+      end
+      if total >= maxnodes then
+        t.expanding = nil
+        render_tree()
+        vim.notify(string.format('RelationView: %d nodes — stopped '
+          .. '(g:relationview_max_nodes)', total))
+        return
+      end
+      local entry = table.remove(queue, 1)
+      if not entry then
+        t.expanding = nil
+        render_tree()
+        return
+      end
+      local nd, depth = entry[1], entry[2]
+      if nd.children then
+        nd.expanded = true
+        absorb(nd.children, depth + 1)
+      else
+        nd.loading = true
+        fetch_callers(t.root, t.mtime, nd.name, alive, function(refs)
+          nd.loading = false
+          if not alive() then
+            t.expanding = nil
+            return
+          end
+          nd.children = make_nodes(group_refs(refs), nd, t.sym)
+          nd.expanded = true
+          absorb(nd.children, depth + 1)
+          render_tree() -- progressive feedback
+          step()
+        end)
+        return
+      end
+    end
+  end
+  update_header()
+  step()
+end
+
+-- export the currently expanded tree as a self-contained HTML graph
+-- (Source Insight style boxes, root on the left, callers to the right)
+local GRAPH_CSS = [[
+body{font:13px/1.45 'SF Mono',Menlo,Consolas,monospace;background:#f4f6f9;
+  color:#1c2733;padding:28px}
+h1{font:600 15px -apple-system,'Segoe UI',sans-serif;margin:0 0 4px}
+p.meta{font:11px -apple-system,'Segoe UI',sans-serif;color:#7b8898;
+  margin:0 0 20px}
+.node{display:flex;align-items:center;position:relative;padding:4px 0}
+.box{border:1px solid #6f8db4;background:#fff;border-radius:4px;
+  padding:5px 10px;box-shadow:1px 1px 3px rgba(30,50,80,.18);
+  white-space:nowrap;position:relative;z-index:1}
+.box.root{background:#2f66b3;border-color:#2f66b3;color:#fff}
+.box.root .loc{color:#cfe0f5}
+.box.cycle{border-style:dashed;color:#9a6b1f}
+.box.leaf{border-color:#b6c2d2;color:#5a6a7d}
+.fn{font-weight:600;display:block}
+.loc{display:block;font-size:11px;color:#7b8898}
+.kids{display:flex;flex-direction:column;justify-content:center;
+  margin-left:36px;position:relative}
+.kids::before{content:'';position:absolute;left:-36px;top:50%;width:18px;
+  height:1px;background:#8fa3bd}
+.kids>.node::before{content:'';position:absolute;left:-18px;top:50%;
+  width:18px;height:1px;background:#8fa3bd}
+.kids>.node::after{content:'';position:absolute;left:-18px;top:0;bottom:0;
+  width:1px;background:#8fa3bd}
+.kids>.node:first-child::after{top:50%}
+.kids>.node:last-child::after{bottom:50%}
+.kids>.node:only-child::after{display:none}
+]]
+
+local function html_escape(x)
+  return (tostring(x):gsub('&', '&amp;'):gsub('<', '&lt;'):gsub('>', '&gt;'))
+end
+
+function A.graph()
+  local t = s.tree
+  if not t then
+    vim.notify('RelationView: no tree to export', vim.log.levels.WARN)
+    return
+  end
+  local function rel(p)
+    if p:sub(1, #t.root + 1) == t.root .. '/' then
+      return p:sub(#t.root + 2)
+    end
+    return p
+  end
+  local function box(label, loc, cls)
+    return string.format(
+      '<div class="box %s"><span class="fn">%s</span><span class="loc">%s</span></div>',
+      cls or '', html_escape(label), html_escape(loc or ''))
+  end
+  local function emit(nd)
+    local loc = string.format('%s:%d', rel(nd.site.path), nd.site.line)
+    local kids = ''
+    if nd.expanded and nd.children and #nd.children > 0 then
+      local ks = {}
+      for _, c in ipairs(nd.children) do
+        ks[#ks + 1] = emit(c)
+      end
+      kids = '<div class="kids">' .. table.concat(ks) .. '</div>'
+    end
+    local cls = nd.cycle and 'cycle' or (not nd.expandable and 'leaf' or '')
+    local label = nd.label .. (nd.cycle and ' ↺' or '')
+        .. (#nd.sites > 1 and (' (x' .. #nd.sites .. ')') or '')
+    return '<div class="node">' .. box(label, loc, cls) .. kids .. '</div>'
+  end
+
+  local kids = {}
+  for _, nd in ipairs(t.nodes) do
+    kids[#kids + 1] = emit(nd)
+  end
+  local defloc = t.def and string.format('%s:%d', rel(t.def.path), t.def.line)
+      or '(no definition)'
+  local html = table.concat({
+    '<!doctype html><html><head><meta charset="utf-8">',
+    '<title>callers of ' .. html_escape(t.sym) .. '</title>',
+    '<style>', GRAPH_CSS, '</style></head><body>',
+    '<h1>Callers of ' .. html_escape(t.sym) .. '</h1>',
+    '<p class="meta">' .. html_escape(t.root) .. ' — generated by RelationView'
+    .. ' (expand more nodes in nvim to widen the graph)</p>',
+    '<div class="node">', box(t.sym, defloc, 'root'),
+    #kids > 0 and ('<div class="kids">' .. table.concat(kids) .. '</div>') or '',
+    '</div></body></html>',
+  }, '\n')
+
+  local dir = vim.fn.stdpath('cache')
+  vim.fn.mkdir(dir, 'p')
+  local path = dir .. '/relationview-' .. t.sym .. '.html'
+  vim.fn.writefile(vim.split(html, '\n', { plain = true }), path)
+  local ok = pcall(vim.ui.open, path)
+  vim.notify('RelationView graph: ' .. path .. (ok and '' or ' (open manually)'))
 end
 
 -- close the panel window of the CURRENT tabpage (panels may exist per tab)
@@ -1129,6 +1352,10 @@ api.nvim_create_user_command('RelationViewToggle', function()
     open_and_query(nil)
   end
 end, { desc = 'Toggle the relation window' })
+
+api.nvim_create_user_command('RelationViewGraph', function()
+  A.graph()
+end, { desc = 'Export the relation tree as an HTML graph' })
 
 if vim.fn.maparg('<F3>', 'n') == '' then
   vim.keymap.set('n', '<F3>', '<Cmd>RelationViewToggle<CR>',

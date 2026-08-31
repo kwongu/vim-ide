@@ -484,7 +484,8 @@ if has('nvim') && !has('cscope')
     nmap <Leader><Leader>i :Gtags -g <C-R>=expand("<cfile>")<CR><CR>
     nmap <Leader><Leader>e :Gtags -g <C-R>=expand("<cword>")<CR><CR>
     nmap <Leader><Leader>a :Gtags -g <C-R>=expand("<cword>")<CR><CR>
-    " 'functions called by this' -> RelationView Callees section
+    " no gtags equivalent for 'functions called by' -> open the
+    " RelationView caller tree instead
     nmap <Leader><Leader>d :RelationView<CR>
     nmap <Leader>e :Gtags -g <C-R>=expand("<cword>")<CR>
     nmap <Leader>f :Gtags -P <C-R>=expand("<cword>")<CR>
@@ -943,6 +944,9 @@ source ${HOME}/.vim/plugin/checksymbol.vim
 if has('nvim') && filereadable(expand('$HOME/.vim/plugin/relationview.lua'))
     execute 'source' fnameescape(expand('$HOME/.vim/plugin/relationview.lua'))
 endif
+
+" g:relationview_position   'bottom' (default) or 'right'
+let g:relationview_position = 'right'
 
 
 "==============================================================================
