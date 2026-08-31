@@ -367,69 +367,155 @@ local function read_file_async(path, cb)
 end
 
 -- top-level brace ranges of the file, each owned by the nearest preceding
--- definition: functions, but also global initializers/struct bodies
+-- definition: functions, but also global initializers/struct bodies.
+--
+-- The scan is PREPROCESSOR-AWARE, which matters a lot on kernel-style C:
+--  * every '#...' directive line (and its '\' continuations) is excluded
+--    from brace counting, so multi-line macros with unbalanced braces
+--    (do { ... } while (0) split across #defines) cannot drift the depth
+--  * '#if/#elif/#else/#endif' branches are tracked with a stack: each
+--    branch is scanned starting from the depth of the '#if', and after
+--    '#endif' the depth continues from the CHOSEN branch's result
+--    (the first branch, or the '#else' branch for '#if 0'), so split
+--    function signatures across branches no longer double-count braces
 local function build_ranges(content, defs)
   local lines = vim.split(content, '\n', { plain = true })
   local ranges = {}
   local depth = 0
   local in_block = false
+  local cont = false -- inside a multi-line '#' directive ('\' continuation)
+  local pp = {}      -- '#if' stack: {start=, chosen=, idx=, result=}
   local open_owner, open_start = nil, nil
   local di, last_def = 1, nil
   local used = {} -- local marker: never mutate the cached defs table
   for i, raw in ipairs(lines) do
+    local skip = false
+    if cont then
+      skip = true
+      cont = raw:match('\\%s*$') ~= nil
+    elseif not in_block and raw:match('^%s*#') then
+      skip = true
+      cont = raw:match('\\%s*$') ~= nil
+      local kw = raw:match('^%s*#%s*(%a+)')
+      if kw == 'if' or kw == 'ifdef' or kw == 'ifndef' then
+        -- '#if 0 /* reason */' and '#if 0 // reason' are dead too
+        local cond = raw:gsub('/%*.*$', ''):gsub('//.*$', '')
+        local dead = kw == 'if'
+            and cond:match('^%s*#%s*if%s+0[LlUu]*%s*$') ~= nil
+        pp[#pp + 1] = { start = depth, chosen = dead and 2 or 1, idx = 1 }
+      elseif kw == 'elif' or kw == 'else' then
+        local top = pp[#pp]
+        if top then
+          if top.idx == top.chosen then
+            top.result = depth
+          end
+          top.idx = top.idx + 1
+          depth = top.start
+        end
+      elseif kw == 'endif' then
+        local top = table.remove(pp)
+        if top then
+          if top.idx == top.chosen then
+            top.result = depth
+          end
+          depth = top.result or top.start
+        end
+      end
+    elseif raw:find('extern%s*"C"') then
+      skip = true -- its '{' has no code meaning; the stray '}' self-corrects
+    end
+
+    -- lines inside a non-chosen preprocessor branch are invisible
+    local active = not skip
+    if active then
+      for _, e in ipairs(pp) do
+        if e.idx ~= e.chosen then
+          active = false
+          break
+        end
+      end
+    end
+
+    -- consume the definitions on this line; only ACTIVE code lines provide
+    -- owner candidates ('#define' lines and defs inside dead/non-chosen
+    -- branches must never own the next brace block)
     while di <= #defs and defs[di].line <= i do
-      last_def = defs[di]
+      if active then
+        last_def = defs[di]
+      end
       di = di + 1
     end
-    local code = raw
-    -- crude comment/string stripping, good enough for brace counting
-    if in_block then
-      local e = code:find('*/', 1, true)
-      if e then
-        code = code:sub(e + 2)
-        in_block = false
-      else
-        code = ''
+
+    if active then
+      local code = raw
+      -- crude comment/string stripping, good enough for brace counting
+      if in_block then
+        local e = code:find('*/', 1, true)
+        if e then
+          code = code:sub(e + 2)
+          in_block = false
+        else
+          code = ''
+        end
       end
-    end
-    if code ~= '' then
-      code = code:gsub('\\[\'"]', '')
-      code = code:gsub('"[^"]*"', '""')
-      code = code:gsub("'[^']*'", "''")
-      code = code:gsub('/%*.-%*/', '')
-      local bs = code:find('/*', 1, true)
-      if bs then
-        code = code:sub(1, bs - 1)
-        in_block = true
+      if code ~= '' then
+        code = code:gsub('\\\\', '')      -- doubled backslashes first: '\\'
+        code = code:gsub('\\[\'"]', '')   -- escaped quotes
+        code = code:gsub("'\"'", "''")    -- '"' must not pair with a string
+        code = code:gsub('"[^"]*"', '""')
+        code = code:gsub("'[^']*'", "''")
+        code = code:gsub('/%*.-%*/', '')
+        -- whichever of '//' or an unterminated '/*' comes first wins:
+        -- a '//' comment containing '/*' (banner lines, glob paths) must
+        -- not open a block comment
+        local bs = code:find('/*', 1, true)
+        local ls = code:find('//', 1, true)
+        if ls and (not bs or ls < bs) then
+          code = code:sub(1, ls - 1)
+        elseif bs then
+          code = code:sub(1, bs - 1)
+          in_block = true
+        end
       end
-      code = code:gsub('//.*$', '')
-    end
-    local opens = select(2, code:gsub('{', ''))
-    local closes = select(2, code:gsub('}', ''))
-    if depth == 0 and opens > 0 then
-      -- a definition owns at most ONE top-level brace range: an anonymous
-      -- block after it (e.g. a static variable initializer that gtags does
-      -- not record) must not be blamed on it again
-      if last_def and not used[last_def] then
-        open_owner = last_def
-        used[last_def] = true
-        -- include the signature line(s) above the opening brace, but never
-        -- reach back into the previous range
-        local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
-        open_start = math.max(math.min(last_def.line, i), floor_)
-      else
-        open_owner = nil
-        open_start = i
+      local opens = select(2, code:gsub('{', ''))
+      local closes = select(2, code:gsub('}', ''))
+      if depth == 0 and opens > 0 then
+        -- a definition owns at most ONE top-level brace range: an anonymous
+        -- block after it (e.g. a static variable initializer that gtags
+        -- does not record) must not be blamed on it again
+        if last_def and not used[last_def] then
+          open_owner = last_def
+          used[last_def] = true
+          -- include the signature line(s) above the opening brace, but
+          -- never reach back into the previous range
+          local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
+          open_start = math.max(math.min(last_def.line, i), floor_)
+        else
+          open_owner = nil
+          open_start = i
+        end
       end
-    end
-    depth = depth + opens - closes
-    if depth <= 0 then
-      if open_start then
-        ranges[#ranges + 1] = { s = open_start, e = i,
-          name = open_owner and open_owner.name or nil }
-        open_start, open_owner = nil, nil
+      depth = depth + opens - closes
+      if depth <= 0 then
+        if open_start then
+          -- definitions recorded INSIDE the closed range (enum members,
+          -- the typedef name on '} name_t;') can never own a later block
+          local closing_semi = code:match(';%s*$') ~= nil
+          for k = di - 1, 1, -1 do
+            local d = defs[k]
+            if d.line < open_start then
+              break
+            end
+            if d.line < i or (d.line == i and closing_semi) then
+              used[d] = true
+            end
+          end
+          ranges[#ranges + 1] = { s = open_start, e = i,
+            name = open_owner and open_owner.name or nil }
+          open_start, open_owner = nil, nil
+        end
+        depth = 0 -- self-correct on miscounts
       end
-      depth = 0 -- self-correct on miscounts
     end
   end
   if open_start then
