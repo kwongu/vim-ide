@@ -116,14 +116,14 @@ window. While it is open, resting the cursor on a symbol in a source window
 updates the panel in real time with the definition and the caller tree:
 
 ```
-── Definition ──────────────────
-  src/util.c:4 │ void util_log(const char *msg)
-── Callers (4) ─────────────────
-  ├─[+] main      src/main.c:12 │ util_log("done");
-  ├─[-] util_add  src/util.c:11 │ util_log("add");
-  │  ├─[+] helper   src/main.c:5 │ return util_add(x, 1);
-  │  └─[+] util_mul src/util.c:19 │ r = util_add(r, a);
-  └─[+] rec_a     src/util.c:30 │ util_log("a");
+── Definition ──────────────────────
+  util_log             src/util.c:4  │ void util_log(const char *msg)
+── Callers (4) ─────────────────────
+  ├─[+] main           src/main.c:12 │ util_log("done");
+  ├─[-] util_add       src/util.c:11 │ util_log("add");
+  │  ├─[+] helper      src/main.c:5  │ return util_add(x, 1);
+  │  └─[+] util_mul    src/util.c:19 │ r = util_add(r, a);
+  └─[+] rec_a          src/util.c:30 │ util_log("a");
 ```
 
 Each node is a calling function; expanding a node queries the callers of
@@ -138,6 +138,12 @@ relation list previews the source around that location, centered on the
 referenced symbol. Jumps land exactly on the referenced symbol - line and
 column - and if the file changed since the last gtags run the symbol is
 re-located within +-30 lines automatically.
+
+The context window is a preview, never a driver: resting the cursor on a
+symbol there does not rebuild the relation tree. Inside the context window
+`Ctrl+]` follows the definition of the symbol under the cursor within that
+window only - the source windows and the tree stay untouched - and
+`Ctrl+t` walks back along the context window's own jump stack.
 
 Keys inside the panel:
 

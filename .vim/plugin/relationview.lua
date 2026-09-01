@@ -25,6 +25,11 @@
 -- file changed since the last gtags run, the symbol is re-located within
 -- +-30 lines of the recorded position.
 --
+-- The context window is a preview, never a driver: resting the cursor on a
+-- symbol there does NOT rebuild the tree. Inside it, <C-]> follows the
+-- definition of the symbol under the cursor within the context window only
+-- (source windows are untouched) and <C-t> returns along its own stack.
+--
 -- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
 --   g:relationview_height     panel height for 'bottom'  (default 12)
@@ -125,6 +130,37 @@ local function basename(p)
   return p:match('([^/]+)$') or p
 end
 
+-- display-width helpers for the aligned columns (tree prefixes and paths
+-- can contain multibyte characters, so plain '#' is not usable)
+local function pad(text, w)
+  local d = w - vim.fn.strwidth(text)
+  return d > 0 and (text .. string.rep(' ', d)) or text
+end
+
+-- truncate to a display width, keeping the HEAD (tree prefix + name)
+local function trunc_w(text, w)
+  if vim.fn.strwidth(text) <= w then
+    return text
+  end
+  local out = text
+  while vim.fn.strwidth(out) > w - 1 and #out > 1 do
+    out = out:sub(1, -2)
+  end
+  return out .. '…'
+end
+
+-- truncate to a display width, keeping the TAIL (basename:line of a path)
+local function trunc_tail(text, w)
+  if vim.fn.strwidth(text) <= w then
+    return text
+  end
+  local out = text
+  while vim.fn.strwidth(out) > w - 1 and #out > 1 do
+    out = out:sub(2)
+  end
+  return '…' .. out
+end
+
 -- ---------------------------------------------------------------------------
 -- state
 -- ---------------------------------------------------------------------------
@@ -149,6 +185,8 @@ local s = {
   ctx_ph = nil,       -- placeholder buffer for an empty context window
   ctx_last = nil,     -- last location shown in the context window
   ctx_timer = nil,    -- context update debounce timer
+  ctx_stack = {},     -- <C-]> jump stack of the context window (<C-t> pops)
+  ctx_bound = nil,     -- buffer currently carrying the context <C-]>/<C-t>
   warned = false,
 }
 
@@ -725,14 +763,15 @@ local function ensure_buf()
 
   api.nvim_buf_call(buf, function()
     vim.cmd([[
-      syntax match RvTree     /[│├└]/
+      syntax match RvTree     /[│├└─]/
       syntax match RvHeader   /^◆.*/
       syntax match RvHint     /^  \[.*/
       syntax match RvSection  /^──.*/
-      syntax match RvMarker   /\[[-+…]\]\|↺/
-      syntax match RvName     /\%(\[[-+…]\] \|↺ \|· \)\zs[^ │]\+/
-      syntax match RvLoc      /[^ │]\+:\d\+/
-      syntax match RvDim      /(no definition)\|(none)\|(x\d\+)/
+      syntax match RvMarker   /\[[-+…]\]\|↺\|·/
+      syntax match RvName     /\%(\[[-+…]\] \|↺ \|· \)\zs\S\+/
+      syntax match RvName     /^  \zs\S\+\ze\s\s/
+      syntax match RvLoc      /\S\+:\d\+\ze\s*│/
+      syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++ more.*/
     ]])
   end)
   api.nvim_set_hl(0, 'RvHeader', { link = 'Title', default = true })
@@ -816,7 +855,7 @@ local function panel_open()
   end
   local prev = api.nvim_get_current_win()
   if cfg('position', 'bottom') == 'right' then
-    vim.cmd('keepalt botright vertical ' .. cfg('width', 60) .. 'split')
+    vim.cmd('keepalt botright vertical ' .. cfg('width', 90) .. 'split')
   else
     vim.cmd('keepalt botright ' .. cfg('height', 12) .. 'split')
   end
@@ -981,7 +1020,7 @@ ensure_ctx = function()
   local ctx
   api.nvim_win_call(s.win, function()
     if cfg('position', 'bottom') == 'right' then
-      vim.cmd('noautocmd rightbelow ' .. cfg('context_height', 14) .. 'split')
+      vim.cmd('noautocmd rightbelow ' .. cfg('context_height', 30) .. 'split')
     else
       vim.cmd('noautocmd rightbelow vertical split')
       local w = cfg('context_width', 0)
@@ -1021,7 +1060,115 @@ ensure_ctx = function()
   return ctx
 end
 
-local function show_context(loc)
+local show_context -- forward: used by the context <C-]> handler below
+
+-- <C-]> / <C-t> inside the context window: follow definitions and come
+-- back WITHOUT touching the source windows or the relation tree. The
+-- mappings are buffer-local and re-applied whenever a buffer is shown in
+-- the context window, so they never leak into normal editing.
+local function ctx_tag_jump()
+  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+    return
+  end
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym, true) then
+    return
+  end
+  local buf = api.nvim_get_current_buf()
+  local file = api.nvim_buf_get_name(buf)
+  if file == '' then
+    return
+  end
+  local pos = api.nvim_win_get_cursor(s.ctx_win)
+  get_root(vim.fs.dirname(file), function(root)
+    if not root or not ctx_visible() then
+      return
+    end
+    run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
+      function(lines)
+        local d = parse_ctags_mod(lines, 4)[1]
+        if not d then
+          vim.notify('RelationView context: no definition of ' .. sym,
+            vim.log.levels.WARN)
+          return
+        end
+        if not ctx_visible() then
+          return
+        end
+        table.insert(s.ctx_stack,
+          { path = file, line = pos[1], col = pos[2], sym = sym })
+        s.ctx_last = nil -- this is a manual jump, not a list preview
+        show_context({ path = d.path, line = d.line, sym = sym })
+      end, 8)
+  end)
+end
+
+local function ctx_tag_back()
+  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+    return
+  end
+  local prev = table.remove(s.ctx_stack)
+  if not prev then
+    vim.notify('RelationView context: jump stack is empty')
+    return
+  end
+  s.ctx_last = nil
+  local buf = vim.fn.bufadd(prev.path)
+  if not pcall(api.nvim_win_set_buf, s.ctx_win, buf) then
+    return
+  end
+  api.nvim_win_call(s.ctx_win, function()
+    pcall(api.nvim_win_set_cursor, s.ctx_win, { prev.line, prev.col })
+    vim.cmd('normal! zz')
+  end)
+  pcall(function()
+    vim.wo[s.ctx_win].winbar = ' ' ..
+      (basename(prev.path) .. ':' .. prev.line):gsub('%%', '%%%%')
+  end)
+end
+
+-- the maps live on the buffer only while the context window has focus, so
+-- the same file opened in a normal window keeps the global <C-]> (:Gtags)
+local function ctx_unbind()
+  local buf = s.ctx_bound
+  s.ctx_bound = nil
+  if buf and api.nvim_buf_is_valid(buf) then
+    pcall(vim.keymap.del, 'n', '<C-]>', { buffer = buf })
+    pcall(vim.keymap.del, 'n', '<C-t>', { buffer = buf })
+  end
+end
+
+local function ctx_bind()
+  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+    return
+  end
+  local buf = api.nvim_win_get_buf(s.ctx_win)
+  if s.ctx_bound == buf then
+    return
+  end
+  ctx_unbind()
+  if not api.nvim_buf_is_valid(buf) then
+    return
+  end
+  s.ctx_bound = buf
+  vim.keymap.set('n', '<C-]>', ctx_tag_jump,
+    { buffer = buf, nowait = true, desc = 'RelationView context: goto definition' })
+  vim.keymap.set('n', '<C-t>', ctx_tag_back,
+    { buffer = buf, nowait = true, desc = 'RelationView context: jump back' })
+end
+
+api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
+  group = group,
+  callback = function()
+    if s.ctx_win and api.nvim_get_current_win() == s.ctx_win then
+      ctx_bind()
+    elseif s.ctx_bound then
+      ctx_unbind()
+    end
+  end,
+})
+
+show_context = function(loc)
   if not ctx_visible() then
     return
   end
@@ -1045,6 +1192,7 @@ local function show_context(loc)
   pcall(function()
     vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
   end)
+  ctx_bind() -- the shown buffer changed; keep <C-]>/<C-t> on it
 end
 
 -- preview the location under the panel cursor (falls back to the
@@ -1073,37 +1221,42 @@ render_tree = function()
   if not t then
     return
   end
-  local lines = header(t.sym)
-  local items = {}
   local function rel(p)
     if p:sub(1, #t.root + 1) == t.root .. '/' then
       return p:sub(#t.root + 2)
     end
     return p
   end
-  local function add(text, item)
-    lines[#lines + 1] = text
-    if item then
-      items[#lines] = item
-    end
+
+  -- pass 1: collect the three columns of every row so they can be padded
+  -- to a common width (symbol | file:line | source text)
+  local rows = {}      -- {kind='row', sym=, loc=, text=, item=, node=}
+                       -- or {kind='raw', text=}
+  local function raw(text)
+    rows[#rows + 1] = { kind = 'raw', text = text }
+  end
+  local function row(symcol, path, line, text, item)
+    rows[#rows + 1] = { kind = 'row', sym = symcol,
+      loc = string.format('%s:%d', rel(path), line),
+      text = text, item = item }
+    return rows[#rows]
   end
 
-  add('')
-  add(section_line('Definition'))
+  raw('')
+  raw(section_line('Definition'))
   if t.def then
-    add(string.format('  %s:%d │ %s', rel(t.def.path), t.def.line,
-        trunc(t.def.text, 90)),
+    row('  ' .. t.sym, t.def.path, t.def.line, t.def.text,
       { loc = { path = t.def.path, line = t.def.line, sym = t.sym } })
   else
-    add('  (no definition)')
+    raw('  (no definition)')
   end
 
   local title = t.kind == 'symbol'
       and 'References (undefined symbol)' or 'Callers'
-  add('')
-  add(section_line(title, #t.nodes))
+  raw('')
+  raw(section_line(title, #t.nodes))
   if #t.nodes == 0 then
-    add('  (none)')
+    raw('  (none)')
   end
 
   local function emit(nodes, prefix)
@@ -1123,12 +1276,11 @@ render_tree = function()
         marker = '[+]'
       end
       local cnt = #nd.sites > 1 and string.format(' (x%d)', #nd.sites) or ''
-      add(string.format('%s%s%s %s%s  %s:%d │ %s', prefix, branch, marker,
-          nd.label, cnt, rel(nd.site.path), nd.site.line,
-          trunc(nd.site.text, 70)),
+      local r = row(prefix .. branch .. marker .. ' ' .. nd.label .. cnt,
+        nd.site.path, nd.site.line, nd.site.text,
         { node = nd,
           loc = { path = nd.site.path, line = nd.site.line, sym = nd.ref_sym } })
-      nd.line = #lines
+      r.node = nd
       if nd.expanded and nd.children then
         emit(nd.children, prefix .. (last and '   ' or '│  '))
       end
@@ -1138,7 +1290,37 @@ render_tree = function()
 
   if t.truncated and t.truncated > 0 then
     -- lower bound: the query is capped, the real total may be larger
-    add(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
+    raw(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
+  end
+
+  -- pass 2: size the columns to the widest entry, capped so the source
+  -- text still gets room in a narrow panel
+  local wsym, wloc = 0, 0
+  for _, r in ipairs(rows) do
+    if r.kind == 'row' then
+      wsym = math.max(wsym, vim.fn.strwidth(r.sym))
+      wloc = math.max(wloc, vim.fn.strwidth(r.loc))
+    end
+  end
+  local avail = (s.win and api.nvim_win_is_valid(s.win))
+      and api.nvim_win_get_width(s.win) or 80
+  wsym = math.min(wsym, math.max(24, math.floor(avail * 0.45)))
+  wloc = math.min(wloc, math.max(16, math.floor(avail * 0.35)))
+
+  local lines = header(t.sym)
+  local items = {}
+  for _, r in ipairs(rows) do
+    if r.kind == 'raw' then
+      lines[#lines + 1] = r.text
+    else
+      lines[#lines + 1] = string.format('%s  %s │ %s',
+        pad(trunc_w(r.sym, wsym), wsym), pad(trunc_tail(r.loc, wloc), wloc),
+        trunc(r.text, 200))
+      items[#lines] = r.item
+      if r.node then
+        r.node.line = #lines
+      end
+    end
   end
   render(lines, items)
   vim.schedule(update_context)
@@ -1543,6 +1725,8 @@ function A.close()
   end
   s.ctx_win = nil
   s.ctx_last = nil
+  s.ctx_stack = {}
+  ctx_unbind()
   if target and api.nvim_win_is_valid(target) then
     api.nvim_win_close(target, false)
   end
@@ -1564,6 +1748,8 @@ function A.toggle_ctx()
     api.nvim_win_close(s.ctx_win, false)
     s.ctx_win = nil
     s.ctx_last = nil
+    s.ctx_stack = {}
+    ctx_unbind()
   elseif ensure_ctx() then
     update_context()
   end
@@ -1601,6 +1787,11 @@ end
 
 local function on_hold()
   if not s.auto or s.pinned or not panel_visible() then
+    return
+  end
+  -- the context window is a preview: resting the cursor on a symbol there
+  -- must never rebuild the relation tree
+  if s.ctx_win and api.nvim_get_current_win() == s.ctx_win then
     return
   end
   local buf = api.nvim_get_current_buf()
