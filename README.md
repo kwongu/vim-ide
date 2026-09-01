@@ -182,7 +182,9 @@ the file rather than the file itself, so a quickfix jump (`Ctrl+n` /
 edit window instead of taking over the preview. Inside the context window
 `Ctrl+]` follows the definition of the symbol under the cursor within that
 window only - the source windows and the tree stay untouched - and
-`Ctrl+t` walks back along the context window's own jump stack.
+`Ctrl+t` walks back along the context window's own jump stack. A double
+click in the context window takes the edit window to the line under the
+mouse.
 
 Keys inside the panel:
 
@@ -194,8 +196,9 @@ mouse button 4 (back): return to where the last jump came from; inside
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)
-g:     export the current tree as an HTML call graph (Source Insight
-       style boxes) and open it in the browser
+x:     export the current tree as an HTML call graph (Source Insight
+       style boxes) and open it in the browser - not 'g', which would
+       swallow the first key of 'gg'
 c:     toggle the context window
 p:     pin - freeze the current symbol (auto update stops until unpinned)
 r:     refresh - drop the cache and query gtags again (use after F2)

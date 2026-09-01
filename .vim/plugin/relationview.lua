@@ -20,7 +20,8 @@
 --   mouse button 4 (back)   return to where that jump came from
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
---   g  export the current tree as an HTML graph and open it in a browser
+--   x  export the current tree as an HTML graph and open it in a browser
+--      (not 'g': that would break 'gg')
 --   c  toggle the context window (Source Insight style: shows the source
 --      around the location under the cursor, attached to the panel)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
@@ -36,7 +37,8 @@
 -- The context window is a preview, never a driver: resting the cursor on a
 -- symbol there does NOT rebuild the tree. Inside it, <C-]> follows the
 -- definition of the symbol under the cursor within the context window only
--- (source windows are untouched) and <C-t> returns along its own stack.
+-- (source windows are untouched), <C-t> returns along its own stack, and a
+-- double click takes the edit window to the line under the mouse.
 --
 -- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
@@ -875,7 +877,8 @@ local function ensure_buf()
   bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
   bmap('*', function() A.expand_all() end, 'RelationView: expand whole tree')
-  bmap('g', function() A.graph() end, 'RelationView: export HTML graph')
+  -- 'g' would swallow the first key of 'gg', so the graph lives on 'x'
+  bmap('x', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
@@ -1029,7 +1032,7 @@ local function header(sym, note)
   local tail = #flags > 0 and ('  [' .. table.concat(flags, ', ') .. ']') or ''
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
-    '  [⏎]jump [o]peek [␣]open/close [*]all [g]graph [p]pin [r]refresh [q]close',
+    '  [⏎]jump [o]peek [␣]open/close [*]all [x]graph [c]ctx [p]pin [r]refresh [q]close',
   }
 end
 
@@ -1117,6 +1120,11 @@ local function ctx_buf()
     { buffer = b, nowait = true, desc = 'RelationView context: goto definition' })
   vim.keymap.set('n', '<C-t>', function() ctx_tag_back() end,
     { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do
+    vim.keymap.set('n', lhs, function() A.ctx_jump() end,
+      { buffer = b, nowait = true,
+        desc = 'RelationView context: jump here in the edit window' })
+  end
   s.ctx_ph = b
   return b
 end
@@ -2504,13 +2512,9 @@ local function pick_src_win()
   return nil
 end
 
-function A.jump(peek)
-  local lnum = api.nvim_win_get_cursor(0)[1]
-  local item = s.items[lnum]
-  local loc = item and item.loc
-  if not loc then
-    return
-  end
+-- jump the edit window to loc = {path, line, sym?, col?}: with `col` the
+-- position is taken as-is, otherwise the symbol is located on that line
+local function jump_to(loc, peek)
   local win = pick_src_win()
   if not win then
     vim.notify('RelationView: no source window to jump in', vim.log.levels.WARN)
@@ -2534,7 +2538,12 @@ function A.jump(peek)
   end)
   api.nvim_win_set_buf(win, buf)
   -- land exactly on the referenced symbol (re-located if the file drifted)
-  local line, col = locate(buf, loc.line, loc.sym)
+  local line, col
+  if loc.col then
+    line, col = loc.line, loc.col
+  else
+    line, col = locate(buf, loc.line, loc.sym)
+  end
   api.nvim_win_call(win, function()
     pcall(api.nvim_win_set_cursor, win, { line, col })
     vim.cmd('normal! zz')
@@ -2542,6 +2551,33 @@ function A.jump(peek)
   if not peek then
     api.nvim_set_current_win(win)
   end
+end
+
+function A.jump(peek)
+  local lnum = api.nvim_win_get_cursor(0)[1]
+  local item = s.items[lnum]
+  if item and item.loc then
+    jump_to(item.loc, peek)
+  end
+end
+
+-- double click in the preview: take the edit window to exactly the line and
+-- column the preview cursor is on
+function A.ctx_jump()
+  if not (s.ctx_win and api.nvim_win_is_valid(s.ctx_win)) then
+    return
+  end
+  local f = s.ctx_file
+  if not f then
+    return
+  end
+  local m = vim.fn.getmousepos()
+  if m and m.winid == s.ctx_win and m.line and m.line > 0 then
+    pcall(api.nvim_win_set_cursor, s.ctx_win,
+      { m.line, math.max(0, (m.column or 1) - 1) })
+  end
+  local pos = api.nvim_win_get_cursor(s.ctx_win)
+  jump_to({ path = f.path, line = pos[1] + (f.off or 0), col = pos[2] })
 end
 
 -- double click in the list: jump to the CLICKED line, not to wherever the
