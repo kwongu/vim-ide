@@ -961,6 +961,33 @@ set path+=./include,./include/linux
 colorscheme jellybeans
 
 "==============================================================================
+"= Cursor line
+"= jellybeans paints CursorLine one single shade above the background
+"= (ctermbg 234 on 233), which is invisible, and leaves it off in edit
+"= windows. Turn it on everywhere and make the focused line actually stand
+"= out. Re-applied on every :colorscheme so it never gets wiped.
+"= Tune these three lines if you want it stronger or weaker.
+"==============================================================================
+set cursorline
+
+function! s:RvCursorLineColors() abort
+    highlight CursorLine     term=NONE cterm=NONE ctermbg=238 guibg=#343a45
+    highlight CursorLineNr   cterm=bold ctermbg=238 ctermfg=117
+                \ gui=bold guibg=#343a45 guifg=#87d7ff
+    " the relation/context windows use a slightly stronger bar for the row
+    " under the panel cursor (see ~/.vim/plugin/relationview.lua)
+    highlight RvCursorLine   cterm=NONE ctermbg=240 guibg=#4e5561
+    highlight RvCursorLineNr cterm=bold ctermbg=240 ctermfg=117
+                \ gui=bold guibg=#4e5561 guifg=#87d7ff
+endfunction
+
+call s:RvCursorLineColors()
+augroup RvCursorLineColors
+    autocmd!
+    autocmd ColorScheme * call s:RvCursorLineColors()
+augroup END
+
+"==============================================================================
 " vim grep
 "==============================================================================
 "set grepprg=grep\ --color=always\ -n\ $*\ /dev/null

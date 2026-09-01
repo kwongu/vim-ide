@@ -120,11 +120,40 @@ updates the panel in real time with the definition and the caller tree:
   util_log             src/util.c:4  │ void util_log(const char *msg)
 ── Callers (4) ─────────────────────
   ├─[+] main           src/main.c:12 │ util_log("done");
-  ├─[-] util_add       src/util.c:11 │ util_log("add");
+  ├─[-] util_add (x2)  src/util.c:11 │ util_log("add");
+  │   ·  util_add      src/util.c:16 │ util_log("add again");
   │  ├─[+] helper      src/main.c:5  │ return util_add(x, 1);
   │  └─[+] util_mul    src/util.c:19 │ r = util_add(r, a);
   └─[+] rec_a          src/util.c:30 │ util_log("a");
 ```
+
+What the panel shows depends on the symbol under the cursor:
+
+```
+function          definition + the expandable caller tree (below)
+struct/union/enum definition + its members
+typedef           definition + the members of the type behind it
+variable          its declaration in the function (parameters included),
+(struct, enum,    the definition and members of its type, and every use
+ or plain)        of the variable inside that function
+member access     the member of the type the VARIABLE was declared with,
+(msg->cmd,        so the right struct is used even when several structs
+ ctx.id)          have a member of that name
+enum constant     the enum it belongs to, focused on that constant
+```
+
+The row under the panel cursor has its symbol coloured sky blue, and the
+same symbol is highlighted in the context window.
+
+For a variable the context window opens on its TYPE definition, so simply
+resting the cursor on a variable in the edit window shows what it is made
+of. Selecting a member row moves the context window to that member, and a
+use row moves it to that line inside the function.
+
+A caller that calls the symbol several times shows every call site: the
+first one on its own row (marked `(xN)`) and the rest as `·` rows beneath
+it, so the list matches `:Gtags -r` line for line
+(`g:relationview_max_sites`, default 8, caps how many are listed).
 
 Each node is a calling function; expanding a node queries the callers of
 that function, so the call chain can be followed to any depth. A caller
@@ -140,7 +169,10 @@ column - and if the file changed since the last gtags run the symbol is
 re-located within +-30 lines automatically.
 
 The context window is a preview, never a driver: resting the cursor on a
-symbol there does not rebuild the relation tree. Inside the context window
+symbol there does not rebuild the relation tree, and it renders a copy of
+the file rather than the file itself, so a quickfix jump (`Ctrl+n` /
+`Ctrl+p` after `<leader><leader>c`), `:tag` or `gf` always lands in a real
+edit window instead of taking over the preview. Inside the context window
 `Ctrl+]` follows the definition of the symbol under the cursor within that
 window only - the source windows and the tree stay untouched - and
 `Ctrl+t` walks back along the context window's own jump stack.
@@ -149,6 +181,9 @@ Keys inside the panel:
 
 ```
 Enter: jump to the call site under the cursor (lands on the symbol)
+double click: same jump, with the mouse
+mouse button 4 (back): return to where the last jump came from; inside
+       the context window it walks that window's own stack instead
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)

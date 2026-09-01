@@ -1,8 +1,14 @@
 -- relationview.lua - Source Insight style "Relation Window" for nvim.
 --
--- Shows the Definition and an expandable multi-depth CALLER TREE of the
--- symbol under the cursor in real time, backed by GNU Global (gtags) -
--- the same GTAGS database that F2 (mktags.sh) already creates.
+-- Shows, in real time, what the symbol under the cursor is:
+--   * a function          -> definition + an expandable multi-depth CALLER TREE
+--   * a struct/union/enum -> definition + its members
+--   * a variable          -> its declaration in the enclosing function
+--                           (parameters included), the definition and members
+--                           of its type, and its uses inside that function
+-- Backed by GNU Global (gtags) - the same GTAGS database that F2
+-- (mktags.sh) already creates - plus treesitter for the members and for
+-- resolving a variable to its type.
 --
 --   F3                  toggle the relation window (was "Empty")
 --   :RelationView [sym] open the window and show relations of sym/<cword>
@@ -10,6 +16,8 @@
 --
 -- Inside the panel:
 --   <Enter> jump to the call site   o  jump but keep focus in the panel
+--   double click            jump to the clicked entry in the edit window
+--   mouse button 4 (back)   return to where that jump came from
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
 --   g  export the current tree as an HTML graph and open it in a browser
@@ -39,9 +47,11 @@
 --   g:relationview_max_refs   max references per level    (default 200)
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
+--   g:relationview_max_sites  call sites listed per caller (default 8)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
---   g:relationview_context_height  context height, 'right' layout (default 14)
+--   g:relationview_context_height  context height, 'right' layout (default 30,
+--                             capped so the tree keeps at least 8 rows)
 --   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
 --   g:relationview_global_cmd path of the global binary   (default auto)
 
@@ -106,6 +116,19 @@ end
 local COMMON_LOCALS = {}
 for w in ('ret err len buf val tmp idx pos cnt num ptr str arg res out'):gmatch('%S+') do
   COMMON_LOCALS[w] = true
+end
+
+-- is the cursor on a TYPE usage ('struct foo') rather than on a plain name?
+local function wants_type_at(buf, line, col)
+  local ok, l = pcall(api.nvim_buf_get_lines, buf, line - 1, line, false)
+  l = ok and l[1] or nil
+  if not l then
+    return false
+  end
+  local head = l:sub(1, (col or 0) + 1)
+  return head:match('%f[%w_]struct%s+[%w_]*$') ~= nil
+      or head:match('%f[%w_]union%s+[%w_]*$') ~= nil
+      or head:match('%f[%w_]enum%s+[%w_]*$') ~= nil
 end
 
 local function is_symbol(w, allow_keyword)
@@ -182,16 +205,61 @@ local s = {
   procs = {},         -- in-flight vim.system handles of the current query
   inflight = {},      -- filedefs key -> list of waiting callbacks
   ctx_win = nil,      -- context window (Source Insight style)
-  ctx_ph = nil,       -- placeholder buffer for an empty context window
+  ctx_ph = nil,       -- the scratch buffer the preview renders into
+  ctx_file = nil,     -- {path=, stamp=, off=, n=} currently copied into it
   ctx_last = nil,     -- last location shown in the context window
   ctx_timer = nil,    -- context update debounce timer
   ctx_stack = {},     -- <C-]> jump stack of the context window (<C-t> pops)
-  ctx_bound = nil,     -- buffer currently carrying the context <C-]>/<C-t>
+  jump_stack = {},    -- positions the panel jumped away from (mouse back)
+  note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
+  shown = nil,        -- symbol of the last render (cursor reset on change)
+  ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
+  scope = nil,        -- function range a variable view is valid for
+  as_type = false,    -- the current view read the symbol as a type usage
   warned = false,
 }
 
+-- sky blue for the symbol under the panel cursor, and for the same symbol
+-- in the context window ('termguicolors' is off in this setup, so the
+-- cterm colours are the ones that actually paint)
+local NS_SYM = api.nvim_create_namespace('RelationViewSym')
+local NS_CTX = api.nvim_create_namespace('RelationViewCtxSym')
+
+-- every colour the panel uses, in one place. A ':colorscheme' wipes user
+-- highlights, so this runs again on every ColorScheme event. All groups are
+-- 'default', so anything set in .vimrc keeps winning.
+local function set_highlights()
+  local hl = {
+    RvHeader = { link = 'Title' },
+    RvHint = { link = 'Comment' },
+    RvSection = { link = 'Label' },
+    RvMarker = { link = 'Special' },
+    RvName = { link = 'Function' },
+    RvLoc = { link = 'Directory' },
+    RvDim = { link = 'Comment' },
+    RvTree = { link = 'Comment' },
+    RvCursorSym = { fg = '#87d7ff', ctermfg = 117, bold = true },
+    RvCtxSym = { fg = '#101820', bg = '#87d7ff', ctermfg = 16,
+      ctermbg = 117, bold = true },
+    -- the row the panel cursor is on: a visible bar, not the barely-there
+    -- one most dark colorschemes ship
+    RvCursorLine = { bg = '#4e5561', ctermbg = 240 },
+    RvCursorLineNr = { fg = '#87d7ff', bg = '#4e5561', ctermfg = 117,
+      ctermbg = 240, bold = true },
+  }
+  for name, spec in pairs(hl) do
+    spec.default = true
+    api.nvim_set_hl(0, name, spec)
+  end
+end
+set_highlights()
+
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
+local render_rows
+local source_text
+local hl_cursor_row
+local find_member
 local ensure_ctx
 local update_context
 local group = api.nvim_create_augroup('RelationView', { clear = true })
@@ -774,20 +842,17 @@ local function ensure_buf()
       syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++ more.*/
     ]])
   end)
-  api.nvim_set_hl(0, 'RvHeader', { link = 'Title', default = true })
-  api.nvim_set_hl(0, 'RvHint', { link = 'Comment', default = true })
-  api.nvim_set_hl(0, 'RvSection', { link = 'Label', default = true })
-  api.nvim_set_hl(0, 'RvMarker', { link = 'Special', default = true })
-  api.nvim_set_hl(0, 'RvName', { link = 'Function', default = true })
-  api.nvim_set_hl(0, 'RvLoc', { link = 'Directory', default = true })
-  api.nvim_set_hl(0, 'RvDim', { link = 'Comment', default = true })
-  api.nvim_set_hl(0, 'RvTree', { link = 'Comment', default = true })
-
   local function bmap(lhs, fn, desc)
     vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, desc = desc })
   end
   bmap('<CR>', function() A.jump(false) end, 'RelationView: jump')
   bmap('o', function() A.jump(true) end, 'RelationView: peek')
+  -- clicking two rows in quick succession makes nvim count the 3rd/4th
+  -- click, so those must jump as well or the second row would do nothing
+  for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do
+    bmap(lhs, function() A.mouse_jump(false) end,
+      'RelationView: jump (double click)')
+  end
   bmap('<Space>', function() A.toggle('toggle') end, 'RelationView: expand/collapse')
   bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
@@ -805,6 +870,7 @@ local function ensure_buf()
     group = group,
     buffer = buf,
     callback = function()
+      hl_cursor_row()
       if not s.ctx_timer then
         s.ctx_timer = uv.new_timer()
       end
@@ -855,7 +921,7 @@ local function panel_open()
   end
   local prev = api.nvim_get_current_win()
   if cfg('position', 'bottom') == 'right' then
-    vim.cmd('keepalt botright vertical ' .. cfg('width', 90) .. 'split')
+    vim.cmd('keepalt botright vertical ' .. cfg('width', 100) .. 'split')
   else
     vim.cmd('keepalt botright ' .. cfg('height', 12) .. 'split')
   end
@@ -871,6 +937,7 @@ local function panel_open()
   wo.spell = false
   wo.cursorline = true
   wo.colorcolumn = ''
+  wo.winhighlight = 'CursorLine:RvCursorLine,CursorLineNr:RvCursorLineNr'
   wo.winfixheight = true
   wo.winfixwidth = true
   pcall(function() wo.winfixbuf = true end)
@@ -891,6 +958,24 @@ local function panel_open()
     ensure_ctx()
   end
   return win
+end
+
+-- colour the symbol on the row the panel cursor is on
+hl_cursor_row = function()
+  if not (s.buf and api.nvim_buf_is_valid(s.buf)) then
+    return
+  end
+  api.nvim_buf_clear_namespace(s.buf, NS_SYM, 0, -1)
+  if not (s.win and api.nvim_win_is_valid(s.win))
+      or api.nvim_win_get_buf(s.win) ~= s.buf then
+    return
+  end
+  local lnum = api.nvim_win_get_cursor(s.win)[1]
+  local it = s.items[lnum]
+  if it and it.hl then
+    pcall(api.nvim_buf_set_extmark, s.buf, NS_SYM, lnum - 1, it.hl[1],
+      { end_col = it.hl[2], hl_group = 'RvCursorSym' })
+  end
 end
 
 local function render(lines, items)
@@ -919,6 +1004,7 @@ local function render(lines, items)
 end
 
 local function header(sym, note)
+  note = note or s.note
   local flags = {}
   if s.pinned then flags[#flags + 1] = 'PINNED' end
   if not s.auto then flags[#flags + 1] = 'auto:off' end
@@ -988,19 +1074,51 @@ local function locate(buf, line, sym)
   return line, 0
 end
 
-local function ctx_placeholder()
+-- The preview shows a COPY of the file in a scratch buffer, never the file
+-- buffer itself. That is what keeps ':cnext' from a ':Gtags -r' quickfix
+-- list (and :tag, gf, ...) from hijacking this window: there is no file
+-- buffer here to jump into, so those commands always land in a real edit
+-- window. It also means the preview can never be edited by accident.
+local ctx_tag_jump, ctx_tag_back
+
+local function ctx_buf()
   if s.ctx_ph and api.nvim_buf_is_valid(s.ctx_ph) then
     return s.ctx_ph
   end
   local b = api.nvim_create_buf(false, true)
   pcall(api.nvim_buf_set_name, b, 'RelationView-Context')
+  vim.bo[b].buftype = 'nofile'
   vim.bo[b].bufhidden = 'hide'
   vim.bo[b].swapfile = false
   api.nvim_buf_set_lines(b, 0, -1, false,
     { '(move the cursor in the relation list to preview a location here)' })
   vim.bo[b].modifiable = false
+  -- the maps live on this buffer forever: it is ours, so they can never
+  -- leak into a real file the user is editing
+  vim.keymap.set('n', '<C-]>', function() ctx_tag_jump() end,
+    { buffer = b, nowait = true, desc = 'RelationView context: goto definition' })
+  vim.keymap.set('n', '<C-t>', function() ctx_tag_back() end,
+    { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
   s.ctx_ph = b
   return b
+end
+
+local function ctx_apply_opts(win)
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  local wo = vim.wo[win]
+  wo.number = true
+  wo.relativenumber = false
+  wo.list = false
+  wo.wrap = false
+  wo.signcolumn = 'no'
+  wo.foldenable = false
+  wo.spell = false
+  wo.cursorline = true
+  wo.colorcolumn = ''
+  wo.winhighlight = 'CursorLine:RvCursorLine,CursorLineNr:RvCursorLineNr'
+  pcall(function() wo.winfixbuf = true end)
 end
 
 local function ctx_visible()
@@ -1008,8 +1126,50 @@ local function ctx_visible()
       and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
 end
 
--- open the context window attached to the panel: below the tree for the
--- 'right' layout, beside it for the 'bottom' layout
+-- copy `path` into the preview buffer (once per file version) and return the
+-- offset between the file's line numbers and the buffer's
+local MAX_CTX_LINES = 50000
+
+local function ctx_fill(path, line)
+  local cur = s.ctx_file
+  local st = uv.fs_stat(path)
+  local info = vim.fn.getbufinfo(path)[1]
+  local stamp = tostring(st and st.mtime.sec or -1) .. ':'
+      .. tostring(info and info.changedtick or 0)
+  if cur and cur.path == path and cur.stamp == stamp
+      and (cur.off == 0 or (line > cur.off + 2 and line < cur.off + cur.n - 2))
+  then
+    return cur.off
+  end
+  local content, srcbuf = source_text(path)
+  if not content then
+    return nil
+  end
+  local all = vim.split(content, '\n', { plain = true })
+  local off, chunk = 0, all
+  if #all > MAX_CTX_LINES then
+    -- huge generated file: show a window around the target and shift the
+    -- numbers back to the file's own with 'statuscolumn'
+    local from = math.max(1, line - 2000)
+    off = from - 1
+    chunk = vim.list_slice(all, from, math.min(#all, from + 4000))
+  end
+  local b = ctx_buf()
+  vim.bo[b].modifiable = true
+  api.nvim_buf_set_lines(b, 0, -1, false, chunk)
+  vim.bo[b].modifiable = false
+  local ft = vim.filetype.match({ filename = path, buf = srcbuf }) or ''
+  if vim.bo[b].filetype ~= ft then
+    vim.bo[b].filetype = ft
+  end
+  s.ctx_file = { path = path, stamp = stamp, off = off, n = #chunk }
+  if s.ctx_win and api.nvim_win_is_valid(s.ctx_win) then
+    vim.wo[s.ctx_win].statuscolumn = off > 0
+        and '%{v:lnum + ' .. off .. '}  ' or ''
+  end
+  return off
+end
+
 ensure_ctx = function()
   if ctx_visible() then
     return s.ctx_win
@@ -1020,7 +1180,11 @@ ensure_ctx = function()
   local ctx
   api.nvim_win_call(s.win, function()
     if cfg('position', 'bottom') == 'right' then
-      vim.cmd('noautocmd rightbelow ' .. cfg('context_height', 30) .. 'split')
+      -- keep the tree usable: on a short terminal a fixed height would
+      -- squash the list down to a row or two, so leave it at least 8 rows
+      local avail = api.nvim_win_get_height(s.win)
+      local h = math.min(cfg('context_height', 30), math.max(3, avail - 9))
+      vim.cmd('noautocmd rightbelow ' .. h .. 'split')
     else
       vim.cmd('noautocmd rightbelow vertical split')
       local w = cfg('context_width', 0)
@@ -1033,17 +1197,9 @@ ensure_ctx = function()
   if not (ctx and api.nvim_win_is_valid(ctx)) then
     return nil
   end
-  api.nvim_win_set_buf(ctx, ctx_placeholder())
+  api.nvim_win_set_buf(ctx, ctx_buf())
+  ctx_apply_opts(ctx)
   local wo = vim.wo[ctx]
-  wo.number = true
-  wo.relativenumber = false
-  wo.list = false
-  wo.wrap = false
-  wo.signcolumn = 'no'
-  wo.foldenable = false
-  wo.spell = false
-  wo.cursorline = true
-  wo.colorcolumn = ''
   wo.winfixheight = true
   wo.winfixwidth = true
   s.ctx_win = ctx
@@ -1060,26 +1216,19 @@ ensure_ctx = function()
   return ctx
 end
 
-local show_context -- forward: used by the context <C-]> handler below
-
--- <C-]> / <C-t> inside the context window: follow definitions and come
--- back WITHOUT touching the source windows or the relation tree. The
--- mappings are buffer-local and re-applied whenever a buffer is shown in
--- the context window, so they never leak into normal editing.
-local function ctx_tag_jump()
+-- <C-]> / <C-t> inside the context window: follow definitions and come back
+-- WITHOUT touching the source windows or the relation tree
+ctx_tag_jump = function()
   if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
     return
   end
   local sym = vim.fn.expand('<cword>')
-  if not is_symbol(sym, true) then
-    return
-  end
-  local buf = api.nvim_get_current_buf()
-  local file = api.nvim_buf_get_name(buf)
-  if file == '' then
+  local file = s.ctx_file and s.ctx_file.path or nil
+  if not is_symbol(sym, true) or not file then
     return
   end
   local pos = api.nvim_win_get_cursor(s.ctx_win)
+  local off = s.ctx_file.off or 0
   get_root(vim.fs.dirname(file), function(root)
     if not root or not ctx_visible() then
       return
@@ -1096,14 +1245,14 @@ local function ctx_tag_jump()
           return
         end
         table.insert(s.ctx_stack,
-          { path = file, line = pos[1], col = pos[2], sym = sym })
-        s.ctx_last = nil -- this is a manual jump, not a list preview
+          { path = file, line = pos[1] + off, col = pos[2], sym = sym })
+        s.ctx_last = nil -- a manual jump, not a list preview
         show_context({ path = d.path, line = d.line, sym = sym })
       end, 8)
   end)
 end
 
-local function ctx_tag_back()
+ctx_tag_back = function()
   if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
     return
   end
@@ -1113,60 +1262,9 @@ local function ctx_tag_back()
     return
   end
   s.ctx_last = nil
-  local buf = vim.fn.bufadd(prev.path)
-  if not pcall(api.nvim_win_set_buf, s.ctx_win, buf) then
-    return
-  end
-  api.nvim_win_call(s.ctx_win, function()
-    pcall(api.nvim_win_set_cursor, s.ctx_win, { prev.line, prev.col })
-    vim.cmd('normal! zz')
-  end)
-  pcall(function()
-    vim.wo[s.ctx_win].winbar = ' ' ..
-      (basename(prev.path) .. ':' .. prev.line):gsub('%%', '%%%%')
-  end)
+  show_context({ path = prev.path, line = prev.line, sym = prev.sym,
+    col = prev.col })
 end
-
--- the maps live on the buffer only while the context window has focus, so
--- the same file opened in a normal window keeps the global <C-]> (:Gtags)
-local function ctx_unbind()
-  local buf = s.ctx_bound
-  s.ctx_bound = nil
-  if buf and api.nvim_buf_is_valid(buf) then
-    pcall(vim.keymap.del, 'n', '<C-]>', { buffer = buf })
-    pcall(vim.keymap.del, 'n', '<C-t>', { buffer = buf })
-  end
-end
-
-local function ctx_bind()
-  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
-    return
-  end
-  local buf = api.nvim_win_get_buf(s.ctx_win)
-  if s.ctx_bound == buf then
-    return
-  end
-  ctx_unbind()
-  if not api.nvim_buf_is_valid(buf) then
-    return
-  end
-  s.ctx_bound = buf
-  vim.keymap.set('n', '<C-]>', ctx_tag_jump,
-    { buffer = buf, nowait = true, desc = 'RelationView context: goto definition' })
-  vim.keymap.set('n', '<C-t>', ctx_tag_back,
-    { buffer = buf, nowait = true, desc = 'RelationView context: jump back' })
-end
-
-api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
-  group = group,
-  callback = function()
-    if s.ctx_win and api.nvim_get_current_win() == s.ctx_win then
-      ctx_bind()
-    elseif s.ctx_bound then
-      ctx_unbind()
-    end
-  end,
-})
 
 show_context = function(loc)
   if not ctx_visible() then
@@ -1178,27 +1276,50 @@ show_context = function(loc)
     return
   end
   s.ctx_last = loc
-  local buf = vim.fn.bufadd(loc.path)
-  if not pcall(api.nvim_win_set_buf, s.ctx_win, buf) then
+  local off = ctx_fill(loc.path, loc.line)
+  if not off then
     return
   end
-  local line, col = locate(buf, loc.line, loc.sym)
+  local b = ctx_buf()
+  if api.nvim_win_get_buf(s.ctx_win) ~= b then
+    pcall(function() vim.wo[s.ctx_win].winfixbuf = false end)
+    pcall(api.nvim_win_set_buf, s.ctx_win, b)
+    ctx_apply_opts(s.ctx_win)
+  end
+  local line, col = locate(b, loc.line - off, loc.sym)
+  if loc.col and loc.sym == nil then
+    col = loc.col
+  end
   api.nvim_win_call(s.ctx_win, function()
     pcall(api.nvim_win_set_cursor, s.ctx_win, { line, col })
     vim.cmd('normal! zz')
   end)
-  local label = basename(loc.path) .. ':' .. line
+  api.nvim_buf_clear_namespace(b, NS_CTX, 0, -1)
+  s.ctx_hl_buf = nil
+  if loc.sym then
+    local txt = api.nvim_buf_get_lines(b, line - 1, line, false)[1]
+    if txt and txt:sub(col + 1, col + #loc.sym) == loc.sym then
+      pcall(api.nvim_buf_set_extmark, b, NS_CTX, line - 1, col,
+        { end_col = col + #loc.sym, hl_group = 'RvCtxSym' })
+      s.ctx_hl_buf = b
+    end
+  end
+  local label = basename(loc.path) .. ':' .. (line + off)
       .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
   pcall(function()
     vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
   end)
-  ctx_bind() -- the shown buffer changed; keep <C-]>/<C-t> on it
 end
 
 -- preview the location under the panel cursor (falls back to the
 -- definition of the current symbol)
 update_context = function()
   if not ctx_visible() then
+    return
+  end
+  -- while the user is browsing inside the context window (<C-]>/<C-t>),
+  -- a late render must not yank the preview back to the list item
+  if api.nvim_get_current_win() == s.ctx_win then
     return
   end
   if not (s.win and api.nvim_win_is_valid(s.win)) then
@@ -1235,18 +1356,87 @@ render_tree = function()
   local function raw(text)
     rows[#rows + 1] = { kind = 'raw', text = text }
   end
-  local function row(symcol, path, line, text, item)
+  local function row(symcol, path, line, text, item, name)
     rows[#rows + 1] = { kind = 'row', sym = symcol,
       loc = string.format('%s:%d', rel(path), line),
-      text = text, item = item }
+      text = text, item = item, name = name }
     return rows[#rows]
+  end
+
+  -- a type or a variable: definition + members, no call tree
+  if t.kind == 'members' or t.kind == 'variable' then
+    if t.decl then
+      raw('')
+      raw(section_line(t.decl.is_param and 'Parameter' or 'Declaration'))
+      local dname = t.decl.name or t.sym
+      local r = row('  ' .. dname, t.decl.path, t.decl.line, t.decl.text,
+        { loc = { path = t.decl.path, line = t.decl.line, sym = dname } },
+        dname)
+      r.focus = true -- until the type definition below claims it
+    end
+    if t.type or t.def then
+      raw('')
+      local tname = t.type and (t.type.kind .. ' ' .. (t.type.name or t.sym))
+          or 'Definition'
+      raw(section_line(tname))
+      if t.def then
+        local label = (t.type and t.type.name) or t.sym
+        local r = row('  ' .. label, t.def.path, t.def.line, t.def.text,
+          { loc = { path = t.def.path, line = t.def.line, sym = label } },
+          label)
+        for _, other in ipairs(rows) do
+          other.focus = nil
+        end
+        -- the context window opens on the type, or on the member that was
+        -- under the cursor when one was picked out of an expression
+        r.focus = not t.focus_member
+      else
+        raw('  ' .. (t.type_note or '(no type definition)'))
+      end
+    elseif t.type_note then
+      raw('  ' .. t.type_note)
+    end
+
+    -- members only exist once the type definition was found and parsed
+    if t.def then
+      raw('')
+      raw(section_line('Members', t.members and #t.members or nil))
+      if not t.members or #t.members == 0 then
+        raw('  ' .. (t.members_note or '(none)'))
+      else
+        for _, m in ipairs(t.members) do
+          local r = row('  ' .. m.name, t.def.path, m.line, m.text,
+            { loc = { path = t.def.path, line = m.line, sym = m.name } },
+            m.name)
+          if t.focus_member and find_member({ m }, t.focus_member) then
+            for _, other in ipairs(rows) do
+              other.focus = nil
+            end
+            r.focus = true
+          end
+        end
+      end
+    end
+
+    if t.uses and #t.uses > 0 then
+      raw('')
+      raw(section_line('Uses in ' .. (t.fnname or 'function'), #t.uses))
+      for _, u in ipairs(t.uses) do
+        row('  ' .. t.sym, t.srcpath, u.line, u.text,
+          { loc = { path = t.srcpath, line = u.line, sym = t.sym } }, t.sym)
+      end
+    end
+
+    render_rows(t, rows)
+    return
   end
 
   raw('')
   raw(section_line('Definition'))
   if t.def then
-    row('  ' .. t.sym, t.def.path, t.def.line, t.def.text,
-      { loc = { path = t.def.path, line = t.def.line, sym = t.sym } })
+    local r = row('  ' .. t.sym, t.def.path, t.def.line, t.def.text,
+      { loc = { path = t.def.path, line = t.def.line, sym = t.sym } }, t.sym)
+    r.focus = true
   else
     raw('  (no definition)')
   end
@@ -1279,8 +1469,25 @@ render_tree = function()
       local r = row(prefix .. branch .. marker .. ' ' .. nd.label .. cnt,
         nd.site.path, nd.site.line, nd.site.text,
         { node = nd,
-          loc = { path = nd.site.path, line = nd.site.line, sym = nd.ref_sym } })
+          loc = { path = nd.site.path, line = nd.site.line, sym = nd.ref_sym } },
+        nd.label)
       r.node = nd
+      -- one caller can call the symbol several times: show every call site,
+      -- not just the first, so nothing is missing next to ':Gtags -r'
+      if #nd.sites > 1 then
+        local pre = prefix .. (last and '   ' or '│  ')
+        local cap = cfg('max_sites', 8)
+        for k = 2, math.min(#nd.sites, cap) do
+          local st = nd.sites[k]
+          row(pre .. ' ·  ' .. nd.label, st.path, st.line, st.text,
+            { loc = { path = st.path, line = st.line, sym = nd.ref_sym } },
+            nd.label)
+        end
+        if #nd.sites > cap then
+          raw(string.format('%s … %d more call sites', pre,
+            #nd.sites - cap))
+        end
+      end
       if nd.expanded and nd.children then
         emit(nd.children, prefix .. (last and '   ' or '│  '))
       end
@@ -1293,8 +1500,12 @@ render_tree = function()
     raw(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
   end
 
-  -- pass 2: size the columns to the widest entry, capped so the source
-  -- text still gets room in a narrow panel
+  render_rows(t, rows)
+end
+
+-- pass 2: size the columns to the widest entry, capped so the source text
+-- still gets room in a narrow panel, then paint the buffer
+render_rows = function(t, rows)
   local wsym, wloc = 0, 0
   for _, r in ipairs(rows) do
     if r.kind == 'row' then
@@ -1309,21 +1520,550 @@ render_tree = function()
 
   local lines = header(t.sym)
   local items = {}
+  local focus
   for _, r in ipairs(rows) do
     if r.kind == 'raw' then
       lines[#lines + 1] = r.text
     else
+      local symcell = pad(trunc_w(r.sym, wsym), wsym)
       lines[#lines + 1] = string.format('%s  %s │ %s',
-        pad(trunc_w(r.sym, wsym), wsym), pad(trunc_tail(r.loc, wloc), wloc),
-        trunc(r.text, 200))
+        symcell, pad(trunc_tail(r.loc, wloc), wloc), trunc(r.text, 200))
       items[#lines] = r.item
+      if r.item and r.name then
+        local st = symcell:find(r.name, 1, true)
+        if st then
+          r.item.hl = { st - 1, st - 1 + #r.name }
+        end
+      end
       if r.node then
         r.node.line = #lines
+      end
+      if r.focus then
+        focus = #lines
       end
     end
   end
   render(lines, items)
+  -- a new symbol starts on its most useful row (the definition, or the
+  -- member that was under the cursor), so the context window shows that
+  -- without the user moving anything
+  if focus and s.shown ~= t.sym and s.win and api.nvim_win_is_valid(s.win) then
+    pcall(api.nvim_win_set_cursor, s.win, { focus, 0 })
+  end
+  s.shown = t.sym
+  hl_cursor_row()
   vim.schedule(update_context)
+end
+
+-- ---------------------------------------------------------------------------
+-- types (struct / union / enum / typedef) and local variables
+--
+-- Source Insight shows the members of a type, and for a variable the type it
+-- was declared with. Both are derived with treesitter: gtags knows WHERE a
+-- type is defined, the parser knows what is INSIDE it.
+-- ---------------------------------------------------------------------------
+
+local MAX_READ_FILE = 8 * 1024 * 1024
+
+-- content of a file, preferring a loaded buffer (unsaved edits included)
+source_text = function(path)
+  for _, b in ipairs(api.nvim_list_bufs()) do
+    if api.nvim_buf_is_loaded(b) and api.nvim_buf_get_name(b) == path then
+      return table.concat(api.nvim_buf_get_lines(b, 0, -1, false), '\n'), b
+    end
+  end
+  local st = uv.fs_stat(path)
+  if not st or st.size > MAX_READ_FILE then
+    return nil
+  end
+  local f = io.open(path, 'r')
+  if not f then
+    return nil
+  end
+  local c = f:read('*a')
+  f:close()
+  return c, nil
+end
+
+-- '__attribute__((packed))' derails the C grammar ('enum __attribute__(())
+-- e {' parses as a function). Blank it out with the SAME number of bytes so
+-- every node range still lines up with the original text.
+local function strip_attrs(text)
+  local function blank(m) return (' '):rep(#m) end
+  return (text:gsub('__attribute__%s*%b()', blank)
+              :gsub('__declspec%s*%b()', blank))
+end
+
+-- parse a file and return its root node plus the 'source' get_node_text needs
+local function ts_tree(path)
+  local content, bufnr = source_text(path)
+  if not content then
+    return nil
+  end
+  if content:find('__attribute__', 1, true)
+      or content:find('__declspec', 1, true) then
+    bufnr = nil -- parse a blanked copy instead of the live buffer
+    content = strip_attrs(content)
+  end
+  if bufnr then
+    local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+    if ok and parser then
+      local okp, trees = pcall(function() return parser:parse() end)
+      if okp and trees and trees[1] then
+        return trees[1]:root(), bufnr
+      end
+    end
+  end
+  local ft = vim.filetype.match({ filename = path })
+  if not ft then
+    return nil
+  end
+  local lang = vim.treesitter.language.get_lang(ft) or ft
+  local ok, parser = pcall(vim.treesitter.get_string_parser, content, lang)
+  if not ok or not parser then
+    return nil
+  end
+  local okp, trees = pcall(function() return parser:parse() end)
+  if not okp or not trees or not trees[1] then
+    return nil
+  end
+  return trees[1]:root(), content
+end
+
+local function ntext(node, source)
+  local ok, t = pcall(vim.treesitter.get_node_text, node, source)
+  return ok and t or ''
+end
+
+local function field1(node, name)
+  local f = node:field(name)
+  return f and f[1] or nil
+end
+
+local TYPE_NODES = {
+  struct_specifier = 'struct',
+  union_specifier = 'union',
+  enum_specifier = 'enum',
+  class_specifier = 'class',
+}
+
+local PRIMITIVES = {}
+for w in ('int char short long float double void bool _Bool signed unsigned'):gmatch('%S+') do
+  PRIMITIVES[w] = true
+end
+local QUALIFIERS = {}
+for w in ('static const volatile extern register inline restrict __restrict auto struct union enum'):gmatch('%S+') do
+  QUALIFIERS[w] = true
+end
+
+-- 'struct arpc_msg *msg;' -> struct/arpc_msg, 'enum color c' -> enum/color,
+-- 'arpc_msg_t msg' -> typedef/arpc_msg_t, 'int i' -> nil (nothing to open)
+local function type_from_text(text)
+  for _, k in ipairs({ 'struct', 'union', 'enum' }) do
+    local name = text:match('%f[%w_]' .. k .. '%s+([%a_][%w_]*)')
+    if name then
+      return { kind = k, name = name }
+    end
+  end
+  for w in text:gmatch('[%a_][%w_]*') do
+    if PRIMITIVES[w] then
+      return nil
+    end
+    if not QUALIFIERS[w] then
+      return { kind = 'typedef', name = w }
+    end
+  end
+  return nil
+end
+
+-- the type a treesitter 'type' field stands for
+local function type_of_node(tnode, source)
+  if not tnode then
+    return nil
+  end
+  local kind = TYPE_NODES[tnode:type()]
+  if kind then
+    local n = field1(tnode, 'name')
+    return n and { kind = kind, name = ntext(n, source) } or nil
+  end
+  if tnode:type() == 'type_identifier' then
+    return { kind = 'typedef', name = ntext(tnode, source) }
+  end
+  return nil -- primitive_type, sized_type_specifier, ...
+end
+
+-- does this gtags definition line define a type whose members we can list?
+local function def_is_type(text, sym)
+  local t = strip_attrs(text)
+  for _, k in ipairs({ 'struct', 'union', 'enum', 'class' }) do
+    -- only a real definition/declaration of the tag counts: a function
+    -- taking 'struct sym *x' merely mentions it
+    if t:match('%f[%w_]' .. k .. '%s+' .. sym .. '%s*[{;]')
+        or t:match('%f[%w_]' .. k .. '%s+' .. sym .. '%s*$') then
+      return k
+    end
+  end
+  -- 'typedef struct { ... } name_t;' is recorded on its closing line
+  if t:match('^%s*}') or t:match('%f[%w_]typedef%f[^%w_]') then
+    return 'typedef'
+  end
+  return nil
+end
+
+-- smallest struct/union/enum (or typedef wrapper) spanning `line`
+local function find_type_node(root, line)
+  local row = line - 1
+  local best
+  local function walk(node)
+    local sr, _, er, _ = node:range()
+    if sr > row or er < row then
+      return
+    end
+    if TYPE_NODES[node:type()] or node:type() == 'type_definition' then
+      if not best then
+        best = node
+      else
+        local bsr, _, ber, _ = best:range()
+        if (er - sr) <= (ber - bsr) then
+          best = node
+        end
+      end
+    end
+    for c in node:iter_children() do
+      walk(c)
+    end
+  end
+  walk(root)
+  if best and best:type() == 'type_definition' then
+    for c in best:iter_children() do
+      if TYPE_NODES[c:type()] then
+        return c
+      end
+    end
+  end
+  return best
+end
+
+-- members of the type defined at path:line
+-- -> { kind=, name=, line=, members = { {name=, text=, line=} } }
+-- every field name of ONE field_declaration, without descending into the
+-- body of a nested struct/union (those belong to the nested type)
+local function field_names(node, source)
+  local names = {}
+  local function walk(n)
+    local nt = n:type()
+    if nt == 'field_declaration_list' or nt == 'enumerator_list' then
+      return
+    end
+    if nt == 'field_identifier' then
+      names[#names + 1] = ntext(n, source)
+    end
+    for c in n:iter_children() do
+      walk(c)
+    end
+  end
+  walk(node)
+  return names
+end
+
+-- the body of a C11 anonymous struct/union member, whose fields belong to
+-- the enclosing type ('n->ival'), or nil
+local function anon_body(node)
+  for x in node:iter_children() do
+    if TYPE_NODES[x:type()] then
+      for y in x:iter_children() do
+        if y:type() == 'field_declaration_list' then
+          return y
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function members_of(path, line, want)
+  local st = uv.fs_stat(path)
+  local info = vim.fn.getbufinfo(path)[1]
+  local key = 'M\0' .. path .. '\0' .. line .. '\0' .. tostring(want)
+  local stamp = tostring(st and st.mtime.sec or -1) .. ':'
+      .. tostring(info and info.changedtick or 0)
+  local hit = cache_get(key, stamp)
+  if hit then
+    return hit.v
+  end
+  local root, source = ts_tree(path)
+  if not root then
+    return nil
+  end
+  local node = find_type_node(root, line)
+  if node and want then
+    -- the file may have drifted since the last F2: if the type sitting on
+    -- that line is a different one, look the wanted name up instead
+    local nn = node:field('name')[1]
+    local got = nn and ntext(nn, source) or nil
+    if got and got ~= want then
+      local alt
+      local function walk(n)
+        if alt then
+          return
+        end
+        if TYPE_NODES[n:type()] then
+          local x = n:field('name')[1]
+          if x and ntext(x, source) == want then
+            alt = n
+          end
+        end
+        for c in n:iter_children() do
+          walk(c)
+        end
+      end
+      walk(root)
+      node = alt
+    end
+  end
+  if not node then
+    return nil
+  end
+  local kind = TYPE_NODES[node:type()] or 'type'
+  local nn = field1(node, 'name')
+  local body
+  for c in node:iter_children() do
+    local ct = c:type()
+    if ct == 'field_declaration_list' or ct == 'enumerator_list' then
+      body = c
+      break
+    end
+  end
+  local out = {}
+  if body then
+    for c in body:iter_children() do
+      local ct = c:type()
+      if ct == 'field_declaration' then
+        local names = field_names(c, source)
+        local inner = #names == 0 and anon_body(c) or nil
+        if inner then
+          -- anonymous struct/union: its fields are members of THIS type
+          for f in inner:iter_children() do
+            if f:type() == 'field_declaration' then
+              local ns = field_names(f, source)
+              out[#out + 1] = {
+                name = #ns > 0 and table.concat(ns, ', ') or '(anonymous)',
+                text = ntext(f, source):gsub('%s+', ' '),
+                line = f:start() + 1,
+              }
+            end
+          end
+        else
+          out[#out + 1] = {
+            name = #names > 0 and table.concat(names, ', ') or '(anonymous)',
+            text = ntext(c, source):gsub('%s+', ' '),
+            line = c:start() + 1,
+          }
+        end
+      elseif ct == 'enumerator' then
+        local n = field1(c, 'name')
+        out[#out + 1] = {
+          name = n and ntext(n, source) or ntext(c, source),
+          text = ntext(c, source):gsub('%s+', ' '),
+          line = c:start() + 1,
+        }
+      end
+    end
+  end
+  local alias
+  if #out == 0 then
+    if node:type() == 'type_definition' then
+      alias = type_of_node(field1(node, 'type'), source)
+    elseif TYPE_NODES[node:type()] and not body and nn then
+      alias = { kind = kind, name = ntext(nn, source) }
+    end
+  end
+  local res = { kind = kind, name = nn and ntext(nn, source) or nil, alias = alias,
+    line = node:start() + 1, members = out,
+    text = (ntext(node, source):match('^[^\n]*') or ''):gsub('%s+$', '') }
+  cache_put(key, stamp, { v = res })
+  return res
+end
+
+-- the function_definition containing `line`
+local function fn_node_at(root, line)
+  local row = line - 1
+  local found
+  local function walk(node)
+    local sr, _, er, _ = node:range()
+    if sr > row or er < row then
+      return
+    end
+    if node:type() == 'function_definition' then
+      found = node
+    end
+    for c in node:iter_children() do
+      walk(c)
+    end
+  end
+  walk(root)
+  return found
+end
+
+-- declaration of `sym` inside the function containing `line` (parameters
+-- included) -> { line=, text=, type=, is_param=, fnname=, fns=, fne= }
+local function local_decl(bufnr, line, sym)
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser then
+    return nil
+  end
+  local okp, trees = pcall(function() return parser:parse() end)
+  if not okp or not trees or not trees[1] then
+    return nil
+  end
+  local fn = fn_node_at(trees[1]:root(), line)
+  if not fn then
+    return nil
+  end
+  local fnname
+  do -- the declarator's innermost identifier is the function name
+    local d = field1(fn, 'declarator')
+    local function findname(n)
+      if not n then
+        return nil
+      end
+      if n:type() == 'identifier' then
+        return ntext(n, bufnr)
+      end
+      for c in n:iter_children() do
+        local r = findname(c)
+        if r then
+          return r
+        end
+      end
+      return nil
+    end
+    fnname = findname(d)
+  end
+
+  local found
+  local function scan(n)
+    local nt = n:type()
+    if nt == 'declaration' or nt == 'parameter_declaration' then
+      local tnode = field1(n, 'type')
+      local hit = false
+      -- walk only the declarator: 'struct msg *p = alloc(N);' declares p,
+      -- it does not declare alloc or N
+      local function decl_ids(d)
+        if not d then
+          return
+        end
+        local dt = d:type()
+        if dt == 'identifier' then
+          if ntext(d, bufnr) == sym then
+            hit = true
+          end
+          return
+        end
+        if dt == 'init_declarator' or dt == 'function_declarator'
+            or dt == 'array_declarator' or dt == 'pointer_declarator'
+            or dt == 'parenthesized_declarator' then
+          decl_ids(field1(d, 'declarator') or d:named_child(0))
+          return
+        end
+        for ch in d:iter_children() do
+          decl_ids(ch)
+        end
+      end
+      for c in n:iter_children() do
+        if c ~= tnode and c:type() ~= 'storage_class_specifier'
+            and c:type() ~= 'type_qualifier' then
+          decl_ids(c)
+        end
+      end
+      if hit then
+        local srow = n:start() + 1
+        -- the declaration closest above the cursor wins (shadowing)
+        if not found or (srow <= line and srow >= found.line) then
+          found = {
+            line = srow,
+            text = ntext(n, bufnr):gsub('%s+', ' '),
+            type = type_of_node(tnode, bufnr),
+            type_text = tnode and ntext(tnode, bufnr) or nil,
+            is_param = nt == 'parameter_declaration',
+          }
+        end
+      end
+    end
+    for c in n:iter_children() do
+      scan(c)
+    end
+  end
+  scan(fn)
+  if found then
+    found.fnname = fnname
+    found.fns = fn:start() + 1
+    found.fne = select(3, fn:range()) + 1
+  end
+  return found
+end
+
+-- 'msg->cmd', 'ctx.id', 'pdev->dev.of_node' under the cursor:
+-- -> base identifier name + the field names from the base outward
+local function cursor_field(bufnr, line, col)
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser then
+    return nil
+  end
+  pcall(function() parser:parse() end)
+  local node = vim.treesitter.get_node({ bufnr = bufnr, pos = { line - 1, col } })
+  if not node or node:type() ~= 'field_identifier' then
+    return nil
+  end
+  local fields = {}
+  local cur, depth = node:parent(), 0
+  while cur and cur:type() == 'field_expression' and depth < 6 do
+    depth = depth + 1
+    local f = field1(cur, 'field')
+    if f then
+      table.insert(fields, 1, ntext(f, bufnr))
+    end
+    local arg = field1(cur, 'argument')
+    while arg and (arg:type() == 'parenthesized_expression'
+        or arg:type() == 'pointer_expression'
+        or arg:type() == 'subscript_expression'
+        or arg:type() == 'cast_expression') do
+      arg = field1(arg, 'argument') or arg:named_child(arg:named_child_count() - 1)
+    end
+    if arg and arg:type() == 'identifier' then
+      return ntext(arg, bufnr), fields
+    end
+    cur = arg
+  end
+  return nil
+end
+
+-- a member by name, tolerating 'int a, b;' style multi-declarators
+find_member = function(members, want)
+  for _, m in ipairs(members or {}) do
+    for one in m.name:gmatch('[%a_][%w_]*') do
+      if one == want then
+        return m
+      end
+    end
+  end
+  return nil
+end
+
+-- every occurrence of `sym` between two lines of a buffer
+local function uses_in_range(bufnr, s_, e_, sym)
+  local out = {}
+  local lines = api.nvim_buf_get_lines(bufnr, s_ - 1, e_, false)
+  local pat = '%f[%w_]' .. sym .. '%f[^%w_]'
+  for i, l in ipairs(lines) do
+    if l:find(pat) then
+      out[#out + 1] = { line = s_ + i - 1, text = l:gsub('^%s+', '') }
+      if #out >= 200 then
+        break
+      end
+    end
+  end
+  return out
 end
 
 -- ---------------------------------------------------------------------------
@@ -1337,6 +2077,7 @@ local function finish(gen, sym, root, mtime, data)
   if gen ~= s.gen then
     return
   end
+  s.scope = nil
   local t = {
     sym = sym,
     root = root,
@@ -1353,10 +2094,132 @@ local function finish(gen, sym, root, mtime, data)
   render_tree()
 end
 
+-- a type NAME -> the definition that really has a body. Follows
+-- 'typedef struct foo foo_t;' (and typedef-of-typedef) and prefers, among
+-- several gtags hits, the one that parses into members.
+local function resolve_type_def(gen, root, name, hops, cb)
+  run_global({ '--result=ctags-mod', '-a', '-d', '-e', name }, root,
+    function(lines)
+      if gen ~= s.gen then
+        return
+      end
+      local defs = parse_ctags_mod(lines, 8)
+      local best, bestm
+      for _, d in ipairs(defs) do
+        local m = members_of(d.path, d.line, name)
+        if m and m.members and #m.members > 0 then
+          best, bestm = d, m
+          break
+        end
+        best = best or d
+      end
+      if bestm or not best then
+        cb(best, bestm, nil)
+        return
+      end
+      if hops > 0 then
+        -- an alias: 'typedef struct arpc_msg arpc_msg_t;'
+        local nxt = type_from_text(strip_attrs(best.text)
+          :gsub('%f[%w_]typedef%f[^%w_]', ''):gsub('%f[%w_]' .. name
+            .. '%f[^%w_]%s*;?%s*$', ''))
+        if nxt and nxt.name ~= name then
+          resolve_type_def(gen, root, nxt.name, hops - 1,
+            function(d2, m2, ty2)
+              if d2 and m2 then
+                cb(d2, m2, ty2 or nxt)
+              else
+                cb(best, nil, nil)
+              end
+            end)
+          return
+        end
+      end
+      cb(best, nil, nil)
+    end, 16)
+end
+
+-- follow 'a->b.c': look the type up, parse it, take the next field, repeat
+local function resolve_chain(gen, root, ty, fields, i, cb)
+  resolve_type_def(gen, root, ty.name, 3, function(tdef, m, ty2)
+    if gen ~= s.gen then
+      return
+    end
+    ty = ty2 or ty
+    if not tdef then
+      cb(nil, ty)
+      return
+    end
+    local hit = m and find_member(m.members, fields[i]) or nil
+    if i >= #fields or not hit then
+      cb({ def = tdef, type = ty, members = m and m.members or nil,
+        member = hit, name = fields[i] })
+      return
+    end
+    local nty = type_from_text(hit.text)
+    if not nty then
+      cb({ def = tdef, type = ty, members = m and m.members or nil,
+        member = hit, name = fields[i] })
+      return
+    end
+    resolve_chain(gen, root, nty, fields, i + 1, cb)
+  end)
+end
+
+-- show a type (members) or a variable (declaration + its type's members)
+local function finish_type(gen, sym, root, opts)
+  if gen ~= s.gen then
+    return
+  end
+  local t = {
+    sym = sym,
+    root = root,
+    kind = opts.decl and 'variable' or 'members',
+    def = opts.def,
+    type = opts.type,
+    decl = opts.decl,
+    uses = opts.uses,
+    fnname = opts.fnname,
+    srcpath = opts.srcpath,
+    type_note = opts.type_note,
+    members_note = opts.members_note,
+    focus_member = opts.focus_member,
+  }
+  -- members are either handed in (the caller already followed typedef
+  -- aliases) or parsed straight from the definition
+  if opts.members then
+    t.members = opts.members
+    if #opts.members == 0 then
+      t.members_note = t.members_note
+        or '(no members — opaque or forward declaration)'
+    end
+  elseif opts.def then
+    local m = members_of(opts.def.path, opts.def.line,
+      opts.type and opts.type.name or nil)
+    if m then
+      t.members = m.members
+      if m.name and not (t.type and t.type.name) then
+        t.type = { kind = m.kind, name = m.name }
+      end
+      if #m.members == 0 then
+        t.members_note = '(no members — opaque or forward declaration)'
+      end
+    else
+      t.members_note = '(definition moved — press F2 to re-index)'
+    end
+  end
+  s.scope = opts.scope -- variable views are only valid inside one function
+  s.note = t.type and ('[' .. t.type.kind .. ' ' .. (t.type.name or sym) .. ']')
+      or (t.decl and '[variable]' or nil)
+  s.tree = t
+  render_tree()
+end
+
 -- manual: explicit request (:RelationView / 'r'), relaxes the guards that
 -- keep the automatic cursor path cheap
-local function update(sym, srcfile, force, manual)
+local function update(sym, srcfile, force, manual, ctx)
   s.sym = sym
+  s.as_type = ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf)
+      and wants_type_at(ctx.buf, ctx.line or 1, ctx.col or 0) or false
   s.gen = s.gen + 1
   kill_procs()
   local gen = s.gen
@@ -1389,9 +2252,12 @@ local function update(sym, srcfile, force, manual)
         .. ' root: ' .. root)
       return
     end
-    if not force then
+    if not force and not (ctx and ctx.buf) then
+      -- only the caller tree is cached: type/variable views depend on the
+      -- cursor's function, which the key does not capture
       local hit = cache_get('S\0' .. sym .. '\0' .. root, mtime)
       if hit then
+        s.note = nil
         s.tree = hit -- expansions done earlier on this tree are kept
         render_tree()
         return
@@ -1436,12 +2302,146 @@ local function update(sym, srcfile, force, manual)
       end
     end
 
+    -- the definition decides what the panel shows: a type lists its
+    -- members, a local variable its declaration and its type, and anything
+    -- else (a function) keeps the caller tree
     run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
       function(lines)
         if gen ~= s.gen then
           return
         end
-        data.def = parse_ctags_mod(lines, 8)[1]
+        local defs = parse_ctags_mod(lines, 8)
+        local type_def, other_def
+        for _, d in ipairs(defs) do
+          if def_is_type(d.text, sym) then
+            type_def = type_def or d
+          else
+            other_def = other_def or d
+          end
+        end
+        -- 'struct dma_config' and 'int dma_config(...)' can both exist: the
+        -- keyword right before the cursor says which one is meant
+        local wants_type = ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf)
+            and wants_type_at(ctx.buf, ctx.line or 1, ctx.col or 0) or false
+        if type_def and other_def and not wants_type then
+          type_def = nil -- the function is the more useful answer
+        end
+        local def = type_def or other_def
+
+        if type_def then
+          -- an alias ('typedef struct foo foo_t;') has no body of its own
+          resolve_type_def(gen, root, sym, 3, function(d, m, ty)
+            if gen ~= s.gen then
+              return
+            end
+            finish_type(gen, sym, root, {
+              def = d or type_def,
+              members = m and m.members or nil,
+              type = ty,
+            })
+          end)
+          return
+        end
+
+        local have_ctx = ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf)
+
+        -- 'msg->cmd': resolve through the VARIABLE's type, so the member of
+        -- the right struct is shown even when many structs share the name
+        if have_ctx then
+          local base, fields = cursor_field(ctx.buf, ctx.line or 1, ctx.col or 0)
+          local bdecl = base and local_decl(ctx.buf, ctx.line or 1, base) or nil
+          local bty = bdecl and (bdecl.type
+            or (bdecl.type_text and type_from_text(bdecl.type_text))) or nil
+          if bty and fields and #fields > 0 then
+            local srcpath = api.nvim_buf_get_name(ctx.buf)
+            local decl_row = { path = srcpath, line = bdecl.line,
+              text = bdecl.text, is_param = bdecl.is_param, name = base }
+            resolve_chain(gen, root, bty, fields, 1, function(res, failed)
+              if gen ~= s.gen then
+                return
+              end
+              if not res then
+                finish_type(gen, sym, root, { decl = decl_row, type = failed,
+                  type_note = '(no definition of ' .. (failed and failed.name
+                    or '?') .. ' in GTAGS)' })
+                return
+              end
+              finish_type(gen, sym, root, {
+                def = res.def,
+                members = res.members,
+                type = res.type,
+                decl = decl_row,
+                focus_member = res.name,
+                fnname = bdecl.fnname,
+                srcpath = srcpath,
+                scope = { buf = ctx.buf, s = bdecl.fns or bdecl.line,
+                  e = bdecl.fne or bdecl.line },
+                uses = uses_in_range(ctx.buf, bdecl.fns or bdecl.line,
+                  bdecl.fne or bdecl.line, sym),
+              })
+            end)
+            return
+          end
+        end
+
+        local decl = have_ctx and local_decl(ctx.buf, ctx.line or 1, sym) or nil
+        if decl then
+          local srcpath = api.nvim_buf_get_name(ctx.buf)
+          local uses = uses_in_range(ctx.buf, decl.fns or decl.line,
+            decl.fne or decl.line, sym)
+          local ty = decl.type
+              or (decl.type_text and type_from_text(decl.type_text))
+          local opts = {
+            decl = { path = srcpath, line = decl.line, text = decl.text,
+              is_param = decl.is_param },
+            type = ty,
+            uses = uses,
+            fnname = decl.fnname,
+            srcpath = srcpath,
+            scope = { buf = ctx.buf, s = decl.fns or decl.line,
+              e = decl.fne or decl.line },
+          }
+          if not ty then
+            opts.type_note = '(plain type: ' ..
+              trunc(decl.type_text or decl.text, 40) .. ')'
+            finish_type(gen, sym, root, opts)
+            return
+          end
+          resolve_type_def(gen, root, ty.name, 3, function(tdef, m, ty2)
+            if gen ~= s.gen then
+              return
+            end
+            opts.def = tdef
+            opts.members = m and m.members or nil
+            opts.type = ty2 or ty
+            if not tdef then
+              opts.type_note = '(no definition of ' .. ty.name .. ' in GTAGS)'
+            end
+            finish_type(gen, sym, root, opts)
+          end)
+          return
+        end
+
+        -- an enum constant (gtags records those) or any member whose own
+        -- line gtags indexed: show the type it belongs to, focused on it
+        if def then
+          local m = members_of(def.path, def.line)
+          if m and m.members and #m.members > 0
+              and find_member(m.members, sym) then
+            local owner = find_member(m.members, sym)
+            if owner.line == def.line or m.line ~= def.line then
+              finish_type(gen, sym, root, {
+                def = { path = def.path, line = m.line, text = m.text },
+                type = { kind = m.kind, name = m.name },
+                focus_member = sym,
+              })
+              return
+            end
+          end
+        end
+
+        s.note = nil
+        data.def = def
         join()
       end, 16)
     run_global({ '--result=ctags-mod', '-a', '-r', '-e', sym }, root,
@@ -1490,6 +2490,17 @@ function A.jump(peek)
   end
   local buf = vim.fn.bufadd(loc.path)
   vim.bo[buf].buflisted = true
+  -- remember where this window was: 'm is only a mark, it does not push a
+  -- jumplist entry, so keep our own stack for the mouse back button
+  local from = api.nvim_win_get_buf(win)
+  if api.nvim_buf_is_valid(from) and api.nvim_buf_get_name(from) ~= '' then
+    local p = api.nvim_win_get_cursor(win)
+    if #s.jump_stack > 100 then
+      table.remove(s.jump_stack, 1)
+    end
+    s.jump_stack[#s.jump_stack + 1] =
+      { win = win, buf = from, line = p[1], col = p[2] }
+  end
   api.nvim_win_call(win, function()
     pcall(vim.cmd, [[normal! m']])
   end)
@@ -1505,9 +2516,61 @@ function A.jump(peek)
   end
 end
 
+-- double click in the list: jump to the CLICKED line, not to wherever the
+-- cursor happened to be (getmousepos is authoritative for the click)
+function A.mouse_jump(peek)
+  local m = vim.fn.getmousepos()
+  if m and m.winid == s.win and m.line and m.line > 0 then
+    pcall(api.nvim_win_set_cursor, s.win, { m.line, 0 })
+  end
+  A.jump(peek)
+end
+
+-- mouse back button: go back to where the last jump came from. Inside the
+-- context window it pops that window's own stack; in the panel it rewinds
+-- the source window; anywhere else it is a plain jumplist step back.
+function A.back()
+  local cur = api.nvim_get_current_win()
+  if s.ctx_win and cur == s.ctx_win then
+    ctx_tag_back()
+    return
+  end
+  local win = cur
+  if s.buf and api.nvim_win_get_buf(cur) == s.buf then
+    win = pick_src_win()
+  end
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  -- undo our own jumps exactly; fall back to the jumplist once they run out
+  local e = table.remove(s.jump_stack)
+  while e and not api.nvim_buf_is_valid(e.buf) do
+    e = table.remove(s.jump_stack)
+  end
+  if e then
+    local target = api.nvim_win_is_valid(e.win) and e.win ~= s.ctx_win
+        and e.win or win
+    api.nvim_win_set_buf(target, e.buf)
+    api.nvim_win_call(target, function()
+      pcall(api.nvim_win_set_cursor, target, { e.line, e.col })
+      vim.cmd('normal! zz')
+    end)
+    if api.nvim_get_current_win() ~= target and cur ~= s.win then
+      api.nvim_set_current_win(target)
+    end
+    return
+  end
+  api.nvim_win_call(win, function()
+    vim.cmd('silent! normal! ' .. string.char(15)) -- <C-o>
+  end)
+end
+
 -- expand/collapse the caller node under the cursor.
 -- mode: 'toggle' | 'expand' | 'collapse'
 function A.toggle(mode)
+  if s.tree and not s.tree.nodes then
+    return -- a type/variable view has no expandable nodes
+  end
   local lnum = api.nvim_win_get_cursor(0)[1]
   local item = s.items[lnum]
   local nd = item and item.node
@@ -1549,7 +2612,7 @@ end
 -- g:relationview_max_depth / g:relationview_max_nodes
 function A.expand_all()
   local t = s.tree
-  if not t or t.expanding then
+  if not t or t.expanding or not t.nodes then
     return
   end
   s.pinned = true
@@ -1652,8 +2715,8 @@ end
 
 function A.graph()
   local t = s.tree
-  if not t then
-    vim.notify('RelationView: no tree to export', vim.log.levels.WARN)
+  if not t or not t.nodes then
+    vim.notify('RelationView: no caller tree to export', vim.log.levels.WARN)
     return
   end
   local function rel(p)
@@ -1726,7 +2789,6 @@ function A.close()
   s.ctx_win = nil
   s.ctx_last = nil
   s.ctx_stack = {}
-  ctx_unbind()
   if target and api.nvim_win_is_valid(target) then
     api.nvim_win_close(target, false)
   end
@@ -1749,7 +2811,6 @@ function A.toggle_ctx()
     s.ctx_win = nil
     s.ctx_last = nil
     s.ctx_stack = {}
-    ctx_unbind()
   elseif ensure_ctx() then
     update_context()
   end
@@ -1770,9 +2831,12 @@ function A.refresh()
     return
   end
   s.src_win = win
-  local file = api.nvim_buf_get_name(api.nvim_win_get_buf(win))
+  local wbuf = api.nvim_win_get_buf(win)
+  local file = api.nvim_buf_get_name(wbuf)
   if file ~= '' then
-    update(s.sym, file, true, true)
+    local cpos = api.nvim_win_get_cursor(win)
+    update(s.sym, file, true, true,
+      { buf = wbuf, line = cpos[1], col = cpos[2] })
   end
 end
 
@@ -1803,8 +2867,19 @@ local function on_hold()
     return
   end
   local sym = vim.fn.expand('<cword>')
-  if not is_symbol(sym) or sym == s.sym then
+  if not is_symbol(sym) then
     return
+  end
+  local cline = api.nvim_win_get_cursor(0)[1]
+  local ccol = api.nvim_win_get_cursor(0)[2]
+  local as_type = wants_type_at(buf, cline, ccol)
+  if sym == s.sym and as_type == (s.as_type or false) then
+    -- 'ret' in another function is a different variable: only skip while
+    -- the cursor stays inside the range the current view was built for
+    local r = s.scope
+    if not r or (r.buf == buf and cline >= r.s and cline <= r.e) then
+      return
+    end
   end
   if not s.timer then
     s.timer = uv.new_timer()
@@ -1823,11 +2898,15 @@ local function on_hold()
     if win ~= s.ctx_win then
       s.src_win = win -- jumps go to real source windows, never the preview
     end
-    update(sym, file, false, false)
+    local cpos = api.nvim_win_get_cursor(win)
+    update(sym, file, false, false,
+      { buf = buf, line = cpos[1], col = cpos[2] })
   end))
 end
 
 api.nvim_create_autocmd('CursorHold', { group = group, callback = on_hold })
+api.nvim_create_autocmd('ColorScheme',
+  { group = group, callback = set_highlights })
 
 local function open_and_query(arg)
   panel_open()
@@ -1840,7 +2919,9 @@ local function open_and_query(arg)
     if cur ~= s.ctx_win then
       s.src_win = cur
     end
-    update(sym, file, false, true)
+    local cpos = api.nvim_win_get_cursor(cur)
+    update(sym, file, false, true,
+      { buf = buf, line = cpos[1], col = cpos[2] })
   elseif not s.sym then
     render_msg(nil, 'move the cursor onto a symbol in a source window')
   end
@@ -1865,4 +2946,11 @@ end, { desc = 'Export the relation tree as an HTML graph' })
 if vim.fn.maparg('<F3>', 'n') == '' then
   vim.keymap.set('n', '<F3>', '<Cmd>RelationViewToggle<CR>',
     { desc = 'RelationView toggle' })
+end
+
+-- the mouse back button must work where the double-click jump lands the
+-- cursor, so it is global (claimed only when nothing else has mapped it)
+if vim.fn.maparg('<X1Mouse>', 'n') == '' then
+  vim.keymap.set('n', '<X1Mouse>', function() A.back() end,
+    { desc = 'RelationView: back (mouse button 4)' })
 end
