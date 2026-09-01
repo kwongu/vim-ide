@@ -44,7 +44,7 @@
 --   g:relationview_width      panel width  for 'right'   (default 60)
 --   g:relationview_auto       1: update as the cursor moves (default 1)
 --   g:relationview_debounce   idle debounce in ms         (default 250)
---   g:relationview_max_refs   max references per level    (default 200)
+--   g:relationview_max_refs   max references per level    (default 1000)
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
@@ -393,6 +393,22 @@ local function get_root(dir, cb)
   end, 2)
 end
 
+-- The database ':Gtags' uses is the one above the WORKING directory. A tree
+-- can hold stale nested GTAGS (a sub-directory indexed months ago), and
+-- searching from the file's own directory would silently pick that one -
+-- different files, different line numbers. Prefer the working directory's
+-- database whenever it covers this file, and fall back to the file's own.
+local function root_for(path, cb)
+  local cwd = vim.fn.getcwd()
+  get_root(cwd, function(cwdroot)
+    if cwdroot and path:sub(1, #cwdroot + 1) == cwdroot .. '/' then
+      cb(cwdroot)
+      return
+    end
+    get_root(vim.fs.dirname(path), cb)
+  end)
+end
+
 -- definitions inside one file: 'global -f' -> { {name=..., line=...} ... }
 -- (used to find the enclosing function of every reference); concurrent
 -- requests for the same file share one process
@@ -694,7 +710,9 @@ end
 -- caller tree building
 -- ---------------------------------------------------------------------------
 
-local MAX_ENCLOSE_FILES = 40
+-- read far more lines than are displayed, so the "N of M" total is real
+local REF_STREAM_CAP = 20000
+local MAX_ENCLOSE_FILES = 100
 local ENCLOSE_CONC = 5
 
 -- annotate every ref with its enclosing function (r.fn) through a small
@@ -742,7 +760,7 @@ end
 
 -- callers of one symbol: annotated references, ready for grouping
 local function fetch_callers(root, mtime, sym, alive, cb)
-  local max_refs = cfg('max_refs', 200)
+  local max_refs = cfg('max_refs', 1000)
   run_global({ '--result=ctags-mod', '-a', '-r', '-e', sym }, root,
     function(lines)
       if not alive() then
@@ -754,7 +772,7 @@ local function fetch_callers(root, mtime, sym, alive, cb)
           cb(refs)
         end
       end)
-    end, max_refs + 200)
+    end, REF_STREAM_CAP)
 end
 
 -- group references by their enclosing function (Source Insight shows one
@@ -1229,7 +1247,7 @@ ctx_tag_jump = function()
   end
   local pos = api.nvim_win_get_cursor(s.ctx_win)
   local off = s.ctx_file.off or 0
-  get_root(vim.fs.dirname(file), function(root)
+  root_for(file, function(root)
     if not root or not ctx_visible() then
       return
     end
@@ -1444,7 +1462,12 @@ render_tree = function()
   local title = t.kind == 'symbol'
       and 'References (undefined symbol)' or 'Callers'
   raw('')
-  raw(section_line(title, #t.nodes))
+  if t.truncated and t.truncated > 0 then
+    raw(section_line(string.format('%s (%d) — %d of %d refs shown', title,
+      #t.nodes, t.shown or 0, (t.shown or 0) + t.truncated)))
+  else
+    raw(section_line(title, #t.nodes))
+  end
   if #t.nodes == 0 then
     raw('  (none)')
   end
@@ -1497,7 +1520,8 @@ render_tree = function()
 
   if t.truncated and t.truncated > 0 then
     -- lower bound: the query is capped, the real total may be larger
-    raw(string.format('  … %d+ more refs  (:Gtags -r %s)', t.truncated, t.sym))
+    raw(string.format('  … %d more refs%s  (:Gtags -r %s)', t.truncated,
+      t.capped and '+' or '', t.sym))
   end
 
   render_rows(t, rows)
@@ -2085,6 +2109,8 @@ local function finish(gen, sym, root, mtime, data)
     def = data.def,
     kind = data.refs_kind,
     truncated = data.refs_truncated,
+    shown = #data.refs,
+    capped = (data.refs_total or 0) >= REF_STREAM_CAP,
     nodes = make_nodes(group_refs(data.refs), nil, sym),
   }
   if gtags_mtime(root) == mtime then
@@ -2235,7 +2261,7 @@ local function update(sym, srcfile, force, manual, ctx)
     return
   end
 
-  get_root(dir, function(root)
+  root_for(srcfile, function(root)
     if gen ~= s.gen then
       return
     end
@@ -2265,7 +2291,7 @@ local function update(sym, srcfile, force, manual, ctx)
     end
     render_msg(sym, 'querying gtags …')
 
-    local max_refs = cfg('max_refs', 200)
+    local max_refs = cfg('max_refs', 1000)
     local data = { refs = {}, refs_kind = 'ref' }
     local pending = 2
     local alive = function() return gen == s.gen end
@@ -2295,8 +2321,9 @@ local function update(sym, srcfile, force, manual, ctx)
             local refs = parse_ctags_mod(lines, max_refs)
             data.refs, data.refs_kind = refs, 'symbol'
             data.refs_truncated = refs.truncated
+            data.refs_total = lines and #lines or 0
             annotate_and_finish()
-          end, max_refs + 200)
+          end, REF_STREAM_CAP)
       else
         annotate_and_finish()
       end
@@ -2452,8 +2479,9 @@ local function update(sym, srcfile, force, manual, ctx)
         local refs = parse_ctags_mod(lines, max_refs)
         data.refs = refs
         data.refs_truncated = refs.truncated
+        data.refs_total = lines and #lines or 0
         join()
-      end, max_refs + 200)
+      end, REF_STREAM_CAP)
   end)
 end
 

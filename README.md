@@ -150,6 +150,13 @@ resting the cursor on a variable in the edit window shows what it is made
 of. Selecting a member row moves the context window to that member, and a
 use row moves it to that line inside the function.
 
+The panel queries the same GTAGS database `:Gtags` does - the one above
+the working directory - so both agree line for line. (Searching from the
+file's own directory would pick up a stale nested GTAGS left in a
+sub-directory, which reports different files and different line numbers.)
+Up to `g:relationview_max_refs` references are listed (default 1000); when
+there are more, the section header says how many of how many are shown.
+
 A caller that calls the symbol several times shows every call site: the
 first one on its own row (marked `(xN)`) and the rest as `·` rows beneath
 it, so the list matches `:Gtags -r` line for line
