@@ -886,6 +886,65 @@ function! AutoLoadTagbar()
 endfunction
 autocmd VimEnter * call AutoLoadTagbar()
 
+"------------------------------------------------------------------------------
+"- Tagbar: 커서가 심볼 위로 가면 EDIT 창이 그 심볼로 점프한다
+"- j/k, 방향키, 마우스 클릭으로 태그 줄에 커서가 놓이면 편집 창이 해당 심볼로
+"- 이동하고 포커스는 Tagbar 에 남는다(Tagbar 자체의 'preview' 매핑 재사용).
+"- <CR> / 더블클릭은 기존처럼 점프 + 포커스 이동.
+"- 'functions', '[members]' 같은 종류 헤더에서는 아무것도 하지 않는다
+"- (그 줄에서 preview 를 누르면 폴드가 접히기 때문).
+"- 끄려면: let g:tagbar_follow_cursor = 0
+"------------------------------------------------------------------------------
+let g:tagbar_follow_cursor = 1
+
+" 커서가 놓인 줄이 실제 태그인지 판별한다. 이름 첫 글자의 구문 그룹이
+" TagbarKind/NestedKind/Help 면 태그가 아니라 헤더다(Tagbar 의 syntax 규칙).
+function! s:TagbarLineIsTag() abort
+	let l:line = getline('.')
+	if l:line =~# '^\s*$' || l:line =~# '^"' || l:line =~# '^\s*\[.*\]$'
+		return 0
+	endif
+	let l:col = match(l:line, '[[:alnum:]_~]') + 1
+	if l:col <= 0
+		return 0
+	endif
+	let l:grp = synIDattr(synID(line('.'), l:col, 1), 'name')
+	return l:grp !~# '^Tagbar\%(Kind\|NestedKind\|Help\)'
+endfunction
+
+function! s:TagbarFollowCursor() abort
+	if !get(g:, 'tagbar_follow_cursor', 1) || get(s:, 'tagbar_following', 0)
+		return
+	endif
+	" 사용자가 실제로 Tagbar 창에 들어와 있을 때만 (win_execute 로 Tagbar
+	" 커서를 옮기는 하이라이트 갱신에 반응하면 편집 커서가 끌려간다)
+	if !get(s:, 'tagbar_focused', 0) || bufname('%') !~# '^__Tagbar__'
+		return
+	endif
+	if !s:TagbarLineIsTag() || get(s:, 'tagbar_follow_line', -1) == line('.')
+		return
+	endif
+	let s:tagbar_follow_line = line('.')
+	let l:key = get(g:, 'tagbar_map_preview', 'p')
+	if type(l:key) == type([])
+		let l:key = empty(l:key) ? 'p' : l:key[0]
+	endif
+	let s:tagbar_following = 1
+	try
+		execute 'normal ' . l:key
+	catch
+	finally
+		let s:tagbar_following = 0
+	endtry
+endfunction
+
+augroup TagbarFollowCursor
+	autocmd!
+	autocmd WinEnter __Tagbar__.* let s:tagbar_focused = 1
+	autocmd WinLeave __Tagbar__.* let s:tagbar_focused = 0
+	autocmd CursorMoved __Tagbar__.* call s:TagbarFollowCursor()
+augroup END
+
 "==============================================================================
 "= CtrlP
 "==============================================================================
@@ -953,6 +1012,10 @@ endif
 
 " g:relationview_position   'bottom' (default) or 'right'
 let g:relationview_position = 'right'
+" g:relationview_auto_open  1: open the panel on startup (default 1)
+let g:relationview_auto_open = 1
+let g:relationview_width = 60
+let g:relationview_context_height = 25
 
 
 "==============================================================================

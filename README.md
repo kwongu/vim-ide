@@ -40,7 +40,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * File system explorer: browses directory hierarchies, and performs file system operations
 
-* Source code browser: provides an overview of the structure of the source code.
+* Source code browser: provides an overview of the structure of the source code. Moving the cursor onto a symbol in the tagbar window - with j/k, the arrows or a single mouse click - takes the edit window to that symbol while the focus stays in tagbar (set g:tagbar_follow_cursor = 0 to turn it off).
 
 * Git status check: uses signs to indicate added, modified and removed lines based on data of an underlying version control system.
 
@@ -64,6 +64,7 @@ F7: Fold a function body
 F8: Unfold a function body
 F9: Toggle NERDTree, file system explorer on the left side
 F10: Toggle tagbar, source code browser on the right side
+     (the cursor or a mouse click on a symbol jumps to it in the edit window)
 F11: Empty
 F12: Delete gtags files created with F2.
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
