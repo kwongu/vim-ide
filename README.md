@@ -161,8 +161,8 @@ knows about it below) and the context window shows the header itself. The
 header is looked up next to the including file, then in the GTAGS path
 index, then in 'path'.
 
-Paths are shown in full; `g:relationview_full_path = 0` shows them relative
-to the gtags root instead (useful in a narrow panel).
+Paths are shown relative to vim's current directory (`:pwd`), the way vim
+itself shows them; `g:relationview_full_path = 1` makes them absolute.
 
 The row under the panel cursor has its symbol coloured sky blue, and the
 same symbol is highlighted in the context window.
@@ -217,8 +217,9 @@ double click: same jump, with the mouse
 In the edit window a double click behaves like `Ctrl+]` (jump to the
 symbol under the mouse), and on an `#include` line it opens that header.
 In the context window a double click follows the definition of the symbol
-under the mouse - like `Ctrl+]` there - while `Enter` takes the edit window
-to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
+under the mouse - like `Ctrl+]` there - and on an `#include` line it opens
+that header in the context window (`Ctrl+t` or the mouse back button
+returns), while `Enter` takes the edit window to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
 keep their own double-click behaviour.
 mouse button 4 (back): return to where the last jump came from; inside
        the context window it walks that window's own stack instead

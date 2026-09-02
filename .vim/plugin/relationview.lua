@@ -51,8 +51,8 @@
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
---   g:relationview_full_path  1: show full paths (default 1; 0 = relative
---                             to the gtags root)
+--   g:relationview_full_path  1: absolute paths; default 0 = relative to
+--                             vim's current directory (:pwd)
 --   g:relationview_auto_open  1: open the panel on startup (default 1)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
@@ -264,6 +264,8 @@ local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local render_rows
 local source_text
+local include_at
+local resolve_include
 local hl_cursor_row
 local find_member
 local ensure_ctx
@@ -1264,13 +1266,35 @@ ctx_tag_jump = function()
     pcall(api.nvim_win_set_cursor, s.ctx_win,
       { m.line, math.max(0, (m.column or 1) - 1) })
   end
-  local sym = vim.fn.expand('<cword>')
   local file = s.ctx_file and s.ctx_file.path or nil
-  if not is_symbol(sym, true) or not file then
+  if not file then
     return
   end
   local pos = api.nvim_win_get_cursor(s.ctx_win)
   local off = s.ctx_file.off or 0
+
+  -- '#include "foo.h"' is about a file: follow it here, like a symbol
+  local inc = include_at(api.nvim_win_get_buf(s.ctx_win), pos[1])
+  if inc then
+    root_for(file, function(root)
+      local path = resolve_include(inc, file, root)
+      if not path then
+        vim.notify('RelationView context: header not found: ' .. inc,
+          vim.log.levels.WARN)
+        return
+      end
+      table.insert(s.ctx_stack,
+        { path = file, line = pos[1] + off, col = pos[2] })
+      s.ctx_last = nil
+      show_context({ path = path, line = 1 })
+    end)
+    return
+  end
+
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym, true) then
+    return
+  end
   root_for(file, function(root)
     if not root or not ctx_visible() then
       return
@@ -1346,7 +1370,8 @@ show_context = function(loc)
       s.ctx_hl_buf = b
     end
   end
-  local label = (cfg('full_path', 1) ~= 0 and loc.path or basename(loc.path))
+  local label = (cfg('full_path', 0) ~= 0 and loc.path
+      or vim.fn.fnamemodify(loc.path, ':.'))
       .. ':' .. (line + off) .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
   pcall(function()
     vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
@@ -1384,17 +1409,14 @@ render_tree = function()
   if not t then
     return
   end
-  -- full paths by default: g:relationview_full_path = 0 shows them relative
-  -- to the gtags root instead
-  local full_path = cfg('full_path', 1) ~= 0
+  -- paths relative to vim's current directory, the way vim itself shows
+  -- them ('%:.'); g:relationview_full_path = 1 keeps them absolute
+  local full_path = cfg('full_path', 0) ~= 0
   local function rel(p)
     if full_path then
       return p
     end
-    if p:sub(1, #t.root + 1) == t.root .. '/' then
-      return p:sub(#t.root + 2)
-    end
-    return p
+    return vim.fn.fnamemodify(p, ':.')
   end
 
   -- pass 1: collect the three columns of every row so they can be padded
@@ -1591,7 +1613,7 @@ render_rows = function(t, rows)
   end
   local avail = (s.win and api.nvim_win_is_valid(s.win))
       and api.nvim_win_get_width(s.win) or 80
-  local wide = cfg('full_path', 1) ~= 0
+  local wide = cfg('full_path', 0) ~= 0
   wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
   wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
 
@@ -2132,7 +2154,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- the header named on an '#include' line, or nil
-local function include_at(buf, line)
+include_at = function(buf, line)
   local ok, l = pcall(api.nvim_buf_get_lines, buf, line - 1, line, false)
   l = ok and l[1] or nil
   if not l or not l:match('^%s*#%s*include') then
@@ -2143,7 +2165,7 @@ end
 
 -- absolute path of an included header. Cheap and synchronous: the file next
 -- to the including one, then the gtags path index, then 'path'.
-local function resolve_include(name, srcpath, root)
+resolve_include = function(name, srcpath, root)
   local dir = srcpath and vim.fs.dirname(srcpath) or nil
   if dir then
     local p = dir .. '/' .. name
