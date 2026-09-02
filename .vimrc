@@ -1310,6 +1310,10 @@ func! NeoTreeOnlyLeft()
 	:TagbarClose
 	:Neotree toggle left
 endfunc
+func! NeoTreeOnlyRight()
+	:TagbarClose
+	:Neotree toggle right
+endfunc
 
 func! NERDTreeOnly()
 	:TagbarClose
@@ -1318,6 +1322,7 @@ endfunc
 
 func! TagbarOnly()
 	:NERDTreeClose
+	:Neotree close
 	:TagbarToggle
 endfunc
 
@@ -1339,9 +1344,11 @@ map <F8> zo
 "map <F10> :NvimTreeToggle<CR>
 "map <F10> :NERDTreeToggle<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
-map <F9> :call NeoTreeOnlyLeft()<CR>
+map <F9> :call NERDTreeOnlyLeft()<CR>
+"map <F9> :call NeoTreeOnlyLeft()<CR>
 map <F10> :call TagbarOnly()<CR>
-map <F11> :call NERDTreeOnlyRight()<CR>
+"map <F11> :call NERDTreeOnlyRight()<CR>
+map <F11> :call NeoTreeOnlyRight()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
 map <F12> :call Deltags()<CR>

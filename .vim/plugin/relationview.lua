@@ -999,6 +999,24 @@ local function panel_open()
   return win
 end
 
+-- Opening or closing another window (a file tree, quickfix, ...) hands the
+-- freed columns to whatever sits next to it - the panel included, and
+-- 'winfixwidth' does not stop that. Remember the panel's size the moment a
+-- window appears or disappears and put that size back once the layout has
+-- settled; anything the user resized by hand is therefore kept as it is.
+local function restore_geom(w, h)
+  if not (s.win and api.nvim_win_is_valid(s.win)) then
+    return
+  end
+  if cfg('position', 'bottom') == 'right' then
+    if w and api.nvim_win_get_width(s.win) ~= w then
+      pcall(api.nvim_win_set_width, s.win, w)
+    end
+  elseif h and api.nvim_win_get_height(s.win) ~= h then
+    pcall(api.nvim_win_set_height, s.win, h)
+  end
+end
+
 -- colour the symbol on the row the panel cursor is on
 hl_cursor_row = function()
   if not (s.buf and api.nvim_buf_is_valid(s.buf)) then
@@ -3178,10 +3196,25 @@ api.nvim_create_autocmd('ColorScheme',
 
 -- the column widths (and therefore how much of each path fits) come from
 -- the panel's size, so a resize has to lay the rows out again
+api.nvim_create_autocmd({ 'WinNew', 'WinClosed' }, {
+  group = group,
+  callback = function()
+    if not (s.win and api.nvim_win_is_valid(s.win)) then
+      return -- the panel itself is being created/closed
+    end
+    local w = api.nvim_win_get_width(s.win)
+    local h = api.nvim_win_get_height(s.win)
+    vim.schedule(function() restore_geom(w, h) end)
+  end,
+})
+
 api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
   group = group,
   callback = function()
-    if not (s.tree and s.win and api.nvim_win_is_valid(s.win)) then
+    if not (s.win and api.nvim_win_is_valid(s.win)) then
+      return
+    end
+    if not s.tree then
       return
     end
     if api.nvim_win_get_width(s.win) == s.rendered_w
