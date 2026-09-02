@@ -46,7 +46,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Smooth scrolling: moves smoothly the screen when exploring source code.
 
-* Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. Toggle with F3.
+* Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
 ## Usage (shortcut)
@@ -111,9 +111,12 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 
 ## Relation window (nvim only)
 
-Press `F3` (or run `:RelationView`) to open the Source Insight style relation
-window. While it is open, resting the cursor on a symbol in a source window
-updates the panel in real time with the definition and the caller tree:
+The Source Insight style relation window opens by itself when nvim starts
+(set `g:relationview_auto_open = 0` to keep it closed; it is always skipped
+in diff mode and in git's editor sessions). `F3` toggles it and
+`:RelationView` opens it on demand. While it is open, resting the cursor on
+a symbol in a source window updates the panel in real time with the
+definition and the caller tree:
 
 ```
 ── Definition ──────────────────────

@@ -50,6 +50,7 @@
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
+--   g:relationview_auto_open  1: open the panel on startup (default 1)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
 --   g:relationview_context_height  context height, 'right' layout (default 25,
@@ -3006,6 +3007,41 @@ end, { desc = 'Toggle the relation window' })
 api.nvim_create_user_command('RelationViewGraph', function()
   A.graph()
 end, { desc = 'Export the relation tree as an HTML graph' })
+
+-- open the panel on startup. Runs after every other VimEnter handler (so
+-- the tagbar/NERDTree layout is already in place), never steals focus, and
+-- does NOT query anything yet: the first time the cursor rests on a symbol
+-- fills it in. Skipped without a UI (headless scripts), in diff mode and in
+-- git's editor sessions. Set g:relationview_auto_open = 0 to keep it closed.
+local function auto_open()
+  if vim.g.rv_auto_opened or cfg('auto_open', 1) == 0 then
+    return
+  end
+  if vim.o.diff or #api.nvim_list_uis() == 0 then
+    return
+  end
+  local ft = vim.bo.filetype
+  if ft == 'gitcommit' or ft == 'gitrebase' or ft == 'help' then
+    return
+  end
+  vim.g.rv_auto_opened = true
+  vim.schedule(function()
+    if panel_visible() then
+      return
+    end
+    local prev = api.nvim_get_current_win()
+    panel_open()
+    if s.buf and api.nvim_buf_line_count(s.buf) <= 1 then
+      render_msg(nil, 'move the cursor onto a symbol in a source window')
+    end
+    if api.nvim_win_is_valid(prev) then
+      api.nvim_set_current_win(prev)
+    end
+  end)
+end
+
+api.nvim_create_autocmd({ 'VimEnter', 'UIEnter' },
+  { group = group, callback = auto_open })
 
 if vim.fn.maparg('<F3>', 'n') == '' then
   vim.keymap.set('n', '<F3>', '<Cmd>RelationViewToggle<CR>',
