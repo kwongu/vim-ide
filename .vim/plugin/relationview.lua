@@ -43,7 +43,7 @@
 -- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
 --   g:relationview_height     panel height for 'bottom'  (default 12)
---   g:relationview_width      panel width  for 'right'   (default 60)
+--   g:relationview_width      panel width  for 'right'   (default 50)
 --   g:relationview_auto       1: update as the cursor moves (default 1)
 --   g:relationview_debounce   idle debounce in ms         (default 250)
 --   g:relationview_max_refs   max references per level    (default 1000)
@@ -943,7 +943,7 @@ local function panel_open()
   end
   local prev = api.nvim_get_current_win()
   if cfg('position', 'bottom') == 'right' then
-    vim.cmd('keepalt botright vertical ' .. cfg('width', 100) .. 'split')
+    vim.cmd('keepalt botright vertical ' .. cfg('width', 50) .. 'split')
   else
     vim.cmd('keepalt botright ' .. cfg('height', 12) .. 'split')
   end
