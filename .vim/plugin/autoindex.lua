@@ -12,7 +12,7 @@
 --
 -- Which files are indexed is decided by ~/.local/bin/indexfiles.sh, so
 -- ctags (gutentags) and gtags always agree:
---     .indexfiles  ->  cscope.files (F2/mktags.sh)  ->  git ls-files  ->  find
+--     .indexfiles  ->  git ls-files  ->  cscope.files (F2/mktags.sh)  ->  find
 -- Drop a '.indexfiles' in a project root to index exactly what you want.
 --
 -- Options (.vimrc)
@@ -134,7 +134,31 @@ end
 -- ---------------------------------------------------------------------------
 -- full build:  indexfiles.sh | gtags -f -
 -- ---------------------------------------------------------------------------
-local function build(root, why)
+-- how many files the index at root currently covers (0: no index)
+local function db_file_count(root, cb)
+  local prog = global_cmd()
+  if not prog or not uv.fs_stat(root .. '/GTAGS') then
+    cb(0)
+    return
+  end
+  local ok = pcall(vim.system,
+    { 'sh', '-c', vim.fn.shellescape(prog) .. ' -P "" 2>/dev/null | wc -l' },
+    { text = true, cwd = root }, function(o)
+      vim.schedule(function()
+        cb(tonumber(((o.stdout or ''):gsub('%s', ''))) or 0)
+      end)
+    end)
+  if not ok then
+    cb(0)
+  end
+end
+
+-- Build the whole index in the background.
+--   opts.confirm: ask before an index that covers far fewer files than the
+--                 current one replaces it (a partial cscope.files or a
+--                 narrow .indexfiles otherwise silently drops most symbols)
+local function build(root, why, opts)
+  opts = opts or {}
   if not enabled() or s.building[root] then
     return
   end
@@ -144,36 +168,89 @@ local function build(root, why)
     return
   end
   s.building[root] = true
-  notify('indexing ' .. vim.fn.fnamemodify(root, ':~') ..
-    (why and (' (' .. why .. ')') or '') .. ' …')
+  local short = vim.fn.fnamemodify(root, ':~')
+  notify('indexing ' .. short .. (why and (' (' .. why .. ')') or '') .. ' …')
   local t0 = uv.now()
   -- Build into a temporary database and move it in when it is complete:
   -- writing GTAGS in place would make every query in the meantime fail
   -- with "GTAGS seems corrupted".
   local tmp = vim.fn.tempname()
   vim.fn.mkdir(tmp, 'p')
-  local cmd = { 'sh', '-c', vim.fn.shellescape(fl) .. ' | ' ..
-    vim.fn.shellescape(gt) .. ' -f - ' .. vim.fn.shellescape(tmp) ..
-    ' && mv -f ' .. vim.fn.shellescape(tmp) .. '/GTAGS ' ..
-    vim.fn.shellescape(tmp) .. '/GRTAGS ' .. vim.fn.shellescape(tmp) ..
-    '/GPATH ' .. vim.fn.shellescape(root) .. '/' }
-  local ok = pcall(vim.system, cmd, { text = true, cwd = root }, function(o)
-    vim.schedule(function()
-      s.building[root] = nil
-      s.roots = {} -- a new database may have appeared above other dirs too
-      pcall(vim.fn.delete, tmp, 'rf')
-      if o.code == 0 then
-        notify(string.format('%s indexed in %.1fs',
-          vim.fn.fnamemodify(root, ':~'), (uv.now() - t0) / 1000))
+  local list = tmp .. '/files'
+
+  local function fail(msg)
+    s.building[root] = nil
+    pcall(vim.fn.delete, tmp, 'rf')
+    if msg then
+      notify(msg, vim.log.levels.WARN)
+    end
+  end
+
+  -- 3. gtags over the file list, then move the finished database in
+  local function run_gtags(n)
+    local cmd = { 'sh', '-c', vim.fn.shellescape(gt) .. ' -f ' ..
+      vim.fn.shellescape(list) .. ' ' .. vim.fn.shellescape(tmp) ..
+      ' && mv -f ' .. vim.fn.shellescape(tmp) .. '/GTAGS ' ..
+      vim.fn.shellescape(tmp) .. '/GRTAGS ' .. vim.fn.shellescape(tmp) ..
+      '/GPATH ' .. vim.fn.shellescape(root) .. '/' }
+    local ok = pcall(vim.system, cmd, { text = true, cwd = root }, function(o)
+      vim.schedule(function()
+        s.building[root] = nil
+        s.roots = {} -- a new database may have appeared above other dirs too
+        pcall(vim.fn.delete, tmp, 'rf')
+        if o.code == 0 then
+          notify(string.format('%s indexed: %d files, %.1fs',
+            short, n, (uv.now() - t0) / 1000))
+        else
+          notify('indexing failed: ' ..
+            ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))),
+            vim.log.levels.WARN)
+        end
+      end)
+    end)
+    if not ok then
+      fail(nil)
+    end
+  end
+
+  -- 2. refuse (or ask) when the new list covers far fewer files
+  local function check_coverage(n)
+    db_file_count(root, function(old)
+      if old < 100 or n >= math.floor(old / 2) then
+        run_gtags(n)
+        return
+      end
+      local msg = string.format(
+        '%s: 색인 대상이 %d개 -> %d개로 줄어듭니다 (부분 cscope.files/.indexfiles?)',
+        short, old, n)
+      if not opts.confirm then
+        fail(msg .. ' - 자동 재색인을 건너뜁니다 (:GtagsIndex 로 강제)')
+        return
+      end
+      if vim.fn.confirm(msg .. '\n그대로 다시 색인할까요?', '&Yes\n&No', 2) == 1 then
+        run_gtags(n)
       else
-        notify('indexing failed: ' ..
-          ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))),
-          vim.log.levels.WARN)
+        fail(nil)
       end
     end)
-  end)
+  end
+
+  -- 1. file list first, so its size can be judged before the index is replaced
+  local ok = pcall(vim.system,
+    { 'sh', '-c', vim.fn.shellescape(fl) .. ' > ' ..
+      vim.fn.shellescape(list) .. ' && wc -l < ' .. vim.fn.shellescape(list) },
+    { text = true, cwd = root }, function(o)
+      vim.schedule(function()
+        local n = tonumber(((o.stdout or ''):gsub('%s', ''))) or 0
+        if o.code ~= 0 or n == 0 then
+          fail('색인할 파일을 찾지 못했습니다: ' .. short)
+          return
+        end
+        check_coverage(n)
+      end)
+    end)
   if not ok then
-    s.building[root] = nil
+    fail(nil)
   end
 end
 
@@ -351,7 +428,7 @@ api.nvim_create_user_command('GtagsIndex', function()
   local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
       or vim.fn.getcwd()
   gtags_root(dir, function(root)
-    build(root or marker_root(dir) or dir, 'manual')
+    build(root or marker_root(dir) or dir, 'manual', { confirm = true })
   end)
 end, { desc = 'Rebuild the GTAGS index of this project in the background' })
 
