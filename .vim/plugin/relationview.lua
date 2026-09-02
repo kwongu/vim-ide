@@ -52,7 +52,7 @@
 --   g:relationview_max_sites  call sites listed per caller (default 8)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
---   g:relationview_context_height  context height, 'right' layout (default 30,
+--   g:relationview_context_height  context height, 'right' layout (default 25,
 --                             capped so the tree keeps at least 8 rows)
 --   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
 --   g:relationview_global_cmd path of the global binary   (default auto)
@@ -1209,7 +1209,7 @@ ensure_ctx = function()
       -- keep the tree usable: on a short terminal a fixed height would
       -- squash the list down to a row or two, so leave it at least 8 rows
       local avail = api.nvim_win_get_height(s.win)
-      local h = math.min(cfg('context_height', 30), math.max(3, avail - 9))
+      local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
       vim.cmd('noautocmd rightbelow ' .. h .. 'split')
     else
       vim.cmd('noautocmd rightbelow vertical split')
