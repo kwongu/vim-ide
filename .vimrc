@@ -123,6 +123,15 @@ Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
 Plug 'ronakg/quickr-preview.vim'
 
+" Magit 스타일 git UI + diff 뷰어
+Plug 'NeogitOrg/neogit'
+Plug 'sindrets/diffview.nvim'
+" Source Insight 스타일: ctags 자동 색인 / 심볼 아웃라인 / 파일 트리
+Plug 'ludovicchabant/vim-gutentags'
+Plug 'stevearc/aerial.nvim'
+Plug 'MunifTanjim/nui.nvim'
+Plug 'nvim-neo-tree/neo-tree.nvim', { 'branch': 'v3.x' }
+
 call plug#end()
 " ------------------------------------
 " settings for nvim default
@@ -234,6 +243,104 @@ require'telescope'.setup{
 }
 require'telescope'.load_extension'fzf'
 EOF
+
+" ------------------------------------
+" Neogit (Magit for nvim) + diffview
+"   <leader>s : Neogit 상태 화면(새 탭)  -  s/u 스테이징, cc 커밋, P 푸시
+"   <leader>v : DiffviewOpen (작업 트리 전체 diff)
+"   (<leader>m 은 vim-mark 가 이미 쓰고 있어 s(tatus) 로 두었다)
+" ------------------------------------
+lua << EOF
+-- 아직 :PlugInstall 을 돌리지 않은 상태에서도 startup 이 깨지지 않게 한다
+local function rv_setup(mod, opts)
+  local ok, m = pcall(require, mod)
+  if ok and type(m) == 'table' and m.setup then
+    pcall(m.setup, opts)
+  end
+end
+_G.rv_setup = rv_setup
+
+rv_setup('neogit', {
+  kind = 'tab',                                  -- Magit 처럼 새 탭에서 열기
+  integrations = { diffview = true, telescope = true },
+  disable_insert_on_commit = 'auto',
+})
+rv_setup('diffview', {})
+EOF
+nnoremap <silent> <Leader>s <Cmd>Neogit<CR>
+nnoremap <silent> <Leader>v <Cmd>DiffviewOpen<CR>
+
+" ------------------------------------
+" aerial: 현재 파일의 심볼 아웃라인(Source Insight 의 Symbol Window)
+"   <leader>o 로 토글. treesitter 백엔드라 LSP 없이도 동작한다.
+"   (F10 의 tagbar 는 그대로 유지 - 둘 중 편한 것을 쓰면 된다)
+" ------------------------------------
+lua << EOF
+_G.rv_setup('aerial', {
+  backends = { 'treesitter', 'lsp', 'markdown', 'man' },
+  layout = { default_direction = 'right', width = 32 },
+  attach_mode = 'window',
+  close_on_select = false,
+  show_guides = true,
+})
+EOF
+nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
+
+" 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O). tags 파일 기반이라
+" gutentags 가 만든 색인을 그대로 쓴다. LSP(clangd) 를 켜면
+" ':Telescope lsp_workspace_symbols' 도 함께 쓸 수 있다.
+nnoremap <silent> <Leader>fs <Cmd>Telescope tags<CR>
+
+" ------------------------------------
+" neo-tree: 사이드바 파일 트리 (NERDTree 상위 호환)
+"   <leader>t 로 토글. a 생성 / d 삭제 / r 이름변경 / ? 도움말
+"   (F11 은 NERDTreeOnlyRight 가 이미 쓰고 있어 t(ree) 로 두었다)
+"   netrw 는 nvim-tree 가 이미 가로채므로 neo-tree 는 건드리지 않는다.
+"   대용량 트리에서 발열/지연이 없도록 git status 는 비동기, 파일
+"   watcher 는 끈다.
+" ------------------------------------
+lua << EOF
+_G.rv_setup('neo-tree', {
+  close_if_last_window = true,
+  enable_git_status = true,
+  enable_diagnostics = false,
+  git_status_async = true,
+  window = { position = 'left', width = 32 },
+  filesystem = {
+    hijack_netrw_behavior = 'disabled',
+    use_libuv_file_watcher = false,
+    follow_current_file = { enabled = true },
+    filtered_items = {
+      visible = true,
+      hide_dotfiles = false,
+      hide_gitignored = false,
+    },
+  },
+})
+EOF
+nnoremap <silent> <Leader>t <Cmd>Neotree toggle<CR>
+
+" ------------------------------------
+" gutentags: ctags 자동 색인 (소스인사이트식 심볼 DB)
+"   커널 트리에서 저장마다 전체 재색인이 돌면 발열/멈춤이 생기므로,
+"   없는 tags 를 자동 생성하지는 않고 이미 있는 tags 만 저장 시 증분
+"   갱신한다. 첫 색인은 프로젝트 루트에서 한 번:  :GutentagsUpdate!
+"   (F2 의 mktags.sh 가 만드는 GTAGS 는 RelationView/:Gtags 용으로 그대로)
+" ------------------------------------
+let g:gutentags_modules = ['ctags']
+let g:gutentags_define_advanced_commands = 1
+let g:gutentags_project_root = ['.git', '.project', '.root']
+let g:gutentags_add_default_project_roots = 0
+let g:gutentags_cache_dir = expand('~/.cache/tags')
+let g:gutentags_generate_on_new = 0
+let g:gutentags_generate_on_missing = 0
+let g:gutentags_generate_on_write = 1
+let g:gutentags_generate_on_empty_buffer = 0
+let g:gutentags_ctags_extra_args = ['--fields=+niazS', '--extras=+q',
+			\ '--c-kinds=+px', '--c++-kinds=+px']
+let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
+			\ 'Documentation', '*.json', '*.min.js', '*.o', '*.a',
+			\ '*.so', '*.ko', '*.cmd', 'GTAGS', 'GRTAGS', 'GPATH']
 
 " Find files using Telescope command-line sugar.
 nnoremap <leader>fi <cmd>Telescope git_commits<cr>
@@ -935,6 +1042,10 @@ if !exists('g:tagbar_ctags_bin')
 	endfor
 	unlet! s:ctags_cand
 endif
+" gutentags 도 같은 바이너리를 쓴다(설정 블록이 이 위에 있어 여기서 넘긴다)
+if exists('g:tagbar_ctags_bin')
+	let g:gutentags_ctags_executable = g:tagbar_ctags_bin
+endif
 "let g:tagbar_left=0
 let g:tagbar_left=1
 let g:tagbar_sort=0
@@ -1072,8 +1183,9 @@ endif
 let g:relationview_position = 'right'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
-let g:relationview_width = 65
+let g:relationview_width = 80
 let g:relationview_context_height = 40
+let g:relationview_show_text = 0
 
 
 "==============================================================================

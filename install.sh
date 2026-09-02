@@ -95,6 +95,44 @@ else
 fi
 cd ${VIMIDE}
 
+# Setup for Neovim
+# nvim 은 ~/.vimrc 를 읽지 않으므로 ~/.config/nvim/init.vim 에서 불러오고,
+# 플러그인은 vim-plug 로 받는다(Vundle 은 plain vim 쪽만 쓴다).
+if command -v nvim >/dev/null 2>&1; then
+	echo "### setup neovim (vim-plug + init.vim) ###"
+	NVIM_AUTOLOAD=${HOME}/.local/share/nvim/site/autoload
+	if [ ! -e ${NVIM_AUTOLOAD}/plug.vim ]; then
+		mkdir -p ${NVIM_AUTOLOAD}
+		curl -fLo ${NVIM_AUTOLOAD}/plug.vim \
+			https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+	fi
+	if [ ! -e ${HOME}/.config/nvim/init.vim ]; then
+		mkdir -p ${HOME}/.config/nvim
+		cat > ${HOME}/.config/nvim/init.vim <<'INITVIM'
+" nvim bootstrap: reuse the existing vim-ide configuration as-is.
+" ~/.vim and ~/.vimrc are symlinks into ~/.vim-ide (see ~/.vim-ide/install.sh).
+set runtimepath^=~/.vim runtimepath+=~/.vim/after
+let &packpath = &runtimepath
+
+" nvim 0.11+ ships default <Tab>/<S-Tab> insert-mode Lua mappings
+" (vim.snippet.jump) that supertab cannot wrap (E129). supertab maps both
+" keys itself, so dropping the defaults restores the classic behavior.
+silent! iunmap <Tab>
+silent! iunmap <S-Tab>
+
+source ~/.vimrc
+INITVIM
+	fi
+	# 플러그인 설치 + treesitter 파서(C/C++ 등) 빌드
+	nvim --headless "+set nomore" +PlugInstall +qall 2>&1 | tail -3
+	nvim --headless "+set nomore" \
+		"+TSUpdateSync c cpp lua vim vimdoc query python bash make devicetree" \
+		+qall 2>&1 | tail -3
+else
+	echo "note: nvim 이 없어 Neovim 설정(RelationView, Neogit, neo-tree 등)은"
+	echo "      건너뜁니다. Ubuntu: sudo apt-get install -y neovim"
+fi
+
 pip install pathlib
 
 echo "### vim install end ###"

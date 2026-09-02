@@ -17,6 +17,12 @@ since both provide `bin/ctags`); on Linux it uses the distribution's
 Universal Ctags when present, otherwise it builds it into `${HOME}/.local`.
 Ubuntu without build tools: `sudo apt-get install -y universal-ctags`.
 
+If `nvim` is installed, `install.sh` also sets up Neovim: it downloads
+vim-plug, writes `~/.config/nvim/init.vim` (which just sources this
+`.vimrc`) when there is none, installs the plugins with `:PlugInstall` and
+builds the treesitter parsers. Existing files are left alone, so re-running
+it is safe.
+
 ## Setup vim env
 echo '' >> ${HOME}/.profile <br/>
 echo '### Setup vim env - start ###' >> ${HOME}/.profile <br/>
@@ -54,6 +60,14 @@ echo '' >> ${HOME}/.profile <br/>
 * Git status check: uses signs to indicate added, modified and removed lines based on data of an underlying version control system.
 
 * Smooth scrolling: moves smoothly the screen when exploring source code.
+
+* Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs (`<leader>v`).
+
+* Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (`<leader>o`), built on treesitter so it needs no language server. Tagbar (F10) stays as it was.
+
+* Automatic ctags index (nvim only): `vim-gutentags` keeps a `tags` file up to date in the background - incrementally, on every write - so `<leader>fs` (`:Telescope tags`) searches every symbol in the project. Build the first index once per project with `:GutentagsUpdate!`.
+
+* Modern file tree (nvim only): `neo-tree.nvim` (`<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree (F9/F11) stays as it was.
 
 * Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
@@ -95,6 +109,12 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 <leader><leader>d: Find the functions under the cursor, and disaplys the results via quickfix window
 <leader><leader>e: Find the egrep under the cursor, and disaplys the results via quickfix window
 <leader><leader>a: Find the assignments under the cursor, and disaplys the results via quickfix window
+
+<leader>s: Neogit - Magit style git status in a new tab (s stage, u unstage, c commit, P push, ? help)
+<leader>v: DiffviewOpen - side by side diff of the working tree
+<leader>o: Toggle the aerial symbol outline of the current file
+<leader>t: Toggle the neo-tree file tree (a add, d delete, r rename)
+<leader>fs: Search every symbol in the project through the ctags index
 
 Ctrl+g: Find the keyword under the cursor, and displays the results via quickfix window
 Ctrl+n: Go to the next error in the quickfix window
