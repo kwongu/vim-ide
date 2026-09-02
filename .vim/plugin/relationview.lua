@@ -38,7 +38,8 @@
 -- symbol there does NOT rebuild the tree. Inside it, <C-]> follows the
 -- definition of the symbol under the cursor within the context window only
 -- (source windows are untouched), <C-t> returns along its own stack, and a
--- double click takes the edit window to the line under the mouse.
+-- double click follows the definition of the symbol under the mouse (same as
+-- <C-]>), and <CR> takes the edit window to the line under the cursor.
 --
 -- Options (set in .vimrc, all optional):
 --   g:relationview_position   'bottom' (default) or 'right'
@@ -50,6 +51,8 @@
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
+--   g:relationview_full_path  1: show full paths (default 1; 0 = relative
+--                             to the gtags root)
 --   g:relationview_auto_open  1: open the panel on startup (default 1)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
@@ -1121,11 +1124,17 @@ local function ctx_buf()
     { buffer = b, nowait = true, desc = 'RelationView context: goto definition' })
   vim.keymap.set('n', '<C-t>', function() ctx_tag_back() end,
     { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  -- double click follows the definition of the symbol under the mouse,
+  -- exactly like <C-]> does here
   for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do
-    vim.keymap.set('n', lhs, function() A.ctx_jump() end,
+    vim.keymap.set('n', lhs, function() ctx_tag_jump() end,
       { buffer = b, nowait = true,
-        desc = 'RelationView context: jump here in the edit window' })
+        desc = 'RelationView context: goto definition (double click)' })
   end
+  -- <CR> takes the edit window to the line under the cursor
+  vim.keymap.set('n', '<CR>', function() A.ctx_jump() end,
+    { buffer = b, nowait = true,
+      desc = 'RelationView context: open this line in the edit window' })
   s.ctx_ph = b
   return b
 end
@@ -1249,6 +1258,12 @@ ctx_tag_jump = function()
   if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
     return
   end
+  -- a double click reports where the mouse is; the keyboard path is a no-op
+  local m = vim.fn.getmousepos()
+  if m and m.winid == s.ctx_win and m.line and m.line > 0 then
+    pcall(api.nvim_win_set_cursor, s.ctx_win,
+      { m.line, math.max(0, (m.column or 1) - 1) })
+  end
   local sym = vim.fn.expand('<cword>')
   local file = s.ctx_file and s.ctx_file.path or nil
   if not is_symbol(sym, true) or not file then
@@ -1331,8 +1346,8 @@ show_context = function(loc)
       s.ctx_hl_buf = b
     end
   end
-  local label = basename(loc.path) .. ':' .. (line + off)
-      .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
+  local label = (cfg('full_path', 1) ~= 0 and loc.path or basename(loc.path))
+      .. ':' .. (line + off) .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
   pcall(function()
     vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
   end)
@@ -1369,7 +1384,13 @@ render_tree = function()
   if not t then
     return
   end
+  -- full paths by default: g:relationview_full_path = 0 shows them relative
+  -- to the gtags root instead
+  local full_path = cfg('full_path', 1) ~= 0
   local function rel(p)
+    if full_path then
+      return p
+    end
     if p:sub(1, #t.root + 1) == t.root .. '/' then
       return p:sub(#t.root + 2)
     end
@@ -1388,6 +1409,28 @@ render_tree = function()
       loc = string.format('%s:%d', rel(path), line),
       text = text, item = item, name = name }
     return rows[#rows]
+  end
+
+  -- an '#include' target: the header itself plus what it defines
+  if t.kind == 'header' then
+    raw('')
+    raw(section_line('Definition'))
+    local r = row('  ' .. basename(t.def.path), t.def.path, t.def.line,
+      t.def.text, { loc = { path = t.def.path, line = t.def.line } },
+      basename(t.def.path))
+    r.focus = true
+    raw('')
+    raw(section_line('Symbols in this file', t.defs and #t.defs or nil))
+    if not t.defs or #t.defs == 0 then
+      raw('  ' .. (t.defs_note or '(none)'))
+    else
+      for _, d in ipairs(t.defs) do
+        row('  ' .. d.name, t.def.path, d.line, d.text,
+          { loc = { path = t.def.path, line = d.line, sym = d.name } }, d.name)
+      end
+    end
+    render_rows(t, rows)
+    return
   end
 
   -- a type or a variable: definition + members, no call tree
@@ -1548,8 +1591,9 @@ render_rows = function(t, rows)
   end
   local avail = (s.win and api.nvim_win_is_valid(s.win))
       and api.nvim_win_get_width(s.win) or 80
-  wsym = math.min(wsym, math.max(24, math.floor(avail * 0.45)))
-  wloc = math.min(wloc, math.max(16, math.floor(avail * 0.35)))
+  local wide = cfg('full_path', 1) ~= 0
+  wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
+  wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
 
   local lines = header(t.sym)
   local items = {}
@@ -2083,6 +2127,72 @@ find_member = function(members, want)
   return nil
 end
 
+-- ---------------------------------------------------------------------------
+-- #include support
+-- ---------------------------------------------------------------------------
+
+-- the header named on an '#include' line, or nil
+local function include_at(buf, line)
+  local ok, l = pcall(api.nvim_buf_get_lines, buf, line - 1, line, false)
+  l = ok and l[1] or nil
+  if not l or not l:match('^%s*#%s*include') then
+    return nil
+  end
+  return l:match('"([^"]+)"') or l:match('<([^>]+)>')
+end
+
+-- absolute path of an included header. Cheap and synchronous: the file next
+-- to the including one, then the gtags path index, then 'path'.
+local function resolve_include(name, srcpath, root)
+  local dir = srcpath and vim.fs.dirname(srcpath) or nil
+  if dir then
+    local p = dir .. '/' .. name
+    if uv.fs_stat(p) then
+      return p
+    end
+  end
+  if root then
+    local prog = global_cmd()
+    if prog then
+      -- '-P' matches whole paths, so anchor the tail: 'a/b.h' -> '/a/b%.h$'
+      local pat = '/' .. name:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
+      local ok, o = pcall(function()
+        return vim.system({ prog, '-P', pat }, { text = true, cwd = root })
+          :wait(3000)
+      end)
+      if ok and o and o.stdout then
+        for rel in o.stdout:gmatch('[^\n]+') do
+          local p = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
+          if uv.fs_stat(p) then
+            return p
+          end
+        end
+      end
+    end
+  end
+  local found = vim.fn.findfile(name, vim.o.path)
+  if found ~= '' then
+    return vim.fn.fnamemodify(found, ':p')
+  end
+  return nil
+end
+
+-- every symbol gtags recorded in one file: { {name=, line=, text=} ... }
+local function file_symbols(root, path, cb)
+  run_global({ '-a', '-f', path }, root, function(lines)
+    local out = {}
+    for _, l in ipairs(lines or {}) do
+      local name, lno, _, text = l:match('^(%S+)%s+(%d+)%s+(%S+)%s?(.*)$')
+      if name then
+        out[#out + 1] = { name = name, line = tonumber(lno),
+          text = (text or ''):gsub('^%s+', '') }
+      end
+    end
+    table.sort(out, function(a, b) return a.line < b.line end)
+    cb(out)
+  end, 4000)
+end
+
 -- every occurrence of `sym` between two lines of a buffer
 local function uses_in_range(bufnr, s_, e_, sym)
   local out = {}
@@ -2249,6 +2359,37 @@ local function finish_type(gen, sym, root, opts)
   render_tree()
 end
 
+-- '#include "foo.h"': the header goes in Definition and the context window
+-- shows the file itself; the symbols gtags knows about it follow below
+local function finish_header(gen, sym, root, path)
+  if gen ~= s.gen then
+    return
+  end
+  local first = ''
+  local f = io.open(path, 'r')
+  if f then
+    first = (f:read('*l') or ''):gsub('%s+$', '')
+    f:close()
+  end
+  local t = {
+    sym = sym,
+    root = root,
+    kind = 'header',
+    def = { path = path, line = 1, text = first },
+  }
+  s.scope = nil
+  s.note = '[header]'
+  s.tree = t
+  render_tree()
+  file_symbols(root, path, function(defs)
+    if gen ~= s.gen or s.tree ~= t then
+      return
+    end
+    t.defs = defs
+    render_tree()
+  end)
+end
+
 -- manual: explicit request (:RelationView / 'r'), relaxes the guards that
 -- keep the automatic cursor path cheap
 local function update(sym, srcfile, force, manual, ctx)
@@ -2298,6 +2439,21 @@ local function update(sym, srcfile, force, manual, ctx)
         return
       end
     end
+    -- an '#include' line is about a FILE, not a symbol
+    if ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf) then
+      local inc = include_at(ctx.buf, ctx.line or 1)
+      if inc then
+        local path = resolve_include(inc, api.nvim_buf_get_name(ctx.buf), root)
+        if path then
+          finish_header(gen, inc, root, path)
+        else
+          s.note = nil
+          render_msg(inc, 'header not found: ' .. inc)
+        end
+        return
+      end
+    end
+
     render_msg(sym, 'querying gtags …')
 
     local max_refs = cfg('max_refs', 1000)
@@ -3042,6 +3198,38 @@ end
 
 api.nvim_create_autocmd({ 'VimEnter', 'UIEnter' },
   { group = group, callback = auto_open })
+
+-- Used by the <2-LeftMouse> mapping in .vimrc: when the cursor sits on an
+-- '#include' line, open that header in this window and report it as handled
+-- so the mapping does not fall through to <C-]>.
+function _G.relationview_open_include()
+  local buf = api.nvim_get_current_buf()
+  if vim.bo[buf].buftype ~= '' then
+    return false
+  end
+  local pos = api.nvim_win_get_cursor(0)
+  local inc = include_at(buf, pos[1])
+  if not inc then
+    return false
+  end
+  local file = api.nvim_buf_get_name(buf)
+  local dir = file ~= '' and vim.fs.dirname(file) or vim.fn.getcwd()
+  local done = false
+  root_for(file ~= '' and file or (dir .. '/x'), function(root)
+    local path = resolve_include(inc, file, root)
+    if path then
+      pcall(vim.cmd, [[normal! m']])
+      vim.cmd('edit ' .. vim.fn.fnameescape(path))
+      done = true
+    else
+      vim.notify('RelationView: header not found: ' .. inc,
+        vim.log.levels.WARN)
+      done = true
+    end
+  end)
+  vim.wait(3000, function() return done end, 20)
+  return true
+end
 
 if vim.fn.maparg('<F3>', 'n') == '' then
   vim.keymap.set('n', '<F3>', '<Cmd>RelationViewToggle<CR>',

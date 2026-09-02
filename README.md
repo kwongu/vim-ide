@@ -155,6 +155,15 @@ member access     the member of the type the VARIABLE was declared with,
 enum constant     the enum it belongs to, focused on that constant
 ```
 
+An `#include "foo.h"` or `#include <a/b.h>` line is about a file, not a
+symbol: the header goes in the Definition section (with the symbols gtags
+knows about it below) and the context window shows the header itself. The
+header is looked up next to the including file, then in the GTAGS path
+index, then in 'path'.
+
+Paths are shown in full; `g:relationview_full_path = 0` shows them relative
+to the gtags root instead (useful in a narrow panel).
+
 The row under the panel cursor has its symbol coloured sky blue, and the
 same symbol is highlighted in the context window.
 
@@ -204,6 +213,13 @@ Keys inside the panel:
 ```
 Enter: jump to the call site under the cursor (lands on the symbol)
 double click: same jump, with the mouse
+
+In the edit window a double click behaves like `Ctrl+]` (jump to the
+symbol under the mouse), and on an `#include` line it opens that header.
+In the context window a double click follows the definition of the symbol
+under the mouse - like `Ctrl+]` there - while `Enter` takes the edit window
+to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
+keep their own double-click behaviour.
 mouse button 4 (back): return to where the last jump came from; inside
        the context window it walks that window's own stack instead
 o:     jump but keep focus in the panel (peek)

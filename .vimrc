@@ -465,6 +465,39 @@ nmap <C-\><C-]> :GtagsCursor<CR>
 nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
 nmap <C-t> <C-o><CR>
 
+"------------------------------------------------------------------------------
+"- 마우스 더블클릭 = <C-]> (심볼 정의로 점프)
+"- '#include "foo.h"' / '#include <a/b.h>' 줄에서는 그 헤더 파일을 연다.
+"- quickfix, NERDTree, Tagbar, RelationView 등 특수 창은 각자의 동작을 유지한다
+"- (버퍼 로컬 매핑이 우선하고, buftype 이 빈 일반 파일 창에서만 아래가 동작).
+"------------------------------------------------------------------------------
+function! s:RvMouseJump() abort
+	" 특수 버퍼(quickfix, help, terminal ...)는 기본 더블클릭 동작 유지
+	if &buftype !=# ''
+		execute "normal! \<2-LeftMouse>"
+		return
+	endif
+	" #include 줄이면 그 헤더로 이동 (nvim + relationview.lua 가 있을 때)
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	" 그 밖에는 커서 아래 심볼로 점프 (<C-]> 매핑을 그대로 사용)
+	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
+		execute "normal \<C-]>"
+	else
+		execute "normal! \<2-LeftMouse>"
+	endif
+endfunction
+
+nnoremap <silent> <2-LeftMouse> :call <SID>RvMouseJump()<CR>
+nnoremap <silent> <3-LeftMouse> :call <SID>RvMouseJump()<CR>
+nnoremap <silent> <4-LeftMouse> :call <SID>RvMouseJump()<CR>
+
 nmap <Leader>g <ESC>:Gtags<SPACE>
 nmap <Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>
 nmap <Leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
