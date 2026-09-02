@@ -322,21 +322,32 @@ nnoremap <silent> <Leader>t <Cmd>Neotree toggle<CR>
 
 " ------------------------------------
 " gutentags: ctags 자동 색인 (소스인사이트식 심볼 DB)
-"   커널 트리에서 저장마다 전체 재색인이 돌면 발열/멈춤이 생기므로,
-"   없는 tags 를 자동 생성하지는 않고 이미 있는 tags 만 저장 시 증분
-"   갱신한다. 첫 색인은 프로젝트 루트에서 한 번:  :GutentagsUpdate!
-"   (F2 의 mktags.sh 가 만드는 GTAGS 는 RelationView/:Gtags 용으로 그대로)
+"   tags 가 없으면 백그라운드에서 한 번 만들고, 저장할 때마다 그 파일만
+"   증분 갱신한다(전체 재색인이 아니라서 커널 트리에서도 가볍다).
+"   수동 전체 재색인은 :GutentagsUpdate!
+"   GTAGS 는 ~/.vim/plugin/autoindex.lua 가 같은 방식으로 관리한다
+"   (:GtagsIndex / :GtagsIndexUpdate / :GtagsIndexStatus)
 " ------------------------------------
 let g:gutentags_modules = ['ctags']
 let g:gutentags_define_advanced_commands = 1
 let g:gutentags_project_root = ['.git', '.project', '.root']
 let g:gutentags_add_default_project_roots = 0
 let g:gutentags_cache_dir = expand('~/.cache/tags')
-let g:gutentags_generate_on_new = 0
-let g:gutentags_generate_on_missing = 0
+let g:gutentags_generate_on_new = 1
+let g:gutentags_generate_on_missing = 1
 let g:gutentags_generate_on_write = 1
 let g:gutentags_generate_on_empty_buffer = 0
-let g:gutentags_ctags_extra_args = ['--fields=+niazS', '--extras=+q',
+" 색인할 파일은 indexfiles.sh 가 정한다(ctags 와 gtags 가 같은 목록을 쓴다):
+"   .indexfiles -> cscope.files(F2) -> git ls-files -> find
+" 커널처럼 큰 트리는 git 이 추적하는 소스만, 그 밖의 프로젝트는 .indexfiles
+" 에 원하는 파일만 적어두면 딱 그만큼만 색인한다. 목록이 있으면 아래
+" gutentags_ctags_exclude 는 쓰이지 않는다(목록 자체가 필터다).
+if executable(expand('~/.local/bin/indexfiles.sh'))
+	let g:gutentags_file_list_command = expand('~/.local/bin/indexfiles.sh')
+endif
+" '--extras=+q' 는 심볼마다 정규화 이름을 하나 더 넣어 tags 가 크게 부푼다
+" (커널 트리에서 눈에 띄게 차이가 난다). 줄 번호와 시그니처만 담는다.
+let g:gutentags_ctags_extra_args = ['--fields=+nS',
 			\ '--c-kinds=+px', '--c++-kinds=+px']
 let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 			\ 'Documentation', '*.json', '*.min.js', '*.o', '*.a',
@@ -1311,7 +1322,6 @@ func! NeoTreeOnlyLeft()
 	:Neotree toggle left
 endfunc
 func! NeoTreeOnlyRight()
-	:TagbarClose
 	:Neotree toggle right
 endfunc
 

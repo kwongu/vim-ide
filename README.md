@@ -65,7 +65,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (`<leader>o`), built on treesitter so it needs no language server. Tagbar (F10) stays as it was.
 
-* Automatic ctags index (nvim only): `vim-gutentags` keeps a `tags` file up to date in the background - incrementally, on every write - so `<leader>fs` (`:Telescope tags`) searches every symbol in the project. Build the first index once per project with `:GutentagsUpdate!`.
+* Automatic symbol index (nvim only): both indexes maintain themselves. `vim-gutentags` keeps the ctags `tags` file current and `~/.vim/plugin/autoindex.lua` does the same for GTAGS (`global --single-update` on every write, a background build when a project has none yet), so RelationView, `:Gtags` and `<leader>fs` are always in sync without pressing F2. Which files get indexed is decided in one place - `~/.local/bin/indexfiles.sh`: a project's own `.indexfiles`, else `cscope.files` (what F2 writes), else `git ls-files`, else a find over the source extensions. Drop an `.indexfiles` in a project root to index exactly the files you care about. Trees larger than `g:autoindex_ctags_max_files` (5000) are indexed by gtags only, because a kernel-sized ctags file (~1GB, 4.8M tags) is too big to be useful; `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive it by hand.
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
@@ -115,6 +115,8 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 <leader>o: Toggle the aerial symbol outline of the current file
 <leader>t: Toggle the neo-tree file tree, same as F9 (a add, d delete, r rename)
 <leader>fs: Search every symbol in the project through the ctags index
+:GtagsIndex / :GtagsIndexUpdate / :GtagsIndexStatus: GTAGS index by hand
+:GutentagsUpdate!: rebuild the ctags index of this project by hand
 
 Ctrl+g: Find the keyword under the cursor, and displays the results via quickfix window
 Ctrl+n: Go to the next error in the quickfix window
