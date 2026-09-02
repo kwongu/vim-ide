@@ -222,6 +222,9 @@ local s = {
   shown = nil,        -- symbol of the last render (cursor reset on change)
   ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
   scope = nil,        -- function range a variable view is valid for
+  rendered_w = nil,   -- panel geometry the current layout was computed for
+  rendered_h = nil,
+  rs_timer = nil,     -- resize debounce
   as_type = false,    -- the current view read the symbol as a type usage
   warned = false,
 }
@@ -1624,8 +1627,12 @@ render_rows = function(t, rows)
       wloc = math.max(wloc, vim.fn.strwidth(r.loc))
     end
   end
-  local avail = (s.win and api.nvim_win_is_valid(s.win))
-      and api.nvim_win_get_width(s.win) or 80
+  local avail = 80
+  if s.win and api.nvim_win_is_valid(s.win) then
+    avail = api.nvim_win_get_width(s.win)
+    s.rendered_w = avail
+    s.rendered_h = api.nvim_win_get_height(s.win)
+  end
   -- 'symbol | path' only by default: g:relationview_show_text = 1 puts the
   -- source line back as a third column
   local show_text = cfg('show_text', 0) ~= 0
@@ -3168,6 +3175,38 @@ end
 api.nvim_create_autocmd('CursorHold', { group = group, callback = on_hold })
 api.nvim_create_autocmd('ColorScheme',
   { group = group, callback = set_highlights })
+
+-- the column widths (and therefore how much of each path fits) come from
+-- the panel's size, so a resize has to lay the rows out again
+api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+  group = group,
+  callback = function()
+    if not (s.tree and s.win and api.nvim_win_is_valid(s.win)) then
+      return
+    end
+    if api.nvim_win_get_width(s.win) == s.rendered_w
+        and api.nvim_win_get_height(s.win) == s.rendered_h then
+      return
+    end
+    if not s.rs_timer then
+      s.rs_timer = uv.new_timer()
+    end
+    s.rs_timer:stop()
+    s.rs_timer:start(50, 0, vim.schedule_wrap(function()
+      if not (s.tree and s.win and api.nvim_win_is_valid(s.win)) then
+        return
+      end
+      -- keep the cursor and the scroll position across the re-render
+      local view
+      api.nvim_win_call(s.win, function() view = vim.fn.winsaveview() end)
+      render_tree()
+      if view then
+        api.nvim_win_call(s.win, function() vim.fn.winrestview(view) end)
+      end
+      hl_cursor_row()
+    end))
+  end,
+})
 
 local function open_and_query(arg)
   panel_open()

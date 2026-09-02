@@ -142,7 +142,9 @@ definition and the caller tree:
 
 Each row is the symbol and where it is; the source line itself is one
 keystroke away in the context window (`g:relationview_show_text = 1` puts
-it back as a third column).
+it back as a third column). Resizing the panel (`Shift+h` / `Shift+l`, or
+resizing the terminal) lays the columns out again, so the paths always use
+the width that is actually there.
 
 What the panel shows depends on the symbol under the cursor:
 
