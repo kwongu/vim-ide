@@ -498,6 +498,14 @@ nnoremap <silent> <2-LeftMouse> :call <SID>RvMouseJump()<CR>
 nnoremap <silent> <3-LeftMouse> :call <SID>RvMouseJump()<CR>
 nnoremap <silent> <4-LeftMouse> :call <SID>RvMouseJump()<CR>
 
+"------------------------------------------------------------------------------
+"- 마우스 뒤로/앞으로 버튼 = <C-o> / <C-i> (점프 목록 이동)
+"- RelationView 패널에서는 편집 창의 점프 목록을 움직이고, ContextView 에서는
+"- 그 창의 <C-]> 스택을 되돌린다(각 창의 버퍼 로컬 매핑이 우선).
+"------------------------------------------------------------------------------
+nnoremap <X1Mouse> <C-o>
+nnoremap <X2Mouse> <C-i>
+
 nmap <Leader>g <ESC>:Gtags<SPACE>
 nmap <Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>
 nmap <Leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
@@ -1064,8 +1072,8 @@ endif
 let g:relationview_position = 'right'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
-let g:relationview_width = 60
-let g:relationview_context_height = 25
+let g:relationview_width = 65
+let g:relationview_context_height = 40
 
 
 "==============================================================================

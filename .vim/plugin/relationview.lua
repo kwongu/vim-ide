@@ -17,7 +17,7 @@
 -- Inside the panel:
 --   <Enter> jump to the call site   o  jump but keep focus in the panel
 --   double click            jump to the clicked entry in the edit window
---   mouse button 4 (back)   return to where that jump came from
+--   mouse button 4 / 5      back / forward, like <C-o> / <C-i>
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
 --   x  export the current tree as an HTML graph and open it in a browser
@@ -216,7 +216,6 @@ local s = {
   ctx_last = nil,     -- last location shown in the context window
   ctx_timer = nil,    -- context update debounce timer
   ctx_stack = {},     -- <C-]> jump stack of the context window (<C-t> pops)
-  jump_stack = {},    -- positions the panel jumped away from (mouse back)
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
   ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
@@ -886,6 +885,9 @@ local function ensure_buf()
   -- 'g' would swallow the first key of 'gg', so the graph lives on 'x'
   bmap('x', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
+  -- the mouse side buttons act on the source window while the list has focus
+  bmap('<X1Mouse>', function() A.back() end, 'RelationView: back (<C-o>)')
+  bmap('<X2Mouse>', function() A.forward() end, 'RelationView: forward (<C-i>)')
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
@@ -1137,6 +1139,9 @@ local function ctx_buf()
   vim.keymap.set('n', '<CR>', function() A.ctx_jump() end,
     { buffer = b, nowait = true,
       desc = 'RelationView context: open this line in the edit window' })
+  -- in the preview the back button walks the same stack as <C-t>
+  vim.keymap.set('n', '<X1Mouse>', function() ctx_tag_back() end,
+    { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
   s.ctx_ph = b
   return b
 end
@@ -1328,8 +1333,9 @@ ctx_tag_back = function()
     return
   end
   s.ctx_last = nil
-  show_context({ path = prev.path, line = prev.line, sym = prev.sym,
-    col = prev.col })
+  -- no 'sym' here on purpose: the recorded line/column is the exact spot,
+  -- re-locating the symbol could land back where we just came from
+  show_context({ path = prev.path, line = prev.line, col = prev.col or 0 })
 end
 
 show_context = function(loc)
@@ -2701,17 +2707,6 @@ local function jump_to(loc, peek)
   end
   local buf = vim.fn.bufadd(loc.path)
   vim.bo[buf].buflisted = true
-  -- remember where this window was: 'm is only a mark, it does not push a
-  -- jumplist entry, so keep our own stack for the mouse back button
-  local from = api.nvim_win_get_buf(win)
-  if api.nvim_buf_is_valid(from) and api.nvim_buf_get_name(from) ~= '' then
-    local p = api.nvim_win_get_cursor(win)
-    if #s.jump_stack > 100 then
-      table.remove(s.jump_stack, 1)
-    end
-    s.jump_stack[#s.jump_stack + 1] =
-      { win = win, buf = from, line = p[1], col = p[2] }
-  end
   api.nvim_win_call(win, function()
     pcall(vim.cmd, [[normal! m']])
   end)
@@ -2769,15 +2764,12 @@ function A.mouse_jump(peek)
   A.jump(peek)
 end
 
--- mouse back button: go back to where the last jump came from. Inside the
--- context window it pops that window's own stack; in the panel it rewinds
--- the source window; anywhere else it is a plain jumplist step back.
-function A.back()
+-- Back / forward = the jumplist, exactly like <C-o> / <C-i> (our own jumps
+-- land there too). From the panel they move the source window, since a
+-- jumplist inside the list itself would mean nothing; the preview walks its
+-- own <C-]> stack instead.
+local function jumplist_step(lhs)
   local cur = api.nvim_get_current_win()
-  if s.ctx_win and cur == s.ctx_win then
-    ctx_tag_back()
-    return
-  end
   local win = cur
   if s.buf and api.nvim_win_get_buf(cur) == s.buf then
     win = pick_src_win()
@@ -2785,27 +2777,33 @@ function A.back()
   if not (win and api.nvim_win_is_valid(win)) then
     return
   end
-  -- undo our own jumps exactly; fall back to the jumplist once they run out
-  local e = table.remove(s.jump_stack)
-  while e and not api.nvim_buf_is_valid(e.buf) do
-    e = table.remove(s.jump_stack)
-  end
-  if e then
-    local target = api.nvim_win_is_valid(e.win) and e.win ~= s.ctx_win
-        and e.win or win
-    api.nvim_win_set_buf(target, e.buf)
-    api.nvim_win_call(target, function()
-      pcall(api.nvim_win_set_cursor, target, { e.line, e.col })
-      vim.cmd('normal! zz')
-    end)
-    if api.nvim_get_current_win() ~= target and cur ~= s.win then
-      api.nvim_set_current_win(target)
-    end
+  -- ':normal! <C-i>' does not move the jumplist forward, so feed the key
+  -- with the target window current and hand the focus straight back
+  local keys = api.nvim_replace_termcodes(lhs, true, false, true)
+  if win == cur then
+    api.nvim_feedkeys(keys, 'nx', false)
     return
   end
-  api.nvim_win_call(win, function()
-    vim.cmd('silent! normal! ' .. string.char(15)) -- <C-o>
-  end)
+  api.nvim_set_current_win(win)
+  api.nvim_feedkeys(keys, 'nx', false)
+  if api.nvim_win_is_valid(cur) then
+    api.nvim_set_current_win(cur)
+  end
+end
+
+function A.back()
+  if s.ctx_win and api.nvim_get_current_win() == s.ctx_win then
+    ctx_tag_back()
+    return
+  end
+  jumplist_step('<C-o>')
+end
+
+function A.forward()
+  if s.ctx_win and api.nvim_get_current_win() == s.ctx_win then
+    return -- the preview stack has no forward step
+  end
+  jumplist_step('<C-i>')
 end
 
 -- expand/collapse the caller node under the cursor.
@@ -3258,9 +3256,4 @@ if vim.fn.maparg('<F3>', 'n') == '' then
     { desc = 'RelationView toggle' })
 end
 
--- the mouse back button must work where the double-click jump lands the
--- cursor, so it is global (claimed only when nothing else has mapped it)
-if vim.fn.maparg('<X1Mouse>', 'n') == '' then
-  vim.keymap.set('n', '<X1Mouse>', function() A.back() end,
-    { desc = 'RelationView: back (mouse button 4)' })
-end
+

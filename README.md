@@ -221,8 +221,10 @@ under the mouse - like `Ctrl+]` there - and on an `#include` line it opens
 that header in the context window (`Ctrl+t` or the mouse back button
 returns), while `Enter` takes the edit window to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
 keep their own double-click behaviour.
-mouse button 4 (back): return to where the last jump came from; inside
-       the context window it walks that window's own stack instead
+mouse button 4 / 5: back / forward, exactly like Ctrl+o / Ctrl+i (the
+       panel's jumps land in the jumplist too, so they are undone the same
+       way); from the panel they move the edit window, and in the context
+       window the back button walks that window's own stack
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)
