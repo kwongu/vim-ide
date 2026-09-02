@@ -53,6 +53,8 @@
 --   g:relationview_max_sites  call sites listed per caller (default 8)
 --   g:relationview_full_path  1: absolute paths; default 0 = relative to
 --                             vim's current directory (:pwd)
+--   g:relationview_show_text  1: also show the source line (default 0:
+--                             only the symbol and its file:line)
 --   g:relationview_auto_open  1: open the panel on startup (default 1)
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
@@ -1619,9 +1621,18 @@ render_rows = function(t, rows)
   end
   local avail = (s.win and api.nvim_win_is_valid(s.win))
       and api.nvim_win_get_width(s.win) or 80
-  local wide = cfg('full_path', 0) ~= 0
-  wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
-  wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
+  -- 'symbol | path' only by default: g:relationview_show_text = 1 puts the
+  -- source line back as a third column
+  local show_text = cfg('show_text', 0) ~= 0
+  if show_text then
+    local wide = cfg('full_path', 0) ~= 0
+    wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
+    wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
+  else
+    -- no source column: the symbol keeps what it needs, the path gets the rest
+    wsym = math.min(wsym, math.max(24, math.floor(avail * 0.5)))
+    wloc = math.min(wloc, math.max(16, avail - wsym - 3))
+  end
 
   local lines = header(t.sym)
   local items = {}
@@ -1631,8 +1642,12 @@ render_rows = function(t, rows)
       lines[#lines + 1] = r.text
     else
       local symcell = pad(trunc_w(r.sym, wsym), wsym)
-      lines[#lines + 1] = string.format('%s  %s │ %s',
-        symcell, pad(trunc_tail(r.loc, wloc), wloc), trunc(r.text, 200))
+      if show_text then
+        lines[#lines + 1] = string.format('%s  %s │ %s',
+          symcell, pad(trunc_tail(r.loc, wloc), wloc), trunc(r.text, 200))
+      else
+        lines[#lines + 1] = symcell .. '  ' .. trunc_tail(r.loc, wloc)
+      end
       items[#lines] = r.item
       if r.item and r.name then
         local st = symcell:find(r.name, 1, true)

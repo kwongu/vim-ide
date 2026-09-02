@@ -130,15 +130,19 @@ definition and the caller tree:
 
 ```
 ── Definition ──────────────────────
-  util_log             src/util.c:4  │ void util_log(const char *msg)
+  util_log             src/util.c:4
 ── Callers (4) ─────────────────────
-  ├─[+] main           src/main.c:12 │ util_log("done");
-  ├─[-] util_add (x2)  src/util.c:11 │ util_log("add");
-  │   ·  util_add      src/util.c:16 │ util_log("add again");
-  │  ├─[+] helper      src/main.c:5  │ return util_add(x, 1);
-  │  └─[+] util_mul    src/util.c:19 │ r = util_add(r, a);
-  └─[+] rec_a          src/util.c:30 │ util_log("a");
+  ├─[+] main           src/main.c:12
+  ├─[-] util_add (x2)  src/util.c:11
+  │   ·  util_add      src/util.c:16
+  │  ├─[+] helper      src/main.c:5
+  │  └─[+] util_mul    src/util.c:19
+  └─[+] rec_a          src/util.c:30
 ```
+
+Each row is the symbol and where it is; the source line itself is one
+keystroke away in the context window (`g:relationview_show_text = 1` puts
+it back as a third column).
 
 What the panel shows depends on the symbol under the cursor:
 
