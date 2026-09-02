@@ -8,6 +8,15 @@ git clone --depth 1 --recurse-submodules https://github.com/kwongu/vim-ide.git $
 cd ${HOME}/.vim-ide <br/>
 ./install.sh
 
+`install.sh` also installs the tools the IDE needs, skipping whatever is
+already there: vim, cscope, GNU Global (gtags) and **Universal Ctags**
+(tagbar's symbol list comes from ctags, and Exuberant Ctags 5.8 misses
+C11 anonymous structs and newer kinds). On macOS it uses
+`brew install universal-ctags` (unlinking the old `ctags` formula first,
+since both provide `bin/ctags`); on Linux it uses the distribution's
+Universal Ctags when present, otherwise it builds it into `${HOME}/.local`.
+Ubuntu without build tools: `sudo apt-get install -y universal-ctags`.
+
 ## Setup vim env
 echo '' >> ${HOME}/.profile <br/>
 echo '### Setup vim env - start ###' >> ${HOME}/.profile <br/>

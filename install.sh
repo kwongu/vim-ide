@@ -51,6 +51,48 @@ make -j8 && make install
 cd -
 rm -rf global-6.6.11
 fi
+
+# Preinstall for Universal Ctags
+# Tagbar 의 심볼 목록은 ctags 가 만든다. Exuberant Ctags 5.8(2009) 은 C11 익명
+# 구조체/최신 kind 를 놓치므로 Universal Ctags 를 쓴다. 이미 있으면 건너뛴다.
+find_universal_ctags() {
+	for c in "${HOME}/.local/bin/ctags" uctags ctags; do
+		if command -v "$c" >/dev/null 2>&1; then
+			if "$c" --version 2>/dev/null | grep -qi 'universal ctags'; then
+				echo "$c"
+				return 0
+			fi
+		fi
+	done
+	return 1
+}
+
+if UCTAGS=$(find_universal_ctags); then
+	echo "### Universal Ctags: ${UCTAGS} (already installed) ###"
+elif [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+	echo "### install Universal Ctags (brew) ###"
+	# 구 ctags(Exuberant) 포뮬러와 bin/ctags 가 충돌하므로 먼저 unlink 한다
+	# (되돌리려면: brew unlink universal-ctags && brew link ctags)
+	if brew list ctags >/dev/null 2>&1; then
+		brew unlink ctags
+	fi
+	brew install universal-ctags
+elif command -v autoconf >/dev/null 2>&1 && command -v automake >/dev/null 2>&1; then
+	echo "### build Universal Ctags -> ${HOME}/.local ###"
+	cd ${VIMIDE}/.program
+	rm -rf ctags
+	git clone --depth 1 https://github.com/universal-ctags/ctags.git
+	cd ctags
+	./autogen.sh && ./configure --prefix=${HOME}/.local && make -j8 && make install
+	cd -
+	rm -rf ctags
+	cd ${VIMIDE}
+else
+	echo "note: Universal Ctags 를 설치하지 못했습니다(Tagbar 는 기존 ctags 로 동작)."
+	echo "      Ubuntu: sudo apt-get install -y universal-ctags"
+	echo "      또는  : sudo apt-get install -y autoconf automake pkg-config gcc make"
+	echo "              설치 후 ./install.sh 를 다시 실행하면 소스로 빌드합니다."
+fi
 cd ${VIMIDE}
 
 pip install pathlib

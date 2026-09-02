@@ -877,6 +877,23 @@ endfunction
 "==============================================================================
 "= Tagbar
 "==============================================================================
+
+"------------------------------------------------------------------------------
+"- Tagbar 는 Universal Ctags 를 쓴다. Exuberant Ctags 5.8(2009) 은 C11 익명
+"- 구조체/최신 kind 를 제대로 못 읽는다. install.sh 가 설치해 준다:
+"-   mac    : brew install universal-ctags (구 ctags 포뮬러는 unlink)
+"-   ubuntu : /usr/bin/ctags 가 이미 Universal 이거나 ~/.local 에 소스 빌드
+"- 아래 순서대로 처음 찾은 것을 쓴다(직접 지정하려면 g:tagbar_ctags_bin 설정).
+"------------------------------------------------------------------------------
+if !exists('g:tagbar_ctags_bin')
+	for s:ctags_cand in [$HOME . '/.local/bin/ctags', 'uctags', 'ctags']
+		if executable(s:ctags_cand)
+			let g:tagbar_ctags_bin = s:ctags_cand
+			break
+		endif
+	endfor
+	unlet! s:ctags_cand
+endif
 "let g:tagbar_left=0
 let g:tagbar_left=1
 let g:tagbar_sort=0
