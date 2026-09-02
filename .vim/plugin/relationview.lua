@@ -863,10 +863,15 @@ local function ensure_buf()
       syntax match RvHint     /^  \[.*/
       syntax match RvSection  /^──.*/
       syntax match RvMarker   /\[[-+…]\]\|↺\|·/
-      syntax match RvName     /\%(\[[-+…]\] \|↺ \|· \)\zs\S\+/
+      " a real lookbehind, not '\zs': RvMarker already matches at the '['
+      " and would otherwise consume the position before this rule is tried
+      syntax match RvName     /\%(\[[-+…]\] \|↺ \|· \)\@<=\S\+/
       syntax match RvName     /^  \zs\S\+\ze\s\s/
-      syntax match RvLoc      /\S\+:\d\+\ze\s*│/
-      syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++ more.*/
+      " the source column may be off (g:relationview_show_text = 0), so the
+      " path can be followed by the '│' separator or by end of line
+      syntax match RvLoc      /\S\+:\d\+\ze\s*\%(│\|$\)/
+      " '(x2)', '(util.h)' and the notes are dim: they are not symbols
+      syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++\? more.*\|([^ )]\+\.[^ )]\+)/
     ]])
   end)
   local function bmap(lhs, fn, desc)
