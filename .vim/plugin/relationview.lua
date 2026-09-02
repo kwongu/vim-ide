@@ -276,8 +276,67 @@ local ensure_ctx
 local update_context
 local group = api.nvim_create_augroup('RelationView', { clear = true })
 
+-- The database lives in a hidden directory in the project root
+-- ('<root>/.tags/'), see ~/.vim/plugin/autoindex.lua. global(1) only finds it
+-- through GTAGSROOT/GTAGSDBPATH, so every child process started here gets
+-- them explicitly instead of relying on whatever the environment holds.
+local function db_dir()
+  local d = vim.g.autoindex_dbdir
+  if d == nil then
+    d = '.tags'
+  end
+  if d == '' or d == '.' then
+    return nil
+  end
+  return (tostring(d):gsub('/+$', ''))
+end
+
+local function db_path(root)
+  local d = db_dir()
+  return d and (root .. '/' .. d) or root
+end
+
+-- global(1) finds '<dir>/$GTAGSOBJDIR/GTAGS' as it walks up, so one value
+-- works for every project (autoindex.lua exports it for the session too)
+local function db_env()
+  local d = db_dir()
+  return d and { GTAGSOBJDIR = d } or nil
+end
+
+-- nearest directory at or above `dir` that holds a database
+local function db_root(dir)
+  local d, hidden = dir, db_dir()
+  while d and d ~= '' do
+    if (hidden and uv.fs_stat(d .. '/' .. hidden .. '/GTAGS'))
+        or uv.fs_stat(d .. '/GTAGS') then
+      return d
+    end
+    local parent = vim.fs.dirname(d)
+    if not parent or parent == d then
+      return nil
+    end
+    d = parent
+  end
+  return nil
+end
+
+-- global compares an absolute argument against the real path of the project,
+-- so a tree reached through a symlink ('/tmp' -> '/private/tmp') is rejected
+-- as 'out of the source project'. Relative to the root it always matches.
+local function rel_to(root, path)
+  if root and path:sub(1, #root + 1) == root .. '/' then
+    return path:sub(#root + 2)
+  end
+  local rp = root and uv.fs_realpath(root)
+  local pp = uv.fs_realpath(path)
+  if rp and pp and pp:sub(1, #rp + 1) == rp .. '/' then
+    return pp:sub(#rp + 2)
+  end
+  return path
+end
+
 local function gtags_mtime(root)
-  local st = uv.fs_stat(root .. '/GTAGS')
+  local st = uv.fs_stat(db_path(root) .. '/GTAGS')
   return st and st.mtime.sec or -1
 end
 
@@ -323,6 +382,7 @@ local function run_global(args, cwd, cb, cap)
   end
   local full = { prog }
   vim.list_extend(full, args)
+  local env = db_env()
 
   local chunks, nlines, delivered = {}, 0, false
   local obj
@@ -345,7 +405,8 @@ local function run_global(args, cwd, cb, cap)
     end
   end
 
-  local ok, ret = pcall(vim.system, full, { cwd = cwd, stdout = on_stdout },
+  local ok, ret = pcall(vim.system, full,
+    { cwd = cwd, env = env, stdout = on_stdout },
     function(o)
       vim.schedule(function()
         local out = table.concat(chunks)
@@ -396,13 +457,11 @@ local function get_root(dir, cb)
     cb(hit)
     return
   end
-  run_global({ '-p' }, dir, function(lines)
-    local root = lines and lines[1] or ''
-    if root ~= '' then
-      s.roots[dir] = root
-    end
-    cb(root ~= '' and root or nil)
-  end, 2)
+  local root = db_root(dir)
+  if root then
+    s.roots[dir] = root
+  end
+  cb(root)
 end
 
 -- The database ':Gtags' uses is the one above the WORKING directory. A tree
@@ -436,7 +495,7 @@ local function get_filedefs(root, mtime, path, cb)
     return
   end
   s.inflight[key] = { cb }
-  run_global({ '-a', '-f', path }, root, function(lines)
+  run_global({ '-a', '-f', rel_to(root, path) }, root, function(lines)
     local defs = {}
     if lines then
       for _, l in ipairs(lines) do
@@ -2230,8 +2289,8 @@ resolve_include = function(name, srcpath, root)
       -- '-P' matches whole paths, so anchor the tail: 'a/b.h' -> '/a/b%.h$'
       local pat = '/' .. name:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
       local ok, o = pcall(function()
-        return vim.system({ prog, '-P', pat }, { text = true, cwd = root })
-          :wait(3000)
+        return vim.system({ prog, '-P', pat },
+          { text = true, cwd = root, env = db_env() }):wait(3000)
       end)
       if ok and o and o.stdout then
         for rel in o.stdout:gmatch('[^\n]+') do
@@ -2252,7 +2311,7 @@ end
 
 -- every symbol gtags recorded in one file: { {name=, line=, text=} ... }
 local function file_symbols(root, path, cb)
-  run_global({ '-a', '-f', path }, root, function(lines)
+  run_global({ '-a', '-f', rel_to(root, path) }, root, function(lines)
     local out = {}
     for _, l in ipairs(lines or {}) do
       local name, lno, _, text = l:match('^(%S+)%s+(%d+)%s+(%S+)%s?(.*)$')

@@ -11,7 +11,14 @@ if ! command -v gtags >/dev/null 2>&1; then
 	exit 1
 fi
 
+# The databases live in a hidden directory ('.tags/'), so nothing shows up
+# in the source tree; DBPATH keeps the old layout reachable with
+#   DBPATH=. ./mktags.sh
+DBPATH="${DBPATH:-.tags}"
+mkdir -p "${DBPATH}"
+
 rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags
+rm -f "${DBPATH}/GPATH" "${DBPATH}/GRTAGS" "${DBPATH}/GTAGS"
 
 DIRS=$@
 
@@ -30,13 +37,13 @@ build_gtags()
 	if [ "${arg1}" = "dir" ]
 	then
 		echo "### start: gtags ${DIRS} ###"
-		time gtags ${DIRS}
+		time gtags ${DIRS} "${DBPATH}"
 		echo "### end: gtags ${DIRS} ###"
 
 	else
-		echo "### start: gtags -f cscope.files ###"
-		time gtags -f cscope.files
-		echo "### end: gtags -f cscope.files ###"
+		echo "### start: gtags -f cscope.files ${DBPATH} ###"
+		time gtags -f cscope.files "${DBPATH}"
+		echo "### end: gtags -f cscope.files ${DBPATH} ###"
 		#echo "### start: gtags-cscope -F cscope.files ###"
 		#time gtags-cscope -F cscope.files
 		#echo "### end: gtags-cscope -F cscope.files ###"
@@ -76,3 +83,7 @@ fi
 
 #build_cscope
 echo "############  end make tags ############"
+if [ "${DBPATH}" != "." ]; then
+	echo "database: ${DBPATH}/  (nvim finds it by itself; in a shell use:"
+	echo "          eval \"\$(gtagsenv.sh)\" )"
+fi

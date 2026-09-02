@@ -31,7 +31,8 @@ elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 elif [ -f cscope.files ]; then
 	grep -v '^[[:space:]]*$' cscope.files
 else
-	find . \( -name .git -o -name .svn -o -name node_modules \) -prune -o \
+	find . \( -name .git -o -name .svn -o -name node_modules \
+		-o -name .tags \) -prune -o \
 		-type f \( -name '*.dts' -o -name '*.dtsi' -o -name '*.c' \
 		-o -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.s' \
 		-o -name '*.S' -o -name '*.reg' \) -print

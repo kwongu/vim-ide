@@ -353,6 +353,32 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 			\ 'Documentation', '*.json', '*.min.js', '*.o', '*.a',
 			\ '*.so', '*.ko', '*.cmd', 'GTAGS', 'GRTAGS', 'GPATH']
 
+" ------------------------------------
+" autoindex.lua: GTAGS 자동 색인
+"   * vim 을 켜면 현재 프로젝트 색인을 백그라운드로 갱신한다
+"     (있으면 증분 'gtags -i', 없으면 전체 빌드. 커널 69k 파일 기준
+"      변경이 없으면 2초, 전체 빌드는 26초 정도)
+"   * 파일을 저장하면 그 파일만 즉시 갱신한다
+"   * GTAGS/GRTAGS/GPATH 는 프로젝트 루트의 숨김 디렉터리 '.tags/' 에 만든다
+"     (예전처럼 루트에 있던 DB 는 처음 열 때 .tags/ 로 옮긴다).
+"     찾는 방법은 $GTAGSOBJDIR 한 줄 - 아래 Telescope 블록 위를 보라.
+"     터미널에서 global 을 쓸 때는:  eval "$(gtagsenv.sh)"
+"   :GtagsIndex(전체) :GtagsIndexRefresh(증분) :GtagsIndexUpdate(현재 파일)
+"   :GtagsIndexStatus(상태)
+" 바꾸고 싶으면:
+"   let g:autoindex_dbdir = '.tags'   " '' 로 두면 예전처럼 루트에 만든다
+"   let g:autoindex_startup = 0       " 시작 시 자동 색인 끄기
+"   let g:autoindex_startup_ctags = 0 " 시작 시 ctags 갱신만 끄기
+"   let g:autoindex_notify = 0        " 알림 끄기
+" ------------------------------------
+
+" 색인은 프로젝트 루트의 숨김 디렉터리 '.tags/' 에 있다. global(1) 은 위로
+" 올라가며 '<dir>/$GTAGSOBJDIR/GTAGS' 도 함께 찾으므로, 이 한 줄이면
+" :Gtags/gtags-cscope/RelationView/':!global' 이 모두 같은 DB 를 본다
+" (루트에 예전처럼 GTAGS 가 있는 프로젝트도 그대로 동작한다).
+" 터미널에서도 쓰려면 ~/.zshenv 에:  export GTAGSOBJDIR=.tags
+let $GTAGSOBJDIR = get(g:, 'autoindex_dbdir', '.tags')
+
 " Find files using Telescope command-line sugar.
 nnoremap <leader>fi <cmd>Telescope git_commits<cr>
 nnoremap <leader>ff <cmd>Telescope find_files<cr>
@@ -554,7 +580,10 @@ let g:UltiSnipsSnippetDirectories=[$HOME.'/.vim/bundle/ultisnips']
 "i : find this #including this file, 특정 헤더파일을 포함시키는 모든 소스코드 찾기.
 
 let g:quickr_cscope_program = "gtags-cscope"
-let g:quickr_cscope_db_file = "GTAGS"
+" 색인은 프로젝트 루트의 숨김 디렉터리에 있다(autoindex.lua 참고).
+let g:quickr_cscope_db_file =
+			\ empty(get(g:, 'autoindex_dbdir', '.tags'))
+			\   ? 'GTAGS' : get(g:, 'autoindex_dbdir', '.tags') . '/GTAGS'
 let g:quickr_cscope_keymaps = 0
 let g:quickr_cscope_autoload_db = 1
 let g:quickr_cscope_use_qf_g = 1
@@ -1301,7 +1330,10 @@ func! Maketags()
 endfunc
 
 func! Deltags()
-	exe "!time rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags"
+	let l:d = get(g:, 'autoindex_dbdir', '.tags')
+	let l:extra = empty(l:d) ? ''
+				\ : ' ' . l:d . '/GPATH ' . l:d . '/GRTAGS ' . l:d . '/GTAGS'
+	exe "!time rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags" . l:extra
 endfunc
 
 func! NERDTreeOnlyLeft()
