@@ -248,6 +248,12 @@ let g:NERDCustomDelimiters = {
 			\ 'dtsi': { 'left': '/*', 'right': '*/', 'leftAlt': '//' },
 			\}
 
+" nerdtree-git-plugin: CursorHold 마다 git status 를 재실행하지 않게 한다.
+" updatetime=100(0.1초) + 커널 트리 git status 23초 = 프로세스가 무한히 쌓여
+" 100개 이상 / 50GB / CPU 800% 까지 폭주했다(2026-09-03 실측). 저장 시에만 갱신하고
+" 수동 갱신이 필요하면 NERDTree 에서 R 을 누른다.
+let g:NERDTreeGitStatusUpdateOnCursorHold = 0
+
 let g:NERDTreeGitStatusIndicatorMapCustom = {
     \ 'Modified'  : 'M',
     \ 'Staged'    : 'S',
