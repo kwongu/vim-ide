@@ -67,7 +67,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Automatic ctags index (nvim only): `vim-gutentags` keeps a `tags` file up to date in the background - incrementally, on every write - so `<leader>fs` (`:Telescope tags`) searches every symbol in the project. Build the first index once per project with `:GutentagsUpdate!`.
 
-* Modern file tree (nvim only): `neo-tree.nvim` (`<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree (F9/F11) stays as it was.
+* Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
 * Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
@@ -85,10 +85,10 @@ F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Fold a function body
 F8: Unfold a function body
-F9: Toggle NERDTree, file system explorer on the left side
+F9: Toggle neo-tree, file system explorer on the left side (tagbar is closed with it, since both live on the left)
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
-F11: Empty
+F11: Toggle NERDTree, file system explorer on the right side
 F12: Delete gtags files created with F2.
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
 Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
@@ -113,7 +113,7 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 <leader>s: Neogit - Magit style git status in a new tab (s stage, u unstage, c commit, P push, ? help)
 <leader>v: DiffviewOpen - side by side diff of the working tree
 <leader>o: Toggle the aerial symbol outline of the current file
-<leader>t: Toggle the neo-tree file tree (a add, d delete, r rename)
+<leader>t: Toggle the neo-tree file tree, same as F9 (a add, d delete, r rename)
 <leader>fs: Search every symbol in the project through the ctags index
 
 Ctrl+g: Find the keyword under the cursor, and displays the results via quickfix window

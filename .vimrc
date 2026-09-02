@@ -293,8 +293,8 @@ nnoremap <silent> <Leader>fs <Cmd>Telescope tags<CR>
 
 " ------------------------------------
 " neo-tree: 사이드바 파일 트리 (NERDTree 상위 호환)
-"   <leader>t 로 토글. a 생성 / d 삭제 / r 이름변경 / ? 도움말
-"   (F11 은 NERDTreeOnlyRight 가 이미 쓰고 있어 t(ree) 로 두었다)
+"   F9 또는 <leader>t 로 토글. a 생성 / d 삭제 / r 이름변경 / ? 도움말
+"   (F11 은 그대로 NERDTree 오른쪽 창)
 "   netrw 는 nvim-tree 가 이미 가로채므로 neo-tree 는 건드리지 않는다.
 "   대용량 트리에서 발열/지연이 없도록 git status 는 비동기, 파일
 "   watcher 는 끈다.
@@ -1304,6 +1304,13 @@ func! NERDTreeOnlyRight()
 	:NERDTreeToggle
 endfunc
 
+" F9: neo-tree on the left (tagbar 도 왼쪽이라 함께 열면 좁아서 닫는다).
+" 예전 NERDTree 왼쪽 창이 필요하면 :call NERDTreeOnlyLeft() 로 그대로 쓸 수 있다.
+func! NeoTreeOnlyLeft()
+	:TagbarClose
+	:Neotree toggle left
+endfunc
+
 func! NERDTreeOnly()
 	:TagbarClose
 	:NERDTreeToggle
@@ -1332,7 +1339,7 @@ map <F8> zo
 "map <F10> :NvimTreeToggle<CR>
 "map <F10> :NERDTreeToggle<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
-map <F9> :call NERDTreeOnlyLeft()<CR>
+map <F9> :call NeoTreeOnlyLeft()<CR>
 map <F10> :call TagbarOnly()<CR>
 map <F11> :call NERDTreeOnlyRight()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
