@@ -71,7 +71,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
-* Relation window (nvim only): Source Insight style panel that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
+* Relation window (nvim only): Source Insight style panel across the bottom of the screen (the context preview takes its right half) that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
 ## Usage (shortcut)
@@ -258,6 +258,13 @@ Ctrl+n / Ctrl+p: next / previous item in the list. It works from ANY
        pressed again; Enter in the panel is what actually goes there.
        With no relation list in the panel the same keys walk the quickfix
        list, and Ctrl+9 / Ctrl+0 (or ]q / [q) always mean quickfix.
+
+Browsing the list - a mouse click on a row, j/k, Ctrl+n/Ctrl+p - marks the
+panel PINNED, so the tree you are reading cannot be rebuilt under you; only
+the context window follows. A DOUBLE click takes the edit window to that
+symbol (the panel stays pinned). Resting on a symbol in a source window for
+g:relationview_unpin_delay ms (3000) releases the pin and the panel follows
+the cursor again - or press p at any time.
 double click: same jump, with the mouse
 
 In the edit window a double click behaves like `Ctrl+]` (jump to the

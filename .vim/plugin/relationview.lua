@@ -28,6 +28,9 @@
 --   C-n / C-p  next / previous item in the list, previewed in the context
 --              window; the edit window does not move (works from any
 --              window; falls back to :cnext/:cprevious with no list)
+--   Browsing the list (click, j/k, C-n/C-p) pins the panel; double click
+--   takes the edit window there; resting on a symbol in a source window for
+--   g:relationview_unpin_delay ms (3s) unpins and follows the cursor again.
 --   a  toggle realtime auto-update            q  close the panel
 --
 -- Expanding a node pins the panel automatically so a stray cursor move
@@ -64,6 +67,8 @@
 --   g:relationview_context_height  context height, 'right' layout (default 25,
 --                             capped so the tree keeps at least 8 rows)
 --   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
+--   g:relationview_unpin_delay ms on one symbol in a source window before a
+--                             pinned panel follows the cursor again (3000)
 --   g:relationview_global_cmd path of the global binary   (default auto)
 
 if vim.g.loaded_relationview then
@@ -269,6 +274,7 @@ set_highlights()
 
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
+local update_header
 local render_rows
 local source_text
 local include_at
@@ -980,6 +986,14 @@ local function ensure_buf()
     buffer = buf,
     callback = function()
       hl_cursor_row()
+      -- Browsing the list (a mouse click, j/k, C-n/C-p) means "hold this
+      -- tree": pin, so a stray cursor move in the edit window cannot
+      -- rebuild it under us. Resting on a symbol in a source window for
+      -- g:relationview_unpin_delay releases it again (see watch_unpin).
+      if not s.rendering and not s.pinned then
+        s.pinned = true
+        update_header()
+      end
       if not s.ctx_timer then
         s.ctx_timer = uv.new_timer()
       end
@@ -1107,6 +1121,8 @@ end
 
 local function render(lines, items)
   local buf = ensure_buf()
+  s.rendering = true
+  vim.schedule(function() s.rendering = false end)
   s.items = items or {}
   vim.bo[buf].modifiable = true
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -1144,7 +1160,7 @@ local function header(sym, note)
 end
 
 -- rewrite only the two header lines (pin/auto flags changed)
-local function update_header()
+function update_header()
   if not (s.buf and api.nvim_buf_is_valid(s.buf)) then
     return
   end
@@ -3219,6 +3235,10 @@ function A.step(dir)
       (dir > 0 and '리스트의 마지막입니다' or '리스트의 처음입니다'))
     return true
   end
+  if not s.pinned then
+    s.pinned = true
+    update_header()
+  end
   pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
   hl_cursor_row()
   -- the panel's own CursorMoved does this on a timer; we are moving another
@@ -3311,6 +3331,46 @@ local function on_hold()
 end
 
 api.nvim_create_autocmd('CursorHold', { group = group, callback = on_hold })
+
+-- A pinned panel is frozen on purpose (the user is walking the list), but
+-- resting on a symbol in a source window means "this one now": after
+-- g:relationview_unpin_delay ms on the same symbol the pin is released and
+-- the panel follows the cursor again.
+local function watch_unpin()
+  if not (s.pinned and panel_visible()) then
+    return
+  end
+  local win = api.nvim_get_current_win()
+  if win == s.win or win == s.ctx_win then
+    return -- the list and the preview are where the pin is meant to hold
+  end
+  local buf = api.nvim_win_get_buf(win)
+  if vim.bo[buf].buftype ~= '' then
+    return
+  end
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym) then
+    return
+  end
+  if not s.unpin_timer then
+    s.unpin_timer = uv.new_timer()
+  end
+  s.unpin_timer:stop()
+  s.unpin_timer:start(cfg('unpin_delay', 3000), 0, vim.schedule_wrap(function()
+    if not (s.pinned and panel_visible()) then
+      return
+    end
+    if api.nvim_get_current_win() ~= win or vim.fn.expand('<cword>') ~= sym then
+      return
+    end
+    s.pinned = false
+    update_header()
+    on_hold() -- rebuild for the symbol the cursor has been resting on
+  end))
+end
+
+api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' },
+  { group = group, callback = watch_unpin })
 api.nvim_create_autocmd('ColorScheme',
   { group = group, callback = set_highlights })
 

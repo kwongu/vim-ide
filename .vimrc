@@ -1267,12 +1267,19 @@ if has('nvim') && filereadable(expand('$HOME/.vim/plugin/relationview.lua'))
 endif
 
 " g:relationview_position   'bottom' (default) or 'right'
-let g:relationview_position = 'right'
+"   'bottom' 이면 화면 아래에 가로로 붙고, context view 는 그 안에서
+"   오른쪽 절반을 차지한다(g:relationview_context_width, 0 = 절반).
+let g:relationview_position = 'bottom'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
+let g:relationview_height = 16
+" 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
 let g:relationview_width = 80
 let g:relationview_context_height = 40
 let g:relationview_show_text = 0
+" 리스트를 훑으면 PINNED 로 고정되고, 소스 창에서 한 심볼에 이만큼
+" 머무르면 고정이 풀리며 다시 커서를 따라간다
+let g:relationview_unpin_delay = 3000
 
 
 "==============================================================================
