@@ -65,9 +65,9 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (`<leader>o`), built on treesitter so it needs no language server. Tagbar (F10) stays as it was.
 
-* Automatic symbol index (nvim only): both indexes maintain themselves. `vim-gutentags` keeps the ctags `tags` file current and `~/.vim/plugin/autoindex.lua` does the same for GTAGS, so RelationView, `:Gtags` and `<leader>fs` are always in sync without pressing F2. **Starting nvim refreshes the index of the project in front of you in the background** - an incremental `gtags -i` when it exists (2s on a 69k-file kernel tree), a full build when it does not (26s there) - and saving a file updates that one file in milliseconds. `:GtagsIndex` rebuilds, `:GtagsIndexRefresh` updates incrementally, `:GtagsIndexUpdate` does the current file and `:GtagsIndexStatus` says what is running. Which files get indexed is decided in one place - `~/.local/bin/indexfiles.sh`: a project's own `.indexfiles`, else `git ls-files` (tracked and new files, honouring `.gitignore`), else `cscope.files` (what F2 writes), else a find over the source extensions. Drop an `.indexfiles` in a project root to index exactly the files you care about. `cscope.files` ranks below git on purpose: an F2 run that is interrupted leaves a partial list behind, and rebuilding from it drops every symbol outside it. For the same reason a rebuild that would cover less than half of what the current index covers asks first (`:GtagsIndex`) or is skipped (automatic), and every build reports how many files it indexed.
+* Automatic symbol index (nvim only): both indexes maintain themselves. `vim-gutentags` keeps the ctags `tags` file current and `~/.vim/plugin/autoindex.lua` does the same for GTAGS, so RelationView, `:Gtags` and `<leader>fs` are always in sync without pressing F2. **Starting nvim refreshes the index of the project in front of you in the background** - an incremental `gtags -i` when it exists (2s on a 69k-file kernel tree), a full build when it does not (26s there) - and saving a file updates that one file in milliseconds. `:GtagsIndex` rebuilds, `:GtagsIndexRefresh` updates incrementally, `:GtagsIndexUpdate` does the current file and `:GtagsIndexStatus` says what is running. **`Ctrl+]`, `:tag` and `g]` are answered from GTAGS** through nvim's `'tagfunc'`, so a jump works the moment a file is saved (8 ms on a 69k-file kernel tree) and needs no ctags file at all; when gtags has nothing to say, the normal tags-file lookup still runs, and an LSP client that sets its own `'tagfunc'` per buffer still wins there. Which files get indexed is decided in one place - `~/.local/bin/indexfiles.sh`: a project's own `.indexfiles`, else `git ls-files` (tracked and new files, honouring `.gitignore`), else `cscope.files` (what F2 writes), else a find over the source extensions. Drop an `.indexfiles` in a project root to index exactly the files you care about. `cscope.files` ranks below git on purpose: an F2 run that is interrupted leaves a partial list behind, and rebuilding from it drops every symbol outside it. For the same reason a rebuild that would cover less than half of what the current index covers asks first (`:GtagsIndex`) or is skipped (automatic), and every build reports how many files it indexed.
 * Where the index lives: `GTAGS`, `GRTAGS` and `GPATH` go into a hidden **`.tags/` directory in the project root**, so nothing visible is dropped into the source tree, and a database still sitting at a project root (what F2 used to write) is moved there the first time the project is opened. GNU global only looks inside such a directory when `GTAGSOBJDIR` names it, so `.vimrc` exports `GTAGSOBJDIR=.tags` once - one value that works in every project, in every subdirectory, and still finds an old root-level database. In a terminal: `eval "$(gtagsenv.sh)"`, or put `export GTAGSOBJDIR=.tags` in `~/.zshenv`. The directory is added to `.git/info/exclude` (local, never committed) so it stays out of `git status`. `let g:autoindex_dbdir = ''` puts the database back in the project root.
-* Trees larger than `g:autoindex_ctags_max_files` (5000) are indexed by gtags only, because a kernel-sized ctags file (~1GB, 4.8M tags) is too big to be useful; `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive it by hand.
+* Trees larger than `g:autoindex_ctags_max_files` (5000) get their **ctags file built by `autoindex.lua` instead of gutentags**, once per project in the background (0.9 GB / 47 s for a 69k-file kernel tree) and never on save - gutentags rewrites the entire tags file whenever a file in the project is saved, which costs seconds at that size. It is refreshed when older than `g:autoindex_ctags_max_age` days (7), rebuilt by `:CtagsIndex`, and switched off with `g:autoindex_ctags = 0`. `g:autoindex_ctags_args` chooses the flags: the default `--fields=+n --excmd=number` trades search patterns for line numbers (~30% smaller); drop `--excmd=number` to keep patterns, which survive edits made outside nvim. `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive gtags by hand; `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive it by hand.
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
@@ -92,6 +92,9 @@ F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
 F11: Toggle NERDTree, file system explorer on the right side
 F12: Delete gtags files created with F2.
+Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
+     RelationView caller list when the panel holds one, the quickfix list
+     otherwise (]q / [q always walk quickfix)
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
 Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 ,e or ,r : Go to the tab on the left/right
@@ -229,9 +232,9 @@ re-located within +-30 lines automatically.
 
 The context window is a preview, never a driver: resting the cursor on a
 symbol there does not rebuild the relation tree, and it renders a copy of
-the file rather than the file itself, so a quickfix jump (`Ctrl+n` /
-`Ctrl+p` after `<leader><leader>c`), `:tag` or `gf` always lands in a real
-edit window instead of taking over the preview. Inside the context window
+the file rather than the file itself, so a quickfix jump (`]q` / `[q`, or
+`Ctrl+n` / `Ctrl+p` when the panel holds no list), `:tag` or `gf` always
+lands in a real edit window instead of taking over the preview. Inside the context window
 `Ctrl+]` follows the definition of the symbol under the cursor within that
 window only - the source windows and the tree stay untouched - and
 `Ctrl+t` walks back along the context window's own jump stack. A double
@@ -242,6 +245,14 @@ Keys inside the panel:
 
 ```
 Enter: jump to the call site under the cursor (lands on the symbol)
+Ctrl+n / Ctrl+p: next / previous item in the list - the quickfix habit,
+       applied to the relation list. It works from ANY window: the panel's
+       cursor moves, the edit window follows to that call site, and the
+       focus stays where it was, so the keys can be pressed again. The
+       panel pins itself while walking (the edit window's cursor would
+       otherwise rebuild the tree); press p to unpin. With no relation
+       list in the panel the same keys walk the quickfix list as before,
+       and ]q / [q always mean quickfix.
 double click: same jump, with the mouse
 
 In the edit window a double click behaves like `Ctrl+]` (jump to the

@@ -10,6 +10,13 @@
 --     ('global --single-update', a few milliseconds)
 --   * opening a source file in a project that has no GTAGS yet starts one
 --     background build (once per project per session)
+--   * C-] / :tag / g] answer from GTAGS through 'tagfunc', so a jump works
+--     the moment a file is saved and needs no ctags file at all; when gtags
+--     has nothing the normal tags-file lookup still runs
+--   * a tree too big for gutentags (see g:autoindex_ctags_max_files) gets its
+--     ctags file built here instead, once, in the background - gutentags
+--     rewrites the whole tags file on every save, which costs seconds on a
+--     kernel-sized (~0.9 GB) index
 --   * :GtagsIndex        rebuild the whole index in the background
 --   * :GtagsIndexUpdate  update the index for the current file now
 --   * :GtagsIndexStatus  what is running / which database is in use
@@ -43,7 +50,18 @@
 --   g:autoindex_migrate      1: move a database found at a project root
 --                            into the hidden directory        (default 1)
 --   g:autoindex_ctags_max_files  projects with more files than this are
---                            left to gtags only (default 5000, 0 = no limit)
+--                            too big for gutentags (default 5000, 0 = no
+--                            limit); their ctags file is built here instead
+--   g:autoindex_ctags        1: build that ctags file            (default 1)
+--   g:autoindex_ctags_args   ctags flags for it (default
+--                            '--fields=+n --excmd=number': line numbers
+--                            instead of search patterns, ~30% smaller -
+--                            1.0 GB instead of 1.4 GB on a kernel tree.
+--                            Drop '--excmd=number' to keep the patterns,
+--                            which survive edits made outside nvim)
+--   g:autoindex_ctags_max_age  rebuild the snapshot when it is older than
+--                            this many days (default 7, 0 = never)
+--   g:autoindex_tagfunc      1: answer C-] from GTAGS            (default 1)
 
 if vim.g.loaded_autoindex then
   return
@@ -96,7 +114,10 @@ local function filelist_cmd()
   return vim.fn.executable(p) == 1 and p or nil
 end
 
-local drain -- defined below; a finished build flushes the queue through it
+local drain        -- defined below; a finished build flushes the queue
+local ctags_build  -- defined below, used by guard_ctags
+local ctags_apply
+local ctags_stale
 
 local s = {
   roots = {},     -- dir -> gtags root ('' = none, only cached when found)
@@ -106,6 +127,8 @@ local s = {
   updating = {},  -- root -> true while a single update runs
   warned = {},    -- root -> true once a leftover root database was reported
   refreshing = {},-- root -> true while an incremental refresh runs
+  ctags_building = {}, -- root -> true while a big-tree ctags build runs
+  ctags_tried = {},    -- root -> true once a ctags build was started
 }
 
 -- g:autoindex_debug = 1 -> append a line per index action to
@@ -631,15 +654,198 @@ local function guard_ctags(path)
   table.insert(list, root)
   vim.g.gutentags_exclude_project_root = list
   notify(string.format(
-    '%s: %s files - ctags 색인은 건너뜁니다(gtags 로 색인). ' ..
-    '원하면 g:autoindex_ctags_max_files 를 올리거나 .indexfiles 로 범위를 줄이세요',
+    '%s: %s files - gutentags 대신 여기서 ctags 를 만듭니다 ' ..
+    '(gutentags 는 저장마다 tags 전체를 다시 써서 이 규모에서는 몇 초씩 걸립니다)',
     vim.fn.fnamemodify(root, ':~'), n and tostring(n) or 'many'))
+  if cfg('ctags', 1) ~= 0 and not s.ctags_tried[root] then
+    local have = ctags_apply(root)
+    if not have or ctags_stale(root) then
+      s.ctags_tried[root] = true
+      ctags_build(root, have and '오래됨' or
+        (n and (n .. ' files') or 'big tree'))
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- ctags for the trees gutentags refuses
+-- ---------------------------------------------------------------------------
+-- guard_ctags() keeps huge projects away from gutentags because gutentags
+-- rebuilds the WHOLE tags file whenever a file in it is saved (its
+-- update_tags.sh greps the old entries out and appends the new ones), which
+-- on a kernel-sized index means rewriting ~0.9 GB per ':w'. Those projects
+-- still deserve a tags file, so build it here: once, in the background, and
+-- never on save - C-] stays correct through 'tagfunc'/GTAGS anyway.
+
+local function ctags_cmd()
+  for _, c in ipairs({ vim.g.gutentags_ctags_executable, vim.g.tagbar_ctags_bin,
+    vim.fn.expand('~/.local/bin/ctags'), 'uctags', 'ctags' }) do
+    if c and c ~= '' and vim.fn.executable(c) == 1 then
+      return c
+    end
+  end
+  return nil
+end
+
+-- the same path gutentags would use, so there is only ever one tags file per
+-- project (gutentags#get_cachefile: '/' ':' -> '-', ' ' -> '_')
+local function ctags_file(root)
+  local dir = vim.g.gutentags_cache_dir
+  if dir and dir ~= '' then
+    local name = (root .. '/tags'):gsub('[\\/:]', '-'):gsub(' ', '_')
+    name = (name:gsub('^%-+', ''))
+    return vim.fn.expand(dir) .. '/' .. name
+  end
+  return dbpath(root) .. '/tags'
+end
+
+-- true when the snapshot is older than g:autoindex_ctags_max_age days
+function ctags_stale(root)
+  local days = cfg('ctags_max_age', 7)
+  if days <= 0 then
+    return false
+  end
+  local st = uv.fs_stat(ctags_file(root))
+  return st ~= nil and (os.time() - st.mtime.sec) > days * 86400
+end
+
+-- put the project's tags file in front of &tags for this buffer
+function ctags_apply(root, buf)
+  local file = ctags_file(root)
+  if not uv.fs_stat(file) then
+    return false
+  end
+  buf = buf or api.nvim_get_current_buf()
+  if not api.nvim_buf_is_valid(buf) then
+    return false
+  end
+  local cur = vim.bo[buf].tags ~= '' and vim.bo[buf].tags or vim.o.tags
+  if cur:find(vim.pesc(file), 1, false) then
+    return true
+  end
+  api.nvim_buf_call(buf, function()
+    vim.opt_local.tags:prepend(file)
+  end)
+  return true
+end
+
+function ctags_build(root, why)
+  if cfg('ctags', 1) == 0 or s.ctags_building[root] then
+    return
+  end
+  local ct, fl = ctags_cmd(), filelist_cmd()
+  if not ct or not fl then
+    return
+  end
+  s.ctags_building[root] = true
+  local short = vim.fn.fnamemodify(root, ':~')
+  local file = ctags_file(root)
+  vim.fn.mkdir(vim.fs.dirname(file), 'p')
+  notify('ctags 색인 생성 중(백그라운드): ' .. short ..
+    (why and (' - ' .. why) or ''))
+  local t0 = uv.now()
+  local tmp = file .. '.building'
+  -- '--excmd=number' drops the search pattern from every entry (~30% smaller,
+  -- 0.88 GB instead of 1.3 GB on a 69k-file kernel tree); '--tag-relative=never'
+  -- with an absolute file list keeps the paths valid from a cache directory.
+  local sh = vim.fn.shellescape(fl) .. " | sed -e 's|^\\./||' -e 's|^|" ..
+    root .. "/|' | " .. vim.fn.shellescape(ct) .. ' -f ' ..
+    vim.fn.shellescape(tmp) .. ' -L - ' ..
+    cfg('ctags_args', '--fields=+n --excmd=number') ..
+    ' --tag-relative=never 2>/dev/null && mv -f ' .. vim.fn.shellescape(tmp) ..
+    ' ' .. vim.fn.shellescape(file)
+  local ok = pcall(vim.system, { 'sh', '-c', sh },
+    { text = true, cwd = root }, function(o)
+      vim.schedule(function()
+        s.ctags_building[root] = nil
+        if o.code ~= 0 then
+          pcall(vim.fn.delete, tmp)
+          notify(short .. ' ctags 색인 실패: ' ..
+            ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))),
+            vim.log.levels.WARN)
+          return
+        end
+        local st = uv.fs_stat(file)
+        notify(string.format('%s ctags 색인 완료 (%.0f MB, %.0fs)', short,
+          (st and st.size or 0) / 1048576, (uv.now() - t0) / 1000))
+        -- every buffer of this project can use it right away
+        for _, b in ipairs(api.nvim_list_bufs()) do
+          local n = api.nvim_buf_get_name(b)
+          if n ~= '' and n:sub(1, #root + 1) == root .. '/' then
+            ctags_apply(root, b)
+          end
+        end
+      end)
+    end)
+  if not ok then
+    s.ctags_building[root] = nil
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- 'tagfunc': C-], :tag, g], C-w ] answered from GTAGS
+-- ---------------------------------------------------------------------------
+-- The tags file is a snapshot; GTAGS is updated on every save, so a jump to
+-- something written a second ago works. Returning v:null leaves the normal
+-- tags-file lookup untouched, which is what happens outside indexed projects.
+function _G.autoindex_tagfunc(pattern, flags, info)
+  if cfg('tagfunc', 1) == 0 or not enabled() then
+    return vim.NIL
+  end
+  -- only plain identifiers; regex/prefix lookups stay with the tags file
+  if type(pattern) ~= 'string' or not pattern:match('^[%w_]+$') then
+    return vim.NIL
+  end
+  if type(flags) == 'string' and flags:find('i') then
+    return vim.NIL -- insert-mode completion
+  end
+  local prog = global_cmd()
+  if not prog then
+    return vim.NIL
+  end
+  local name = api.nvim_buf_get_name(0)
+  local dir = name ~= '' and vim.bo.buftype == ''
+      and vim.fs.dirname(vim.fn.fnamemodify(name, ':p')) or vim.fn.getcwd()
+  local root = s.roots[dir] or scan_root(dir)
+  if not root then
+    return vim.NIL
+  end
+  local ok, o = pcall(function()
+    return vim.system({ prog, '-d', '--result=ctags-mod', pattern },
+      { text = true, cwd = root, env = env_for(root) }):wait(3000)
+  end)
+  if not ok or not o or o.code ~= 0 or not o.stdout or o.stdout == '' then
+    return vim.NIL
+  end
+  local items = {}
+  for line in o.stdout:gmatch('[^\n]+') do
+    local path, lno, text = line:match('^([^\t]+)\t(%d+)\t(.*)$')
+    if path then
+      items[#items + 1] = {
+        name = pattern,
+        filename = path:sub(1, 1) == '/' and path or (root .. '/' .. path),
+        cmd = tostring(lno),
+        kind = 'd',
+        user_data = (text or ''):gsub('^%s+', ''),
+      }
+    end
+  end
+  if #items == 0 then
+    return vim.NIL
+  end
+  return items
 end
 
 -- ---------------------------------------------------------------------------
 -- autocmds and commands
 -- ---------------------------------------------------------------------------
 local group = api.nvim_create_augroup('AutoIndexGtags', { clear = true })
+
+-- GTAGS answers C-] / :tag / g] (an LSP client still overrides this per
+-- buffer, which is what you want where clangd is running)
+if cfg('tagfunc', 1) ~= 0 and vim.o.tagfunc == '' then
+  vim.o.tagfunc = 'v:lua.autoindex_tagfunc'
+end
 
 api.nvim_create_autocmd('BufReadPre', {
   group = group,
@@ -681,6 +887,9 @@ api.nvim_create_autocmd('BufReadPost', {
     end
     gtags_root(vim.fs.dirname(path), function(root)
       if root then
+        if cfg('ctags', 1) ~= 0 then
+          ctags_apply(root, a.buf)
+        end
         return -- already indexed
       end
       local mroot = marker_root(path)
@@ -796,6 +1005,17 @@ api.nvim_create_user_command('GtagsIndexRefresh', function()
   end)
 end, { desc = 'Incrementally refresh the GTAGS index of this project' })
 
+api.nvim_create_user_command('CtagsIndex', function()
+  local path = api.nvim_buf_get_name(0)
+  local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
+      or vim.fn.getcwd()
+  gtags_root(dir, function(root)
+    root = root or marker_root(dir) or dir
+    s.ctags_tried[root] = true
+    ctags_build(root, 'manual')
+  end)
+end, { desc = 'Rebuild this project\'s ctags file in the background' })
+
 api.nvim_create_user_command('GtagsIndexStatus', function()
   local lines = {}
   for root in pairs(s.building) do
@@ -803,6 +1023,9 @@ api.nvim_create_user_command('GtagsIndexStatus', function()
   end
   for root in pairs(s.updating) do
     lines[#lines + 1] = 'updating ' .. root
+  end
+  for root in pairs(s.ctags_building) do
+    lines[#lines + 1] = 'building ctags ' .. root
   end
   local path = api.nvim_buf_get_name(0)
   local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
@@ -812,6 +1035,13 @@ api.nvim_create_user_command('GtagsIndexStatus', function()
         (root and dbpath(root) or '(none - :GtagsIndex)')
     lines[#lines + 1] = 'GTAGSOBJDIR: ' .. (vim.env.GTAGSOBJDIR or '(unset)')
     lines[#lines + 1] = 'file list: ' .. (filelist_cmd() or '(indexfiles.sh missing)')
+    if root then
+      local cf = ctags_file(root)
+      local st = uv.fs_stat(cf)
+      lines[#lines + 1] = 'ctags: ' .. cf ..
+          (st and string.format(' (%.0f MB)', st.size / 1048576) or ' (없음)')
+    end
+    lines[#lines + 1] = 'tagfunc: ' .. (vim.o.tagfunc ~= '' and vim.o.tagfunc or '(unset)')
     vim.notify(table.concat(lines, '\n'))
   end)
 end, { desc = 'Show what the GTAGS auto-indexer is doing' })

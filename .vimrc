@@ -368,6 +368,13 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 "     (있으면 증분 'gtags -i', 없으면 전체 빌드. 커널 69k 파일 기준
 "      변경이 없으면 2초, 전체 빌드는 26초 정도)
 "   * 파일을 저장하면 그 파일만 즉시 갱신한다
+"   * C-] / :tag / g] 는 'tagfunc' 로 GTAGS 가 답한다(커널에서 8ms).
+"     tags 파일이 없어도, 방금 저장한 심볼도 바로 점프된다. gtags 가
+"     모르면 평소처럼 tags 파일을 찾는다(LSP 가 붙은 버퍼는 LSP 우선).
+"   * gutentags 가 감당 못하는 큰 트리(g:autoindex_ctags_max_files 초과)는
+"     여기서 ctags 파일을 만든다 - 커널 0.9GB / 47초, 저장할 때는 만들지
+"     않는다(gutentags 는 저장마다 tags 전체를 재작성한다).
+"     :CtagsIndex 로 다시 만들고, g:autoindex_ctags = 0 으로 끈다.
 "   * GTAGS/GRTAGS/GPATH 는 프로젝트 루트의 숨김 디렉터리 '.tags/' 에 만든다
 "     (예전처럼 루트에 있던 DB 는 처음 열 때 .tags/ 로 옮긴다).
 "     찾는 방법은 $GTAGSOBJDIR 한 줄 - 아래 Telescope 블록 위를 보라.
@@ -613,8 +620,25 @@ let g:Gtags_OpenQuickfixWindow = 1
 "let g:Gtags_VerticalWindow = 0
 "let g:Gtags_Auto_Map = 0
 "let g:Gtags_Auto_Update = 0
-nmap <C-n> :cn<CR>
-nmap <C-p> :cp<CR>
+" C-n / C-p 는 "지금 앞에 있는 리스트의 다음/이전 항목" 이다:
+"   RelationView 패널에 리스트가 있으면 그 caller 리스트를 훑고
+"   (편집 창에 위치를 보여주고 포커스는 그대로 둔다. 훑는 동안 패널은
+"    자동으로 PINNED 되어 트리가 다시 그려지지 않는다)
+"   패널이 비어 있으면 예전처럼 quickfix 를 훑는다.
+" quickfix 만 따로 움직이려면 ]q / [q (vim-unimpaired) 또는 :cnext/:cprev
+func! s:ListStep(dir) abort
+	if exists(':RelationViewNext') == 2
+		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
+		return
+	endif
+	try
+		exe a:dir > 0 ? 'cnext' : 'cprevious'
+	catch /^Vim\%((\a\+)\)\=:E\%(553\|42\|776\)/
+		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+	endtry
+endfunc
+nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
+nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
 nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>

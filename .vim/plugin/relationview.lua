@@ -25,6 +25,8 @@
 --   c  toggle the context window (Source Insight style: shows the source
 --      around the location under the cursor, attached to the panel)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
+--   C-n / C-p  next / previous item in the list (works from any window;
+--              falls back to :cnext / :cprevious when the panel has no list)
 --   a  toggle realtime auto-update            q  close the panel
 --
 -- Expanding a node pins the panel automatically so a stray cursor move
@@ -966,6 +968,8 @@ local function ensure_buf()
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
+  bmap('<C-n>', function() A.step(1) end, 'RelationView: next item')
+  bmap('<C-p>', function() A.step(-1) end, 'RelationView: previous item')
   bmap('a', function() A.toggle_auto() end, 'RelationView: toggle auto')
 
   -- Source Insight style: moving in the list previews the location under
@@ -1133,7 +1137,8 @@ local function header(sym, note)
   local tail = #flags > 0 and ('  [' .. table.concat(flags, ', ') .. ']') or ''
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
-    '  [⏎]jump [o]peek [␣]open/close [*]all [x]graph [c]ctx [p]pin [r]refresh [q]close',
+    '  [⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
+      '[c]ctx [p]pin [r]refresh [q]close',
   }
 end
 
@@ -3172,6 +3177,58 @@ function A.pin()
   update_header()
 end
 
+-- Walk the list the way quickfix's :cnext/:cprevious walk theirs: move the
+-- panel's cursor to the next/previous row that carries a location, show that
+-- location in the edit window, and leave the focus where it was so the key
+-- can be pressed again. Returns false when there is no list to walk, which is
+-- what makes the mapping fall through to quickfix.
+-- Pins the panel while walking: without that the edit window's cursor move
+-- would rebuild the tree under us (the same reason expanding a node pins).
+function A.step(dir)
+  if not (s.win and api.nvim_win_is_valid(s.win)
+      and s.buf and api.nvim_buf_is_valid(s.buf)
+      and api.nvim_win_get_buf(s.win) == s.buf) then
+    return false
+  end
+  local total = api.nvim_buf_line_count(s.buf)
+  local any = false
+  for i = 1, total do
+    if s.items[i] and s.items[i].loc then
+      any = true
+      break
+    end
+  end
+  if not any then
+    return false -- nothing in the panel: let quickfix have the key
+  end
+  local lnum = api.nvim_win_get_cursor(s.win)[1]
+  local found
+  for _ = 1, total do
+    lnum = lnum + dir
+    if lnum < 1 or lnum > total then
+      break
+    end
+    if s.items[lnum] and s.items[lnum].loc then
+      found = lnum
+      break
+    end
+  end
+  if not found then
+    vim.notify('RelationView: ' ..
+      (dir > 0 and '리스트의 마지막입니다' or '리스트의 처음입니다'))
+    return true
+  end
+  if not s.pinned then
+    s.pinned = true
+    update_header()
+  end
+  pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
+  hl_cursor_row()
+  update_context()
+  jump_to(s.items[found].loc, true) -- peek: focus stays where the user is
+  return true
+end
+
 function A.refresh()
   s.roots = {} -- a new GTAGS may have appeared since (F2)
   if not s.sym then
@@ -3336,6 +3393,23 @@ api.nvim_create_user_command('RelationViewToggle', function()
     open_and_query(nil)
   end
 end, { desc = 'Toggle the relation window' })
+
+-- One key for "next item in whatever list is in front of me": the relation
+-- list when the panel holds one, the quickfix list otherwise.
+local function step_or_qf(dir)
+  if A.step(dir) then
+    return
+  end
+  local ok, err = pcall(vim.cmd, dir > 0 and 'cnext' or 'cprevious')
+  if not ok then
+    vim.notify((tostring(err):gsub('^.*Vim%b():', '')), vim.log.levels.INFO)
+  end
+end
+
+api.nvim_create_user_command('RelationViewNext', function() step_or_qf(1) end,
+  { desc = 'Next item in the relation list (falls back to :cnext)' })
+api.nvim_create_user_command('RelationViewPrev', function() step_or_qf(-1) end,
+  { desc = 'Previous item in the relation list (falls back to :cprevious)' })
 
 api.nvim_create_user_command('RelationViewGraph', function()
   A.graph()
