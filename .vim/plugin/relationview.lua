@@ -291,7 +291,13 @@ local function db_dir()
   return (tostring(d):gsub('/+$', ''))
 end
 
+-- global reads '<root>/GTAGS' before '<root>/$GTAGSOBJDIR/GTAGS', so a project
+-- holding both is answered from the root one; follow that for the mtime the
+-- cache keys off (see autoindex.lua for the same rule)
 local function db_path(root)
+  if uv.fs_stat(root .. '/GTAGS') then
+    return root
+  end
   local d = db_dir()
   return d and (root .. '/' .. d) or root
 end

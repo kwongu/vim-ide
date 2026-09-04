@@ -140,7 +140,15 @@ local function dbdir_name()
   return (tostring(d):gsub('/+$', ''))
 end
 
+-- The database global will actually use. It looks at '<root>/GTAGS' before
+-- '<root>/$GTAGSOBJDIR/GTAGS', so when a project carries both (an old
+-- mktags.sh run after the migration, say) the root one wins every query -
+-- follow that here, or timestamps, counts and updates would be applied to a
+-- database nothing reads.
 local function dbpath(root)
+  if uv.fs_stat(root .. '/GTAGS') then
+    return root
+  end
   local d = dbdir_name()
   return d and (root .. '/' .. d) or root
 end
@@ -178,8 +186,10 @@ local function migrate(root)
     -- both layouts present: the hidden one is used, say so once
     if not s.warned[root] then
       s.warned[root] = true
-      notify(vim.fn.fnamemodify(root, ':~') .. ': GTAGS 가 루트에도 남아 있습니다 (' ..
-        d .. ' 쪽을 사용합니다)', vim.log.levels.WARN)
+      notify(vim.fn.fnamemodify(root, ':~') ..
+        ': GTAGS 가 루트에도 있어 그쪽이 쓰입니다(global 우선순위). ' ..
+        d .. '/ 만 쓰려면 루트의 GTAGS/GRTAGS/GPATH 를 지우세요(F12)',
+        vim.log.levels.WARN)
     end
     return
   end

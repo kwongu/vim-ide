@@ -360,7 +360,7 @@ let g:gutentags_ctags_extra_args = ['--fields=+nS',
 			\ '--c-kinds=+px', '--c++-kinds=+px']
 let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 			\ 'Documentation', '*.json', '*.min.js', '*.o', '*.a',
-			\ '*.so', '*.ko', '*.cmd', 'GTAGS', 'GRTAGS', 'GPATH']
+			\ '*.so', '*.ko', '*.cmd', '.tags', 'GTAGS', 'GRTAGS', 'GPATH']
 
 " ------------------------------------
 " autoindex.lua: GTAGS 자동 색인

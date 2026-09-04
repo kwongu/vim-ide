@@ -16,6 +16,14 @@ fi
 cd ${VIMIDE}
 mkdir -p ${HOME}/.local/bin
 cp -rf ${VIMIDE}/.local/bin/* ${HOME}/.local/bin
+
+# The symbol databases live in '<project>/.tags/'. vim and nvim export
+# GTAGSOBJDIR themselves (.vimrc); a shell needs it once to run 'global' or
+# 'gtags-cscope' by hand.
+if ! (env | grep -q '^GTAGSOBJDIR='); then
+	echo "tip: 터미널에서 global 을 쓰려면  echo 'export GTAGSOBJDIR=.tags' >> ~/.zshenv"
+	echo "     (한 번만; 현재 셸에는  eval \"\$(gtagsenv.sh)\" )"
+fi
 ln -sf ${VIMIDE}/.vim ${HOME}/.vim
 ln -sf ${VIMIDE}/.vimrc ${HOME}/.vimrc
 vim +PluginInstall +qall
