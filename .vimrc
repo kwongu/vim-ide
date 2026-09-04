@@ -16,6 +16,15 @@ if has('nvim')
     set runtimepath+=~/.vim/after
 endif
 
+" 색인은 프로젝트 루트의 숨김 디렉터리 '.tags/' 에 있다. global(1) 은 위로
+" 올라가며 '<dir>/$GTAGSOBJDIR/GTAGS' 도 함께 찾으므로, 이 한 줄이면
+" :Gtags/gtags-cscope/RelationView/':!global' 이 모두 같은 DB 를 본다
+" (루트에 예전처럼 GTAGS 가 있는 프로젝트도 그대로 동작한다).
+" nvim 분기 밖에 두는 이유: plain vim 은 ~/.vim/plugin/*.lua 를 읽지 않아
+" autoindex.lua 가 돌지 않는다. 이 줄이 두 편집기 모두를 덮는다.
+" 터미널에서도 쓰려면 ~/.zshenv 에:  export GTAGSOBJDIR=.tags
+let $GTAGSOBJDIR = get(g:, 'autoindex_dbdir', '.tags')
+
 " Work in Vim compatible not Vi compatible
 set nocompatible
 
@@ -372,13 +381,6 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 "   let g:autoindex_notify = 0        " 알림 끄기
 " ------------------------------------
 
-" 색인은 프로젝트 루트의 숨김 디렉터리 '.tags/' 에 있다. global(1) 은 위로
-" 올라가며 '<dir>/$GTAGSOBJDIR/GTAGS' 도 함께 찾으므로, 이 한 줄이면
-" :Gtags/gtags-cscope/RelationView/':!global' 이 모두 같은 DB 를 본다
-" (루트에 예전처럼 GTAGS 가 있는 프로젝트도 그대로 동작한다).
-" 터미널에서도 쓰려면 ~/.zshenv 에:  export GTAGSOBJDIR=.tags
-let $GTAGSOBJDIR = get(g:, 'autoindex_dbdir', '.tags')
-
 " Find files using Telescope command-line sugar.
 nnoremap <leader>fi <cmd>Telescope git_commits<cr>
 nnoremap <leader>ff <cmd>Telescope find_files<cr>
@@ -580,10 +582,16 @@ let g:UltiSnipsSnippetDirectories=[$HOME.'/.vim/bundle/ultisnips']
 "i : find this #including this file, 특정 헤더파일을 포함시키는 모든 소스코드 찾기.
 
 let g:quickr_cscope_program = "gtags-cscope"
-" 색인은 프로젝트 루트의 숨김 디렉터리에 있다(autoindex.lua 참고).
-let g:quickr_cscope_db_file =
-			\ empty(get(g:, 'autoindex_dbdir', '.tags'))
-			\   ? 'GTAGS' : get(g:, 'autoindex_dbdir', '.tags') . '/GTAGS'
+" 색인은 프로젝트 루트의 숨김 디렉터리에 있다(autoindex.lua 참고). 이 플러그인은
+" findfile() 로 DB 파일을 직접 찾으므로 숨김 경로를 알려줘야 하고, 못 찾으면
+" 조용히 죽는다(플러그인이 finish 해서 <plug> 매핑조차 만들어지지 않는다).
+" 그래서 숨김 DB 가 있으면 그쪽을, 없으면 예전처럼 루트의 GTAGS 를 쓴다.
+let s:rv_dbdir = get(g:, 'autoindex_dbdir', '.tags')
+if !empty(s:rv_dbdir) && !empty(findfile(s:rv_dbdir . '/GTAGS', '.;'))
+	let g:quickr_cscope_db_file = s:rv_dbdir . '/GTAGS'
+else
+	let g:quickr_cscope_db_file = 'GTAGS'
+endif
 let g:quickr_cscope_keymaps = 0
 let g:quickr_cscope_autoload_db = 1
 let g:quickr_cscope_use_qf_g = 1
