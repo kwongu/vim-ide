@@ -93,10 +93,11 @@ F10: Toggle tagbar, source code browser on the right side
 F11: Toggle NERDTree, file system explorer on the right side
 F12: Delete gtags files created with F2.
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
-     RelationView caller list when the panel holds one, the quickfix list
+     RelationView caller list when the panel holds one (previewed in the
+     context window; the edit window does not move), the quickfix list
      otherwise
-Ctrl+comma, Ctrl+period: Next/previous quickfix item, always. These two keys
-     only reach nvim from a terminal that speaks CSI u (the kitty keyboard
+Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
+     reach nvim from a terminal that speaks CSI u (the kitty keyboard
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
      same everywhere, so use those if your terminal stays silent.
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
@@ -236,7 +237,7 @@ re-located within +-30 lines automatically.
 
 The context window is a preview, never a driver: resting the cursor on a
 symbol there does not rebuild the relation tree, and it renders a copy of
-the file rather than the file itself, so a quickfix jump (`Ctrl+,` / `Ctrl+.`,
+the file rather than the file itself, so a quickfix jump (`Ctrl+9` / `Ctrl+0`,
 `]q` / `[q`, or `Ctrl+n` / `Ctrl+p` when the panel holds no list), `:tag` or
 `gf` always lands in a real edit window instead of taking over the preview. Inside the context window
 `Ctrl+]` follows the definition of the symbol under the cursor within that
@@ -249,14 +250,14 @@ Keys inside the panel:
 
 ```
 Enter: jump to the call site under the cursor (lands on the symbol)
-Ctrl+n / Ctrl+p: next / previous item in the list - the quickfix habit,
-       applied to the relation list. It works from ANY window: the panel's
-       cursor moves, the edit window follows to that call site, and the
-       focus stays where it was, so the keys can be pressed again. The
-       panel pins itself while walking (the edit window's cursor would
-       otherwise rebuild the tree); press p to unpin. With no relation
-       list in the panel the same keys walk the quickfix list as before,
-       and Ctrl+, / Ctrl+. (or ]q / [q) always mean quickfix.
+Ctrl+n / Ctrl+p: next / previous item in the list. It works from ANY
+       window: the panel's cursor moves and the context window previews
+       that call site, centred on the symbol, while the EDIT WINDOW STAYS
+       WHERE IT IS - this is for reading through the call sites, not for
+       going to them. The focus does not move either, so the keys can be
+       pressed again; Enter in the panel is what actually goes there.
+       With no relation list in the panel the same keys walk the quickfix
+       list, and Ctrl+9 / Ctrl+0 (or ]q / [q) always mean quickfix.
 double click: same jump, with the mouse
 
 In the edit window a double click behaves like `Ctrl+]` (jump to the

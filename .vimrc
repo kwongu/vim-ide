@@ -622,10 +622,10 @@ let g:Gtags_OpenQuickfixWindow = 1
 "let g:Gtags_Auto_Update = 0
 " C-n / C-p 는 "지금 앞에 있는 리스트의 다음/이전 항목" 이다:
 "   RelationView 패널에 리스트가 있으면 그 caller 리스트를 훑고
-"   (편집 창에 위치를 보여주고 포커스는 그대로 둔다. 훑는 동안 패널은
-"    자동으로 PINNED 되어 트리가 다시 그려지지 않는다)
+"   (context view 에만 미리보기가 뜨고 EDIT 창은 움직이지 않는다.
+"    포커스도 그대로. 실제로 그 위치로 가려면 패널에서 Enter)
 "   패널이 비어 있으면 예전처럼 quickfix 를 훑는다.
-" quickfix 만 따로 움직이려면 Ctrl+, / Ctrl+. (아래) 또는 ]q / [q
+" quickfix 만 따로 움직이려면 Ctrl+9 / Ctrl+0 (아래) 또는 ]q / [q
 func! s:ListStep(dir) abort
 	if exists(':RelationViewNext') == 2
 		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
@@ -640,7 +640,7 @@ endfunc
 nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
 nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
 
-" quickfix 전용: Ctrl+, (next) / Ctrl+. (prev)
+" quickfix 전용: Ctrl+9 (next) / Ctrl+0 (prev)
 " 이 두 키는 전통적인 터미널 인코딩으로는 아예 전달되지 않는다. CSI-u
 " (kitty keyboard protocol) 를 쓰는 터미널이어야 nvim 까지 도달한다
 " - iTerm2 3.5+, kitty, WezTerm, Ghostty, foot 등. 안 먹으면 ]q / [q 를
@@ -652,8 +652,8 @@ func! s:QfStep(dir) abort
 		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
 	endtry
 endfunc
-nnoremap <silent> <C-,> :call <SID>QfStep(1)<CR>
-nnoremap <silent> <C-.> :call <SID>QfStep(-1)<CR>
+nnoremap <silent> <C-9> :call <SID>QfStep(1)<CR>
+nnoremap <silent> <C-0> :call <SID>QfStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
 nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>

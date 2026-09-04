@@ -25,8 +25,9 @@
 --   c  toggle the context window (Source Insight style: shows the source
 --      around the location under the cursor, attached to the panel)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
---   C-n / C-p  next / previous item in the list (works from any window;
---              falls back to :cnext / :cprevious when the panel has no list)
+--   C-n / C-p  next / previous item in the list, previewed in the context
+--              window; the edit window does not move (works from any
+--              window; falls back to :cnext/:cprevious with no list)
 --   a  toggle realtime auto-update            q  close the panel
 --
 -- Expanding a node pins the panel automatically so a stray cursor move
@@ -3177,13 +3178,13 @@ function A.pin()
   update_header()
 end
 
--- Walk the list the way quickfix's :cnext/:cprevious walk theirs: move the
--- panel's cursor to the next/previous row that carries a location, show that
--- location in the edit window, and leave the focus where it was so the key
--- can be pressed again. Returns false when there is no list to walk, which is
--- what makes the mapping fall through to quickfix.
--- Pins the panel while walking: without that the edit window's cursor move
--- would rebuild the tree under us (the same reason expanding a node pins).
+-- Walk the list: move the panel's cursor to the next/previous row that
+-- carries a location and preview that location in the CONTEXT window. The
+-- edit window is deliberately left alone - this is for looking through the
+-- call sites, not for going to them (Enter in the panel still goes). The
+-- focus stays where it was, so the key can be pressed again.
+-- Returns false when there is no list to walk, which is what makes the
+-- mapping fall through to quickfix.
 function A.step(dir)
   if not (s.win and api.nvim_win_is_valid(s.win)
       and s.buf and api.nvim_buf_is_valid(s.buf)
@@ -3218,14 +3219,11 @@ function A.step(dir)
       (dir > 0 and '리스트의 마지막입니다' or '리스트의 처음입니다'))
     return true
   end
-  if not s.pinned then
-    s.pinned = true
-    update_header()
-  end
   pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
   hl_cursor_row()
+  -- the panel's own CursorMoved does this on a timer; we are moving another
+  -- window's cursor, so do it here and now
   update_context()
-  jump_to(s.items[found].loc, true) -- peek: focus stays where the user is
   return true
 end
 
