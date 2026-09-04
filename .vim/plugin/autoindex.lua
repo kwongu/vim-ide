@@ -510,8 +510,8 @@ local function refresh(root, why)
         return
       end
       done(string.format(
-        '%s: 색인 대상이 %d개 -> %d개로 줄어들어 자동 갱신을 건너뜁니다 ' ..
-        '(의도한 것이면 :GtagsIndex)', short, old, n), vim.log.levels.WARN)
+        '%s: 색인 %d개 -> %d개 축소, 자동 갱신 생략 (:GtagsIndex)',
+        short, old, n), vim.log.levels.WARN)
     end)
   end
 
@@ -653,9 +653,9 @@ local function guard_ctags(path)
   end
   table.insert(list, root)
   vim.g.gutentags_exclude_project_root = list
-  notify(string.format(
-    '%s: %s files - gutentags 대신 여기서 ctags 를 만듭니다 ' ..
-    '(gutentags 는 저장마다 tags 전체를 다시 써서 이 규모에서는 몇 초씩 걸립니다)',
+  -- keep this on one line: a wrapped message means a hit-enter prompt at
+  -- every start in a narrow terminal
+  notify(string.format('%s: %s files - ctags 는 여기서 직접 만듭니다',
     vim.fn.fnamemodify(root, ':~'), n and tostring(n) or 'many'))
   if cfg('ctags', 1) ~= 0 and not s.ctags_tried[root] then
     local have = ctags_apply(root)

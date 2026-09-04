@@ -625,7 +625,7 @@ let g:Gtags_OpenQuickfixWindow = 1
 "   (편집 창에 위치를 보여주고 포커스는 그대로 둔다. 훑는 동안 패널은
 "    자동으로 PINNED 되어 트리가 다시 그려지지 않는다)
 "   패널이 비어 있으면 예전처럼 quickfix 를 훑는다.
-" quickfix 만 따로 움직이려면 ]q / [q (vim-unimpaired) 또는 :cnext/:cprev
+" quickfix 만 따로 움직이려면 Ctrl+, / Ctrl+. (아래) 또는 ]q / [q
 func! s:ListStep(dir) abort
 	if exists(':RelationViewNext') == 2
 		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
@@ -639,6 +639,21 @@ func! s:ListStep(dir) abort
 endfunc
 nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
 nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
+
+" quickfix 전용: Ctrl+, (next) / Ctrl+. (prev)
+" 이 두 키는 전통적인 터미널 인코딩으로는 아예 전달되지 않는다. CSI-u
+" (kitty keyboard protocol) 를 쓰는 터미널이어야 nvim 까지 도달한다
+" - iTerm2 3.5+, kitty, WezTerm, Ghostty, foot 등. 안 먹으면 ]q / [q 를
+" 쓰면 된다(같은 동작).
+func! s:QfStep(dir) abort
+	try
+		exe a:dir > 0 ? 'cnext' : 'cprevious'
+	catch /^Vim\%((\a\+)\)\=:E\%(553\|42\|776\)/
+		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+	endtry
+endfunc
+nnoremap <silent> <C-,> :call <SID>QfStep(1)<CR>
+nnoremap <silent> <C-.> :call <SID>QfStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
 nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>

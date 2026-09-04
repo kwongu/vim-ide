@@ -94,7 +94,11 @@ F11: Toggle NERDTree, file system explorer on the right side
 F12: Delete gtags files created with F2.
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one, the quickfix list
-     otherwise (]q / [q always walk quickfix)
+     otherwise
+Ctrl+comma, Ctrl+period: Next/previous quickfix item, always. These two keys
+     only reach nvim from a terminal that speaks CSI u (the kitty keyboard
+     protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
+     same everywhere, so use those if your terminal stays silent.
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
 Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 ,e or ,r : Go to the tab on the left/right
@@ -232,9 +236,9 @@ re-located within +-30 lines automatically.
 
 The context window is a preview, never a driver: resting the cursor on a
 symbol there does not rebuild the relation tree, and it renders a copy of
-the file rather than the file itself, so a quickfix jump (`]q` / `[q`, or
-`Ctrl+n` / `Ctrl+p` when the panel holds no list), `:tag` or `gf` always
-lands in a real edit window instead of taking over the preview. Inside the context window
+the file rather than the file itself, so a quickfix jump (`Ctrl+,` / `Ctrl+.`,
+`]q` / `[q`, or `Ctrl+n` / `Ctrl+p` when the panel holds no list), `:tag` or
+`gf` always lands in a real edit window instead of taking over the preview. Inside the context window
 `Ctrl+]` follows the definition of the symbol under the cursor within that
 window only - the source windows and the tree stay untouched - and
 `Ctrl+t` walks back along the context window's own jump stack. A double
@@ -252,7 +256,7 @@ Ctrl+n / Ctrl+p: next / previous item in the list - the quickfix habit,
        panel pins itself while walking (the edit window's cursor would
        otherwise rebuild the tree); press p to unpin. With no relation
        list in the panel the same keys walk the quickfix list as before,
-       and ]q / [q always mean quickfix.
+       and Ctrl+, / Ctrl+. (or ]q / [q) always mean quickfix.
 double click: same jump, with the mouse
 
 In the edit window a double click behaves like `Ctrl+]` (jump to the
