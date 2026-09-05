@@ -67,6 +67,10 @@
 --   g:relationview_context_height  context height, 'right' layout (default 25,
 --                             capped so the tree keeps at least 8 rows)
 --   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
+--   g:relationview_context_position  'panel' (default: a split inside the
+--                             panel) or 'right'/'left' (a window of its own
+--                             beside the edit window, so the panel keeps the
+--                             whole bottom); context_width applies to both
 --   g:relationview_unpin_delay ms on one symbol in a source window before a
 --                             pinned panel follows the cursor again (3000)
 --   g:relationview_global_cmd path of the global binary   (default auto)
@@ -275,6 +279,7 @@ set_highlights()
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
+local pick_src_win
 local render_rows
 local source_text
 local include_at
@@ -1336,22 +1341,47 @@ ensure_ctx = function()
     return nil
   end
   local ctx
-  api.nvim_win_call(s.win, function()
-    if cfg('position', 'bottom') == 'right' then
-      -- keep the tree usable: on a short terminal a fixed height would
-      -- squash the list down to a row or two, so leave it at least 8 rows
-      local avail = api.nvim_win_get_height(s.win)
-      local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
-      vim.cmd('noautocmd rightbelow ' .. h .. 'split')
-    else
-      vim.cmd('noautocmd rightbelow vertical split')
-      local w = cfg('context_width', 0)
-      if w > 0 then
-        vim.cmd('vertical resize ' .. w)
-      end
+  local where = cfg('context_position', 'panel')
+  if where == 'left' or where == 'right' then
+    -- A window of its own, beside the file you are editing, instead of a
+    -- split inside the panel: the panel keeps the whole bottom and the
+    -- preview gets the full height of the edit area.
+    local host = pick_src_win()
+    if not (host and api.nvim_win_is_valid(host)) then
+      return nil
     end
-    ctx = api.nvim_get_current_win()
-  end)
+    -- measure before the split: afterwards `host` is already halved
+    local host_w = api.nvim_win_get_width(host)
+    api.nvim_win_call(host, function()
+      vim.cmd('noautocmd ' ..
+        (where == 'right' and 'rightbelow' or 'leftabove') .. ' vertical split')
+      local w = cfg('context_width', 0)
+      if w <= 0 then
+        w = math.max(40, math.floor(vim.o.columns / 3))
+      end
+      -- never leave the file you are editing thinner than the preview
+      w = math.min(w, math.max(20, math.floor(host_w / 2)))
+      vim.cmd('vertical resize ' .. w)
+      ctx = api.nvim_get_current_win()
+    end)
+  else
+    api.nvim_win_call(s.win, function()
+      if cfg('position', 'bottom') == 'right' then
+        -- keep the tree usable: on a short terminal a fixed height would
+        -- squash the list down to a row or two, so leave it at least 8 rows
+        local avail = api.nvim_win_get_height(s.win)
+        local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
+        vim.cmd('noautocmd rightbelow ' .. h .. 'split')
+      else
+        vim.cmd('noautocmd rightbelow vertical split')
+        local w = cfg('context_width', 0)
+        if w > 0 then
+          vim.cmd('vertical resize ' .. w)
+        end
+      end
+      ctx = api.nvim_get_current_win()
+    end)
+  end
   if not (ctx and api.nvim_win_is_valid(ctx)) then
     return nil
   end
@@ -2814,7 +2844,7 @@ end
 -- panel actions
 -- ---------------------------------------------------------------------------
 
-local function pick_src_win()
+pick_src_win = function()
   if s.src_win and s.src_win ~= s.ctx_win and api.nvim_win_is_valid(s.src_win)
       and api.nvim_win_get_tabpage(s.src_win) == api.nvim_get_current_tabpage()
   then

@@ -71,7 +71,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
-* Relation window (nvim only): Source Insight style panel across the bottom of the screen (the context preview takes its right half) that shows the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
+* Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
 ## Usage (shortcut)
@@ -228,10 +228,15 @@ that already appears higher up in the chain is marked `↺` (recursion) and
 stops there. Expanding a node pins the panel automatically so cursor moves
 do not rebuild the tree; press `p` to unpin.
 
-A context window (Source Insight style) is attached below the tree
-('right' layout) or beside it ('bottom' layout): moving the cursor in the
-relation list previews the source around that location, centered on the
-referenced symbol. Jumps land exactly on the referenced symbol - line and
+A context window (Source Insight style) shows the source around the
+location under the panel cursor, centred on the referenced symbol. By
+default it is a split inside the panel (below the tree in the 'right'
+layout, beside it in 'bottom'); `g:relationview_context_position = 'right'`
+(or `'left'`) gives it a window of its own next to the file you are
+editing instead, so the panel keeps the whole bottom and the preview the
+full height - that is the layout this setup ships with
+(`g:relationview_context_width` sets its width, capped at half the edit
+window so a narrow screen stays usable). Jumps land exactly on the referenced symbol - line and
 column - and if the file changed since the last gtags run the symbol is
 re-located within +-30 lines automatically.
 
