@@ -261,6 +261,21 @@ local function materialize(root)
   return files, name
 end
 
+-- autoindex.lua calls this before it builds a file list, so a preset is in
+-- place BEFORE the first index runs (otherwise the very first build - the one
+-- that happens when a project has no index yet - would index the whole tree)
+function _G.projectfiles_materialize(root)
+  if not root or root == '' then
+    return false
+  end
+  local entries = entries_of(root)
+  if not entries then
+    return false -- auto mode: nothing to write
+  end
+  materialize(root)
+  return true
+end
+
 -- ---------------------------------------------------------------------------
 -- reindex what we just decided
 -- ---------------------------------------------------------------------------
@@ -553,6 +568,107 @@ local function add_with_related(root, path)
   save_entries(root, name, entries)
   notify(('연관 파일 %d개 함께 추가 (헤더/심볼 정의)'):format(#extra))
 end
+
+-- ---------------------------------------------------------------------------
+-- a symbol the index does not know: find the file that defines it
+-- ---------------------------------------------------------------------------
+-- 'global' can only answer for files that are already indexed, so this looks
+-- at the SOURCE instead - definitions first, any mention as a last resort.
+local function grep_defining(root, sym)
+  local q = vim.fn.shellescape(sym)
+  local pats = {
+    "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*\\('",
+    "-e '^#[[:space:]]*define[[:space:]]+" .. sym .. "[^A-Za-z0-9_]'",
+    "-e '^(typedef|struct|union|enum)[[:space:]].*[^A-Za-z0-9_]" .. sym .. "[^A-Za-z0-9_]*[;{]'",
+    "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*[=;[]'",
+  }
+  local globs = "'*.c' '*.h' '*.cpp' '*.cc' '*.S' '*.dts' '*.dtsi'"
+  local cmds = {}
+  if uv.fs_stat(root .. '/.git') then
+    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. globs
+  end
+  cmds[#cmds + 1] = "grep -rlE " .. table.concat(pats, ' ') ..
+      " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
+  local max = tonumber(cfg('grep_max', 5)) or 5
+  for _, c in ipairs(cmds) do
+    local out = {}
+    local ok, lines = pcall(vim.fn.systemlist, { 'sh', '-c',
+      'cd ' .. vim.fn.shellescape(root) .. ' && ' .. c .. ' 2>/dev/null | head -' ..
+      (max * 4) })
+    if ok then
+      -- a definition is more likely in a .c than in a header full of protos
+      table.sort(lines, function(a, b)
+        local ca, cb = a:match('%.c$') ~= nil, b:match('%.c$') ~= nil
+        if ca ~= cb then
+          return ca
+        end
+        return #a < #b
+      end)
+      for _, l in ipairs(lines) do
+        if l ~= '' and uv.fs_stat(root .. '/' .. l) and #out < max then
+          out[#out + 1] = l
+        end
+      end
+    end
+    if #out > 0 then
+      return out
+    end
+  end
+  return {}
+end
+
+-- add the files that define `sym`, index them straight away, and say how
+-- many were added (0 = nothing found / nothing new)
+function _G.projectfiles_add_for_symbol(sym)
+  if type(sym) ~= 'string' or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
+    return 0
+  end
+  local root = cur_root()
+  local entries, name = entries_of(root)
+  if not name then
+    return 0 -- auto mode indexes everything already
+  end
+  local have = {}
+  for _, e in ipairs(entries) do
+    have[e.path] = true
+  end
+  local hits = grep_defining(root, sym)
+  local added = {}
+  for _, rel in ipairs(hits) do
+    if not have[rel] then
+      have[rel] = true
+      entries[#entries + 1] = { path = rel, kind = 'file' }
+      added[#added + 1] = rel
+    end
+  end
+  if #added == 0 then
+    return 0
+  end
+  preset_write(name, entries)
+  materialize(root)
+  -- index the new files NOW so the jump that triggered this can be retried
+  -- immediately; the full refresh below keeps everything else in step
+  local prog = vim.fn.executable('global') == 1 and 'global'
+      or vim.fn.expand('~/.local/bin/global')
+  for _, rel in ipairs(added) do
+    pcall(function()
+      vim.system({ prog, '--single-update', rel },
+        { cwd = root, env = { GTAGSOBJDIR = dbdir() or '.tags' } }):wait(5000)
+    end)
+  end
+  reindex(root)
+  notify(("'%s' 을(를) 정의한 파일 %d개를 추가했습니다: %s")
+    :format(sym, #added, table.concat(added, ', ')))
+  return #added
+end
+
+api.nvim_create_user_command('ProjectFilesAddSymbol', function(o)
+  local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
+  if _G.projectfiles_add_for_symbol(sym) == 0 then
+    notify("'" .. sym .. "' 을(를) 정의한 파일을 찾지 못했습니다",
+      vim.log.levels.WARN)
+  end
+end, { nargs = '?', desc = 'Add the file that defines a symbol to the list' })
 
 -- ---------------------------------------------------------------------------
 -- pickers (telescope when it is there, vim.ui.select otherwise)
@@ -1007,6 +1123,15 @@ api.nvim_create_user_command('ProjectFilesReindex', function()
 end, { desc = 'Rebuild the index for the current file list' })
 
 -- a preset is applied as soon as the session knows which project it is in
+-- as early as possible (the indexer may start on the first BufReadPost),
+-- and again once the session is up and the real project is known
+pcall(function()
+  local root = root_of(nil)
+  if active_preset(root) then
+    materialize(root)
+  end
+end)
+
 api.nvim_create_autocmd('VimEnter', {
   group = group,
   callback = function()
@@ -1015,6 +1140,6 @@ api.nvim_create_autocmd('VimEnter', {
       if active_preset(root) then
         materialize(root)
       end
-    end, 400)
+    end, 200)
   end,
 })

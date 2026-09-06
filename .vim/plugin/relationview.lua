@@ -1573,6 +1573,18 @@ function A.ctx_jump_from_edit()
   if name == '' then
     return false
   end
+  -- an '#include' line is about a file: open the header in the EDIT window
+  -- (the panel/preview show what is in it, as they already do)
+  if include_at(buf, api.nvim_win_get_cursor(win)[1]) then
+    local opened = false
+    api.nvim_win_call(win, function()
+      opened = _G.relationview_open_include and _G.relationview_open_include()
+          or false
+    end)
+    if opened then
+      return true
+    end
+  end
   local sym = vim.fn.expand('<cword>')
   if not is_symbol(sym, true) then
     return false
@@ -1588,32 +1600,51 @@ function A.ctx_jump_from_edit()
   -- every dead end below has to land somewhere: fall back to the builtin
   -- tag jump IN THE EDIT WINDOW, or the key would silently do nothing for
   -- anything gtags has no definition for (a macro, a struct member, ...)
-  local function fallback()
-    if api.nvim_win_is_valid(win) then
-      api.nvim_win_call(win, function()
-        pcall(vim.cmd, 'normal! ' ..
-          api.nvim_replace_termcodes('<C-]>', true, false, true))
-      end)
+  local jump_via_gtags -- forward: used by the retry below
+  local function fallback(retried)
+    if not api.nvim_win_is_valid(win) then
+      return
+    end
+    local jumped = false
+    api.nvim_win_call(win, function()
+      jumped = pcall(vim.cmd, 'normal! ' ..
+        api.nvim_replace_termcodes('<C-]>', true, false, true))
+    end)
+    if jumped or retried then
+      return
+    end
+    -- Nothing the index knows about. In preset mode that usually means the
+    -- file defining it simply is not in the project files yet: find it, add
+    -- it, index it, and take the jump again.
+    local added = 0
+    pcall(function()
+      if _G.projectfiles_add_for_symbol then
+        added = _G.projectfiles_add_for_symbol(sym) or 0
+      end
+    end)
+    if added > 0 then
+      vim.defer_fn(function() jump_via_gtags(true) end, 200)
     end
   end
   s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
   local gen = s.ctx_jump_gen
+  jump_via_gtags = function(retried)
   root_for(name, function(root)
-    if gen ~= s.ctx_jump_gen then
+    if gen ~= s.ctx_jump_gen and not retried then
       return -- a newer C-] is on its way: that one wins
     end
     if not root or not ctx_visible() then
-      fallback()
+      fallback(retried)
       return
     end
     run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
       function(lines)
-        if gen ~= s.ctx_jump_gen then
+        if gen ~= s.ctx_jump_gen and not retried then
           return
         end
         local d = parse_ctags_mod(lines, 4)[1]
         if not d then
-          fallback() -- no gtags definition: let the tag stack try
+          fallback(retried) -- no gtags definition: let the tag stack try
           return
         end
         if api.nvim_win_is_valid(win) then
@@ -1626,6 +1657,8 @@ function A.ctx_jump_from_edit()
         end
       end, 8)
   end)
+  end
+  jump_via_gtags(false)
   return true
 end
 
@@ -3784,7 +3817,7 @@ local function show_results(title, sym, results, truncated, origin)
   end
 end
 
-function A.gtags(args)
+function A.gtags(args, retried)
   local flags, pat = {}, {}
   for w in tostring(args):gmatch('%S+') do
     if w:sub(1, 1) == '-' and #w > 1 then
@@ -3861,6 +3894,19 @@ function A.gtags(args)
         end
         if #results >= cap then
           break
+        end
+      end
+      if #results == 0 and not retried then
+        -- the project files may simply not contain it yet
+        local added = 0
+        pcall(function()
+          if _G.projectfiles_add_for_symbol then
+            added = _G.projectfiles_add_for_symbol(pattern) or 0
+          end
+        end)
+        if added > 0 then
+          vim.defer_fn(function() A.gtags(args, true) end, 250)
+          return
         end
       end
       show_results('Gtags ' .. tostring(args), pattern, results,

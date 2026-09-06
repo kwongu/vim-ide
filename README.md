@@ -99,6 +99,8 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      otherwise
 Ctrl+Enter: Take the edit window to the RelationView item you walked to
 Ctrl+c: Unpin the relation panel (otherwise the CONFIG lookup, as before)
+gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
+     including file, then through the GTAGS path index, then 'path')
 \fo: Find a file among the indexed ones and open it (^d drop, ^a add)
 \fp / \fd: Pick files / directories to add to the project files list
 \fx: Remove entries    \fm: Choose the preset    \fS: Save it    \fR: Reindex
@@ -196,6 +198,15 @@ files that define the symbols it uses - one level deep, at most
 `g:projectfiles_expand_max` symbols (40), off with
 `g:projectfiles_expand = 0`. Adding `src/main.c` in a small project pulls in
 `inc/util.h` and `src/util.c` by itself.
+
+A symbol the index does not know about is not a dead end: `Ctrl+]` and
+`:Gtags` (so `\c`) fall back to searching the project's sources for whatever
+defines it, add that file to the project files, index it, and take the jump
+again - `:ProjectFilesAddSymbol` does the same on demand. Adding a file
+brings the headers it includes and the files defining the symbols it uses
+along with it, so this rarely has to trigger. The preset is written out
+before the indexer builds its file list, so even the very first index of a
+project obeys it.
 
 Dropping the last entry puts the project back in auto mode rather than
 leaving an empty list behind (an empty list would index nothing, and the old

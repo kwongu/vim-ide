@@ -668,6 +668,10 @@ nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 func! s:RvCtxJump() abort
 	if has('nvim') && exists('*luaeval')
 		try
+			" #include 줄이면 배치와 상관없이 그 헤더로 간다
+			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				return
+			endif
 			" 패널이 떠 있으면 플러그인이 처리한다:
 			"   미리보기 있음 -> context view 에서 열고 포커스 이동
 			"   미리보기 없음 -> 패널만 그 심볼로 바꾸고(PINNED) false 를
@@ -675,11 +679,19 @@ func! s:RvCtxJump() abort
 			if luaeval('_G.relationview_ctx_jump ~= nil and _G.relationview_ctx_jump() or false')
 				return
 			endif
-			" 패널이 닫혀 있으면 예전처럼 quickfix 로 보낸다
+			" 패널이 닫혀 있으면 예전처럼 quickfix 로 보낸다. 거기서도
+			" 못 찾으면 그 심볼을 정의한 파일을 project files 에 넣고
+			" (색인까지) 한 번 더 찾는다.
 			if !luaeval('_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil or false')
 						\ && exists(':Gtags') == 2
 						\ && luaeval('_G.relationview_has_db ~= nil and _G.relationview_has_db() or false')
-				execute 'Gtags -d ' . expand('<cword>')
+				let l:w = expand('<cword>')
+				call setqflist([])
+				try | execute 'Gtags -d ' . l:w | catch | endtry
+				if empty(getqflist()) && l:w =~# '^[A-Za-z_][A-Za-z0-9_]*$'
+							\ && luaeval('_G.projectfiles_add_for_symbol ~= nil and _G.projectfiles_add_for_symbol("' . l:w . '") or 0') > 0
+					try | execute 'Gtags -d ' . l:w | catch | endtry
+				endif
 				return
 			endif
 		catch
@@ -694,6 +706,22 @@ func! s:RvCtxJump() abort
 	execute "normal! \<C-]>"
 endfunc
 nnoremap <silent> <C-]> :call <SID>RvCtxJump()<CR>
+
+" gf : #include 줄에서는 relationview 의 헤더 해석기(포함한 파일 옆 →
+"      GTAGS 경로 색인 → 'path')로 그 헤더를 편집창에 연다. 그 밖에는
+"      평소의 gf.
+func! s:RvGotoFile() abort
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	normal! gf
+endfunc
+nnoremap <silent> gf :call <SID>RvGotoFile()<CR>
 
 " C-c 매핑은 checksymbol.vim 을 source 한 뒤에 둔다(아래쪽 참고)
 
@@ -1348,7 +1376,7 @@ let g:relationview_height = 16
 " context view 는 패널 안이 아니라 편집 창 오른쪽에 따로 띄운다
 "   -> RelationView 는 아래 전체 폭, ContextView 는 오른쪽 세로 한 칸
 let g:relationview_context_position = 'right'
-let g:relationview_context_width = 75
+let g:relationview_context_width = 80
 " 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
 let g:relationview_width = 80
 let g:relationview_context_height = 40

@@ -432,6 +432,13 @@ local function build(root, why, opts)
   end
 
   -- 1. file list first, so its size can be judged before the index is replaced
+  -- a preset decides which files exist for the indexer: write it out before
+  -- the list is generated, or the very first build indexes the whole tree
+  pcall(function()
+    if _G.projectfiles_materialize then
+      _G.projectfiles_materialize(root)
+    end
+  end)
   local ok = pcall(vim.system,
     { 'sh', '-c', vim.fn.shellescape(fl) .. ' > ' ..
       vim.fn.shellescape(list) .. ' && wc -l < ' .. vim.fn.shellescape(list) },
@@ -539,6 +546,13 @@ function refresh(root, why, force)
     end)
   end
 
+  -- a preset decides which files exist for the indexer: write it out before
+  -- the list is generated, or the very first build indexes the whole tree
+  pcall(function()
+    if _G.projectfiles_materialize then
+      _G.projectfiles_materialize(root)
+    end
+  end)
   local ok = pcall(vim.system,
     { 'sh', '-c', vim.fn.shellescape(fl) .. ' > ' .. vim.fn.shellescape(list) ..
       ' && wc -l < ' .. vim.fn.shellescape(list) },
@@ -803,6 +817,13 @@ function ctags_build(root, why)
   -- '--excmd=number' drops the search pattern from every entry (~30% smaller,
   -- 0.88 GB instead of 1.3 GB on a 69k-file kernel tree); '--tag-relative=never'
   -- with an absolute file list keeps the paths valid from a cache directory.
+  -- a preset decides which files exist for the indexer: write it out before
+  -- the list is generated, or the very first build indexes the whole tree
+  pcall(function()
+    if _G.projectfiles_materialize then
+      _G.projectfiles_materialize(root)
+    end
+  end)
   local sh = vim.fn.shellescape(fl) .. " | sed -e 's|^\\./||' -e 's|^|" ..
     root .. "/|' | " .. vim.fn.shellescape(ct) .. ' -f ' ..
     vim.fn.shellescape(tmp) .. ' -L - ' ..
