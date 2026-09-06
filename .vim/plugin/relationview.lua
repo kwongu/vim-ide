@@ -2477,6 +2477,36 @@ local function field_names(node, source)
   return names
 end
 
+-- the line the member's NAME is on. A declaration can span many lines
+-- ('struct { ... } pair[N];' starts at the 'struct {'), and the useful place
+-- to land is where the name is.
+local function name_line(node)
+  -- Only the declarator side: the TYPE of this field may itself be an
+  -- anonymous struct, and its members would otherwise be mistaken for the
+  -- name of this one ('struct { ... struct x y; ... } pair[N];').
+  local decls = node:field('declarator')
+  if not decls or #decls == 0 then
+    return nil
+  end
+  local found
+  local function walk(n)
+    if found then
+      return
+    end
+    if n:type() == 'field_identifier' then
+      found = n:start() + 1
+      return
+    end
+    for c in n:iter_children() do
+      walk(c)
+    end
+  end
+  for _, d in ipairs(decls) do
+    walk(d)
+  end
+  return found
+end
+
 -- the body of a C11 anonymous struct/union member, whose fields belong to
 -- the enclosing type ('n->ival'), or nil
 local function anon_body(node)
@@ -2560,15 +2590,30 @@ local function members_of(path, line, want)
               out[#out + 1] = {
                 name = #ns > 0 and table.concat(ns, ', ') or '(anonymous)',
                 text = ntext(f, source):gsub('%s+', ' '),
-                line = f:start() + 1,
+                line = name_line(f) or (f:start() + 1),
               }
             end
           end
         else
+          -- 'struct { ... } hw;' - the member has a name but its type does
+          -- not, so a chain can only continue by descending into that body
+          -- right here. Remember where it starts.
+          local sub
+          for x in c:iter_children() do
+            if TYPE_NODES[x:type()] and not field1(x, 'name') then
+              for y in x:iter_children() do
+                if y:type() == 'field_declaration_list' then
+                  sub = x:start() + 1
+                  break
+                end
+              end
+            end
+          end
           out[#out + 1] = {
             name = #names > 0 and table.concat(names, ', ') or '(anonymous)',
             text = ntext(c, source):gsub('%s+', ' '),
-            line = c:start() + 1,
+            line = name_line(c) or (c:start() + 1),
+            sub = sub,
           }
         end
       elseif ct == 'enumerator' then
@@ -2918,7 +2963,38 @@ local function resolve_type_def(gen, root, name, hops, cb)
 end
 
 -- follow 'a->b.c': look the type up, parse it, take the next field, repeat
-local function resolve_chain(gen, root, ty, fields, i, cb)
+local resolve_chain
+
+-- the same walk, but inside an anonymous struct/union body of the SAME file
+-- ('struct { struct { u32 max_channel; } hw; } pair[N];' - the kernel is
+-- full of these, and there is no type name anywhere to look up)
+local function anon_chain(gen, root, path, sub_line, fields, i, cb)
+  local sm = members_of(path, sub_line)
+  if not sm then
+    return false
+  end
+  local hit = find_member(sm.members, fields[i])
+  if not hit then
+    return false
+  end
+  local def = { path = path, line = sm.line }
+  if i >= #fields then
+    cb({ def = def, members = sm.members, member = hit, name = fields[i] })
+    return true
+  end
+  if hit.sub and anon_chain(gen, root, path, hit.sub, fields, i + 1, cb) then
+    return true
+  end
+  local nty = type_from_text(hit.text)
+  if nty then
+    resolve_chain(gen, root, nty, fields, i + 1, cb)
+    return true
+  end
+  cb({ def = def, members = sm.members, member = hit, name = fields[i] })
+  return true
+end
+
+resolve_chain = function(gen, root, ty, fields, i, cb)
   resolve_type_def(gen, root, ty.name, 3, function(tdef, m, ty2)
     if gen ~= s.gen then
       return
@@ -2932,6 +3008,11 @@ local function resolve_chain(gen, root, ty, fields, i, cb)
     if i >= #fields or not hit then
       cb({ def = tdef, type = ty, members = m and m.members or nil,
         member = hit, name = fields[i] })
+      return
+    end
+    -- an anonymous struct/union member: continue inside it, same file
+    if hit.sub and tdef.path
+        and anon_chain(gen, root, tdef.path, hit.sub, fields, i + 1, cb) then
       return
     end
     local nty = type_from_text(hit.text)

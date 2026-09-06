@@ -107,6 +107,12 @@ this used to end in "E426: tag not found".
 On a member access (`msg->cmd`, `ctx.id`) the jump follows the type of the
 BASE variable and goes to that member's declaration in the struct, so a
 local or a parameter that happens to carry the same name cannot steal it.
+Chains work all the way down - `asrc->pair[i].hw.max_channel` lands on
+`max_channel` - including the kernel's favourite shape, structs nested
+anonymously inside each other (`struct { struct { u32 max_channel; } hw; }
+pair[N];`), where there is no type name anywhere to look up. The landing
+line is the one carrying the member's name, not the `struct {` the
+declaration happens to start on.
 gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      including file, then through the GTAGS path index, then 'path')
 \fo: Find a file among the indexed ones and open it (^d drop, ^a add)
