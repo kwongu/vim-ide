@@ -331,8 +331,9 @@ symbol there does not rebuild the relation tree, and it renders a copy of
 the file rather than the file itself, so a quickfix jump (`Ctrl+9` / `Ctrl+0`,
 `]q` / `[q`, or `Ctrl+n` / `Ctrl+p` when the panel holds no list), `:tag` or
 `gf` always lands in a real edit window instead of taking over the preview. Inside the context window
-`Ctrl+]` follows the definition of the symbol under the cursor within that
-window only - the source windows and the tree stay untouched - and
+`Ctrl+]` (and a double click) follows the symbol under the cursor within that
+window only - a parameter or a local variable goes to its declaration in the
+function being previewed, everything else to its definition - the source windows and the tree stay untouched - and
 `Ctrl+t` walks back along the context window's own jump stack. A double
 click in the context window takes the edit window to the line under the
 mouse.

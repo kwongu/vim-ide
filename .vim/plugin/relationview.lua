@@ -29,6 +29,9 @@
 --              window; the edit window does not move (works from any
 --              window - including from inside the preview itself - and
 --              falls back to :cnext/:cprevious with no list)
+--   In the context window C-] (and a double click) follows the symbol under
+--   the cursor inside that window - including a parameter or a local, whose
+--   declaration is found in the function being previewed; C-t walks back.
 --   C-c unpins the panel (:RelationViewUnpin); C-] in an edit window opens
 --   the definition in the CONTEXT window, moves the focus there and switches
 --   the panel to that symbol (pinned), C-t walks back and hands the focus to
@@ -1479,6 +1482,25 @@ ctx_tag_jump = function()
   if not is_symbol(sym, true) then
     return
   end
+
+  -- A parameter or a local variable is in no index; its declaration is in
+  -- the function we are looking at. The preview holds only a slice of the
+  -- file, which treesitter cannot always parse into a function, so ask the
+  -- real file's buffer and then move the preview to the declaration.
+  local here = pos[1] + off
+  local okb, fbuf = pcall(vim.fn.bufadd, file)
+  if okb and fbuf and fbuf > 0 then
+    pcall(vim.fn.bufload, fbuf)
+    local okd, d = pcall(local_decl, fbuf, here, sym)
+    if okd and d and d.line and d.line ~= here then
+      table.insert(s.ctx_stack,
+        { path = file, line = here, col = pos[2], sym = sym })
+      s.ctx_last = nil
+      show_context({ path = file, line = d.line, sym = sym })
+      return
+    end
+  end
+
   root_for(file, function(root)
     if not root or not ctx_visible() then
       return
