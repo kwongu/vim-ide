@@ -343,9 +343,11 @@ relation list and the preview follows to each hit, so a search can be read
 through without leaving that window (a late redraw still cannot yank the
 preview away while you are following symbols inside it with `Ctrl+]`).
 
-`Ctrl+]` in an edit window opens the definition **in the context window**
-and moves the focus there; the edit window stays where it is, so it remains
-the place you are working in. `Ctrl+t` walks back: right after the jump it
+`Ctrl+]` in an edit window opens the definition **in the context window**,
+moves the focus there, and switches the panel to that symbol - pinned, so
+its callers stay in front of you while you read (`Ctrl+n`/`Ctrl+p` then walk
+that new list). The edit window stays where it is, so it remains the place
+you are working in. `Ctrl+t` walks back: right after the jump it
 returns the focus to the edit window, and if you kept following symbols
 with `Ctrl+]` inside the context window it unwinds that window's own stack
 first and hands the focus back only when it reaches the spot the jump

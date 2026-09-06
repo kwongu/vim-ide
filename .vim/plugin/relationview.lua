@@ -30,8 +30,9 @@
 --              window - including from inside the preview itself - and
 --              falls back to :cnext/:cprevious with no list)
 --   C-c unpins the panel (:RelationViewUnpin); C-] in an edit window opens
---   the definition in the CONTEXT window and moves the focus there, C-t
---   walks back and hands the focus to the edit window again.
+--   the definition in the CONTEXT window, moves the focus there and switches
+--   the panel to that symbol (pinned), C-t walks back and hands the focus to
+--   the edit window again.
 --   Browsing the list (click, j/k, C-n/C-p) pins the panel; double click
 --   takes the edit window there; resting on a symbol in a source window for
 --   g:relationview_unpin_delay ms (3s) unpins and follows the cursor again.
@@ -289,6 +290,7 @@ local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
 local pick_src_win
+local update        -- the panel's own refresh, defined further down
 local render_rows
 local source_text
 local include_at
@@ -1580,6 +1582,11 @@ function A.ctx_jump_from_edit()
           return
         end
         if api.nvim_win_is_valid(win) then
+          -- the panel follows the jump as well and freezes on it, so the
+          -- callers of what you just opened are right there (C-c, or 2s on
+          -- a symbol in the edit window, lets it follow the cursor again)
+          s.pinned = true
+          update(sym, d.path, true, false, nil)
           ctx_enter_from(win, { path = d.path, line = d.line, sym = sym }, sym)
         end
       end, 8)
@@ -2727,7 +2734,7 @@ end
 
 -- manual: explicit request (:RelationView / 'r'), relaxes the guards that
 -- keep the automatic cursor path cheap
-local function update(sym, srcfile, force, manual, ctx)
+function update(sym, srcfile, force, manual, ctx)
   s.sym = sym
   s.as_type = ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf)
       and wants_type_at(ctx.buf, ctx.line or 1, ctx.col or 0) or false
