@@ -199,10 +199,19 @@ files that define the symbols it uses - one level deep, at most
 `g:projectfiles_expand = 0`. Adding `src/main.c` in a small project pulls in
 `inc/util.h` and `src/util.c` by itself.
 
+With the preview open, `Ctrl+]` never sends the edit window anywhere: if
+gtags has no definition it first tries to bring the defining file into the
+project (below), then falls back to the ctags snapshot's location - both
+shown in the preview, with the panel switching to that symbol. Only with no
+preview window does the edit window take the jump itself.
+
 A symbol the index does not know about is not a dead end: `Ctrl+]` and
 `:Gtags` (so `\c`) fall back to searching the project's sources for whatever
 defines it, add that file to the project files, index it, and take the jump
-again - `:ProjectFilesAddSymbol` does the same on demand. Adding a file
+again - `:ProjectFilesAddSymbol` does the same on demand. Side trees - `tools/`,
+`samples/`, `scripts/`, `Documentation/`, selftests - are skipped when
+looking for a definition (they carry their own copies of kernel headers);
+`:ProjectFilesPrune` drops such entries from a preset that already has them. Adding a file
 brings the headers it includes and the files defining the symbols it uses
 along with it, so this rarely has to trigger. The preset is written out
 before the indexer builds its file list, so even the very first index of a

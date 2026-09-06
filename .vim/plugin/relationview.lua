@@ -1557,6 +1557,41 @@ ctx_enter_from = function(win, loc, sym)
   return true
 end
 
+-- Where the ctags snapshot thinks a symbol is. Used when gtags has nothing:
+-- the location still belongs in the preview, not in the edit window.
+local function tag_loc(sym)
+  if #vim.fn.tagfiles() == 0 then
+    return nil
+  end
+  local ok, tl = pcall(vim.fn.taglist, '^' .. vim.fn.escape(sym, '\\.*$^~[]') .. '$')
+  if not ok or type(tl) ~= 'table' then
+    return nil
+  end
+  for _, t in ipairs(tl) do
+    local path = t.filename
+    if path and path ~= '' and uv.fs_stat(path) then
+      local line = tonumber(t.cmd)
+      if not line then
+        -- '/^int foo(void)$/' : find that line in the file
+        local pat = tostring(t.cmd):match('^/%^?(.-)%$?/$')
+        if pat then
+          local okr, lines = pcall(vim.fn.readfile, path, '', 20000)
+          if okr then
+            for i, l in ipairs(lines) do
+              if l:find(pat, 1, true) then
+                line = i
+                break
+              end
+            end
+          end
+        end
+      end
+      return { path = path, line = line or 1 }
+    end
+  end
+  return nil
+end
+
 function A.ctx_jump_from_edit()
   if not panel_visible() then
     return false -- nothing of ours is up: the caller falls back to :Gtags
@@ -1601,30 +1636,45 @@ function A.ctx_jump_from_edit()
   -- tag jump IN THE EDIT WINDOW, or the key would silently do nothing for
   -- anything gtags has no definition for (a macro, a struct member, ...)
   local jump_via_gtags -- forward: used by the retry below
+  -- gtags has no definition for this one. With the preview up the answer
+  -- still belongs there, never in the edit window:
+  --   1. pull the file that defines it into the project and ask gtags again
+  --   2. failing that, use the ctags snapshot's location
+  --   3. failing that, say so
+  -- Without a preview the edit window IS the reading window, so the builtin
+  -- tag jump is the right thing there.
   local function fallback(retried)
     if not api.nvim_win_is_valid(win) then
       return
     end
-    local jumped = false
-    api.nvim_win_call(win, function()
-      jumped = pcall(vim.cmd, 'normal! ' ..
-        api.nvim_replace_termcodes('<C-]>', true, false, true))
-    end)
-    if jumped or retried then
+    if not ctx_visible() then
+      api.nvim_win_call(win, function()
+        pcall(vim.cmd, 'normal! ' ..
+          api.nvim_replace_termcodes('<C-]>', true, false, true))
+      end)
       return
     end
-    -- Nothing the index knows about. In preset mode that usually means the
-    -- file defining it simply is not in the project files yet: find it, add
-    -- it, index it, and take the jump again.
-    local added = 0
-    pcall(function()
-      if _G.projectfiles_add_for_symbol then
-        added = _G.projectfiles_add_for_symbol(sym) or 0
+    if not retried then
+      local added = 0
+      pcall(function()
+        if _G.projectfiles_add_for_symbol then
+          added = _G.projectfiles_add_for_symbol(sym) or 0
+        end
+      end)
+      if added > 0 then
+        vim.defer_fn(function() jump_via_gtags(true) end, 200)
+        return
       end
-    end)
-    if added > 0 then
-      vim.defer_fn(function() jump_via_gtags(true) end, 200)
     end
+    local loc = tag_loc(sym)
+    if loc then
+      s.pinned = true
+      update(sym, loc.path, true, false, nil)
+      ctx_enter_from(win, { path = loc.path, line = loc.line, sym = sym }, sym)
+      return
+    end
+    vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
+      vim.log.levels.WARN)
   end
   s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
   local gen = s.ctx_jump_gen

@@ -596,13 +596,28 @@ local function grep_defining(root, sym)
       'cd ' .. vim.fn.shellescape(root) .. ' && ' .. c .. ' 2>/dev/null | head -' ..
       (max * 4) })
     if ok then
-      -- a definition is more likely in a .c than in a header full of protos
-      table.sort(lines, function(a, b)
-        local ca, cb = a:match('%.c$') ~= nil, b:match('%.c$') ~= nil
-        if ca ~= cb then
-          return ca
+      -- Side trees (tools/, samples/, selftests ...) carry their own copies
+      -- of kernel headers; pulling those into a project is noise. Drop them
+      -- unless there is nothing else, and prefer the shortest real path.
+      local function side(x)
+        return x:match('^tools/') ~= nil or x:match('^samples/') ~= nil
+            or x:match('^Documentation/') ~= nil or x:match('^scripts/') ~= nil
+            or x:match('/selftests/') ~= nil or x:match('/test[s]?/') ~= nil
+      end
+      local main = {}
+      for _, l in ipairs(lines) do
+        if not side(l) then
+          main[#main + 1] = l
         end
-        return #a < #b
+      end
+      if #main > 0 then
+        lines = main
+      end
+      table.sort(lines, function(a, b)
+        if #a ~= #b then
+          return #a < #b
+        end
+        return a < b
       end)
       for _, l in ipairs(lines) do
         if l ~= '' and uv.fs_stat(root .. '/' .. l) and #out < max then
@@ -661,6 +676,33 @@ function _G.projectfiles_add_for_symbol(sym)
     :format(sym, #added, table.concat(added, ', ')))
   return #added
 end
+
+-- side-tree entries an earlier, less picky expansion may have pulled in
+api.nvim_create_user_command('ProjectFilesPrune', function()
+  local root = cur_root()
+  local entries, name = entries_of(root)
+  if not name then
+    notify('auto 모드입니다 (정리할 목록 없음)')
+    return
+  end
+  local kept, gone = {}, {}
+  for _, e in ipairs(entries) do
+    local p2 = e.path
+    if p2:match('^tools/') or p2:match('^samples/') or p2:match('^Documentation/')
+        or p2:match('^scripts/') or p2:match('/selftests/') then
+      gone[#gone + 1] = p2
+    else
+      kept[#kept + 1] = e
+    end
+  end
+  if #gone == 0 then
+    notify('정리할 항목이 없습니다 (' .. #entries .. ' entries)')
+    return
+  end
+  save_entries(root, name, kept)
+  notify(('%d개 제거 (tools/ samples/ scripts/ Documentation/ selftests), %d개 남음')
+    :format(#gone, #kept))
+end, { desc = 'Drop tools//samples//scripts entries from the preset' })
 
 api.nvim_create_user_command('ProjectFilesAddSymbol', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
