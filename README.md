@@ -99,6 +99,9 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      otherwise
 Ctrl+Enter: Take the edit window to the RelationView item you walked to
 Ctrl+c: Unpin the relation panel (otherwise the CONFIG lookup, as before)
+Ctrl+] / double click on a PARAMETER or a LOCAL VARIABLE goes to its
+declaration in the enclosing function, in the edit window - those are in no
+index, so this used to end in "E426: tag not found".
 gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      including file, then through the GTAGS path index, then 'path')
 \fo: Find a file among the indexed ones and open it (^d drop, ^a add)

@@ -294,6 +294,7 @@ local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
 local pick_src_win
+local local_decl    -- treesitter: the declaration of a local/parameter
 local update        -- the panel's own refresh, defined further down
 local render_rows
 local source_text
@@ -1735,6 +1736,36 @@ function _G.relationview_has_db()
   return db_root(dir) ~= nil
 end
 
+-- A parameter or a local variable is in no index - ctags and gtags only
+-- know globals - so C-] on one used to end in 'E426: tag not found'. Its
+-- declaration is right here in the enclosing function: take the EDIT window
+-- there (the panel/preview show the variable's type by themselves).
+function _G.relationview_local_jump()
+  local buf = api.nvim_get_current_buf()
+  if vim.bo[buf].buftype ~= '' then
+    return false
+  end
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym) then
+    return false
+  end
+  local pos = api.nvim_win_get_cursor(0)
+  local ok, d = pcall(local_decl, buf, pos[1], sym)
+  if not ok or not d or not d.line then
+    return false
+  end
+  if d.line == pos[1] then
+    return true -- already on the declaration: nothing to jump to, but this
+                -- is still 'handled' (do not fall through to a tag error)
+  end
+  pcall(vim.cmd, [[normal! m']])
+  local text = api.nvim_buf_get_lines(buf, d.line - 1, d.line, false)[1] or ''
+  local at = text:find(sym, 1, true)
+  pcall(api.nvim_win_set_cursor, 0, { d.line, at and (at - 1) or 0 })
+  pcall(vim.cmd, 'normal! zz')
+  return true
+end
+
 -- the .vimrc <C-]> mapping asks this first and falls back to the builtin
 function _G.relationview_ctx_jump()
   return A.ctx_jump_from_edit()
@@ -2463,7 +2494,7 @@ end
 
 -- declaration of `sym` inside the function containing `line` (parameters
 -- included) -> { line=, text=, type=, is_param=, fnname=, fns=, fne= }
-local function local_decl(bufnr, line, sym)
+local_decl = function(bufnr, line, sym)
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok or not parser then
     return nil

@@ -672,6 +672,10 @@ func! s:RvCtxJump() abort
 			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
 				return
 			endif
+			" 파라미터/지역변수는 색인에 없다: 이 함수 안의 선언으로 간다
+			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
+				return
+			endif
 			" 패널이 떠 있으면 플러그인이 처리한다:
 			"   미리보기 있음 -> context view 에서 열고 포커스 이동
 			"   미리보기 없음 -> 패널만 그 심볼로 바꾸고(PINNED) false 를
@@ -751,6 +755,15 @@ function! s:RvMouseJump() abort
 	if has('nvim') && exists('*luaeval')
 		try
 			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	" 파라미터/지역변수는 이 함수 안의 선언으로 (색인에 없다)
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
 				return
 			endif
 		catch
