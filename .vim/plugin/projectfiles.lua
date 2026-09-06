@@ -286,6 +286,26 @@ local function entries_differ(a, b)
   return false
 end
 
+-- using a preset whose local copy has drifted from the repository's: say so
+-- once, at the moment it starts being used, or a 'git pull' that updated it
+-- would look like it did nothing
+local function announce_fork(name)
+  if not name or name == '' then
+    return
+  end
+  local mine = read_preset_file(preset_file(presets_dir(), name))
+  local sp = shared_path(name)
+  local sh = sp and read_preset_file(sp) or nil
+  if mine and sh and entries_differ(mine.entries, sh.entries) then
+    local how = (#mine.entries == #sh.entries)
+        and ('개수는 같지만 내용이 다릅니다 (%d개)'):format(#sh.entries)
+        or ('%d개로 다릅니다'):format(#sh.entries)
+    notify(('내 사본을 씁니다 (%d개). vim-ide 공용본은 '):format(#mine.entries)
+      .. how .. ' - ^d 로 내 사본을 지우면 공용본을 따라갑니다',
+      vim.log.levels.WARN)
+  end
+end
+
 local function preset_read(name)
   return read_preset_file(preset_path(name))
       or read_preset_file(shared_path(name))
@@ -313,11 +333,24 @@ local function write_json(f, lines)
   return ok and ret == 0
 end
 
+-- Writing always targets MY copy, and my copy is the one that gets read. The
+-- first write against a name vim-ide carries therefore forks it on this
+-- machine: from then on a 'git pull' that updates the shared preset changes
+-- nothing here. That fork is often not a deliberate save - C-] on a symbol
+-- outside the preset adds the file that defines it - so say it out loud.
 local function preset_write(name, entries)
   local f = preset_path(name)
+  local sp = shared_path(name)
+  local forking = uv.fs_stat(f) == nil and sp ~= nil and uv.fs_stat(sp) ~= nil
   if not write_json(f, encode_preset(name, entries)) then
     notify('preset 을 저장하지 못했습니다: ' .. f, vim.log.levels.ERROR)
     return false
+  end
+  if forking then
+    notify(("vim-ide 공용 preset '%s' 를 이 장비 사본으로 갈랐습니다. "):format(name)
+      .. '앞으로 git pull 은 이 preset 을 바꾸지 않습니다 '
+      .. '(<leader>fm 에서 ^d 로 내 사본을 지우면 다시 따라갑니다)',
+      vim.log.levels.WARN)
   end
   return true
 end
@@ -1275,6 +1308,7 @@ local function pick_preset()
     materialize(root)
     reindex(root)
     notify(it.name and ("preset '" .. it.name .. "'") or 'auto 모드')
+    announce_fork(it.name)
   end
   local t = telescope()
   if not t then
@@ -1477,6 +1511,9 @@ api.nvim_create_user_command('ProjectFilesPreset', function(o)
   materialize(root)
   reindex(root)
   notify(o.args == 'auto' and 'auto 모드' or ("preset '" .. o.args .. "'"))
+  if o.args ~= 'auto' then
+    announce_fork(o.args)
+  end
 end, { nargs = '?', complete = function()
   local n = preset_list()
   table.insert(n, 1, 'auto')

@@ -289,6 +289,11 @@ copy. Pick one there with `\fm`, where each preset says where it comes from:
 | `[vim-ide]` | the repository's, and my copy (if any) is identical to it |
 | `[내 사본 ≠ vim-ide N개]` | I have edited it here; the repository still holds the N-entry version, and a `git pull` will not change what this machine uses |
 
+You are also told when a fork starts (the write that creates my copy - often
+not a deliberate save, since `C-]` on a symbol outside the preset adds the
+file that defines it) and every time a forked preset is put to use, because
+that is when a `git pull` stops having any effect on it.
+
 `^d` in that picker deletes only my copy - which is how the last case goes
 back to following the shared one; the shared original is removed by deleting
 the file in the repository. To ignore the shared presets entirely:
