@@ -262,6 +262,8 @@ local s = {
 -- in the context window ('termguicolors' is off in this setup, so the
 -- cterm colours are the ones that actually paint)
 local NS_SYM = api.nvim_create_namespace('RelationViewSym')
+-- the symbol a jump landed on, coloured until the cursor moves away
+local NS_JUMP = api.nvim_create_namespace('RelationViewJumpSym')
 local NS_CTX = api.nvim_create_namespace('RelationViewCtxSym')
 
 -- every colour the panel uses, in one place. A ':colorscheme' wipes user
@@ -298,6 +300,7 @@ local render_tree     -- forward declarations
 local update_header
 local pick_src_win
 local local_decl    -- treesitter: the declaration of a local/parameter
+local member_jump   -- 'msg->cmd': where that member is declared
 local update        -- the panel's own refresh, defined further down
 local render_rows
 local source_text
@@ -1128,6 +1131,52 @@ local function restore_geom(w, h)
 end
 
 -- colour the symbol on the row the panel cursor is on
+-- colour `sym` on `line` of `buf` (sky blue, the same as the panel uses)
+-- until the cursor moves off it
+local function flash_symbol(buf, line, sym)
+  if not (buf and api.nvim_buf_is_valid(buf) and line and sym and sym ~= '') then
+    return
+  end
+  pcall(api.nvim_buf_clear_namespace, buf, NS_JUMP, 0, -1)
+  local okl, lines = pcall(api.nvim_buf_get_lines, buf, line - 1, line, false)
+  local text = okl and lines[1] or nil
+  if not text then
+    return
+  end
+  local at, init = nil, 1
+  while true do
+    local sidx, eidx = text:find(sym, init, true)
+    if not sidx then
+      break
+    end
+    local before = sidx > 1 and text:sub(sidx - 1, sidx - 1) or ''
+    local after = text:sub(eidx + 1, eidx + 1)
+    if not before:match('[%w_]') and not after:match('[%w_]') then
+      at = sidx
+      break
+    end
+    init = eidx + 1
+  end
+  if not at then
+    return
+  end
+  pcall(api.nvim_buf_set_extmark, buf, NS_JUMP, line - 1, at - 1,
+    { end_col = at - 1 + #sym, hl_group = 'RvCtxSym' })
+  -- the jump itself moves the cursor, so start watching a moment later
+  vim.defer_fn(function()
+    if not api.nvim_buf_is_valid(buf) then
+      return
+    end
+    api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufLeave' }, {
+      buffer = buf,
+      once = true,
+      callback = function()
+        pcall(api.nvim_buf_clear_namespace, buf, NS_JUMP, 0, -1)
+      end,
+    })
+  end, 150)
+end
+
 hl_cursor_row = function()
   if not (s.buf and api.nvim_buf_is_valid(s.buf)) then
     return
@@ -1491,12 +1540,37 @@ ctx_tag_jump = function()
   local okb, fbuf = pcall(vim.fn.bufadd, file)
   if okb and fbuf and fbuf > 0 then
     pcall(vim.fn.bufload, fbuf)
-    local okd, d = pcall(local_decl, fbuf, here, sym)
-    if okd and d and d.line and d.line ~= here then
+    -- 'msg->cmd' first: the member belongs to the base variable's struct,
+    -- not to whatever else carries that name (a local, say)
+    local taken = member_jump(fbuf, here, pos[2], function(loc)
       table.insert(s.ctx_stack,
         { path = file, line = here, col = pos[2], sym = sym })
       s.ctx_last = nil
-      show_context({ path = file, line = d.line, sym = sym })
+      show_context(loc)
+      vim.defer_fn(function()
+        if ctx_visible() then
+          local off2 = (s.ctx_file and s.ctx_file.off) or 0
+          flash_symbol(api.nvim_win_get_buf(s.ctx_win), loc.line - off2, loc.sym)
+        end
+      end, 60)
+    end)
+    if taken then
+      return
+    end
+    local okd, d = pcall(local_decl, fbuf, here, sym)
+    if okd and d and d.line then
+      if d.line ~= here then
+        table.insert(s.ctx_stack,
+          { path = file, line = here, col = pos[2], sym = sym })
+        s.ctx_last = nil
+        show_context({ path = file, line = d.line, sym = sym })
+      end
+      vim.defer_fn(function()
+        if ctx_visible() then
+          local off2 = (s.ctx_file and s.ctx_file.off) or 0
+          flash_symbol(api.nvim_win_get_buf(s.ctx_win), d.line - off2, sym)
+        end
+      end, 60)
       return
     end
   end
@@ -1771,12 +1845,39 @@ function _G.relationview_local_jump()
   if not is_symbol(sym) then
     return false
   end
+  local win = api.nvim_get_current_win()
   local pos = api.nvim_win_get_cursor(0)
+
+  -- a member access resolves through the base variable's type, not by name
+  if member_jump(buf, pos[1], pos[2], function(loc)
+        if ctx_visible() then
+          ctx_enter_from(win, loc, loc.sym)
+          vim.defer_fn(function()
+            if ctx_visible() then
+              local cbuf = api.nvim_win_get_buf(s.ctx_win)
+              local off = (s.ctx_file and s.ctx_file.off) or 0
+              flash_symbol(cbuf, loc.line - off, loc.sym)
+            end
+          end, 60)
+        elseif api.nvim_win_is_valid(win) then
+          api.nvim_win_call(win, function()
+            pcall(vim.cmd, [[normal! m']])
+            vim.cmd('edit ' .. vim.fn.fnameescape(loc.path))
+            pcall(api.nvim_win_set_cursor, win, { loc.line, 0 })
+            pcall(vim.cmd, 'normal! zz')
+          end)
+          flash_symbol(api.nvim_win_get_buf(win), loc.line, loc.sym)
+        end
+      end) then
+    return true
+  end
+
   local ok, d = pcall(local_decl, buf, pos[1], sym)
   if not ok or not d or not d.line then
     return false
   end
   if d.line == pos[1] then
+    flash_symbol(buf, d.line, sym)
     return true -- already on the declaration: nothing to jump to, but this
                 -- is still 'handled' (do not fall through to a tag error)
   end
@@ -1785,6 +1886,7 @@ function _G.relationview_local_jump()
   local at = text:find(sym, 1, true)
   pcall(api.nvim_win_set_cursor, 0, { d.line, at and (at - 1) or 0 })
   pcall(vim.cmd, 'normal! zz')
+  flash_symbol(buf, d.line, sym)
   return true
 end
 
@@ -2843,6 +2945,45 @@ local function resolve_chain(gen, root, ty, fields, i, cb)
 end
 
 -- show a type (members) or a variable (declaration + its type's members)
+-- 'msg->cmd' / 'ctx.id' under the cursor: where is THAT member declared?
+-- Matching by name alone is what sends such a jump to a local variable that
+-- happens to share the name, or to an unrelated global - so resolve the type
+-- of the BASE variable and take the member out of that struct.
+-- Returns true when it took the jump on (the answer arrives asynchronously).
+member_jump = function(buf, line, col, cb)
+  local okc, base, fields = pcall(cursor_field, buf, line, col)
+  if not okc or not base or not fields or #fields == 0 then
+    return false
+  end
+  local name = api.nvim_buf_get_name(buf)
+  if name == '' then
+    return false
+  end
+  local okd, decl = pcall(local_decl, buf, line, base)
+  local ty = (okd and decl) and type_from_text(decl.text) or nil
+  if not ty then
+    return false -- base is not a local we can type: let the others try
+  end
+  local want = fields[#fields]
+  local gen = s.gen
+  root_for(name, function(root)
+    if not root then
+      return
+    end
+    resolve_chain(gen, root, ty, fields, 1, function(res)
+      local m = res and res.member
+      local def = res and res.def
+      if not (m and def and def.path) then
+        vim.notify('RelationView: 멤버 ' .. want .. ' 를 찾지 못했습니다',
+          vim.log.levels.WARN)
+        return
+      end
+      cb({ path = def.path, line = m.line or def.line, sym = want })
+    end)
+  end)
+  return true
+end
+
 local function finish_type(gen, sym, root, opts)
   if gen ~= s.gen then
     return
