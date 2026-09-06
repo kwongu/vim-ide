@@ -96,6 +96,7 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one (previewed in the
      context window; the edit window does not move), the quickfix list
      otherwise
+Ctrl+Enter: Take the edit window to the RelationView item you walked to
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
@@ -172,9 +173,9 @@ definition and the caller tree:
   └─[+] rec_a          src/util.c:30
 ```
 
-Each row is the symbol and where it is; the source line itself is one
-keystroke away in the context window (`g:relationview_show_text = 1` puts
-it back as a third column). Resizing the panel (`Shift+h` / `Shift+l`, or
+Each row is the symbol, where it is, and the source line itself as a third
+column (`g:relationview_show_text = 0` drops that column when the panel is
+narrow; the context window shows the line either way). Resizing the panel (`Shift+h` / `Shift+l`, or
 resizing the terminal) lays the columns out again, so the paths always use
 the width that is actually there.
 
@@ -255,6 +256,11 @@ Keys inside the panel:
 
 ```
 Enter: jump to the call site under the cursor (lands on the symbol)
+Ctrl+Enter: the same jump, but it works from ANY window - after walking the
+       list with Ctrl+n / Ctrl+p from the edit window, this is how the walk
+       ends in the edit window (:RelationViewJump). Like the other Ctrl'ed
+       punctuation keys it needs a CSI u terminal; Enter inside the panel
+       does the same thing everywhere.
 Ctrl+n / Ctrl+p: next / previous item in the list. It works from ANY
        window: the panel's cursor moves and the context window previews
        that call site, centred on the symbol, while the EDIT WINDOW STAYS

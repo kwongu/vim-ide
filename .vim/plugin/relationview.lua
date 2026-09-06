@@ -31,6 +31,8 @@
 --   Browsing the list (click, j/k, C-n/C-p) pins the panel; double click
 --   takes the edit window there; resting on a symbol in a source window for
 --   g:relationview_unpin_delay ms (3s) unpins and follows the cursor again.
+--   C-CR (:RelationViewJump) jumps the edit window to the selected item from
+--   any window - the way a C-n/C-p walk ends.
 --   a  toggle realtime auto-update            q  close the panel
 --
 -- Expanding a node pins the panel automatically so a stray cursor move
@@ -980,6 +982,7 @@ local function ensure_buf()
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
+  bmap('<C-CR>', function() A.jump(false) end, 'RelationView: jump')
   bmap('<C-n>', function() A.step(1) end, 'RelationView: next item')
   bmap('<C-p>', function() A.step(-1) end, 'RelationView: previous item')
   bmap('a', function() A.toggle_auto() end, 'RelationView: toggle auto')
@@ -1159,7 +1162,7 @@ local function header(sym, note)
   local tail = #flags > 0 and ('  [' .. table.concat(flags, ', ') .. ']') or ''
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
-    '  [⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
+    '  [⏎/^⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
       '[c]ctx [p]pin [r]refresh [q]close',
   }
 end
@@ -2889,6 +2892,22 @@ local function jump_to(loc, peek)
   end
 end
 
+-- Jump to the item the PANEL cursor is on, from wherever the user is.
+-- C-n/C-p only preview, so this is how a walk finally ends in the edit
+-- window. Returns false when the panel has no selectable item.
+function A.jump_here(peek)
+  if not (s.win and api.nvim_win_is_valid(s.win) and s.buf
+      and api.nvim_win_get_buf(s.win) == s.buf) then
+    return false
+  end
+  local item = s.items[api.nvim_win_get_cursor(s.win)[1]]
+  if not (item and item.loc) then
+    return false
+  end
+  jump_to(item.loc, peek)
+  return true
+end
+
 function A.jump(peek)
   local lnum = api.nvim_win_get_cursor(0)[1]
   local item = s.items[lnum]
@@ -3493,6 +3512,12 @@ local function step_or_qf(dir)
     vim.notify((tostring(err):gsub('^.*Vim%b():', '')), vim.log.levels.INFO)
   end
 end
+
+api.nvim_create_user_command('RelationViewJump', function()
+  if not A.jump_here(false) then
+    vim.notify('RelationView: 선택된 항목이 없습니다')
+  end
+end, { desc = 'Jump the edit window to the item under the panel cursor' })
 
 api.nvim_create_user_command('RelationViewNext', function() step_or_qf(1) end,
   { desc = 'Next item in the relation list (falls back to :cnext)' })

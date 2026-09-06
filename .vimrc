@@ -652,6 +652,15 @@ func! s:QfStep(dir) abort
 		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
 	endtry
 endfunc
+" 리스트에서 고른 항목으로 실제 이동: Ctrl+Enter (어느 창에서 눌러도 된다)
+"   C-n/C-p 는 미리보기만 하므로, 이 키가 그 순회의 마침표다.
+func! s:RvJump() abort
+	if exists(':RelationViewJump') == 2
+		RelationViewJump
+	endif
+endfunc
+nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
+
 nnoremap <silent> <C-9> :call <SID>QfStep(1)<CR>
 nnoremap <silent> <C-0> :call <SID>QfStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
@@ -1276,11 +1285,13 @@ let g:relationview_height = 16
 " context view 는 패널 안이 아니라 편집 창 오른쪽에 따로 띄운다
 "   -> RelationView 는 아래 전체 폭, ContextView 는 오른쪽 세로 한 칸
 let g:relationview_context_position = 'right'
-let g:relationview_context_width = 70
+let g:relationview_context_width = 75
 " 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
 let g:relationview_width = 80
 let g:relationview_context_height = 40
-let g:relationview_show_text = 0
+" 리스트에 소스 코드 열까지 보여준다(심볼 | 파일경로 | 그 줄의 내용).
+" 패널이 화면 아래 전체 폭을 쓰므로 세 열이 들어간다.
+let g:relationview_show_text = 1
 " 리스트를 훑으면 PINNED 로 고정되고, 소스 창에서 한 심볼에 이만큼
 " 머무르면 고정이 풀리며 다시 커서를 따라간다
 let g:relationview_unpin_delay = 3000
