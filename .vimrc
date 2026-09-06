@@ -1393,6 +1393,7 @@ let g:relationview_unpin_delay = 3000
 "     <leader>fd  추가할 디렉터리 고르기  (그 아래 전부)
 "     <leader>fx  등록 항목 제거
 "     <leader>fm  preset 선택/전환        (^d 내 사본 삭제, auto 포함)
+"                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
 "   :ProjectFilesPresetShare <name>

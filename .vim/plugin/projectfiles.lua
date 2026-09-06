@@ -268,6 +268,24 @@ local function read_preset_file(f)
   return data
 end
 
+-- same set of entries? (order does not matter: the pickers append)
+local function entries_differ(a, b)
+  a, b = a or {}, b or {}
+  if #a ~= #b then
+    return true
+  end
+  local seen = {}
+  for _, e in ipairs(a) do
+    seen[(e.kind or 'file') .. '\0' .. (e.path or '')] = true
+  end
+  for _, e in ipairs(b) do
+    if not seen[(e.kind or 'file') .. '\0' .. (e.path or '')] then
+      return true
+    end
+  end
+  return false
+end
+
 local function preset_read(name)
   return read_preset_file(preset_path(name))
       or read_preset_file(shared_path(name))
@@ -1233,15 +1251,22 @@ local function pick_preset()
   local items = { { name = nil, label = (cur == nil and '● ' or '  ') ..
     'auto  (프로젝트 전체 색인)' } }
   for _, n in ipairs(names) do
-    local p = preset_read(n)
-    local sp = shared_path(n)
-    local shared = sp ~= nil and uv.fs_stat(sp) ~= nil
     -- say where a preset comes from: the ones vim-ide carries are on every
-    -- machine, mine are only here
-    local tag = shared
-        and (uv.fs_stat(preset_path(n)) and '  [vim-ide + 내 사본]'
-          or '  [vim-ide]')
-        or ''
+    -- machine, mine are only here. When both exist mine is the one in use,
+    -- so show when it has drifted from what the repository holds - that is
+    -- the case where a 'git pull' looks like it did nothing (^d drops my
+    -- copy and follows the shared one again).
+    local mine = read_preset_file(preset_path(n))
+    local sh = read_preset_file(shared_path(n))
+    local p = mine or sh
+    local tag = ''
+    if sh and mine then
+      tag = entries_differ(mine.entries, sh.entries)
+          and ('  [내 사본 ≠ vim-ide %d개]'):format(#sh.entries)
+          or '  [vim-ide]'
+    elseif sh then
+      tag = '  [vim-ide]'
+    end
     items[#items + 1] = { name = n, label = ('%s%s  (%d entries)%s')
       :format(cur == n and '● ' or '  ', n, p and #p.entries or 0, tag) }
   end

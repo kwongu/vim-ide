@@ -281,11 +281,19 @@ cd ~/.vim-ide && git add .vim/presets && git commit -m 'preset' && git push
 
 On the other machine, `git pull` in `~/.vim-ide` is enough - `~/.vim` is a
 symlink into it (see `install.sh`), so nvim finds the presets with nothing to
-copy. Pick one there with `\fm`. In that picker a shared preset is tagged
-`[vim-ide]`, and `^d` on one deletes only my local copy (the shared original
-is removed by deleting the file in the repository). To ignore the shared
-presets entirely: `let g:projectfiles_shared_presets = ''`, or point it at a
-directory of your own.
+copy. Pick one there with `\fm`, where each preset says where it comes from:
+
+| tag | meaning |
+|---|---|
+| *(none)* | only mine - this machine has it, the repository does not |
+| `[vim-ide]` | the repository's, and my copy (if any) is identical to it |
+| `[내 사본 ≠ vim-ide N개]` | I have edited it here; the repository still holds the N-entry version, and a `git pull` will not change what this machine uses |
+
+`^d` in that picker deletes only my copy - which is how the last case goes
+back to following the shared one; the shared original is removed by deleting
+the file in the repository. To ignore the shared presets entirely:
+`let g:projectfiles_shared_presets = ''`, or point it at a directory of your
+own.
 
 ## Relation window (nvim only)
 
