@@ -1375,31 +1375,6 @@ ensure_ctx = function()
     -- preview gets the full height of the edit area.
     -- the project files view owns the top of the right column: put the
     -- preview under it instead of splitting the edit window again
-    local pf = _G.projectfiles_win and _G.projectfiles_win() or nil
-    if pf and api.nvim_win_is_valid(pf) then
-      -- that view has 'winfixheight': splitting it would grow the whole
-      -- column and take the rows from the panel below, so relax it for the
-      -- split and put the panel's height back if it moved anyway
-      local fixed = vim.wo[pf].winfixheight
-      local ph = (s.win and api.nvim_win_is_valid(s.win))
-          and api.nvim_win_get_height(s.win) or nil
-      vim.wo[pf].winfixheight = false
-      api.nvim_win_call(pf, function()
-        vim.cmd('noautocmd rightbelow split')
-        ctx = api.nvim_get_current_win()
-      end)
-      if api.nvim_win_is_valid(pf) then
-        vim.wo[pf].winfixheight = fixed
-      end
-      if ph and s.win and api.nvim_win_is_valid(s.win)
-          and api.nvim_win_get_height(s.win) ~= ph then
-        pcall(api.nvim_win_set_height, s.win, ph)
-      end
-      if ctx and api.nvim_win_is_valid(ctx) then
-        goto ctx_ready
-      end
-    end
-    do
     local host = pick_src_win()
     if not (host and api.nvim_win_is_valid(host)) then
       return nil
@@ -1418,8 +1393,6 @@ ensure_ctx = function()
       vim.cmd('vertical resize ' .. w)
       ctx = api.nvim_get_current_win()
     end)
-    end
-    ::ctx_ready::
   else
     api.nvim_win_call(s.win, function()
       if cfg('position', 'bottom') == 'right' then

@@ -1361,17 +1361,21 @@ let g:relationview_unpin_delay = 3000
 
 " ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창
-"   <leader>fp 또는 :ProjectFiles 로 열고 닫는다 (오른쪽 열, context 위).
+"   <leader>fo : 색인된 파일을 telescope 로 찾아 점프 (^a 추가, ^d 제거)
+"   <leader>fp : 추가할 파일 고르기 (여러 개는 <Tab>)
+"   :ProjectFilesRemove / :ProjectFilesPreset / :ProjectFilesSave
 "   auto 모드   = 프로젝트 전체(지금까지와 같음)
 "   preset 모드 = 고른 파일/디렉터리만 색인
-"   뷰에서 a 추가 / d 제거 / p preset 선택 / s 저장 / m 모드전환 / r 재색인.
+"   파일을 추가하면 그 파일이 쓰는 헤더와 심볼 정의 파일도 함께 들어간다
+"   (g:projectfiles_expand = 0 으로 끄고, _expand_max 로 개수를 정한다).
 "   추가·제거·전환은 곧바로 재색인되고, preset 밖 파일은 저장해도 색인에
 "   들어가지 않는다. 목록은 <root>/.tags/files 로 떨어지고 gtags·ctags 가
 "   같은 목록을 쓴다.
 " 프로젝트에 지정된 preset 이 없을 때 쓸 기본값:
 "   let g:projectfiles_preset = 'kernel-audio'
 " ------------------------------------
-nnoremap <silent> <leader>fp :ProjectFiles<CR>
+nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
+nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
 
 
 "==============================================================================

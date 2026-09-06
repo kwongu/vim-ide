@@ -71,7 +71,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
-* Project files view (nvim only): `<leader>fp` opens a list of the files that get indexed, above the context preview. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Add (`a`) or drop (`d`) a path and the index follows immediately; presets are named, reusable across checkouts, and one can be made the startup default. See "Project files and presets" below.
+* Project files (nvim only): `<leader>fo` finds and opens a file from what is indexed (a telescope picker, `^d` drops it from the list, `^a` adds more), `<leader>fp` picks files to add. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Adding a file brings the headers it includes and the files defining the symbols it uses along with it, and the index follows immediately; presets are named, reusable across checkouts, and one can be made the startup default. See "Project files and presets" below.
 * Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
@@ -99,6 +99,8 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      otherwise
 Ctrl+Enter: Take the edit window to the RelationView item you walked to
 Ctrl+c: Unpin the relation panel (otherwise the CONFIG lookup, as before)
+,fo: Find a file among the indexed ones and open it (^d drop, ^a add)
+,fp: Pick files to add to the project files list
 Ctrl+]: Open the definition in the context window and focus it; Ctrl+t back
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
@@ -157,21 +159,15 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 
 ## Project files and presets (nvim only)
 
-`~/.vim/plugin/projectfiles.lua` decides WHICH files are indexed, and shows
-them in a window of its own (`<leader>fp` / `:ProjectFiles`) at the top of
-the right column, above the context preview.
+`~/.vim/plugin/projectfiles.lua` decides WHICH files are indexed. There is no
+window of its own: everything runs through telescope pickers.
 
 ```
-◆ ~/k6.12  [preset: asrc]
-  [⏎]open [a]dd [d]rop [p]reset [s]ave [m]ode [r]eindex [q]close
-
-── Entries (2) ──
-  dir  sound/soc/telechips/asrc
-  file include/sound/soc.h
-── Files (16) ──
-  include/sound/soc.h
-  sound/soc/telechips/asrc/tcc_asrc_dai.c
-  ...
+<leader>fo  find an indexed file and open it   (^d drop it, ^a add files)
+<leader>fp  pick files to add                  (<Tab> for several at once)
+:ProjectFilesRemove   drop entries          :ProjectFilesPreset [name|auto]
+:ProjectFilesSave <name>   save the entries as a preset
+:ProjectFilesReindex       rebuild the index for the current list
 ```
 
 Two modes:
@@ -181,9 +177,16 @@ Two modes:
 * **preset**: only the entries of a named preset. An entry is a file or a
   directory (a directory brings everything indexable under it). The list is
   written to `<root>/.tags/files`, which `indexfiles.sh` reads before
-  anything else, so **gtags and ctags both index exactly what the view
+  anything else, so **gtags and ctags both index exactly what the picker
   shows** - and a smaller index means faster searches and a shorter
   RelationView tree.
+
+**A file brings what it needs.** Adding one file also adds the headers it
+`#include`s (resolved next to the file, then through the index) and the
+files that define the symbols it uses - one level deep, at most
+`g:projectfiles_expand_max` symbols (40), off with
+`g:projectfiles_expand = 0`. Adding `src/main.c` in a small project pulls in
+`inc/util.h` and `src/util.c` by itself.
 
 Adding, dropping or switching reindexes immediately (an incremental
 `gtags -i`, which also drops what left the list), and saving a file that is
@@ -194,15 +197,6 @@ skipped. Which preset a project uses is remembered in `<root>/.tags/preset`
 and applied again when nvim starts; `g:projectfiles_preset` names the one to
 fall back on for a project that has none yet. Adding a path while in auto
 mode starts a preset for you.
-
-```
-:ProjectFiles              toggle the view          <leader>fp
-:ProjectFilesAdd [path]    add (default: this file) a  in the view
-:ProjectFilesRemove [path] remove                   d  in the view
-:ProjectFilesPreset [name] switch ('auto' = off)    p  in the view
-:ProjectFilesSave <name>   save the entries         s  in the view
-:ProjectFilesReindex       rebuild the index        r  in the view
-```
 
 ## Relation window (nvim only)
 

@@ -378,343 +378,429 @@ local function remove_path(root, path)
 end
 
 -- ---------------------------------------------------------------------------
--- the view
+-- what a file drags in with it
 -- ---------------------------------------------------------------------------
-local function visible()
-  return s.win ~= nil and api.nvim_win_is_valid(s.win)
-      and api.nvim_win_get_buf(s.win) == s.buf
+-- Picking one file is rarely what you mean: that file needs its headers, and
+-- the files defining the symbols it calls. Both are pulled in with it (one
+-- level deep), bounded by g:projectfiles_expand_max.
+
+local KEYWORD = {}
+for w in ([[if else for while do switch case break continue return goto sizeof
+  struct union enum typedef static const volatile extern inline void char short
+  int long float double signed unsigned register auto default typeof asm
+  __attribute__ NULL true false]]):gmatch('%S+') do
+  KEYWORD[w] = true
 end
 
--- relationview asks for this so its context preview lands BELOW the view
-function _G.projectfiles_win()
-  return visible() and s.win or nil
-end
-
-local function ensure_buf()
-  if s.buf and api.nvim_buf_is_valid(s.buf) then
-    return s.buf
+local function global_cmd()
+  if vim.fn.executable('global') == 1 then
+    return 'global'
   end
-  local buf = api.nvim_create_buf(false, true)
-  pcall(api.nvim_buf_set_name, buf, 'ProjectFiles')
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'hide'
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].filetype = 'projectfiles'
-  s.buf = buf
-  return buf
+  local p = vim.fn.expand('~/.local/bin/global')
+  return vim.fn.executable(p) == 1 and p or nil
 end
 
-local render -- forward
-local open    -- forward
+local function global_lines(root, args)
+  local cmd = { global_cmd() }
+  if not cmd[1] then
+    return {}
+  end
+  vim.list_extend(cmd, args)
+  local ok, o = pcall(function()
+    return vim.system(cmd, { text = true, cwd = root,
+      env = { GTAGSOBJDIR = dbdir() } }):wait(4000)
+  end)
+  if not ok or not o or o.code ~= 0 or not o.stdout then
+    return {}
+  end
+  return vim.split(o.stdout, '\n', { trimempty = true })
+end
 
-local function row_here()
-  if not visible() then
+-- headers this file includes, as far as they exist inside the project
+local function includes_of(root, abs)
+  local out, dir = {}, vim.fs.dirname(abs)
+  local ok, lines = pcall(vim.fn.readfile, abs, '', 3000)
+  if not ok then
+    return out
+  end
+  for _, l in ipairs(lines) do
+    local inc = l:match('^%s*#%s*include%s*"([^"]+)"')
+        or l:match('^%s*#%s*include%s*<([^>]+)>')
+    if inc then
+      local cand = dir .. '/' .. inc
+      if not uv.fs_stat(cand) then
+        cand = nil
+        -- ask the index where that header is: '-P' matches whole paths
+        local pat = '/' .. inc:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
+        for _, hit in ipairs(global_lines(root, { '-P', pat })) do
+          local p2 = hit:sub(1, 1) == '/' and hit or (root .. '/' .. hit)
+          if uv.fs_stat(p2) then
+            cand = p2
+            break
+          end
+        end
+      end
+      if cand then
+        out[#out + 1] = cand
+      end
+    end
+  end
+  return out
+end
+
+-- files defining the symbols this one uses
+local function symbol_files(root, abs)
+  local out, seen = {}, {}
+  local ok, lines = pcall(vim.fn.readfile, abs, '', 3000)
+  if not ok then
+    return out
+  end
+  local max = tonumber(cfg('expand_max', 40)) or 40
+  local syms, n = {}, 0
+  for _, l in ipairs(lines) do
+    if not l:match('^%s*#') then
+      for w in l:gmatch('[A-Za-z_][A-Za-z0-9_]*') do
+        if not KEYWORD[w] and #w > 2 and not seen[w] and n < max then
+          seen[w] = true
+          n = n + 1
+          syms[#syms + 1] = w
+        end
+      end
+    end
+  end
+  local self_rel = rel_to(root, abs)
+  local files, added = {}, {}
+  for _, sym in ipairs(syms) do
+    for _, hit in ipairs(global_lines(root, { '--result=ctags-mod', '-d', sym })) do
+      local path = hit:match('^([^\t]+)')
+      if path then
+        local rel = path:sub(1, 1) == '/' and rel_to(root, path) or path
+        if rel ~= self_rel and not added[rel] and uv.fs_stat(root .. '/' .. rel) then
+          added[rel] = true
+          files[#files + 1] = rel
+        end
+      end
+    end
+  end
+  for _, f in ipairs(files) do
+    out[#out + 1] = root .. '/' .. f
+  end
+  return out
+end
+
+-- everything `abs` needs, as project-relative paths
+local function related_of(root, abs)
+  if cfg('expand', 1) == 0 then
+    return {}
+  end
+  local out, seen = {}, {}
+  for _, list in ipairs({ includes_of(root, abs), symbol_files(root, abs) }) do
+    for _, p in ipairs(list) do
+      local rel = rel_to(root, p)
+      if indexed(p) and rel:sub(1, 1) ~= '/' and not seen[rel] then
+        seen[rel] = true
+        out[#out + 1] = rel
+      end
+    end
+  end
+  return out
+end
+
+-- ---------------------------------------------------------------------------
+-- adding, with what the file needs
+-- ---------------------------------------------------------------------------
+local function add_with_related(root, path)
+  local before = select(1, entries_of(root)) or {}
+  local n0 = #before
+  add_path(root, path)
+  local entries, name = entries_of(root)
+  if not name then
+    return -- add_path refused (bad path)
+  end
+  if #entries == n0 then
+    return -- nothing new
+  end
+  local abs = abs_of(root, path)
+  local st = uv.fs_stat(abs)
+  if not (st and st.type == 'file') then
+    return -- a directory already brings its own tree
+  end
+  local have = {}
+  for _, e in ipairs(entries) do
+    have[e.path] = true
+  end
+  local extra = {}
+  for _, rel in ipairs(related_of(root, abs)) do
+    if not have[rel] then
+      have[rel] = true
+      extra[#extra + 1] = { path = rel, kind = 'file' }
+    end
+  end
+  if #extra == 0 then
+    return
+  end
+  vim.list_extend(entries, extra)
+  save_entries(root, name, entries)
+  notify(('연관 파일 %d개 함께 추가 (헤더/심볼 정의)'):format(#extra))
+end
+
+-- ---------------------------------------------------------------------------
+-- pickers (telescope when it is there, vim.ui.select otherwise)
+-- ---------------------------------------------------------------------------
+local function telescope()
+  local ok, pickers = pcall(require, 'telescope.pickers')
+  if not ok then
     return nil
   end
-  return s.rows[api.nvim_win_get_cursor(s.win)[1]]
+  return {
+    pickers = pickers,
+    finders = require('telescope.finders'),
+    conf = require('telescope.config').values,
+    actions = require('telescope.actions'),
+    state = require('telescope.actions.state'),
+  }
 end
 
-local function src_win()
+-- the files that are indexed right now (preset list, or the whole project)
+local function current_files(root)
+  local d = dbdir() or '.tags'
+  local list = root .. '/' .. d .. '/files'
+  if uv.fs_stat(list) then
+    return vim.fn.readfile(list)
+  end
+  local fl = vim.fn.expand('~/.local/bin/indexfiles.sh')
+  if vim.fn.executable(fl) == 1 then
+    local o = vim.fn.systemlist({ 'sh', '-c', 'cd ' .. vim.fn.shellescape(root)
+      .. ' && ' .. vim.fn.shellescape(fl) })
+    local out = {}
+    for _, l in ipairs(o) do
+      l = l:gsub('^%./', '')
+      if l ~= '' then
+        out[#out + 1] = l
+      end
+    end
+    return out
+  end
+  return {}
+end
+
+local function open_in_edit(root, rel)
+  local abs = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
+  local target
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
     local b = api.nvim_win_get_buf(w)
     local n = api.nvim_buf_get_name(b)
-    if vim.bo[b].buftype == '' and w ~= s.win
-        and not n:match('RelationView') then
-      return w
+    if vim.bo[b].buftype == '' and not n:match('RelationView') then
+      target = w
+      break
     end
-  end
-  return nil
-end
-
--- A window with 'winfixheight' will not give rows to a new neighbour: nvim
--- grows the whole column instead and takes the rows from the relation panel
--- at the bottom. So relax the preview while splitting it, and put the
--- panel's height back if it moved anyway.
-local function with_panel_height(fn)
-  local panel = _G.relationview_panel_win and _G.relationview_panel_win() or nil
-  local h = panel and api.nvim_win_is_valid(panel)
-      and api.nvim_win_get_height(panel) or nil
-  fn()
-  if panel and h and api.nvim_win_is_valid(panel)
-      and api.nvim_win_get_height(panel) ~= h then
-    pcall(api.nvim_win_set_height, panel, h)
-  end
-end
-
-local A = {}
-
-function A.open_file()
-  local r = row_here()
-  if not (r and r.path) then
-    return
-  end
-  local root = cur_root()
-  local abs = r.path:sub(1, 1) == '/' and r.path or (root .. '/' .. r.path)
-  local w = src_win()
-  if not w then
-    notify('열 편집 창이 없습니다', vim.log.levels.WARN)
-    return
   end
   local buf = vim.fn.bufadd(abs)
   vim.bo[buf].buflisted = true
-  api.nvim_win_set_buf(w, buf)
-  api.nvim_set_current_win(w)
+  if target then
+    api.nvim_win_set_buf(target, buf)
+    api.nvim_set_current_win(target)
+  else
+    vim.cmd('edit ' .. vim.fn.fnameescape(abs))
+  end
 end
 
-function A.add()
-  local root = cur_root()
-  local cur = api.nvim_buf_get_name(0)
-  local def = (cur ~= '' and vim.bo.buftype == '') and rel_to(root, cur) or ''
-  vim.ui.input({ prompt = '추가할 파일/디렉터리: ', default = def,
-    completion = 'file' }, function(input)
-    if input and input ~= '' then
-      add_path(root, input)
-      render()
+local function fallback_select(items, prompt, on_choice)
+  if #items == 0 then
+    notify('목록이 비어 있습니다')
+    return
+  end
+  vim.ui.select(items, { prompt = prompt }, function(choice)
+    if choice then
+      on_choice(choice)
     end
   end)
 end
 
-function A.remove()
-  local r = row_here()
+-- <leader>fo : find a project file and jump to it
+local function pick_find()
   local root = cur_root()
-  if r and r.entry then
-    remove_path(root, r.entry.path)
-  elseif r and r.path then
-    remove_path(root, r.path)
-  else
-    return
+  local files = current_files(root)
+  local t = telescope()
+  if not t then
+    return fallback_select(files, 'Project files',
+      function(c) open_in_edit(root, c) end)
   end
-  render()
-end
-
-function A.preset()
-  local root = cur_root()
-  local names = preset_list()
-  local items = { '(auto - 프로젝트 전체)' }
-  vim.list_extend(items, names)
-  vim.ui.select(items, { prompt = 'preset 선택' }, function(choice, idx)
-    if not choice then
-      return
-    end
-    set_active(root, idx == 1 and '' or names[idx - 1])
-    materialize(root)
-    reindex(root)
-    render()
-    notify(idx == 1 and 'auto 모드' or ("preset '" .. names[idx - 1] .. "'"))
-  end)
-end
-
-function A.save()
-  local root = cur_root()
-  local entries = entries_of(root)
-  if not entries or #entries == 0 then
-    notify('저장할 항목이 없습니다 (a 로 추가하세요)', vim.log.levels.WARN)
-    return
-  end
-  vim.ui.input({ prompt = '이 목록을 저장할 preset 이름: ',
-    default = active_preset(root) or 'default' }, function(name)
-    if not name or name == '' then
-      return
-    end
-    preset_write(name, entries)
-    set_active(root, name)
-    materialize(root)
-    render()
-    notify("preset '" .. name .. "' 저장")
-  end)
-end
-
-function A.mode()
-  local root = cur_root()
-  if active_preset(root) then
-    set_active(root, '')
-    notify('auto 모드 (프로젝트 전체 색인)')
-  else
-    local names = preset_list()
-    set_active(root, names[1] or tostring(cfg('preset', 'default')))
-    notify("preset '" .. (names[1] or tostring(cfg('preset', 'default'))) .. "'")
-  end
-  materialize(root)
-  reindex(root)
-  render()
-end
-
-function A.reindex()
-  local root = cur_root()
-  materialize(root)
-  reindex(root)
-  render()
-  notify('재색인 시작')
-end
-
-function A.close()
-  if visible() then
-    local w = s.win
-    with_panel_height(function() api.nvim_win_close(w, false) end)
-  end
-  s.win = nil
-end
-
-local function map_keys(buf)
-  local function m(lhs, fn, desc)
-    vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, desc = desc })
-  end
-  m('<CR>', A.open_file, 'ProjectFiles: open')
-  m('<2-LeftMouse>', A.open_file, 'ProjectFiles: open')
-  m('a', A.add, 'ProjectFiles: add path')
-  m('d', A.remove, 'ProjectFiles: remove entry')
-  m('x', A.remove, 'ProjectFiles: remove entry')
-  m('p', A.preset, 'ProjectFiles: pick preset')
-  m('s', A.save, 'ProjectFiles: save preset')
-  m('m', A.mode, 'ProjectFiles: auto/preset')
-  m('r', A.reindex, 'ProjectFiles: reindex')
-  m('q', A.close, 'ProjectFiles: close')
-end
-
-render = function()
-  if not visible() then
-    return
-  end
-  local root = cur_root()
-  local entries, name = entries_of(root)
-  local cached = s.cache[root]
-  local files = cached and cached.files
-  if entries and not files then
-    files = materialize(root)
-  end
-  local lines, rows = {}, {}
-  local short = vim.fn.fnamemodify(root, ':~')
-  lines[1] = string.format('◆ %s  [%s]', short,
-    name and ('preset: ' .. name) or 'auto')
-  lines[2] = '  [⏎]open [a]dd [d]rop [p]reset [s]ave [m]ode [r]eindex [q]close'
-  lines[3] = ''
-  if entries then
-    lines[#lines + 1] = string.format('── Entries (%d) ──', #entries)
-    for _, e in ipairs(entries) do
-      lines[#lines + 1] = string.format('  %-4s %s', e.kind, e.path)
-      rows[#lines] = { entry = e, path = e.path }
-    end
-    lines[#lines + 1] = ''
-    lines[#lines + 1] = string.format('── Files (%d) ──', files and #files or 0)
-    for _, f in ipairs(files or {}) do
-      lines[#lines + 1] = '  ' .. f
-      rows[#lines] = { path = f }
-    end
-  else
-    lines[#lines + 1] = '── Files ──'
-    lines[#lines + 1] = '  auto 모드: 이 프로젝트 전체를 색인합니다'
-    lines[#lines + 1] = '  (a 로 파일/디렉터리를 추가하면 preset 모드로 바뀝니다)'
-  end
-  s.rows = rows
-  vim.bo[s.buf].modifiable = true
-  api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
-  vim.bo[s.buf].modifiable = false
-end
-
-open = function()
-  if visible() then
-    return s.win
-  end
-  local buf = ensure_buf()
-  local ctx = _G.relationview_ctx_win and _G.relationview_ctx_win() or nil
-  local win
-  if ctx and api.nvim_win_is_valid(ctx) then
-    -- the view belongs above the context preview, in the same column
-    local fixed = vim.wo[ctx].winfixheight
-    vim.wo[ctx].winfixheight = false
-    with_panel_height(function()
-      api.nvim_win_call(ctx, function()
-        vim.cmd('noautocmd aboveleft split')
-        win = api.nvim_get_current_win()
-        pcall(vim.cmd, 'resize ' .. (tonumber(cfg('height', 12)) or 12))
+  t.pickers.new({}, {
+    prompt_title = 'Project files (' .. #files .. ')  ^a add  ^d remove',
+    finder = t.finders.new_table({
+      results = files,
+      entry_maker = function(e)
+        return { value = e, display = e, ordinal = e, path = root .. '/' .. e }
+      end,
+    }),
+    sorter = t.conf.generic_sorter({}),
+    previewer = t.conf.file_previewer({}),
+    attach_mappings = function(bufnr, map)
+      t.actions.select_default:replace(function()
+        local entry = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if entry then
+          open_in_edit(root, entry.value)
+        end
       end)
-    end)
-    if api.nvim_win_is_valid(ctx) then
-      vim.wo[ctx].winfixheight = fixed
-    end
-  else
-    local host = src_win()
-    if not host then
-      notify('창을 만들 자리가 없습니다', vim.log.levels.WARN)
-      return nil
-    end
-    local w = cfg('width', vim.g.relationview_context_width or 0)
-    w = tonumber(w) or 0
-    if w <= 0 then
-      w = math.max(40, math.floor(vim.o.columns / 4))
-    end
-    local hw = api.nvim_win_get_width(host)
-    w = math.min(w, math.max(20, math.floor(hw / 2)))
-    with_panel_height(function()
-      api.nvim_win_call(host, function()
-        vim.cmd('noautocmd rightbelow vertical split')
-        vim.cmd('vertical resize ' .. w)
-        win = api.nvim_get_current_win()
+      map({ 'i', 'n' }, '<C-d>', function()
+        local entry = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if entry then
+          remove_path(root, entry.value)
+        end
       end)
-    end)
+      map({ 'i', 'n' }, '<C-a>', function()
+        t.actions.close(bufnr)
+        vim.schedule(function() vim.cmd('ProjectFilesAdd') end)
+      end)
+      return true
+    end,
+  }):find()
+end
+
+-- files in the project that are NOT in the list yet
+local function candidates(root)
+  local have = {}
+  for _, f in ipairs(current_files(root)) do
+    have[f] = true
   end
-  if not (win and api.nvim_win_is_valid(win)) then
-    return nil
+  local cmd = "cd " .. vim.fn.shellescape(root) .. " && { git ls-files --cached --others"
+      .. " --exclude-standard 2>/dev/null || find . -type f | sed 's|^\\./||'; }"
+  local out = {}
+  for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
+    l = l:gsub('^%./', '')
+    if l ~= '' and indexed(l) and not have[l] then
+      out[#out + 1] = l
+    end
   end
-  api.nvim_win_set_buf(win, buf)
-  local wo = vim.wo[win]
-  wo.number = false
-  wo.relativenumber = false
-  wo.wrap = false
-  wo.cursorline = true
-  wo.signcolumn = 'no'
-  wo.foldcolumn = '0'
-  wo.winfixheight = true
-  wo.winfixwidth = true
-  wo.winhighlight = 'CursorLine:RvCursorLine,CursorLineNr:RvCursorLineNr'
-  s.win = win
-  map_keys(buf)
-  render()
-  return win
+  table.sort(out)
+  return out
+end
+
+-- pick files (multi-select) to register
+local function pick_add()
+  local root = cur_root()
+  local items = candidates(root)
+  local t = telescope()
+  if not t then
+    return fallback_select(items, '추가할 파일',
+      function(c) add_with_related(root, c) end)
+  end
+  t.pickers.new({}, {
+    prompt_title = 'Add to project files (' .. #items ..
+        ')  <Tab> 여러 개  <CR> 추가',
+    finder = t.finders.new_table({
+      results = items,
+      entry_maker = function(e)
+        return { value = e, display = e, ordinal = e, path = root .. '/' .. e }
+      end,
+    }),
+    sorter = t.conf.generic_sorter({}),
+    previewer = t.conf.file_previewer({}),
+    attach_mappings = function(bufnr)
+      t.actions.select_default:replace(function()
+        local picker = t.state.get_current_picker(bufnr)
+        local picks = picker:get_multi_selection()
+        if #picks == 0 then
+          local e = t.state.get_selected_entry()
+          picks = e and { e } or {}
+        end
+        t.actions.close(bufnr)
+        for _, e in ipairs(picks) do
+          add_with_related(root, e.value)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
+-- pick entries to drop
+local function pick_remove()
+  local root = cur_root()
+  local entries = entries_of(root) or {}
+  local items = {}
+  for _, e in ipairs(entries) do
+    items[#items + 1] = e.kind .. '  ' .. e.path
+  end
+  local t = telescope()
+  local function drop(label)
+    remove_path(root, (label:gsub('^%a+%s+', '')))
+  end
+  if not t then
+    return fallback_select(items, '제거할 항목', drop)
+  end
+  t.pickers.new({}, {
+    prompt_title = 'Remove from project files (' .. #items .. ')',
+    finder = t.finders.new_table({ results = items }),
+    sorter = t.conf.generic_sorter({}),
+    attach_mappings = function(bufnr)
+      t.actions.select_default:replace(function()
+        local picker = t.state.get_current_picker(bufnr)
+        local picks = picker:get_multi_selection()
+        if #picks == 0 then
+          local e = t.state.get_selected_entry()
+          picks = e and { e } or {}
+        end
+        t.actions.close(bufnr)
+        for _, e in ipairs(picks) do
+          drop(e[1] or e.value)
+        end
+      end)
+      return true
+    end,
+  }):find()
 end
 
 -- ---------------------------------------------------------------------------
 -- commands
 -- ---------------------------------------------------------------------------
-api.nvim_create_user_command('ProjectFiles', function()
-  if visible() then
-    A.close()
-  else
-    open()
-  end
-end, { desc = 'Toggle the project files view' })
+api.nvim_create_user_command('ProjectFiles', function() pick_find() end,
+  { desc = 'Find a project file (telescope) - ^a add, ^d remove' })
+api.nvim_create_user_command('ProjectFilesFind', function() pick_find() end,
+  { desc = 'Find a project file and jump to it' })
 
 api.nvim_create_user_command('ProjectFilesAdd', function(o)
   local root = cur_root()
-  local p = o.args ~= '' and o.args or api.nvim_buf_get_name(0)
-  if p == '' then
-    notify('경로를 지정하세요', vim.log.levels.WARN)
+  if o.args == '' then
+    pick_add()
     return
   end
-  add_path(root, p)
-  render()
-end, { nargs = '?', complete = 'file', desc = 'Add a file/directory to the preset' })
+  add_with_related(root, o.args)
+end, { nargs = '?', complete = 'file',
+  desc = 'Add a file/directory (with the headers and definitions it uses)' })
 
 api.nvim_create_user_command('ProjectFilesRemove', function(o)
   local root = cur_root()
-  local p = o.args ~= '' and o.args or api.nvim_buf_get_name(0)
-  remove_path(root, p)
-  render()
-end, { nargs = '?', complete = 'file', desc = 'Remove a file/directory from the preset' })
+  if o.args == '' then
+    pick_remove()
+    return
+  end
+  remove_path(root, o.args)
+end, { nargs = '?', complete = 'file', desc = 'Remove a file/directory' })
 
 api.nvim_create_user_command('ProjectFilesPreset', function(o)
   local root = cur_root()
   if o.args == '' then
     local names = preset_list()
-    notify('presets: ' .. (#names > 0 and table.concat(names, ', ') or '(없음)')
-      .. '  |  현재: ' .. (active_preset(root) or 'auto'))
+    local items = { 'auto (프로젝트 전체)' }
+    vim.list_extend(items, names)
+    vim.ui.select(items, { prompt = 'preset' }, function(choice, idx)
+      if not choice then
+        return
+      end
+      set_active(root, idx == 1 and '' or names[idx - 1])
+      materialize(root)
+      reindex(root)
+      notify(idx == 1 and 'auto 모드' or ("preset '" .. names[idx - 1] .. "'"))
+    end)
     return
   end
   set_active(root, o.args == 'auto' and '' or o.args)
   materialize(root)
   reindex(root)
-  render()
   notify(o.args == 'auto' and 'auto 모드' or ("preset '" .. o.args .. "'"))
 end, { nargs = '?', complete = function()
   local n = preset_list()
@@ -732,17 +818,16 @@ api.nvim_create_user_command('ProjectFilesSave', function(o)
   preset_write(o.args, entries)
   set_active(root, o.args)
   materialize(root)
-  render()
-  notify("preset '" .. o.args .. "' 저장 (" .. #entries .. " entries)")
+  notify(("preset '%s' 저장 (%d entries)"):format(o.args, #entries))
 end, { nargs = '?', desc = 'Save the current entries as a named preset' })
 
 api.nvim_create_user_command('ProjectFilesReindex', function()
-  A.reindex()
+  local root = cur_root()
+  materialize(root)
+  reindex(root)
+  notify('재색인 시작')
 end, { desc = 'Rebuild the index for the current file list' })
 
--- ---------------------------------------------------------------------------
--- keep the list live
--- ---------------------------------------------------------------------------
 -- a preset is applied as soon as the session knows which project it is in
 api.nvim_create_autocmd('VimEnter', {
   group = group,
@@ -753,15 +838,5 @@ api.nvim_create_autocmd('VimEnter', {
         materialize(root)
       end
     end, 400)
-  end,
-})
-
--- a file saved while the view is open may be new to the list
-api.nvim_create_autocmd('BufWritePost', {
-  group = group,
-  callback = function()
-    if visible() then
-      vim.defer_fn(render, 200)
-    end
   end,
 })
