@@ -338,6 +338,11 @@ cursor again - or press `Ctrl+c` (`p` inside the panel) to release it now.
 `Ctrl+c` outside a pinned panel keeps whatever it meant before (the
 checksymbol.vim CONFIG lookup here).
 
+While the focus is in the context window, `Ctrl+n` / `Ctrl+p` still walk the
+relation list and the preview follows to each hit, so a search can be read
+through without leaving that window (a late redraw still cannot yank the
+preview away while you are following symbols inside it with `Ctrl+]`).
+
 `Ctrl+]` in an edit window opens the definition **in the context window**
 and moves the focus there; the edit window stays where it is, so it remains
 the place you are working in. `Ctrl+t` walks back: right after the jump it

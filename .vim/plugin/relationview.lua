@@ -27,7 +27,8 @@
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
 --   C-n / C-p  next / previous item in the list, previewed in the context
 --              window; the edit window does not move (works from any
---              window; falls back to :cnext/:cprevious with no list)
+--              window - including from inside the preview itself - and
+--              falls back to :cnext/:cprevious with no list)
 --   C-c unpins the panel (:RelationViewUnpin); C-] in an edit window opens
 --   the definition in the CONTEXT window and moves the focus there, C-t
 --   walks back and hands the focus to the edit window again.
@@ -1649,13 +1650,16 @@ end
 
 -- preview the location under the panel cursor (falls back to the
 -- definition of the current symbol)
-update_context = function()
+-- force: the user asked for this one (C-n/C-p), so show it even while the
+-- focus is inside the preview
+update_context = function(force)
   if not ctx_visible() then
     return
   end
-  -- while the user is browsing inside the context window (<C-]>/<C-t>),
-  -- a late render must not yank the preview back to the list item
-  if api.nvim_get_current_win() == s.ctx_win then
+  -- while the user is browsing inside the context window (<C-]>/<C-t>), a
+  -- late render must not yank the preview back to the list item - but an
+  -- explicit step through the list must
+  if not force and api.nvim_get_current_win() == s.ctx_win then
     return
   end
   if not (s.win and api.nvim_win_is_valid(s.win)) then
@@ -3440,8 +3444,10 @@ function A.step(dir)
   pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
   hl_cursor_row()
   -- the panel's own CursorMoved does this on a timer; we are moving another
-  -- window's cursor, so do it here and now
-  update_context()
+  -- window's cursor, so do it here and now - and force it, because stepping
+  -- is often done from inside the preview after a C-] took the focus there
+  s.ctx_last = nil
+  update_context(true)
   return true
 end
 
