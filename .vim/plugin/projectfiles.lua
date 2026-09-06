@@ -574,62 +574,127 @@ end
 -- ---------------------------------------------------------------------------
 -- 'global' can only answer for files that are already indexed, so this looks
 -- at the SOURCE instead - definitions first, any mention as a last resort.
-local function grep_defining(root, sym)
-  local q = vim.fn.shellescape(sym)
-  local pats = {
+local GLOBS = "'*.c' '*.h' '*.cpp' '*.cc' '*.S' '*.dts' '*.dtsi'"
+
+-- Side trees (tools/, samples/, selftests ...) carry their own copies of
+-- kernel headers; pulling those into a project is noise.
+local function rank_hits(lines, root, max)
+  local function side(x)
+    return x:match('^tools/') ~= nil or x:match('^samples/') ~= nil
+        or x:match('^Documentation/') ~= nil or x:match('^scripts/') ~= nil
+        or x:match('/selftests/') ~= nil or x:match('/test[s]?/') ~= nil
+  end
+  local main, all = {}, {}
+  for _, l in ipairs(lines) do
+    if l ~= '' and uv.fs_stat(root .. '/' .. l) then
+      all[#all + 1] = l
+      if not side(l) then
+        main[#main + 1] = l
+      end
+    end
+  end
+  local pick = #main > 0 and main or all
+  table.sort(pick, function(a, b)
+    if #a ~= #b then
+      return #a < #b
+    end
+    return a < b
+  end)
+  local out = {}
+  for _, l in ipairs(pick) do
+    if #out < max then
+      out[#out + 1] = l
+    end
+  end
+  return out
+end
+
+local function def_patterns(sym)
+  return {
     "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*\\('",
     "-e '^#[[:space:]]*define[[:space:]]+" .. sym .. "[^A-Za-z0-9_]'",
     "-e '^(typedef|struct|union|enum)[[:space:]].*[^A-Za-z0-9_]" .. sym .. "[^A-Za-z0-9_]*[;{]'",
     "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*[=;[]'",
   }
-  local globs = "'*.c' '*.h' '*.cpp' '*.cc' '*.S' '*.dts' '*.dtsi'"
+end
+
+local function grep_defining(root, sym)
+  local pats = def_patterns(sym)
   local cmds = {}
   if uv.fs_stat(root .. '/.git') then
-    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. globs
+    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
   end
   cmds[#cmds + 1] = "grep -rlE " .. table.concat(pats, ' ') ..
       " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
   local max = tonumber(cfg('grep_max', 5)) or 5
   for _, c in ipairs(cmds) do
-    local out = {}
     local ok, lines = pcall(vim.fn.systemlist, { 'sh', '-c',
       'cd ' .. vim.fn.shellescape(root) .. ' && ' .. c .. ' 2>/dev/null | head -' ..
       (max * 4) })
     if ok then
-      -- Side trees (tools/, samples/, selftests ...) carry their own copies
-      -- of kernel headers; pulling those into a project is noise. Drop them
-      -- unless there is nothing else, and prefer the shortest real path.
-      local function side(x)
-        return x:match('^tools/') ~= nil or x:match('^samples/') ~= nil
-            or x:match('^Documentation/') ~= nil or x:match('^scripts/') ~= nil
-            or x:match('/selftests/') ~= nil or x:match('/test[s]?/') ~= nil
+      local hits = rank_hits(lines, root, max)
+      if #hits > 0 then
+        return hits
       end
-      local main = {}
-      for _, l in ipairs(lines) do
-        if not side(l) then
-          main[#main + 1] = l
-        end
-      end
-      if #main > 0 then
-        lines = main
-      end
-      table.sort(lines, function(a, b)
-        if #a ~= #b then
-          return #a < #b
-        end
-        return a < b
-      end)
-      for _, l in ipairs(lines) do
-        if l ~= '' and uv.fs_stat(root .. '/' .. l) and #out < max then
-          out[#out + 1] = l
-        end
-      end
-    end
-    if #out > 0 then
-      return out
     end
   end
   return {}
+end
+
+function _G.projectfiles_add_for_symbol_async(sym, cb)
+  cb = cb or function() end
+  if type(sym) ~= 'string' or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
+    return cb(0)
+  end
+  local root = cur_root()
+  local entries, name = entries_of(root)
+  if not name then
+    return cb(0) -- auto mode indexes everything already
+  end
+  grep_defining_async(root, sym, function(hits)
+    local have = {}
+    for _, e in ipairs(entries) do
+      have[e.path] = true
+    end
+    local added = {}
+    for _, rel in ipairs(hits) do
+      if not have[rel] then
+        have[rel] = true
+        entries[#entries + 1] = { path = rel, kind = 'file' }
+        added[#added + 1] = rel
+      end
+    end
+    if #added == 0 then
+      return cb(0)
+    end
+    preset_write(name, entries)
+    materialize(root)
+    local prog = vim.fn.executable('global') == 1 and 'global'
+        or vim.fn.expand('~/.local/bin/global')
+    local left = #added
+    for _, rel in ipairs(added) do
+      local ok = pcall(vim.system, { prog, '--single-update', rel },
+        { cwd = root, env = { GTAGSOBJDIR = dbdir() or '.tags' } },
+        function()
+          vim.schedule(function()
+            left = left - 1
+            if left == 0 then
+              reindex(root)
+              notify(("'%s' 정의 파일 %d개 추가: %s")
+                :format(sym, #added, table.concat(added, ', ')))
+              cb(#added)
+            end
+          end)
+        end)
+      if not ok then
+        left = left - 1
+      end
+    end
+    if left <= 0 then
+      reindex(root)
+      cb(#added)
+    end
+  end)
 end
 
 -- add the files that define `sym`, index them straight away, and say how

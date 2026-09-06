@@ -200,9 +200,12 @@ files that define the symbols it uses - one level deep, at most
 `inc/util.h` and `src/util.c` by itself.
 
 With the preview open, `Ctrl+]` never sends the edit window anywhere: if
-gtags has no definition it first tries to bring the defining file into the
-project (below), then falls back to the ctags snapshot's location - both
-shown in the preview, with the panel switching to that symbol. Only with no
+gtags has no definition the ctags snapshot answers instead (6 ms even on a
+kernel-sized tags file), shown in the preview with the panel switching to
+that symbol - and the search for the file that actually defines it runs in
+the BACKGROUND afterwards, so the jump lands in about 100 ms instead of
+waiting ~1.7 s for a `git grep` over the whole tree. When that search
+finishes and the file joins the project, the panel fills in its callers. Only with no
 preview window does the edit window take the jump itself.
 
 A symbol the index does not know about is not a dead end: `Ctrl+]` and

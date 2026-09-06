@@ -1654,23 +1654,36 @@ function A.ctx_jump_from_edit()
       end)
       return
     end
-    if not retried then
-      local added = 0
-      pcall(function()
-        if _G.projectfiles_add_for_symbol then
-          added = _G.projectfiles_add_for_symbol(sym) or 0
-        end
-      end)
-      if added > 0 then
-        vim.defer_fn(function() jump_via_gtags(true) end, 200)
-        return
-      end
-    end
+    -- The ctags snapshot answers in a few milliseconds, so ask it FIRST and
+    -- show the definition straight away. Searching the sources for the file
+    -- that defines the symbol takes over a second on a kernel tree, so that
+    -- runs in the background afterwards - it only enriches the panel (real
+    -- callers next time), it must never make the jump wait.
     local loc = tag_loc(sym)
     if loc then
       s.pinned = true
       update(sym, loc.path, true, false, nil)
       ctx_enter_from(win, { path = loc.path, line = loc.line, sym = sym }, sym)
+      if not retried and _G.projectfiles_add_for_symbol_async then
+        vim.defer_fn(function()
+          pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
+            if n and n > 0 and s.sym == sym and panel_visible() then
+              update(sym, loc.path, true, false, nil) -- now with callers
+            end
+          end)
+        end, 30)
+      end
+      return
+    end
+    if not retried and _G.projectfiles_add_for_symbol_async then
+      pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
+        if n and n > 0 then
+          jump_via_gtags(true)
+        else
+          vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
+            vim.log.levels.WARN)
+        end
+      end)
       return
     end
     vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
@@ -3946,18 +3959,16 @@ function A.gtags(args, retried)
           break
         end
       end
-      if #results == 0 and not retried then
-        -- the project files may simply not contain it yet
-        local added = 0
-        pcall(function()
-          if _G.projectfiles_add_for_symbol then
-            added = _G.projectfiles_add_for_symbol(pattern) or 0
+      if #results == 0 and not retried and _G.projectfiles_add_for_symbol_async
+      then
+        -- the project files may simply not contain it yet; the search for
+        -- the defining file runs in the background, the empty list is shown
+        -- meanwhile and replaced when it lands
+        pcall(_G.projectfiles_add_for_symbol_async, pattern, function(n)
+          if n and n > 0 then
+            A.gtags(args, true)
           end
         end)
-        if added > 0 then
-          vim.defer_fn(function() A.gtags(args, true) end, 250)
-          return
-        end
       end
       show_results('Gtags ' .. tostring(args), pattern, results,
         math.max(0, #lines - #results), origin)

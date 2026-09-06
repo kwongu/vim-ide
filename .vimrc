@@ -689,8 +689,9 @@ func! s:RvCtxJump() abort
 				call setqflist([])
 				try | execute 'Gtags -d ' . l:w | catch | endtry
 				if empty(getqflist()) && l:w =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-							\ && luaeval('_G.projectfiles_add_for_symbol ~= nil and _G.projectfiles_add_for_symbol("' . l:w . '") or 0') > 0
-					try | execute 'Gtags -d ' . l:w | catch | endtry
+					" 소스 전체 검색은 커널에서 1초를 훌쩍 넘긴다: 백그라운드로
+					" 돌리고, 파일이 추가되면 그때 다시 찾는다
+					call luaeval('_G.projectfiles_add_for_symbol_async ~= nil and (function() _G.projectfiles_add_for_symbol_async(_A, function(n) if n and n > 0 then vim.cmd("Gtags -d " .. _A) end end) return 1 end)() or 0', l:w)
 				endif
 				return
 			endif
