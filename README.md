@@ -71,7 +71,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
-* Project files (nvim only): `<leader>fo` finds and opens a file from what is indexed (a telescope picker, `^d` drops it from the list, `^a` adds more), `<leader>fp` picks files to add. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Adding a file brings the headers it includes and the files defining the symbols it uses along with it, and the index follows immediately; presets are named, reusable across checkouts, and one can be made the startup default. See "Project files and presets" below.
+* Project files (nvim only): `<leader>fo` finds and opens a file from what is indexed (a telescope picker, `^d` drops it from the list, `^a` adds more), `<leader>fp` picks files to add. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Adding a file brings the headers it includes and the files defining the symbols it uses along with it, and the index follows immediately; presets are named, reusable across checkouts, shipped with vim-ide itself so every machine has them, and one can be made the startup default. See "Project files and presets" below.
 * Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
@@ -188,7 +188,7 @@ window of its own: everything runs through telescope pickers.
 \fp  pick files to add                  (<Tab> for several at once)
 \fd  pick directories to add            (everything indexable under them)
 \fx  pick entries to drop               (files and directories)
-\fm  choose the preset                  (auto included, ^d deletes one)
+\fm  choose the preset                  (auto included, ^d deletes mine)
 \fS  save the current entries as a preset
 \fR  reindex now
 ```
@@ -197,7 +197,8 @@ window of its own: everything runs through telescope pickers.
 with a preview, multi-select where it makes sense, and the same commands
 behind it: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
 `:ProjectFilesRemove`, `:ProjectFilesPreset`, `:ProjectFilesSave`,
-`:ProjectFilesReindex` (each takes an optional argument to skip the picker).
+`:ProjectFilesReindex` (each takes an optional argument to skip the picker),
+plus `:ProjectFilesPresetShare` (below).
 
 Two modes:
 
@@ -244,13 +245,47 @@ index would sit there stale).
 
 Adding, dropping or switching reindexes immediately (an incremental
 `gtags -i`, which also drops what left the list), and saving a file that is
-NOT in the preset does not sneak it into the index. Presets are stored as
-JSON under `stdpath('data')/vim-ide/presets/`, so the same preset can be
-reused in another checkout - entries that do not exist there are simply
-skipped. Which preset a project uses is remembered in `<root>/.tags/preset`
-and applied again when nvim starts; `g:projectfiles_preset` names the one to
-fall back on for a project that has none yet. Adding a path while in auto
-mode starts a preset for you.
+NOT in the preset does not sneak it into the index. Which preset a project
+uses is remembered in `<root>/.tags/preset` and applied again when nvim
+starts; `g:projectfiles_preset` names the one to fall back on for a project
+that has none yet. Adding a path while in auto mode starts a preset for you.
+
+### Where presets live, and sharing them across machines
+
+A preset is JSON: a name and a list of project-relative paths. Nothing in it
+is machine-specific, so the same preset applies to any checkout of the same
+tree - entries that are not in this one are simply skipped. They are read
+from two places:
+
+| | |
+|---|---|
+| `stdpath('data')/vim-ide/presets/` | mine. Every save writes here |
+| `.vim/presets/` in this repository | shared. Comes with vim-ide, so a `git pull` on another machine (the Linux box) brings it along |
+
+Both are listed together; when a name is in both, my copy wins - so editing a
+shared preset (adding a file, dropping one) stays local and never dirties the
+checkout. `:ProjectFilesPresetShare [name]` copies a preset into the
+repository; commit and push it and the other machines get it:
+
+```
+:ProjectFilesPresetShare kernel-audio_d3_under
+```
+
+(no trailing `"` comment - a user command takes the rest of the line as its
+argument). It writes `~/.vim-ide/.vim/presets/<name>.json` and prints the
+commit line to run:
+
+```
+cd ~/.vim-ide && git add .vim/presets && git commit -m 'preset' && git push
+```
+
+On the other machine, `git pull` in `~/.vim-ide` is enough - `~/.vim` is a
+symlink into it (see `install.sh`), so nvim finds the presets with nothing to
+copy. Pick one there with `\fm`. In that picker a shared preset is tagged
+`[vim-ide]`, and `^d` on one deletes only my local copy (the shared original
+is removed by deleting the file in the repository). To ignore the shared
+presets entirely: `let g:projectfiles_shared_presets = ''`, or point it at a
+directory of your own.
 
 ## Relation window (nvim only)
 

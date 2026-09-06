@@ -7,28 +7,42 @@
 --           list of project-relative paths, so the same preset can be reused
 --           in another checkout: entries that do not exist there are skipped.
 --
+-- Where presets live
+--   ~/.local/share/nvim/vim-ide/presets/   mine, written by every save
+--   <vim-ide>/.vim/presets/                shared: kept in the vim-ide
+--                                          repository, so a 'git pull' on
+--                                          another machine (Linux) brings
+--                                          them along
+-- Both are listed; my copy wins when a name exists in both.
+-- ':ProjectFilesPresetShare <name>' copies one into the repository (commit
+-- and push it to hand it to the other machines).
+--
 -- The list is materialised as '<root>/.tags/files', which indexfiles.sh reads
 -- before anything else, so gtags (autoindex.lua) and ctags (gutentags) both
 -- index exactly the files in the view - and adding or removing one reindexes
 -- straight away.
 --
 -- Commands
---   :ProjectFiles              toggle the view (right column, above the
---                              context preview)
+--   :ProjectFiles              find an indexed file and open it (telescope)
 --   :ProjectFilesAdd [path]    add a file or directory (default: this buffer)
 --   :ProjectFilesRemove [path] remove one
 --   :ProjectFilesPreset [name] switch to a preset ('' = auto mode); no
 --                              argument lists what there is
 --   :ProjectFilesSave <name>   save the current entries as a preset
+--   :ProjectFilesPresetShare [name]
+--                              copy a preset into vim-ide (shared with the
+--                              other machines after a commit/push)
 --   :ProjectFilesReindex       rebuild the index for the current list
 --
--- In the view
---   <CR> open the file      a add path      d remove entry under the cursor
---   p    pick a preset      s save preset   m auto/preset      r reindex
---   q    close
+-- In a picker
+--   <CR> take the entry     <Tab> several at once
+--   ^a   add files (find)   ^d remove from the list, or delete a preset
 --
 -- Options (.vimrc)
 --   g:projectfiles_preset      preset to use when a project has none yet
+--   g:projectfiles_shared_presets
+--                              where the shared presets are ('' disables
+--                              them; default '<vim-ide>/.vim/presets')
 --   g:projectfiles_width       view width (default: the context width)
 --   g:projectfiles_height      view height in its column (default 12)
 --   g:projectfiles_exts        indexed extensions (default as indexfiles.sh)
@@ -120,22 +134,129 @@ local function presets_dir()
   return d
 end
 
-local function preset_path(name)
-  return presets_dir() .. '/' .. name:gsub('[^%w%-_.]', '_') .. '.json'
+-- only '~' and '$VAR' need expanding: vim.fn.expand() treats the rest of a
+-- path as a file pattern and answers '' for anything it does not like
+local function expand_dir(p)
+  p = tostring(p or '')
+  if p:sub(1, 1) == '~' or p:find('%$') then
+    p = vim.fn.expand(p)
+  end
+  return (p:gsub('/+$', ''))
+end
+
+-- Presets that travel WITH vim-ide ('<vim-ide>/.vim/presets'). '~/.vim' is a
+-- symlink into '~/.vim-ide' (install.sh), so a checkout on another machine -
+-- the Linux box - sees the same presets with nothing to copy. A preset is a
+-- list of project-relative paths, so it applies to any checkout of the same
+-- tree. The writable copy in stdpath('data') shadows the shared one, so
+-- saving over a shared preset stays local until ':ProjectFilesPresetShare'
+-- puts it back into the repository.
+-- where the shared presets could be, best first: next to this very file
+-- (realpath, so the '~/.vim' symlink resolves to the vim-ide checkout - that
+-- is the copy git tracks), then the usual install locations
+local function shared_cands()
+  local src = debug.getinfo(1, 'S').source:gsub('^@', '')
+  local here = uv.fs_realpath(src) or src
+  return {
+    vim.fs.dirname(vim.fs.dirname(here)) .. '/presets', -- <...>/.vim/presets
+    expand_dir('~/.vim/presets'),
+    expand_dir('~/.vim-ide/.vim/presets'),
+  }
+end
+
+-- create = this is a write ('ProjectFilesPresetShare'): make the directory
+-- if it is not there yet. Returns nil when sharing is off
+-- (g:projectfiles_shared_presets = '') - that answer is never overridden.
+local function shared_dir(create)
+  local o = vim.g.projectfiles_shared_presets
+  if o ~= nil then
+    local p = expand_dir(o)
+    if p == '' then
+      return nil -- explicitly disabled
+    end
+    if create then
+      pcall(vim.fn.mkdir, p, 'p') -- mkdir() raises; the caller checks fs_stat
+    end
+    local st = uv.fs_stat(p)
+    return (st and st.type == 'directory') and p or nil
+  end
+  local cands = shared_cands()
+  for _, c in ipairs(cands) do
+    local st = uv.fs_stat(c)
+    if st and st.type == 'directory' then
+      return c
+    end
+  end
+  if create then
+    pcall(vim.fn.mkdir, cands[1], 'p')
+    local st = uv.fs_stat(cands[1])
+    return (st and st.type == 'directory') and cands[1] or nil
+  end
+  return nil
+end
+
+-- The file name is the sanitised preset name, but a preset dropped into the
+-- shared directory by hand may carry any name; open that one as it is, as
+-- long as it cannot climb out of the directory.
+local function preset_file(dir, name)
+  if not name:find('/') and name ~= '.' and name ~= '..' then
+    local exact = dir .. '/' .. name .. '.json'
+    if uv.fs_stat(exact) then
+      return exact
+    end
+  end
+  return dir .. '/' .. name:gsub('[^%w%-_.]', '_') .. '.json'
+end
+
+local function preset_path(name) -- my own copy: what a save writes
+  return preset_file(presets_dir(), name)
+end
+
+local function shared_path(name) -- the copy vim-ide carries, if there is one
+  local d = shared_dir()
+  return d and preset_file(d, name) or nil
+end
+
+-- scandir, not glob(): glob() can miss a preset written moments ago in this
+-- same session (and it honours 'wildignore'), and a save has to show up in
+-- the list straight away
+local function json_names(dir)
+  local out = {}
+  local h = dir and uv.fs_scandir(dir)
+  if not h then
+    return out
+  end
+  while true do
+    local n = uv.fs_scandir_next(h)
+    if not n then
+      break
+    end
+    local base = n:match('^(.+)%.json$')
+    -- glob() skipped dotfiles; scandir does not. '._default.json'
+    -- (an AppleDouble sidecar) is not a preset.
+    if base and base:sub(1, 1) ~= '.' then
+      out[#out + 1] = base
+    end
+  end
+  return out
 end
 
 local function preset_list()
-  local out = {}
-  for _, f in ipairs(vim.fn.glob(presets_dir() .. '/*.json', false, true)) do
-    out[#out + 1] = vim.fn.fnamemodify(f, ':t:r')
+  local seen, out = {}, {}
+  for _, d in ipairs({ presets_dir(), shared_dir() }) do
+    for _, n in ipairs(json_names(d)) do
+      if not seen[n] then
+        seen[n] = true
+        out[#out + 1] = n
+      end
+    end
   end
   table.sort(out)
   return out
 end
 
-local function preset_read(name)
-  local f = preset_path(name)
-  if not uv.fs_stat(f) then
+local function read_preset_file(f)
+  if not f or not uv.fs_stat(f) then
     return nil
   end
   local ok, data = pcall(function()
@@ -147,10 +268,40 @@ local function preset_read(name)
   return data
 end
 
+local function preset_read(name)
+  return read_preset_file(preset_path(name))
+      or read_preset_file(shared_path(name))
+end
+
+-- one entry per line, keys in a fixed order: a preset kept in git should
+-- produce a readable diff when a file is added or removed
+local function encode_preset(name, entries)
+  local out = { '{', '  "name": ' .. vim.json.encode(name) .. ',',
+    '  "entries": [' }
+  for i, e in ipairs(entries) do
+    out[#out + 1] = ('    {"kind": %s, "path": %s}%s'):format(
+      vim.json.encode(e.kind or 'file'), vim.json.encode(e.path or ''),
+      i < #entries and ',' or '')
+  end
+  out[#out + 1] = '  ]'
+  out[#out + 1] = '}'
+  return out
+end
+
+-- writefile() answers -1 instead of throwing, so pcall alone would call a
+-- failed write a success and quietly lose the preset
+local function write_json(f, lines)
+  local ok, ret = pcall(vim.fn.writefile, lines, f)
+  return ok and ret == 0
+end
+
 local function preset_write(name, entries)
   local f = preset_path(name)
-  local data = vim.json.encode({ name = name, entries = entries })
-  pcall(vim.fn.writefile, vim.split(data, '\n'), f)
+  if not write_json(f, encode_preset(name, entries)) then
+    notify('preset 을 저장하지 못했습니다: ' .. f, vim.log.levels.ERROR)
+    return false
+  end
+  return true
 end
 
 -- which preset this project uses ('' = auto mode)
@@ -296,17 +447,29 @@ end
 -- entry editing
 -- ---------------------------------------------------------------------------
 local function save_entries(root, name, entries)
-  preset_write(name, entries)
   if #entries == 0 then
     -- an empty preset indexes nothing, and an empty file list makes the
     -- indexer skip its run - which would leave the old index in place and
     -- quietly stale. Dropping the last entry means "index everything again".
+    -- Never WRITE that empty list: my copy is preferred over the one vim-ide
+    -- carries, so an empty file would hide the shared preset of that name on
+    -- this machine, in every project. Drop my copy instead.
+    local mine = preset_path(name)
+    local had_mine = uv.fs_stat(mine) ~= nil
+    if had_mine then
+      pcall(vim.fn.delete, mine)
+    end
     set_active(root, '')
     materialize(root)
     reindex(root)
-    notify('목록이 비어 auto 모드로 돌아갑니다 (프로젝트 전체 색인)')
+    local sp = shared_path(name)
+    notify(sp and uv.fs_stat(sp)
+      and ("목록이 비어 auto 모드로 돌아갑니다 (내 '%s' 사본은 지웠고 vim-ide "
+        .. '공용본은 그대로입니다)'):format(name)
+      or '목록이 비어 auto 모드로 돌아갑니다 (프로젝트 전체 색인)')
     return nil
   end
+  preset_write(name, entries)
   local files = materialize(root)
   reindex(root)
   return files
@@ -341,6 +504,22 @@ local function add_path(root, path)
   if not name then
     -- auto mode: adding a path means "start a preset here"
     name = tostring(cfg('preset', 'default'))
+    if preset_read(name) then
+      -- that name is taken - by one of mine, or by one vim-ide carries.
+      -- Starting an empty list under it would HIDE the saved preset instead
+      -- of extending it, so take a free name (this project's directory).
+      local base = vim.fn.fnamemodify(root, ':t')
+      if base == '' then
+        base = name
+      end
+      local free = base
+      local i = 2
+      while preset_read(free) do
+        free = base .. '-' .. i
+        i = i + 1
+      end
+      name = free
+    end
     entries = {}
     set_active(root, name)
     notify("auto -> preset '" .. name .. "'")
@@ -1055,8 +1234,16 @@ local function pick_preset()
     'auto  (프로젝트 전체 색인)' } }
   for _, n in ipairs(names) do
     local p = preset_read(n)
-    items[#items + 1] = { name = n, label = ('%s%s  (%d entries)')
-      :format(cur == n and '● ' or '  ', n, p and #p.entries or 0) }
+    local sp = shared_path(n)
+    local shared = sp ~= nil and uv.fs_stat(sp) ~= nil
+    -- say where a preset comes from: the ones vim-ide carries are on every
+    -- machine, mine are only here
+    local tag = shared
+        and (uv.fs_stat(preset_path(n)) and '  [vim-ide + 내 사본]'
+          or '  [vim-ide]')
+        or ''
+    items[#items + 1] = { name = n, label = ('%s%s  (%d entries)%s')
+      :format(cur == n and '● ' or '  ', n, p and #p.entries or 0, tag) }
   end
   local function use(it)
     set_active(root, it.name or '')
@@ -1096,15 +1283,36 @@ local function pick_preset()
       map({ 'i', 'n' }, '<C-d>', function()
         local e = t.state.get_selected_entry()
         t.actions.close(bufnr)
-        if e and e.value.name then
-          pcall(vim.fn.delete, preset_path(e.value.name))
-          if cur == e.value.name then
-            set_active(root, '')
+        if not (e and e.value.name) then
+          return
+        end
+        local nm = e.value.name
+        local had_mine = uv.fs_stat(preset_path(nm)) ~= nil
+        if had_mine then
+          pcall(vim.fn.delete, preset_path(nm))
+        end
+        -- a preset that vim-ide carries belongs to every machine: deleting
+        -- my copy only drops the local override, the shared one stays
+        local sp = shared_path(nm)
+        if sp and uv.fs_stat(sp) then
+          if had_mine and cur == nm then
+            -- my override went away: the shared list is in force now
             materialize(root)
             reindex(root)
           end
-          notify("preset '" .. e.value.name .. "' 삭제")
+          notify(had_mine
+            and ("preset '" .. nm .. "' 내 사본 삭제 (vim-ide 공용본으로 복귀)")
+            or ("preset '" .. nm .. "' 은 vim-ide 공용본입니다. 저장소에서 지우세요: "
+              .. sp),
+            had_mine and vim.log.levels.INFO or vim.log.levels.WARN)
+          return
         end
+        if cur == nm then
+          set_active(root, '')
+          materialize(root)
+          reindex(root)
+        end
+        notify("preset '" .. nm .. "' 삭제")
       end)
       return true
     end,
@@ -1262,6 +1470,68 @@ api.nvim_create_user_command('ProjectFilesSave', function(o)
   materialize(root)
   notify(("preset '%s' 저장 (%d entries)"):format(o.args, #entries))
 end, { nargs = '?', desc = 'Save the current entries as a named preset' })
+
+-- put a preset into vim-ide itself, so the other machines (the Linux box)
+-- get it with the next 'git pull'. The repository copy is what every
+-- checkout reads; my own copy in stdpath('data') keeps shadowing it.
+api.nvim_create_user_command('ProjectFilesPresetShare', function(o)
+  local name = o.args ~= '' and o.args or active_preset(cur_root())
+  if not name or name == '' then
+    notify('공유할 preset 이름을 지정하세요 (:ProjectFilesPresetShare <name>)',
+      vim.log.levels.WARN)
+    return
+  end
+  local d = shared_dir(true)
+  if not d then
+    notify(vim.g.projectfiles_shared_presets == ''
+      and '공유 preset 이 꺼져 있습니다 (g:projectfiles_shared_presets)'
+      or 'vim-ide 의 presets 디렉터리를 만들지 못했습니다',
+      vim.log.levels.WARN)
+    return
+  end
+  local p = preset_read(name)
+  if not p then
+    notify("preset '" .. name .. "' 이(가) 없습니다", vim.log.levels.WARN)
+    return
+  end
+  if #p.entries == 0 then
+    notify("preset '" .. name .. "' 이 비어 있어 공유하지 않습니다",
+      vim.log.levels.WARN)
+    return
+  end
+  local dst = preset_file(d, name)
+  -- the file in the repository is shared with the other machines: do not
+  -- quietly shrink it
+  local old = read_preset_file(dst)
+  if old and #old.entries > #p.entries then
+    local ans = vim.fn.confirm(
+      ("vim-ide 의 '%s' 는 %d개, 지금 것은 %d개입니다. 덮어쓸까요?")
+      :format(name, #old.entries, #p.entries), "&Yes\n&No", 2)
+    if ans ~= 1 then
+      notify('취소했습니다')
+      return
+    end
+  end
+  if not write_json(dst, encode_preset(name, p.entries)) then
+    notify('저장하지 못했습니다 (쓰기 권한을 확인하세요): ' .. dst,
+      vim.log.levels.ERROR)
+    return
+  end
+  -- the hint has to be a command that actually runs: '-C <root>' means the
+  -- pathspec is relative to <root>, and there may be no repository at all
+  -- when g:projectfiles_shared_presets points somewhere else
+  local repo = vim.fs.dirname(vim.fs.dirname(d))
+  local rel = dst:sub(#repo + 2)
+  local head = ("preset '%s' (%d entries) -> %s"):format(name, #p.entries, dst)
+  if dst:sub(1, #repo + 1) == repo .. '/' and uv.fs_stat(repo .. '/.git') then
+    notify(head .. '\n커밋해야 다른 장비에 반영됩니다: '
+      .. ("git -C %s add %s && git commit && git push"):format(repo, rel))
+  else
+    notify(head)
+  end
+end, { nargs = '?', complete = function()
+  return preset_list()
+end, desc = 'Copy a preset into vim-ide so other machines get it' })
 
 api.nvim_create_user_command('ProjectFilesReindex', function()
   local root = cur_root()

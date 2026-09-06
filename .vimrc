@@ -1392,9 +1392,12 @@ let g:relationview_unpin_delay = 3000
 "     <leader>fp  추가할 파일 고르기      (<Tab> 여러 개)
 "     <leader>fd  추가할 디렉터리 고르기  (그 아래 전부)
 "     <leader>fx  등록 항목 제거
-"     <leader>fm  preset 선택/전환        (^d preset 삭제, auto 포함)
+"     <leader>fm  preset 선택/전환        (^d 내 사본 삭제, auto 포함)
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
+"   :ProjectFilesPresetShare <name>
+"     preset 을 vim-ide 저장소(.vim/presets)에 넣는다. 커밋/푸시하면
+"     다른 장비(리눅스)에서 git pull 만으로 같은 preset 을 쓴다.
 "   auto 모드   = 프로젝트 전체(지금까지와 같음)
 "   preset 모드 = 고른 파일/디렉터리만 색인
 "   파일을 추가하면 그 파일이 쓰는 헤더와 심볼 정의 파일도 함께 들어간다
