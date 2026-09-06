@@ -33,6 +33,10 @@
 --   the definition in the CONTEXT window, moves the focus there and switches
 --   the panel to that symbol (pinned), C-t walks back and hands the focus to
 --   the edit window again.
+--   Without the preview window the edit window takes its role: C-] jumps
+--   there (builtin, so C-t returns) while the panel still follows and pins,
+--   C-n/C-p move the edit window through the list, and a :Gtags search shows
+--   its first hit there. With the panel closed too, both go to quickfix.
 --   Browsing the list (click, j/k, C-n/C-p) pins the panel; double click
 --   takes the edit window there; resting on a symbol in a source window for
 --   g:relationview_unpin_delay ms (3s) unpins and follows the cursor again.
@@ -1373,10 +1377,24 @@ ensure_ctx = function()
     -- preview under it instead of splitting the edit window again
     local pf = _G.projectfiles_win and _G.projectfiles_win() or nil
     if pf and api.nvim_win_is_valid(pf) then
+      -- that view has 'winfixheight': splitting it would grow the whole
+      -- column and take the rows from the panel below, so relax it for the
+      -- split and put the panel's height back if it moved anyway
+      local fixed = vim.wo[pf].winfixheight
+      local ph = (s.win and api.nvim_win_is_valid(s.win))
+          and api.nvim_win_get_height(s.win) or nil
+      vim.wo[pf].winfixheight = false
       api.nvim_win_call(pf, function()
         vim.cmd('noautocmd rightbelow split')
         ctx = api.nvim_get_current_win()
       end)
+      if api.nvim_win_is_valid(pf) then
+        vim.wo[pf].winfixheight = fixed
+      end
+      if ph and s.win and api.nvim_win_is_valid(s.win)
+          and api.nvim_win_get_height(s.win) ~= ph then
+        pcall(api.nvim_win_set_height, s.win, ph)
+      end
       if ctx and api.nvim_win_is_valid(ctx) then
         goto ctx_ready
       end
@@ -1436,6 +1454,10 @@ ensure_ctx = function()
     callback = function()
       if s.ctx_win == ctx then
         s.ctx_win = nil
+        -- the stack belongs to that window: a reopened preview must not
+        -- inherit jumps (and origins) from the closed one
+        s.ctx_last = nil
+        s.ctx_stack = {}
       end
     end,
   })
@@ -1522,11 +1544,16 @@ ctx_tag_back = function()
   -- the bottom of the stack is the edit window we were sent here from:
   -- walking back past it means going back to that window, not just showing
   -- its line in the preview
-  if prev.origin and prev.origin.win and api.nvim_win_is_valid(prev.origin.win)
-  then
-    pcall(api.nvim_win_set_cursor, prev.origin.win,
-      { prev.line, prev.col or 0 })
-    pcall(api.nvim_set_current_win, prev.origin.win)
+  local ow = prev.origin and prev.origin.win
+  if ow and api.nvim_win_is_valid(ow) then
+    -- only put the cursor back when that window still shows the file we
+    -- left: it may have been sent somewhere else since (<CR> here does
+    -- exactly that), and a line number from another file is a wrong jump
+    if prev.origin.buf and api.nvim_buf_is_valid(prev.origin.buf)
+        and api.nvim_win_get_buf(ow) == prev.origin.buf then
+      pcall(api.nvim_win_set_cursor, ow, { prev.line, prev.col or 0 })
+    end
+    pcall(api.nvim_set_current_win, ow)
   end
 end
 
@@ -1539,8 +1566,16 @@ ctx_enter_from = function(win, loc, sym)
   end
   local buf = api.nvim_win_get_buf(win)
   local pos = api.nvim_win_get_cursor(win)
-  table.insert(s.ctx_stack, { origin = { win = win, buf = buf },
-    path = api.nvim_buf_get_name(buf), line = pos[1], col = pos[2], sym = sym })
+  local entry = { origin = { win = win, buf = buf },
+    path = api.nvim_buf_get_name(buf), line = pos[1], col = pos[2], sym = sym }
+  -- one origin per trip: pressing C-] again in the same edit window replaces
+  -- the way back instead of stacking another dead C-t on top of it
+  local top = s.ctx_stack[#s.ctx_stack]
+  if top and top.origin and top.origin.win == win then
+    s.ctx_stack[#s.ctx_stack] = entry
+  else
+    table.insert(s.ctx_stack, entry)
+  end
   s.ctx_last = nil
   if loc then
     show_context(loc)
@@ -1550,8 +1585,8 @@ ctx_enter_from = function(win, loc, sym)
 end
 
 function A.ctx_jump_from_edit()
-  if not (panel_visible() and ctx_visible()) then
-    return false
+  if not panel_visible() then
+    return false -- nothing of ours is up: the caller falls back to :Gtags
   end
   local win = api.nvim_get_current_win()
   if win == s.win or win == s.ctx_win then
@@ -1569,16 +1604,43 @@ function A.ctx_jump_from_edit()
   if not is_symbol(sym, true) then
     return false
   end
+  if not ctx_visible() then
+    -- panel without a preview: the edit window does the jump (the builtin
+    -- one, so the tag stack and C-t keep working) and the panel follows the
+    -- symbol, pinned - the same state the preview path leaves behind
+    s.pinned = true
+    update(sym, name, true, false, nil)
+    return false -- the caller performs the jump itself
+  end
+  -- every dead end below has to land somewhere: fall back to the builtin
+  -- tag jump IN THE EDIT WINDOW, or the key would silently do nothing for
+  -- anything gtags has no definition for (a macro, a struct member, ...)
+  local function fallback()
+    if api.nvim_win_is_valid(win) then
+      api.nvim_win_call(win, function()
+        pcall(vim.cmd, 'normal! ' ..
+          api.nvim_replace_termcodes('<C-]>', true, false, true))
+      end)
+    end
+  end
+  s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
+  local gen = s.ctx_jump_gen
   root_for(name, function(root)
+    if gen ~= s.ctx_jump_gen then
+      return -- a newer C-] is on its way: that one wins
+    end
     if not root or not ctx_visible() then
+      fallback()
       return
     end
     run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
       function(lines)
+        if gen ~= s.ctx_jump_gen then
+          return
+        end
         local d = parse_ctags_mod(lines, 4)[1]
         if not d then
-          vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
-            vim.log.levels.WARN)
+          fallback() -- no gtags definition: let the tag stack try
           return
         end
         if api.nvim_win_is_valid(win) then
@@ -1594,6 +1656,16 @@ function A.ctx_jump_from_edit()
   return true
 end
 
+-- the .vimrc <C-]> mapping asks this when nothing of ours handled the key:
+-- with a database around the fallback is ':Gtags -d' (quickfix), otherwise
+-- the builtin tag jump
+function _G.relationview_has_db()
+  local name = api.nvim_buf_get_name(0)
+  local dir = (name ~= '' and vim.bo.buftype == '')
+      and vim.fs.dirname(vim.fn.fnamemodify(name, ':p')) or vim.fn.getcwd()
+  return db_root(dir) ~= nil
+end
+
 -- the .vimrc <C-]> mapping asks this first and falls back to the builtin
 function _G.relationview_ctx_jump()
   return A.ctx_jump_from_edit()
@@ -1602,11 +1674,7 @@ end
 -- the .vimrc <C-c> mapping: true when a pin was actually released, so the
 -- key can fall through to whatever it meant before (checksymbol.vim)
 function _G.relationview_unpin()
-  if not A.unpin() then
-    return false
-  end
-  pcall(function() api.nvim_exec_autocmds('CursorHold', {}) end)
-  return true
+  return A.unpin()
 end
 
 show_context = function(loc)
@@ -3395,11 +3463,30 @@ end
 -- C-c: let the panel follow the cursor again (the 2-3s dwell rule does this
 -- by itself, this is the "right now" version)
 function A.unpin()
-  if not s.pinned then
+  -- no panel on screen: the key was not ours, let it mean what it used to
+  if not (s.pinned and panel_visible()) then
     return false
   end
   s.pinned = false
   update_header()
+  -- A captured ':Gtags' list is frozen, and on_hold() will not rebuild it
+  -- (it refuses while the cursor sits in the preview, and the symbol has
+  -- not changed), so bring the live view back from a real source window.
+  local w = pick_src_win()
+  if w and api.nvim_win_is_valid(w) then
+    local b = api.nvim_win_get_buf(w)
+    local name = api.nvim_buf_get_name(b)
+    if name ~= '' and vim.bo[b].buftype == '' then
+      local pos = api.nvim_win_get_cursor(w)
+      local sym = api.nvim_win_call(w, function()
+        return vim.fn.expand('<cword>')
+      end)
+      if is_symbol(sym) then
+        update(sym, name, true, false,
+          { buf = b, line = pos[1], col = pos[2] })
+      end
+    end
+  end
   return true
 end
 
@@ -3450,11 +3537,18 @@ function A.step(dir)
   end
   pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
   hl_cursor_row()
-  -- the panel's own CursorMoved does this on a timer; we are moving another
-  -- window's cursor, so do it here and now - and force it, because stepping
-  -- is often done from inside the preview after a C-] took the focus there
-  s.ctx_last = nil
-  update_context(true)
+  if ctx_visible() then
+    -- the panel's own CursorMoved does this on a timer; we are moving
+    -- another window's cursor, so do it here and now - and force it,
+    -- because stepping is often done from inside the preview after a C-]
+    -- took the focus there
+    s.ctx_last = nil
+    update_context(true)
+  else
+    -- no preview window: the edit window is where you read, so show it
+    -- there instead (peek: the focus stays where the key was pressed)
+    jump_to(s.items[found].loc, true)
+  end
   return true
 end
 
@@ -3705,9 +3799,15 @@ local function show_results(title, sym, results, truncated, origin)
   update_context()
   -- reading the hit is the next thing you do, so land in the preview - and
   -- leave a way back to where the search was started (C-t)
-  if origin and api.nvim_win_is_valid(origin) and ctx_visible()
-      and #results > 0 then
-    ctx_enter_from(origin, nil, sym)
+  if origin and api.nvim_win_is_valid(origin) and #results > 0 then
+    if ctx_visible() then
+      ctx_enter_from(origin, nil, sym)
+    else
+      -- no preview: show the first hit in the edit window instead, the way
+      -- the quickfix jump used to (the focus stays where you are)
+      local first = results[1]
+      jump_to({ path = first.path, line = first.line, sym = first.name }, true)
+    end
   end
 end
 
@@ -3745,11 +3845,20 @@ function A.gtags(args)
       paths_only = true
     end
   end
-  local file = api.nvim_buf_get_name(0)
-  local origin = api.nvim_get_current_win()
-  if origin == s.win or origin == s.ctx_win then
-    origin = nil -- started from the panel/preview: stay where you are
+  -- Which project this searches must come from a real file, not from
+  -- whatever scratch window happens to hold the focus (the preview, the
+  -- panel, the project files view, quickfix ...) - otherwise the root is
+  -- resolved from the cwd and the search finds nothing.
+  local win = api.nvim_get_current_win()
+  local sbuf = api.nvim_win_get_buf(win)
+  if vim.bo[sbuf].buftype ~= '' or api.nvim_buf_get_name(sbuf) == '' then
+    local sw = pick_src_win()
+    if sw and api.nvim_win_is_valid(sw) then
+      win, sbuf = sw, api.nvim_win_get_buf(sw)
+    end
   end
+  local file = api.nvim_buf_get_name(sbuf)
+  local origin = (vim.bo[sbuf].buftype == '' and file ~= '') and win or nil
   local dir = file ~= '' and vim.fs.dirname(vim.fn.fnamemodify(file, ':p'))
       or vim.fn.getcwd()
   get_root(dir, function(root)

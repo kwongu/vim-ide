@@ -668,11 +668,28 @@ nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 func! s:RvCtxJump() abort
 	if has('nvim') && exists('*luaeval')
 		try
+			" 패널이 떠 있으면 플러그인이 처리한다:
+			"   미리보기 있음 -> context view 에서 열고 포커스 이동
+			"   미리보기 없음 -> 패널만 그 심볼로 바꾸고(PINNED) false 를
+			"                    돌려주어 아래 기본 점프가 EDIT 창에서 난다
 			if luaeval('_G.relationview_ctx_jump ~= nil and _G.relationview_ctx_jump() or false')
+				return
+			endif
+			" 패널이 닫혀 있으면 예전처럼 quickfix 로 보낸다
+			if !luaeval('_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil or false')
+						\ && exists(':Gtags') == 2
+						\ && luaeval('_G.relationview_has_db ~= nil and _G.relationview_has_db() or false')
+				execute 'Gtags -d ' . expand('<cword>')
 				return
 			endif
 		catch
 		endtry
+	endif
+	" 특수 창(패널/ProjectFiles/Tagbar/NERDTree/quickfix ...)에서 builtin
+	" C-] 는 그 창의 버퍼를 갈아치워 사이드바를 부순다. help 는 <C-]> 가
+	" |태그| 점프라서 살려둔다.
+	if &buftype !=# '' && &buftype !=# 'help'
+		return
 	endif
 	execute "normal! \<C-]>"
 endfunc

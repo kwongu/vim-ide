@@ -287,20 +287,38 @@ local function save_entries(root, name, entries)
   return files
 end
 
+-- A path typed in the view is meant relative to the PROJECT (that is what
+-- the rows show); a path completed on the command line is relative to the
+-- cwd. Try the project first, then the cwd.
+local function abs_of(root, path)
+  local cand
+  if path:sub(1, 1) == '/' then
+    cand = path
+  elseif uv.fs_stat(root .. '/' .. path) then
+    cand = root .. '/' .. path
+  else
+    cand = vim.fn.fnamemodify(path, ':p')
+  end
+  cand = vim.fn.fnamemodify(cand, ':p'):gsub('/+$', '')
+  return uv.fs_realpath(cand) or cand
+end
+
 local function add_path(root, path)
   local entries, name = entries_of(root)
+  local abs = abs_of(root, path)
+  local st = uv.fs_stat(abs)
+  if not st then
+    -- check BEFORE switching modes: a typo must not turn the project into
+    -- an empty preset (which would index nothing at all)
+    notify('없는 경로: ' .. path, vim.log.levels.WARN)
+    return
+  end
   if not name then
     -- auto mode: adding a path means "start a preset here"
     name = tostring(cfg('preset', 'default'))
     entries = {}
     set_active(root, name)
     notify("auto -> preset '" .. name .. "'")
-  end
-  local abs = vim.fn.fnamemodify(path, ':p'):gsub('/+$', '')
-  local st = uv.fs_stat(abs)
-  if not st then
-    notify('없는 경로: ' .. path, vim.log.levels.WARN)
-    return
   end
   local rel = rel_to(root, abs)
   for _, e in ipairs(entries) do
@@ -320,7 +338,7 @@ local function remove_path(root, path)
     notify('auto 모드에서는 제거할 목록이 없습니다', vim.log.levels.WARN)
     return
   end
-  local abs = vim.fn.fnamemodify(path, ':p'):gsub('/+$', '')
+  local abs = abs_of(root, path)
   local rel = rel_to(root, abs)
   local kept, hit = {}, false
   for _, e in ipairs(entries) do
