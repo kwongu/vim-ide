@@ -661,11 +661,32 @@ func! s:RvJump() abort
 endfunc
 nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 
+" C-] : 편집 창에서는 정의를 context view 에 열고 포커스를 그쪽으로 옮긴다
+"       (편집 창은 그대로. C-t 로 편집 창에 돌아온다. context view 안에서는
+"        그 창의 자체 점프 스택으로 계속 파고들 수 있다)
+"       패널/미리보기가 없으면 예전처럼 tagfunc(gtags) 로 편집 창에서 점프.
+func! s:RvCtxJump() abort
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_ctx_jump ~= nil and _G.relationview_ctx_jump() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	execute "normal! \<C-]>"
+endfunc
+nnoremap <silent> <C-]> :call <SID>RvCtxJump()<CR>
+
+" C-c 매핑은 checksymbol.vim 을 source 한 뒤에 둔다(아래쪽 참고)
+
 nnoremap <silent> <C-9> :call <SID>QfStep(1)<CR>
 nnoremap <silent> <C-0> :call <SID>QfStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
-nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
+" <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고
+" 포커스 이동, 패널이 없으면 tagfunc 로 편집창 점프). 예전 매핑은 남겨둔다:
+"nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
 nmap <C-t> <C-o><CR>
 
 "------------------------------------------------------------------------------
@@ -691,7 +712,9 @@ function! s:RvMouseJump() abort
 	endif
 	" 그 밖에는 커서 아래 심볼로 점프 (<C-]> 매핑을 그대로 사용)
 	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-		execute "normal \<C-]>"
+		" 'normal!': 더블클릭은 예전대로 EDIT 창에서 점프한다
+		" (<C-]> 매핑은 context view 로 보내므로 타면 안 된다)
+		execute "normal! \<C-]>"
 	else
 		execute "normal! \<2-LeftMouse>"
 	endif
@@ -1267,6 +1290,29 @@ set tags=tags;/
 "==============================================================================
 source ${HOME}/.vim/plugin/checksymbol.vim
 
+" C-c : RelationView 가 PINNED 면 해제하고(다시 커서를 따라간다), 그렇지
+"       않으면 원래대로 checksymbol.vim 의 CONFIG 조회를 그대로 한다.
+"       (checksymbol.vim 이 <C-c> 를 가져가므로 source 뒤에 다시 건다)
+func! s:RvUnpin() abort
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_unpin ~= nil and _G.relationview_unpin() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	if exists('*CheckSymbol')
+		call CheckSymbol(expand('<cword>'))
+	endif
+endfunc
+" checksymbol.vim 은 ~/.vim/plugin/ 에 있어 vimrc 가 끝난 뒤 한 번 더
+" 로드되며 <C-c> 를 다시 가져간다. 그래서 VimEnter 에서 건다.
+augroup RvUnpinKey
+	autocmd!
+	autocmd VimEnter * nnoremap <silent> <C-c> :call <SID>RvUnpin()<CR>
+augroup END
+
 "==============================================================================
 "= RelationView: Source Insight style relation window (nvim only)
 "  F3 toggle / :RelationView - see ~/.vim/plugin/relationview.lua
@@ -1294,7 +1340,7 @@ let g:relationview_context_height = 40
 let g:relationview_show_text = 1
 " 리스트를 훑으면 PINNED 로 고정되고, 소스 창에서 한 심볼에 이만큼
 " 머무르면 고정이 풀리며 다시 커서를 따라간다
-let g:relationview_unpin_delay = 2000
+let g:relationview_unpin_delay = 3000
 
 " ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창

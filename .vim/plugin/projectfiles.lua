@@ -409,6 +409,21 @@ local function src_win()
   return nil
 end
 
+-- A window with 'winfixheight' will not give rows to a new neighbour: nvim
+-- grows the whole column instead and takes the rows from the relation panel
+-- at the bottom. So relax the preview while splitting it, and put the
+-- panel's height back if it moved anyway.
+local function with_panel_height(fn)
+  local panel = _G.relationview_panel_win and _G.relationview_panel_win() or nil
+  local h = panel and api.nvim_win_is_valid(panel)
+      and api.nvim_win_get_height(panel) or nil
+  fn()
+  if panel and h and api.nvim_win_is_valid(panel)
+      and api.nvim_win_get_height(panel) ~= h then
+    pcall(api.nvim_win_set_height, panel, h)
+  end
+end
+
 local A = {}
 
 function A.open_file()
@@ -577,21 +592,6 @@ render = function()
   vim.bo[s.buf].modifiable = true
   api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
   vim.bo[s.buf].modifiable = false
-end
-
--- A window with 'winfixheight' will not give rows to a new neighbour: nvim
--- grows the whole column instead and takes the rows from the relation panel
--- at the bottom. So relax the preview while splitting it, and put the
--- panel's height back if it moved anyway.
-local function with_panel_height(fn)
-  local panel = _G.relationview_panel_win and _G.relationview_panel_win() or nil
-  local h = panel and api.nvim_win_is_valid(panel)
-      and api.nvim_win_get_height(panel) or nil
-  fn()
-  if panel and h and api.nvim_win_is_valid(panel)
-      and api.nvim_win_get_height(panel) ~= h then
-    pcall(api.nvim_win_set_height, panel, h)
-  end
 end
 
 open = function()

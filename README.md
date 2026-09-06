@@ -98,6 +98,8 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      context window; the edit window does not move), the quickfix list
      otherwise
 Ctrl+Enter: Take the edit window to the RelationView item you walked to
+Ctrl+c: Unpin the relation panel (otherwise the CONFIG lookup, as before)
+Ctrl+]: Open the definition in the context window and focus it; Ctrl+t back
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
@@ -331,8 +333,21 @@ Browsing the list - a mouse click on a row, j/k, Ctrl+n/Ctrl+p - marks the
 panel PINNED, so the tree you are reading cannot be rebuilt under you; only
 the context window follows. A DOUBLE click takes the edit window to that
 symbol (the panel stays pinned). Resting on a symbol in a source window for
-g:relationview_unpin_delay ms (3000) releases the pin and the panel follows
-the cursor again - or press p at any time.
+g:relationview_unpin_delay ms releases the pin and the panel follows the
+cursor again - or press `Ctrl+c` (`p` inside the panel) to release it now.
+`Ctrl+c` outside a pinned panel keeps whatever it meant before (the
+checksymbol.vim CONFIG lookup here).
+
+`Ctrl+]` in an edit window opens the definition **in the context window**
+and moves the focus there; the edit window stays where it is, so it remains
+the place you are working in. `Ctrl+t` walks back: right after the jump it
+returns the focus to the edit window, and if you kept following symbols
+with `Ctrl+]` inside the context window it unwinds that window's own stack
+first and hands the focus back only when it reaches the spot the jump
+started from. `<leader><leader>c` (`:Gtags -r`) behaves the same way - the
+hits are listed in the panel and the focus lands in the preview, `Ctrl+t`
+returns. Double click and `Ctrl+Enter` are the ones that move the edit
+window.
 double click: same jump, with the mouse
 
 In the edit window a double click behaves like `Ctrl+]` (jump to the

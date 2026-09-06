@@ -28,6 +28,9 @@
 --   C-n / C-p  next / previous item in the list, previewed in the context
 --              window; the edit window does not move (works from any
 --              window; falls back to :cnext/:cprevious with no list)
+--   C-c unpins the panel (:RelationViewUnpin); C-] in an edit window opens
+--   the definition in the CONTEXT window and moves the focus there, C-t
+--   walks back and hands the focus to the edit window again.
 --   Browsing the list (click, j/k, C-n/C-p) pins the panel; double click
 --   takes the edit window there; resting on a symbol in a source window for
 --   g:relationview_unpin_delay ms (3s) unpins and follows the cursor again.
@@ -986,6 +989,7 @@ local function ensure_buf()
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
   bmap('<C-CR>', function() A.jump(false) end, 'RelationView: jump')
+  bmap('<C-c>', function() A.unpin() end, 'RelationView: unpin')
   bmap('<C-n>', function() A.step(1) end, 'RelationView: next item')
   bmap('<C-p>', function() A.step(-1) end, 'RelationView: previous item')
   bmap('a', function() A.toggle_auto() end, 'RelationView: toggle auto')
@@ -1234,7 +1238,7 @@ end
 -- list (and :tag, gf, ...) from hijacking this window: there is no file
 -- buffer here to jump into, so those commands always land in a real edit
 -- window. It also means the preview can never be edited by accident.
-local ctx_tag_jump, ctx_tag_back
+local ctx_tag_jump, ctx_tag_back, ctx_enter_from
 
 local function ctx_buf()
   if s.ctx_ph and api.nvim_buf_is_valid(s.ctx_ph) then
@@ -1512,6 +1516,89 @@ ctx_tag_back = function()
   -- no 'sym' here on purpose: the recorded line/column is the exact spot,
   -- re-locating the symbol could land back where we just came from
   show_context({ path = prev.path, line = prev.line, col = prev.col or 0 })
+  -- the bottom of the stack is the edit window we were sent here from:
+  -- walking back past it means going back to that window, not just showing
+  -- its line in the preview
+  if prev.origin and prev.origin.win and api.nvim_win_is_valid(prev.origin.win)
+  then
+    pcall(api.nvim_win_set_cursor, prev.origin.win,
+      { prev.line, prev.col or 0 })
+    pcall(api.nvim_set_current_win, prev.origin.win)
+  end
+end
+
+-- C-] (and \\c) in an EDIT window: show the definition in the context
+-- window and move the focus there. The edit window itself stays put - it is
+-- the reading window; C-t brings the focus back to it.
+ctx_enter_from = function(win, loc, sym)
+  if not ctx_visible() then
+    return false
+  end
+  local buf = api.nvim_win_get_buf(win)
+  local pos = api.nvim_win_get_cursor(win)
+  table.insert(s.ctx_stack, { origin = { win = win, buf = buf },
+    path = api.nvim_buf_get_name(buf), line = pos[1], col = pos[2], sym = sym })
+  s.ctx_last = nil
+  if loc then
+    show_context(loc)
+  end
+  pcall(api.nvim_set_current_win, s.ctx_win)
+  return true
+end
+
+function A.ctx_jump_from_edit()
+  if not (panel_visible() and ctx_visible()) then
+    return false
+  end
+  local win = api.nvim_get_current_win()
+  if win == s.win or win == s.ctx_win then
+    return false
+  end
+  local buf = api.nvim_win_get_buf(win)
+  if vim.bo[buf].buftype ~= '' then
+    return false
+  end
+  local name = api.nvim_buf_get_name(buf)
+  if name == '' then
+    return false
+  end
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym, true) then
+    return false
+  end
+  root_for(name, function(root)
+    if not root or not ctx_visible() then
+      return
+    end
+    run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
+      function(lines)
+        local d = parse_ctags_mod(lines, 4)[1]
+        if not d then
+          vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
+            vim.log.levels.WARN)
+          return
+        end
+        if api.nvim_win_is_valid(win) then
+          ctx_enter_from(win, { path = d.path, line = d.line, sym = sym }, sym)
+        end
+      end, 8)
+  end)
+  return true
+end
+
+-- the .vimrc <C-]> mapping asks this first and falls back to the builtin
+function _G.relationview_ctx_jump()
+  return A.ctx_jump_from_edit()
+end
+
+-- the .vimrc <C-c> mapping: true when a pin was actually released, so the
+-- key can fall through to whatever it meant before (checksymbol.vim)
+function _G.relationview_unpin()
+  if not A.unpin() then
+    return false
+  end
+  pcall(function() api.nvim_exec_autocmds('CursorHold', {}) end)
+  return true
 end
 
 show_context = function(loc)
@@ -3294,6 +3381,17 @@ function A.pin()
   update_header()
 end
 
+-- C-c: let the panel follow the cursor again (the 2-3s dwell rule does this
+-- by itself, this is the "right now" version)
+function A.unpin()
+  if not s.pinned then
+    return false
+  end
+  s.pinned = false
+  update_header()
+  return true
+end
+
 -- Walk the list: move the panel's cursor to the next/previous row that
 -- carries a location and preview that location in the CONTEXT window. The
 -- edit window is deliberately left alone - this is for looking through the
@@ -3580,7 +3678,7 @@ for c in ('drsgPfaie'):gmatch('.') do
   GFLAG[c] = true
 end
 
-local function show_results(title, sym, results, truncated)
+local function show_results(title, sym, results, truncated, origin)
   s.gen = s.gen + 1
   kill_procs()
   s.tree = { kind = 'results', sym = sym, title = title, results = results,
@@ -3592,6 +3690,12 @@ local function show_results(title, sym, results, truncated)
   render_tree()
   hl_cursor_row()
   update_context()
+  -- reading the hit is the next thing you do, so land in the preview - and
+  -- leave a way back to where the search was started (C-t)
+  if origin and api.nvim_win_is_valid(origin) and ctx_visible()
+      and #results > 0 then
+    ctx_enter_from(origin, nil, sym)
+  end
 end
 
 function A.gtags(args)
@@ -3629,6 +3733,10 @@ function A.gtags(args)
     end
   end
   local file = api.nvim_buf_get_name(0)
+  local origin = api.nvim_get_current_win()
+  if origin == s.win or origin == s.ctx_win then
+    origin = nil -- started from the panel/preview: stay where you are
+  end
   local dir = file ~= '' and vim.fs.dirname(vim.fn.fnamemodify(file, ':p'))
       or vim.fn.getcwd()
   get_root(dir, function(root)
@@ -3661,7 +3769,7 @@ function A.gtags(args)
         end
       end
       show_results('Gtags ' .. tostring(args), pattern, results,
-        math.max(0, #lines - #results))
+        math.max(0, #lines - #results), origin)
     end, cap + 200)
   end)
 end
@@ -3688,6 +3796,14 @@ local function capture_gtags()
 end
 
 api.nvim_create_autocmd('VimEnter', { group = group, callback = capture_gtags })
+
+api.nvim_create_user_command('RelationViewUnpin', function()
+  if not A.unpin() then
+    return
+  end
+  -- follow the cursor again straight away
+  pcall(function() api.nvim_exec_autocmds('CursorHold', {}) end)
+end, { desc = 'Unpin the relation panel (follow the cursor again)' })
 
 api.nvim_create_user_command('RelationViewJump', function()
   if not A.jump_here(false) then
