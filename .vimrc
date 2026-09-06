@@ -1361,9 +1361,14 @@ let g:relationview_unpin_delay = 3000
 
 " ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창
-"   <leader>fo : 색인된 파일을 telescope 로 찾아 점프 (^a 추가, ^d 제거)
-"   <leader>fp : 추가할 파일 고르기 (여러 개는 <Tab>)
-"   :ProjectFilesRemove / :ProjectFilesPreset / :ProjectFilesSave
+"   전부 telescope 픽커로 동작한다:
+"     <leader>fo  색인된 파일 찾아 열기   (^a 추가, ^d 목록에서 제거)
+"     <leader>fp  추가할 파일 고르기      (<Tab> 여러 개)
+"     <leader>fd  추가할 디렉터리 고르기  (그 아래 전부)
+"     <leader>fx  등록 항목 제거
+"     <leader>fm  preset 선택/전환        (^d preset 삭제, auto 포함)
+"     <leader>fS  지금 목록을 preset 으로 저장
+"     <leader>fR  지금 목록으로 재색인
 "   auto 모드   = 프로젝트 전체(지금까지와 같음)
 "   preset 모드 = 고른 파일/디렉터리만 색인
 "   파일을 추가하면 그 파일이 쓰는 헤더와 심볼 정의 파일도 함께 들어간다
@@ -1376,6 +1381,11 @@ let g:relationview_unpin_delay = 3000
 " ------------------------------------
 nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
 nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
+nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
+nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
+nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
+nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
+nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 
 
 "==============================================================================

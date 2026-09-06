@@ -282,6 +282,16 @@ end
 -- ---------------------------------------------------------------------------
 local function save_entries(root, name, entries)
   preset_write(name, entries)
+  if #entries == 0 then
+    -- an empty preset indexes nothing, and an empty file list makes the
+    -- indexer skip its run - which would leave the old index in place and
+    -- quietly stale. Dropping the last entry means "index everything again".
+    set_active(root, '')
+    materialize(root)
+    reindex(root)
+    notify('목록이 비어 auto 모드로 돌아갑니다 (프로젝트 전체 색인)')
+    return nil
+  end
   local files = materialize(root)
   reindex(root)
   return files
@@ -627,7 +637,8 @@ local function pick_find()
       function(c) open_in_edit(root, c) end)
   end
   t.pickers.new({}, {
-    prompt_title = 'Project files (' .. #files .. ')  ^a add  ^d remove',
+    prompt_title = ('Project files [%s] (%d)  ^a add  ^d remove')
+        :format(active_preset(root) or 'auto', #files),
     finder = t.finders.new_table({
       results = files,
       entry_maker = function(e)
@@ -717,6 +728,174 @@ local function pick_add()
   }):find()
 end
 
+-- directories of the project that are not registered yet
+local function dir_candidates(root)
+  local entries = entries_of(root) or {}
+  local have = {}
+  for _, e in ipairs(entries) do
+    if e.kind == 'dir' then
+      have[e.path] = true
+    end
+  end
+  local cmd = 'cd ' .. vim.fn.shellescape(root) ..
+      " && find . \\( -name .git -o -name .tags -o -name node_modules " ..
+      "-o -name .svn \\) -prune -o -type d -print 2>/dev/null | sed 's|^\\./||'"
+  local out = {}
+  for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
+    if l ~= '' and l ~= '.' and not have[l] then
+      out[#out + 1] = l
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- pick directories to register (everything indexable under them)
+local function pick_add_dir()
+  local root = cur_root()
+  local items = dir_candidates(root)
+  local t = telescope()
+  if not t then
+    return fallback_select(items, '추가할 디렉터리',
+      function(c) add_path(root, c) end)
+  end
+  t.pickers.new({}, {
+    prompt_title = ('Add directories (%d)  <Tab> 여러 개  <CR> 추가')
+        :format(#items),
+    finder = t.finders.new_table({ results = items }),
+    sorter = t.conf.generic_sorter({}),
+    attach_mappings = function(bufnr)
+      t.actions.select_default:replace(function()
+        local picker = t.state.get_current_picker(bufnr)
+        local picks = picker:get_multi_selection()
+        if #picks == 0 then
+          local e = t.state.get_selected_entry()
+          picks = e and { e } or {}
+        end
+        t.actions.close(bufnr)
+        for _, e in ipairs(picks) do
+          add_path(root, e[1] or e.value)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
+-- pick which preset this project uses ('auto' = index everything)
+local function pick_preset()
+  local root = cur_root()
+  local cur = active_preset(root)
+  local names = preset_list()
+  local items = { { name = nil, label = (cur == nil and '● ' or '  ') ..
+    'auto  (프로젝트 전체 색인)' } }
+  for _, n in ipairs(names) do
+    local p = preset_read(n)
+    items[#items + 1] = { name = n, label = ('%s%s  (%d entries)')
+      :format(cur == n and '● ' or '  ', n, p and #p.entries or 0) }
+  end
+  local function use(it)
+    set_active(root, it.name or '')
+    materialize(root)
+    reindex(root)
+    notify(it.name and ("preset '" .. it.name .. "'") or 'auto 모드')
+  end
+  local t = telescope()
+  if not t then
+    local labels = {}
+    for _, it in ipairs(items) do
+      labels[#labels + 1] = it.label
+    end
+    return fallback_select(labels, 'preset', function(_, idx)
+      if idx then
+        use(items[idx])
+      end
+    end)
+  end
+  t.pickers.new({}, {
+    prompt_title = 'Preset  <CR> 사용  ^d 삭제',
+    finder = t.finders.new_table({
+      results = items,
+      entry_maker = function(e)
+        return { value = e, display = e.label, ordinal = e.label }
+      end,
+    }),
+    sorter = t.conf.generic_sorter({}),
+    attach_mappings = function(bufnr, map)
+      t.actions.select_default:replace(function()
+        local e = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if e then
+          use(e.value)
+        end
+      end)
+      map({ 'i', 'n' }, '<C-d>', function()
+        local e = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if e and e.value.name then
+          pcall(vim.fn.delete, preset_path(e.value.name))
+          if cur == e.value.name then
+            set_active(root, '')
+            materialize(root)
+            reindex(root)
+          end
+          notify("preset '" .. e.value.name .. "' 삭제")
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
+-- save the current entries under a name (existing one, or a new one)
+local function pick_save()
+  local root = cur_root()
+  local entries = entries_of(root) or {}
+  if #entries == 0 then
+    notify('저장할 항목이 없습니다 (,fp 로 추가하세요)', vim.log.levels.WARN)
+    return
+  end
+  local function save(name)
+    if not name or name == '' then
+      return
+    end
+    preset_write(name, entries)
+    set_active(root, name)
+    materialize(root)
+    notify(("preset '%s' 저장 (%d entries)"):format(name, #entries))
+  end
+  local NEW = '＋ 새 이름 입력…'
+  local items = { NEW }
+  vim.list_extend(items, preset_list())
+  local function chosen(label)
+    if label == NEW then
+      vim.ui.input({ prompt = 'preset 이름: ',
+        default = active_preset(root) or 'default' }, save)
+    else
+      save(label)
+    end
+  end
+  local t = telescope()
+  if not t then
+    return fallback_select(items, '저장할 preset', chosen)
+  end
+  t.pickers.new({}, {
+    prompt_title = ('Save %d entries as…'):format(#entries),
+    finder = t.finders.new_table({ results = items }),
+    sorter = t.conf.generic_sorter({}),
+    attach_mappings = function(bufnr)
+      t.actions.select_default:replace(function()
+        local e = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if e then
+          vim.schedule(function() chosen(e[1] or e.value) end)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
 -- pick entries to drop
 local function pick_remove()
   local root = cur_root()
@@ -781,21 +960,20 @@ api.nvim_create_user_command('ProjectFilesRemove', function(o)
   remove_path(root, o.args)
 end, { nargs = '?', complete = 'file', desc = 'Remove a file/directory' })
 
+api.nvim_create_user_command('ProjectFilesAddDir', function(o)
+  local root = cur_root()
+  if o.args == '' then
+    pick_add_dir()
+    return
+  end
+  add_path(root, o.args)
+end, { nargs = '?', complete = 'dir',
+  desc = 'Add a directory (everything indexable under it)' })
+
 api.nvim_create_user_command('ProjectFilesPreset', function(o)
   local root = cur_root()
   if o.args == '' then
-    local names = preset_list()
-    local items = { 'auto (프로젝트 전체)' }
-    vim.list_extend(items, names)
-    vim.ui.select(items, { prompt = 'preset' }, function(choice, idx)
-      if not choice then
-        return
-      end
-      set_active(root, idx == 1 and '' or names[idx - 1])
-      materialize(root)
-      reindex(root)
-      notify(idx == 1 and 'auto 모드' or ("preset '" .. names[idx - 1] .. "'"))
-    end)
+    pick_preset()
     return
   end
   set_active(root, o.args == 'auto' and '' or o.args)
@@ -812,7 +990,7 @@ api.nvim_create_user_command('ProjectFilesSave', function(o)
   local root = cur_root()
   local entries = entries_of(root) or {}
   if o.args == '' then
-    notify('이름이 필요합니다: :ProjectFilesSave <name>', vim.log.levels.WARN)
+    pick_save()
     return
   end
   preset_write(o.args, entries)

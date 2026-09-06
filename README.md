@@ -99,8 +99,9 @@ Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      otherwise
 Ctrl+Enter: Take the edit window to the RelationView item you walked to
 Ctrl+c: Unpin the relation panel (otherwise the CONFIG lookup, as before)
-,fo: Find a file among the indexed ones and open it (^d drop, ^a add)
-,fp: Pick files to add to the project files list
+\fo: Find a file among the indexed ones and open it (^d drop, ^a add)
+\fp / \fd: Pick files / directories to add to the project files list
+\fx: Remove entries    \fm: Choose the preset    \fS: Save it    \fR: Reindex
 Ctrl+]: Open the definition in the context window and focus it; Ctrl+t back
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
@@ -163,12 +164,20 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 window of its own: everything runs through telescope pickers.
 
 ```
-<leader>fo  find an indexed file and open it   (^d drop it, ^a add files)
-<leader>fp  pick files to add                  (<Tab> for several at once)
-:ProjectFilesRemove   drop entries          :ProjectFilesPreset [name|auto]
-:ProjectFilesSave <name>   save the entries as a preset
-:ProjectFilesReindex       rebuild the index for the current list
+\fo  find an indexed file and open it   (^d drop it, ^a add files)
+\fp  pick files to add                  (<Tab> for several at once)
+\fd  pick directories to add            (everything indexable under them)
+\fx  pick entries to drop               (files and directories)
+\fm  choose the preset                  (auto included, ^d deletes one)
+\fS  save the current entries as a preset
+\fR  reindex now
 ```
+
+(`<leader>` is `\` in this setup.) Every one of them is a telescope picker
+with a preview, multi-select where it makes sense, and the same commands
+behind it: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
+`:ProjectFilesRemove`, `:ProjectFilesPreset`, `:ProjectFilesSave`,
+`:ProjectFilesReindex` (each takes an optional argument to skip the picker).
 
 Two modes:
 
@@ -187,6 +196,10 @@ files that define the symbols it uses - one level deep, at most
 `g:projectfiles_expand_max` symbols (40), off with
 `g:projectfiles_expand = 0`. Adding `src/main.c` in a small project pulls in
 `inc/util.h` and `src/util.c` by itself.
+
+Dropping the last entry puts the project back in auto mode rather than
+leaving an empty list behind (an empty list would index nothing, and the old
+index would sit there stale).
 
 Adding, dropping or switching reindexes immediately (an incremental
 `gtags -i`, which also drops what left the list), and saving a file that is
