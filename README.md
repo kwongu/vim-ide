@@ -386,12 +386,16 @@ with `Ctrl+]` inside the context window it unwinds that window's own stack
 first and hands the focus back only when it reaches the spot the jump
 started from. `<leader><leader>c` (`:Gtags -r`) behaves the same way - the
 hits are listed in the panel and the focus lands in the preview, `Ctrl+t`
-returns. Double click and `Ctrl+Enter` are the ones that move the edit
-window.
+returns. A double click in the edit window now does exactly what `Ctrl+]`
+does - a function goes to the preview, a parameter or local to its
+declaration, an `#include` to that header - so `Ctrl+Enter` (and `Enter` in
+the panel) are what move the edit window to a list item.
 double click: same jump, with the mouse
 
-In the edit window a double click behaves like `Ctrl+]` (jump to the
-symbol under the mouse), and on an `#include` line it opens that header.
+In the edit window a double click behaves like `Ctrl+]` in every case: a
+symbol the index knows opens in the context window (with the panel switching
+to it, pinned), a parameter or a local variable goes to its declaration in
+the edit window, and an `#include` line opens that header there.
 In the context window a double click follows the definition of the symbol
 under the mouse - like `Ctrl+]` there - and on an `#include` line it opens
 that header in the context window (`Ctrl+t` or the mouse back button

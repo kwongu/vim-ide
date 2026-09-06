@@ -751,29 +751,13 @@ function! s:RvMouseJump() abort
 		execute "normal! \<2-LeftMouse>"
 		return
 	endif
-	" #include 줄이면 그 헤더로 이동 (nvim + relationview.lua 가 있을 때)
-	if has('nvim') && exists('*luaeval')
-		try
-			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
-				return
-			endif
-		catch
-		endtry
-	endif
-	" 파라미터/지역변수는 이 함수 안의 선언으로 (색인에 없다)
-	if has('nvim') && exists('*luaeval')
-		try
-			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
-				return
-			endif
-		catch
-		endtry
-	endif
-	" 그 밖에는 커서 아래 심볼로 점프 (<C-]> 매핑을 그대로 사용)
+	" 더블클릭은 <C-]> 와 똑같이 동작한다:
+	"   #include        -> 그 헤더를 EDIT 창에서 연다
+	"   파라미터/지역변수 -> 이 함수 안의 선언으로 (EDIT 창)
+	"   그 밖의 심볼     -> 패널+미리보기가 켜져 있으면 context view 로,
+	"                      아니면 예전처럼 EDIT 창/quickfix
 	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-		" 'normal!': 더블클릭은 예전대로 EDIT 창에서 점프한다
-		" (<C-]> 매핑은 context view 로 보내므로 타면 안 된다)
-		execute "normal! \<C-]>"
+		call s:RvCtxJump()
 	else
 		execute "normal! \<2-LeftMouse>"
 	endif
