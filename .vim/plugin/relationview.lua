@@ -2921,10 +2921,13 @@ end
 -- a type NAME -> the definition that really has a body. Follows
 -- 'typedef struct foo foo_t;' (and typedef-of-typedef) and prefers, among
 -- several gtags hits, the one that parses into members.
+-- gen ties a lookup to the panel render that started it, so a stale answer
+-- cannot overwrite a newer view. A jump the user asked for belongs to no
+-- render: it passes nil and runs to completion.
 local function resolve_type_def(gen, root, name, hops, cb)
   run_global({ '--result=ctags-mod', '-a', '-d', '-e', name }, root,
     function(lines)
-      if gen ~= s.gen then
+      if gen and gen ~= s.gen then
         return
       end
       local defs = parse_ctags_mod(lines, 8)
@@ -2996,7 +2999,7 @@ end
 
 resolve_chain = function(gen, root, ty, fields, i, cb)
   resolve_type_def(gen, root, ty.name, 3, function(tdef, m, ty2)
-    if gen ~= s.gen then
+    if gen and gen ~= s.gen then
       return
     end
     ty = ty2 or ty
@@ -3031,7 +3034,7 @@ end
 -- happens to share the name, or to an unrelated global - so resolve the type
 -- of the BASE variable and take the member out of that struct.
 -- Returns true when it took the jump on (the answer arrives asynchronously).
-member_jump = function(buf, line, col, cb)
+member_jump = function(buf, line, col, cb, retried)
   local okc, base, fields = pcall(cursor_field, buf, line, col)
   if not okc or not base or not fields or #fields == 0 then
     return false
@@ -3046,15 +3049,32 @@ member_jump = function(buf, line, col, cb)
     return false -- base is not a local we can type: let the others try
   end
   local want = fields[#fields]
-  local gen = s.gen
   root_for(name, function(root)
     if not root then
       return
     end
-    resolve_chain(gen, root, ty, fields, 1, function(res)
+    resolve_chain(nil, root, ty, fields, 1, function(res)
       local m = res and res.member
       local def = res and res.def
       if not (m and def and def.path) then
+        -- The chain stops where a type is not in the index - and then even
+        -- the first member of 'a->b[i].c.d' cannot be resolved. Pull the
+        -- file that defines that type into the project and try once more.
+        local missing = (res and res.type and res.type.name) or ty.name
+        if not retried and missing and _G.projectfiles_add_for_symbol_async then
+          pcall(_G.projectfiles_add_for_symbol_async, missing, function(n)
+            if n and n > 0 then
+              vim.defer_fn(function()
+                member_jump(buf, line, col, cb, true)
+              end, 150)
+            else
+              vim.notify('RelationView: ' .. missing ..
+                ' 의 정의를 찾지 못했습니다 (멤버 ' .. want .. ')',
+                vim.log.levels.WARN)
+            end
+          end)
+          return
+        end
         vim.notify('RelationView: 멤버 ' .. want .. ' 를 찾지 못했습니다',
           vim.log.levels.WARN)
         return

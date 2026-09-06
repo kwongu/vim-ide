@@ -104,9 +104,13 @@ declaration in the enclosing function - in the edit window, and inside the
 context window when that is where you are reading - and the symbol it lands
 on is coloured sky blue until you move off it. Those are in no index, so
 this used to end in "E426: tag not found".
-On a member access (`msg->cmd`, `ctx.id`) the jump follows the type of the
-BASE variable and goes to that member's declaration in the struct, so a
-local or a parameter that happens to carry the same name cannot steal it.
+On a member access (`msg->cmd`, `ctx.id`, `asrc->pair[i].hw.max_channel`)
+the jump follows the type of the BASE variable through every link of the
+chain - array subscripts included - and goes to that member's declaration in
+the struct, so a local or a parameter that happens to carry the same name
+cannot steal it. When a type along the way is not in the index, the file
+defining it is pulled into the project files first and the chain is walked
+again.
 Chains work all the way down - `asrc->pair[i].hw.max_channel` lands on
 `max_channel` - including the kernel's favourite shape, structs nested
 anonymously inside each other (`struct { struct { u32 max_channel; } hw; }

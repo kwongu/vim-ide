@@ -613,7 +613,10 @@ local function def_patterns(sym)
   return {
     "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*\\('",
     "-e '^#[[:space:]]*define[[:space:]]+" .. sym .. "[^A-Za-z0-9_]'",
-    "-e '^(typedef|struct|union|enum)[[:space:]].*[^A-Za-z0-9_]" .. sym .. "[^A-Za-z0-9_]*[;{]'",
+    -- 'struct foo {' has no separator left before the name once
+    -- '[[:space:]]' has eaten the space, so the middle part is optional
+    "-e '^(typedef|struct|union|enum)[[:space:]]+([^;{]*[^A-Za-z0-9_])?" ..
+      sym .. "[^A-Za-z0-9_]*[;{]'",
     "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*[=;[]'",
   }
 end
@@ -639,6 +642,44 @@ local function grep_defining(root, sym)
     end
   end
   return {}
+end
+
+-- Same search, off the main loop: 'git grep' over a kernel-sized tree takes
+-- well over a second, and nothing may block the editor for that.
+local function grep_defining_async(root, sym, cb)
+  local pats = def_patterns(sym)
+  local max = tonumber(cfg('grep_max', 5)) or 5
+  local cmds = {}
+  if uv.fs_stat(root .. '/.git') then
+    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
+  end
+  cmds[#cmds + 1] = 'grep -rlE ' .. table.concat(pats, ' ') ..
+      " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
+  local i = 0
+  local function step()
+    i = i + 1
+    if i > #cmds then
+      cb({})
+      return
+    end
+    local ok = pcall(vim.system, { 'sh', '-c',
+      'cd ' .. vim.fn.shellescape(root) .. ' && ' .. cmds[i] ..
+      ' 2>/dev/null | head -' .. (max * 4) },
+      { text = true }, function(o)
+        vim.schedule(function()
+          local hits = rank_hits(vim.split(o.stdout or '', '\n'), root, max)
+          if #hits > 0 then
+            cb(hits)
+          else
+            step()
+          end
+        end)
+      end)
+    if not ok then
+      cb({})
+    end
+  end
+  step()
 end
 
 function _G.projectfiles_add_for_symbol_async(sym, cb)
