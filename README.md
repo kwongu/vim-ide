@@ -71,6 +71,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
 
+* Project files view (nvim only): `<leader>fp` opens a list of the files that get indexed, above the context preview. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Add (`a`) or drop (`d`) a path and the index follows immediately; presets are named, reusable across checkouts, and one can be made the startup default. See "Project files and presets" below.
 * Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
 
 
@@ -150,6 +151,55 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 7 or f: Find this file
 8 or i: Find files #including this file
 9 or a: Find places where this symbol is assigned a value
+```
+
+## Project files and presets (nvim only)
+
+`~/.vim/plugin/projectfiles.lua` decides WHICH files are indexed, and shows
+them in a window of its own (`<leader>fp` / `:ProjectFiles`) at the top of
+the right column, above the context preview.
+
+```
+◆ ~/k6.12  [preset: asrc]
+  [⏎]open [a]dd [d]rop [p]reset [s]ave [m]ode [r]eindex [q]close
+
+── Entries (2) ──
+  dir  sound/soc/telechips/asrc
+  file include/sound/soc.h
+── Files (16) ──
+  include/sound/soc.h
+  sound/soc/telechips/asrc/tcc_asrc_dai.c
+  ...
+```
+
+Two modes:
+
+* **auto** (no preset): the whole project, exactly as before -
+  `.indexfiles`, `git ls-files`, `cscope.files`, then a find.
+* **preset**: only the entries of a named preset. An entry is a file or a
+  directory (a directory brings everything indexable under it). The list is
+  written to `<root>/.tags/files`, which `indexfiles.sh` reads before
+  anything else, so **gtags and ctags both index exactly what the view
+  shows** - and a smaller index means faster searches and a shorter
+  RelationView tree.
+
+Adding, dropping or switching reindexes immediately (an incremental
+`gtags -i`, which also drops what left the list), and saving a file that is
+NOT in the preset does not sneak it into the index. Presets are stored as
+JSON under `stdpath('data')/vim-ide/presets/`, so the same preset can be
+reused in another checkout - entries that do not exist there are simply
+skipped. Which preset a project uses is remembered in `<root>/.tags/preset`
+and applied again when nvim starts; `g:projectfiles_preset` names the one to
+fall back on for a project that has none yet. Adding a path while in auto
+mode starts a preset for you.
+
+```
+:ProjectFiles              toggle the view          <leader>fp
+:ProjectFilesAdd [path]    add (default: this file) a  in the view
+:ProjectFilesRemove [path] remove                   d  in the view
+:ProjectFilesPreset [name] switch ('auto' = off)    p  in the view
+:ProjectFilesSave <name>   save the entries         s  in the view
+:ProjectFilesReindex       rebuild the index        r  in the view
 ```
 
 ## Relation window (nvim only)
@@ -251,6 +301,13 @@ window only - the source windows and the tree stay untouched - and
 `Ctrl+t` walks back along the context window's own jump stack. A double
 click in the context window takes the edit window to the line under the
 mouse.
+
+While the panel is open, `:Gtags -d`, `:Gtags -r` and friends (so
+`<leader><leader>c` and the rest of those maps) list their results **in the
+panel** instead of the quickfix window, as a `Gtags -r foo (27)` section
+that behaves like any other list here - Ctrl+n/Ctrl+p, preview, Enter,
+Ctrl+Enter. With the panel closed the original quickfix behaviour is
+untouched (`g:relationview_capture_gtags = 0` turns the capture off).
 
 Keys inside the panel:
 

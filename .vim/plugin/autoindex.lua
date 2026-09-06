@@ -115,6 +115,7 @@ local function filelist_cmd()
 end
 
 local drain        -- defined below; a finished build flushes the queue
+local refresh      -- defined below; re-entered through the pending queue
 local ctags_build  -- defined below, used by guard_ctags
 local ctags_apply
 local ctags_stale
@@ -129,6 +130,8 @@ local s = {
   refreshing = {},-- root -> true while an incremental refresh runs
   ctags_building = {}, -- root -> true while a big-tree ctags build runs
   ctags_tried = {},    -- root -> true once a ctags build was started
+  lists = {},          -- root -> cached '.tags/files' membership
+  refresh_again = {},  -- root -> a refresh requested while one was running
 }
 
 -- g:autoindex_debug = 1 -> append a line per index action to
@@ -386,6 +389,11 @@ local function build(root, why, opts)
         git_exclude(root)
         -- files saved while the build ran were queued and skipped: flush them
         drain(root)
+        local again = s.refresh_again[root]
+        if again then
+          s.refresh_again[root] = nil
+          vim.schedule(function() refresh(root, again.why, again.force) end)
+        end
         if o.code == 0 then
           notify(string.format('%s indexed: %d files, %.1fs',
             short, n, (uv.now() - t0) / 1000))
@@ -449,8 +457,15 @@ end
 -- database equal to the list - unlike 'global -u', which walks the tree itself
 -- and would pull in files a project deliberately left out of .indexfiles.
 -- 'equal to the list' cuts both ways: see the coverage check below.
-local function refresh(root, why)
-  if not enabled() or s.building[root] or s.refreshing[root] then
+function refresh(root, why, force)
+  if not enabled() then
+    return
+  end
+  -- A list change while a refresh is still running must not be dropped:
+  -- remember it and run once more when this one finishes (adding a file to
+  -- a preset right after switching to it would otherwise never be indexed).
+  if s.building[root] or s.refreshing[root] then
+    s.refresh_again[root] = { why = why, force = force }
     return
   end
   local gt, fl = gtags_cmd(), filelist_cmd()
@@ -470,6 +485,11 @@ local function refresh(root, why)
     drain(root)
     if msg then
       notify(msg, level)
+    end
+    local again = s.refresh_again[root]
+    if again then
+      s.refresh_again[root] = nil
+      vim.schedule(function() refresh(root, again.why, again.force) end)
     end
   end
 
@@ -504,6 +524,10 @@ local function refresh(root, why)
   -- coverage check the full build uses guards this too - but here it only
   -- skips (a background job at startup must not ask questions).
   local function check(n)
+    if force then
+      run_incremental(n) -- the user just changed the list on purpose
+      return
+    end
     db_file_count(root, function(old)
       if old < 100 or n >= math.floor(old / 2) then
         run_incremental(n)
@@ -579,6 +603,33 @@ function drain(root)
   end
 end
 
+-- '<root>/.tags/files' is the preset list (see projectfiles.lua). While it
+-- exists, only the files in it belong to the index - saving anything else
+-- must not quietly add it.
+local function in_list(root, path)
+  local file = dbpath(root) .. '/files'
+  if dbpath(root) == root then
+    file = root .. '/' .. (dbdir_name() or '.tags') .. '/files'
+  end
+  local st = uv.fs_stat(file)
+  if not st then
+    return true -- auto mode: everything in the project counts
+  end
+  local c = s.lists[root]
+  if not c or c.mtime ~= st.mtime.sec then
+    c = { mtime = st.mtime.sec, set = {} }
+    for _, l in ipairs(vim.fn.readfile(file)) do
+      l = l:gsub('^%./', ''):gsub('%s+$', '')
+      if l ~= '' then
+        c.set[l] = true
+      end
+    end
+    s.lists[root] = c
+  end
+  local rel = path:sub(1, #root + 1) == root .. '/' and path:sub(#root + 2) or path
+  return c.set[rel] == true
+end
+
 local function update_file(path)
   if not (enabled() and indexed_file(path)) then
     dbg('update_file ignored ' .. path)
@@ -586,6 +637,10 @@ local function update_file(path)
   end
   gtags_root(vim.fs.dirname(path), function(root)
     dbg('update_file ' .. path .. ' root=' .. tostring(root))
+    if root and not in_list(root, path) then
+      dbg('update_file skipped (not in preset list) ' .. path)
+      return
+    end
     if root then
       s.pending[root] = s.pending[root] or {}
       s.pending[root][path] = true
@@ -992,18 +1047,19 @@ api.nvim_create_user_command('GtagsIndexUpdate', function()
   update_file(vim.fn.fnamemodify(path, ':p'))
 end, { desc = 'Update the GTAGS index for the current file' })
 
-api.nvim_create_user_command('GtagsIndexRefresh', function()
+api.nvim_create_user_command('GtagsIndexRefresh', function(o)
   local path = api.nvim_buf_get_name(0)
   local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
       or vim.fn.getcwd()
   gtags_root(dir, function(root)
     if root then
-      refresh(root, 'manual')
+      refresh(root, o.bang and 'manual!' or 'manual', o.bang)
     else
       notify('이 프로젝트에는 색인이 없습니다 (:GtagsIndex)', vim.log.levels.WARN)
     end
   end)
-end, { desc = 'Incrementally refresh the GTAGS index of this project' })
+end, { bang = true,
+  desc = 'Incrementally refresh the GTAGS index (! skips the shrink guard)' })
 
 api.nvim_create_user_command('CtagsIndex', function()
   local path = api.nvim_buf_get_name(0)

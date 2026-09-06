@@ -75,6 +75,9 @@
 --                             whole bottom); context_width applies to both
 --   g:relationview_unpin_delay ms on one symbol in a source window before a
 --                             pinned panel follows the cursor again (3000)
+--   g:relationview_capture_gtags  1: ':Gtags -d/-r/-s/-g' lists its results in
+--                             the panel while it is open, instead of the
+--                             quickfix window (default 1)
 --   g:relationview_global_cmd path of the global binary   (default auto)
 
 if vim.g.loaded_relationview then
@@ -1287,6 +1290,16 @@ local function ctx_apply_opts(win)
   pcall(function() wo.winfixbuf = true end)
 end
 
+-- projectfiles.lua asks for these: one to sit above the preview, one to put
+-- the panel's height back if a new window in that column stole rows from it
+function _G.relationview_panel_win()
+  return (s.win and api.nvim_win_is_valid(s.win)) and s.win or nil
+end
+
+function _G.relationview_ctx_win()
+  return (s.ctx_win and api.nvim_win_is_valid(s.ctx_win)) and s.ctx_win or nil
+end
+
 local function ctx_visible()
   return s.ctx_win ~= nil and api.nvim_win_is_valid(s.ctx_win)
       and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
@@ -1349,6 +1362,19 @@ ensure_ctx = function()
     -- A window of its own, beside the file you are editing, instead of a
     -- split inside the panel: the panel keeps the whole bottom and the
     -- preview gets the full height of the edit area.
+    -- the project files view owns the top of the right column: put the
+    -- preview under it instead of splitting the edit window again
+    local pf = _G.projectfiles_win and _G.projectfiles_win() or nil
+    if pf and api.nvim_win_is_valid(pf) then
+      api.nvim_win_call(pf, function()
+        vim.cmd('noautocmd rightbelow split')
+        ctx = api.nvim_get_current_win()
+      end)
+      if ctx and api.nvim_win_is_valid(ctx) then
+        goto ctx_ready
+      end
+    end
+    do
     local host = pick_src_win()
     if not (host and api.nvim_win_is_valid(host)) then
       return nil
@@ -1367,6 +1393,8 @@ ensure_ctx = function()
       vim.cmd('vertical resize ' .. w)
       ctx = api.nvim_get_current_win()
     end)
+    end
+    ::ctx_ready::
   else
     api.nvim_win_call(s.win, function()
       if cfg('position', 'bottom') == 'right' then
@@ -1585,6 +1613,29 @@ render_tree = function()
       loc = string.format('%s:%d', rel(path), line),
       text = text, item = item, name = name }
     return rows[#rows]
+  end
+
+  -- a flat result list (:Gtags -d/-r/-s/-g captured from the quickfix window)
+  if t.kind == 'results' then
+    raw('')
+    raw(section_line(t.title or 'Results', #t.results))
+    if #t.results == 0 then
+      raw('  (none)')
+    else
+      for i, res in ipairs(t.results) do
+        local name = res.name or t.sym
+        local rr = row('  ' .. name, res.path, res.line, res.text or '',
+          { loc = { path = res.path, line = res.line, sym = res.name } }, name)
+        if i == 1 then
+          rr.focus = true
+        end
+      end
+      if t.truncated and t.truncated > 0 then
+        raw('  … ' .. t.truncated .. ' more')
+      end
+    end
+    render_rows(t, rows)
+    return
   end
 
   -- an '#include' target: the header itself plus what it defines
@@ -3512,6 +3563,131 @@ local function step_or_qf(dir)
     vim.notify((tostring(err):gsub('^.*Vim%b():', '')), vim.log.levels.INFO)
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- ':Gtags -d/-r/...' results in the panel instead of the quickfix window
+-- ---------------------------------------------------------------------------
+-- gtags.vim fills the quickfix list with 'cexpr' and opens it. While the
+-- panel is up that is the wrong place to read a symbol search, so the same
+-- query is run here and rendered as a result list, which then behaves like
+-- any other panel list (C-n/C-p, preview, Enter, C-CR). With the panel
+-- closed the original command runs untouched.
+local gtags_orig -- function(args): calls gtags.vim's own s:RunGlobal
+
+-- which single-letter flags map straight onto global(1)
+local GFLAG = {}
+for c in ('drsgPfaie'):gmatch('.') do
+  GFLAG[c] = true
+end
+
+local function show_results(title, sym, results, truncated)
+  s.gen = s.gen + 1
+  kill_procs()
+  s.tree = { kind = 'results', sym = sym, title = title, results = results,
+    truncated = truncated }
+  s.note = nil
+  s.as_type = false
+  s.sym = sym
+  s.pinned = true -- a search result is a fixed list, not a live view
+  render_tree()
+  hl_cursor_row()
+  update_context()
+end
+
+function A.gtags(args)
+  local flags, pat = {}, {}
+  for w in tostring(args):gmatch('%S+') do
+    if w:sub(1, 1) == '-' and #w > 1 then
+      flags[#flags + 1] = w
+    else
+      pat[#pat + 1] = w
+    end
+  end
+  local pattern = table.concat(pat, ' ')
+  local ok_flags = pattern ~= ''
+  for _, f in ipairs(flags) do
+    if f:sub(1, 2) == '--' then
+      ok_flags = false
+    else
+      for c in f:sub(2):gmatch('.') do
+        if not GFLAG[c] then
+          ok_flags = false
+        end
+      end
+    end
+  end
+  if not (panel_visible() and ok_flags) then
+    if gtags_orig then
+      gtags_orig(args)
+    end
+    return
+  end
+  local paths_only = false
+  for _, f in ipairs(flags) do
+    if f:find('P', 1, true) then
+      paths_only = true
+    end
+  end
+  local file = api.nvim_buf_get_name(0)
+  local dir = file ~= '' and vim.fs.dirname(vim.fn.fnamemodify(file, ':p'))
+      or vim.fn.getcwd()
+  get_root(dir, function(root)
+    root = root or vim.fn.getcwd()
+    local argv = {}
+    if not paths_only then
+      argv[#argv + 1] = '--result=ctags-mod'
+    end
+    vim.list_extend(argv, flags)
+    argv[#argv + 1] = pattern
+    local cap = cfg('max_refs', 1000)
+    run_global(argv, root, function(lines, err)
+      if not lines then
+        render_msg(pattern, 'Gtags: ' .. (err or 'no result'))
+        return
+      end
+      local results = {}
+      for _, l in ipairs(lines) do
+        if paths_only then
+          results[#results + 1] = { name = basename(l), path = l, line = 1 }
+        else
+          local path, lno, text = l:match('^([^\t]+)\t(%d+)\t(.*)$')
+          if path then
+            results[#results + 1] = { name = pattern, path = path,
+              line = tonumber(lno), text = (text or ''):gsub('^%s+', '') }
+          end
+        end
+        if #results >= cap then
+          break
+        end
+      end
+      show_results('Gtags ' .. tostring(args), pattern, results,
+        math.max(0, #lines - #results))
+    end, cap + 200)
+  end)
+end
+
+-- gtags.vim is loaded after this file, so take the command over once
+-- everything is up; nvim_get_commands hands us the original function to
+-- fall back on (call s:RunGlobal(<q-args>, '')).
+local function capture_gtags()
+  if cfg('capture_gtags', 1) == 0 then
+    return
+  end
+  local c = api.nvim_get_commands({ builtin = false })['Gtags']
+  if not (c and c.script_id and (c.definition or ''):match('RunGlobal')) then
+    return
+  end
+  local sid = c.script_id
+  gtags_orig = function(args)
+    pcall(vim.cmd, string.format("call <SNR>%d_RunGlobal(%s, '')", sid,
+      vim.fn.string(tostring(args))))
+  end
+  api.nvim_create_user_command('Gtags', function(o) A.gtags(o.args) end,
+    { nargs = '*', complete = 'custom,GtagsCandidate',
+      desc = 'gtags search - into the relation panel while it is open' })
+end
+
+api.nvim_create_autocmd('VimEnter', { group = group, callback = capture_gtags })
 
 api.nvim_create_user_command('RelationViewJump', function()
   if not A.jump_here(false) then
