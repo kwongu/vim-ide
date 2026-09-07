@@ -1,5 +1,20 @@
 ;; extends
 
+;; -- 타입 이름을 '쓰는' 자리 ----------------------------------------------
+;; uint32_t 같은 stdint 계열도, 프로젝트의 struct/enum/typedef 이름도 모두
+;; type_identifier 다. 예약어(int/void/char = primitive_type)와 달리 이들은
+;; typedef 이므로 SI 화면에서 심볼 참조 색(초록)으로 나온다.
+;; 이 규칙은 파일 맨 앞에 있어야 한다: 아래의 선언 패턴들이 나중에 와서
+;; '정의하는 자리'를 다시 덮어야 하기 때문이다(뒤에 온 캡처가 이긴다).
+((type_identifier) @si.type.ref)
+
+;; uint32_t/int8_t/size_t 같은 계열은 tree-sitter 문법이 int/void 와 같은
+;; primitive_type 으로 묶지만 실제로는 typedef 다. '_t' 로 끝나는 것만 골라
+;; 심볼 참조 색으로 내고, 진짜 예약어(int, void, char, bool, unsigned...)는
+;; 키워드 색으로 남긴다.
+((primitive_type) @si.type.ref
+  (#lua-match? @si.type.ref "_t$"))
+
 ;; Source Insight 기본 스타일 흉내: "선언"에 밑줄을 그어 준다.
 ;; SI 화면에서는 함수 정의의 이름, 파라미터, 지역변수 선언, 구조체 멤버,
 ;; goto 레이블이 밑줄로 표시되고, 같은 이름을 본문에서 참조할 때는 밑줄이

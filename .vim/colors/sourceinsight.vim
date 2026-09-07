@@ -90,7 +90,8 @@ if s:variant ==# 'factory'
 else
   " 화면 기준 배색 (실제 SI 화면 판독):
   "   struct/int/static 등 예약어      네이비 볼드
-  "   struct·typedef·enum 이름         짙은 파랑 볼드
+  "   struct·typedef·enum 이름         정의 자리는 짙은 파랑 볼드,
+  "                                    쓰는 자리(uint32_t 포함)는 초록 볼드
   "   함수 정의 이름                    네이비 볼드
   "   함수 호출(심볼 참조)              짙은 초록 (볼드)
   "   상수형 매크로/NULL/숫자           빨강
@@ -100,8 +101,10 @@ else
   "   #ifdef/#ifndef 의 조건 이름은 옅은 빨강 (상수 매크로와 같은 색)
   "   enum 요소는 네이비 볼드, '=' 같은 연산자는 초록, 값은 옅은 빨강
   let s:c.control  = s:c.keyword
-  " enum/struct/typedef 이름은 함수 정의 이름과 같은 짙은 파랑
+  " 정의하는 자리의 이름은 짙은 파랑(아래 @si.declaration.function),
+  " 쓰는 자리의 타입 이름(uint32_t, enum tcc_..._t)은 초록
   let s:c.type     = ['#000080', 18,  'darkblue']
+  let s:c.typeref  = ['#008000', 28,  'darkgreen']
   let s:c.decl     = s:c.keyword
   let s:c.ref      = ['#008000', 28,  'darkgreen']
   let s:c.reflocal = s:c.fg
@@ -119,6 +122,9 @@ else
 endif
 if !has_key(s:c, 'incdef')
   let s:c.incdef = s:c.preproc
+endif
+if !has_key(s:c, 'typeref')
+  let s:c.typeref = s:c.ref
 endif
 
 " 평범한 키워드의 볼드 여부는 배색마다 다르다: 화면 기준은 볼드,
@@ -354,6 +360,10 @@ endfor
 
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
+" 타입 이름을 '쓰는' 자리: uint32_t, enum tcc_asrc_drv_sync_mode_t 등
+" (정의하는 자리는 아래 @si.declaration.function 이 짙은 파랑으로 덮는다)
+call s:hi('@si.type.ref', 'typeref', '', 'bold')
+
 " __iomem/__user/__init 같은 커널 주석 매크로 (after/queries 가 잡아 준다)
 call s:hi('@si.kernel.attr', 'number', '', '')
 
