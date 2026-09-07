@@ -60,6 +60,11 @@ set lazyredraw
 syntax on
 
 set backspace=indent,eol,start " for backspace
+
+" 되돌리기를 파일에 남긴다: 어제 편집한 것도 오늘 u 로 되돌릴 수 있다.
+" (Source Insight 의 checkpoint/Restore Lines 에 해당하는 부분)
+" 저장 위치는 nvim 기본값 ~/.local/state/nvim/undo/ 이며 없으면 알아서 만든다.
+set undofile
 "set termguicolors
 
 "==============================================================================
@@ -1401,6 +1406,7 @@ let g:relationview_unpin_delay = 3000
 "     <leader>fR  지금 목록으로 재색인
 "     <leader>fs  색인된 심볼 검색 (<F3> 또는 ^g 로 relation window 로 넘김)
 "     <leader>fw  커서 밑 심볼로 바로 검색
+"     <leader>fk  북마크(mark) 목록      (ma..mz 로 표시, 'a 로 이동)
 "   :ProjectFilesPresetShare <name>
 "     preset 을 vim-ide 저장소(.vim/presets)에 넣는다. 커밋/푸시하면
 "     다른 장비(리눅스)에서 git pull 만으로 같은 preset 을 쓴다.
@@ -1423,6 +1429,11 @@ nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
+" SI 의 Bookmark window: 표시는 ma..mz / mA..mZ (shada 가 세션 사이에도
+" 기억한다), 목록은 <leader>fk. signcolumn 을 두 칸으로 둬서 vim-signify 의
+" 변경 표시와 북마크 표시가 서로를 덮지 않게 한다.
+nnoremap <silent> <leader>fk <cmd>Telescope marks<cr>
+set signcolumn=auto:2
 
 
 "==============================================================================

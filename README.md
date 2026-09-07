@@ -364,6 +364,26 @@ the file in the repository. To ignore the shared presets entirely:
 `let g:projectfiles_shared_presets = ''`, or point it at a directory of your
 own.
 
+## What Source Insight has, and what is here
+
+Compared feature by feature against SI 4.0's own command reference. Covered:
+jump to definition and back, the context preview, the relation window's
+callers/members/reference tree, the reference highlight, Highlight Word (F4,
+58 colours in rotation), lookup references, the project database with
+background re-scan, project symbol and file browsing, the symbol window
+(F10), syntax decoration of declarations, incremental search, project-wide
+grep with clickable results.
+
+Still missing, in the order it costs you:
+
+| | |
+|---|---|
+| Callees - the "Calls" direction | the relation window is caller-only; gtags cannot answer it, but treesitter can |
+| Custom commands with parsed output | `,mk` / `,mb` shell out and throw the output away; routing them through quickfix would make every build error a jump |
+| Outlining | `foldmethod=manual`; treesitter folds would give fold-by-function |
+| Smart rename / project-wide replace | `,H` is a single-buffer `:%s` |
+| Overview strip, clip window, snippets, file compare | lower value in a read-mostly workflow |
+
 ## Reference highlight (nvim only)
 
 Source Insight washes every visible occurrence of the symbol under the

@@ -142,3 +142,28 @@
 
 ((type_identifier) @si.kernel.attr
   (#lua-match? @si.kernel.attr "^__%l"))
+
+;; -- '#if 0' 안의 죽은 코드 ----------------------------------------------
+;; SI 는 컴파일되지 않는 블록을 회색으로 눌러 보여 준다('Inactive Code').
+;; 두 갈래로 잡는다: #else 가 없는 경우와 있는 경우(있으면 #else 지시문
+;; 자체와 살아 있는 분기는 건드리지 않는다). 우선순위 105 로 두어 그 안의
+;; 주석·문자열 색까지 회색이 이긴다.
+(preproc_if
+  condition: (number_literal) @_z
+  (_) @si.inactive
+  !alternative
+  (#eq? @_z "0")
+  (#set! priority 105))
+
+(preproc_if
+  condition: (number_literal) @_z
+  (_) @si.inactive
+  alternative: (_)
+  (#eq? @_z "0")
+  (#not-lua-match? @si.inactive "^#el")
+  (#set! priority 105))
+
+;; -- goto / default 는 제어 키워드다 -------------------------------------
+;; nvim-treesitter 는 이 둘을 평범한 @keyword 로 잡는데, SI 는 제어 키워드
+;; (if/for/return...)와 같은 색으로 그린다.
+["goto" "default"] @keyword.exception

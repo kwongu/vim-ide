@@ -43,6 +43,7 @@ let s:c = {
       \ 'string':    ['#800000', 88,  'darkred'],
       \ 'stringbg':  ['#ffffbb', 230, 'yellow'],
       \ 'declbg':    ['#e8e8e8', 254, 'lightgrey'],
+      \ 'selbg':     ['#000080', 18,  'darkblue'],
       \ 'number':    ['#800000', 88,  'darkred'],
       \ 'preproc':   ['#000080', 18,  'darkblue'],
       \ 'macro':     ['#7f007f', 90,  'darkmagenta'],
@@ -160,8 +161,10 @@ call s:hi('CursorLine',    '',        'cursorline','')
 call s:hi('CursorColumn',  '',        'cursorline','')
 call s:hi('CursorLineNr',  'keyword', 'cursorline','bold')
 call s:hi('ColorColumn',   '',        'cursorline','')
-call s:hi('Visual',        '',        'sel',       '')
-call s:hi('VisualNOS',     '',        'sel',       '')
+" SI 의 선택 색: 흰 글자 + 네이비 배경 (구문 색을 덮는다).
+" 예전처럼 옅은 파랑만 깔고 글자색을 살리려면 두 줄을 'sel' 로 되돌리면 된다.
+call s:hi('Visual',        'bg',      'selbg',     '')
+call s:hi('VisualNOS',     'bg',      'selbg',     '')
 call s:hi('Search',        'fg',      'match',     '')
 call s:hi('IncSearch',     'bg',      'warn',      'bold')
 call s:hi('CurSearch',     'bg',      'warn',      'bold')
@@ -191,7 +194,7 @@ call s:hi('NonText',       'ui',      '',          '')
 call s:hi('SpecialKey',    'ui',      '',          '')
 call s:hi('Whitespace',    'ui',      '',          '')
 call s:hi('Conceal',       'linenr',  '',          '')
-call s:hi('QuickFixLine',  '',        'sel',       '')
+call s:hi('QuickFixLine',  'fg',      'sel',       '')
 " 커서. 터미널 커서 색은 guicursor 가 가리키는 하이라이트 그룹에서 오므로
 " ~/.vimrc 의 s:VimIdeApplyTheme() 이 guicursor 에 'Cursor' 를 붙여 준다.
 " 색을 바꾸려면: let g:sourceinsight_cursor = '#0087ff'
@@ -228,10 +231,10 @@ call s:hi('Macro',         'macro',   '',          '')
 call s:hi('PreCondit',     'preproc', '',          '')
 " struct/typedef/enum 이름은 초록 볼드(심볼 참조 색). 'int'/'uint32_t' 처럼
 " 언어가 아는 타입은 키워드 색이 된다.
-call s:hi('Type',          'type',    '',          'bold')
+call s:hi('Type',          'type',    '',          s:kw)
 call s:hi('StorageClass',  'keyword', '',          s:kw)
 call s:hi('Structure',     'keyword', '',          s:kw)
-call s:hi('Typedef',       'type',    '',          'bold')
+call s:hi('Typedef',       'type',    '',          s:kw)
 call s:hi('Special',       'fg',      '',          '')
 call s:hi('SpecialChar',   'string',  'stringbg',  '')
 call s:hi('Delimiter',     'delim',   '',          '')
@@ -287,6 +290,14 @@ call s:hi('TelescopePreviewLine',   '',        'cursorline', '')
 
 " 커서 밑 심볼의 모든 등장 위치 (SI 의 'Reference Highlight' 스타일 값)
 highlight SiRefHighlight guifg=#000000 guibg=#aae1ff ctermfg=16 ctermbg=153
+" clangd 등 LSP 를 켜도 같은 음영을 쓰게 한다
+highlight! link LspReferenceText  SiRefHighlight
+highlight! link LspReferenceRead  SiRefHighlight
+highlight! link LspReferenceWrite SiRefHighlight
+
+" '#if 0' 안의 죽은 코드: SI 의 'Inactive Code' 처럼 회색으로 눌러 둔다
+" (after/queries/c/highlights.scm 이 우선순위 105 로 잡아 준다)
+call s:hi('@si.inactive', 'linenr', '', '')
 
 " 점프가 착지한 심볼: 하늘색 상자는 두 테마 공통으로 쓴다
 highlight RvCtxSym guifg=#101820 guibg=#87d7ff ctermfg=16 ctermbg=117
@@ -321,11 +332,11 @@ let s:ts = {
       \ 'keyword.directive':  ['preproc', s:kw],
       \ 'keyword.directive.define': ['incdef', ''],
       \ 'keyword.import':     ['incdef', ''],
-      \ 'type':               ['type',    'bold'],
-      \ 'type.builtin':       ['typeref', 'bold'],
-      \ 'type.definition':    ['type',    'bold'],
-      \ 'type.qualifier':     ['keyword', 'bold'],
-      \ 'storageclass':       ['keyword', 'bold'],
+      \ 'type':               ['type',    s:kw],
+      \ 'type.builtin':       ['typeref', s:kw],
+      \ 'type.definition':    ['type',    s:kw],
+      \ 'type.qualifier':     ['keyword', s:kw],
+      \ 'storageclass':       ['keyword', s:kw],
       \ 'structure':          ['keyword', s:kw],
       \ 'comment':            ['comment', ''],
       \ 'comment.documentation': ['comment', ''],
@@ -377,7 +388,7 @@ endfor
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
 " 타입 이름을 '쓰는' 자리: uint32_t, enum tcc_asrc_drv_sync_mode_t 등
 " (정의하는 자리는 아래 @si.declaration.function 이 짙은 파랑으로 덮는다)
-call s:hi('@si.type.ref', 'typeref', '', 'bold')
+call s:hi('@si.type.ref', 'typeref', '', s:kw)
 
 " __iomem/__user/__init 같은 커널 주석 매크로 (after/queries 가 잡아 준다)
 call s:hi('@si.kernel.attr', 'number', '', '')

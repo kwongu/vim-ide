@@ -16,12 +16,13 @@
 --   g:refhighlight        0 으로 끈다 (기본 1)
 --   g:refhighlight_delay  커서가 멈춘 뒤 몇 ms 만에 칠할지 (기본 80)
 --   g:refhighlight_min    이 길이 미만 이름은 무시 (기본 2)
---   g:refhighlight_priority  matchadd 우선순위 (기본 -50, F4 마크 아래)
+--   g:refhighlight_priority  matchadd 우선순위 (기본 -1010, F4 마크 아래)
 --   :RefHighlightToggle   실행 중에 켜고 끄기
 --
--- vim-mark(F4) 와 겹치지 않는다: vim-mark 는 -10 이하(g:mwMaxMatchPriority)
--- 를 쓰므로 여기서는 -50 을 써서, F4 로 칠한 색과 검색 하이라이트가 항상
--- 위에 온다.
+-- vim-mark(F4) 와 겹치지 않는다: vim-mark 의 우선순위는
+--   g:mwMaxMatchPriority(-10) - 색개수 + 1 + i
+-- 라서 'maximum' 팔레트(58색)에서는 -67 까지 내려간다. 그래서 그보다 훨씬
+-- 낮은 -1010 을 써야 F4 로 칠한 색과 검색 하이라이트가 항상 위에 온다.
 
 if vim.g.loaded_refhighlight then
   return
@@ -110,7 +111,7 @@ local function paint()
   clear()
   local pat = [[\V\<]] .. vim.fn.escape(word, '\\') .. [[\>]]
   local ok, id = pcall(vim.fn.matchadd, 'SiRefHighlight', pat,
-    cfg('priority', -50), -1, { window = win })
+    cfg('priority', -1010), -1, { window = win })
   if ok then
     s.id, s.word, s.win = id, word, win
   end
