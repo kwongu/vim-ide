@@ -285,6 +285,9 @@ call s:hi('TelescopePromptCounter', 'linenr',  '',        '')
 call s:hi('TelescopeResultsComment', 'linenr', '',        '')
 call s:hi('TelescopePreviewLine',   '',        'cursorline', '')
 
+" 커서 밑 심볼의 모든 등장 위치 (SI 의 'Reference Highlight' 스타일 값)
+highlight SiRefHighlight guifg=#000000 guibg=#aae1ff ctermfg=16 ctermbg=153
+
 " 점프가 착지한 심볼: 하늘색 상자는 두 테마 공통으로 쓴다
 highlight RvCtxSym guifg=#101820 guibg=#87d7ff ctermfg=16 ctermbg=117
             \ gui=bold cterm=bold

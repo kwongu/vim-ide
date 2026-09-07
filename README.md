@@ -364,6 +364,25 @@ the file in the repository. To ignore the shared presets entirely:
 `let g:projectfiles_shared_presets = ''`, or point it at a directory of your
 own.
 
+## Reference highlight (nvim only)
+
+Source Insight washes every visible occurrence of the symbol under the
+cursor in pale blue as you move around, which is how you see where a
+variable is used without searching for it. `.vim/plugin/refhighlight.lua`
+does the same with SI's own colour (`#000000` on `#aae1ff`).
+
+It paints 80 ms after the cursor stops, on a window-wide `matchadd`, so the
+cost does not grow with the file. It stays out of the way of keywords,
+one-character names, strings and comments, and it sits *below* `F4`
+(vim-mark) and search highlighting, which use higher match priorities.
+
+```vim
+let g:refhighlight = 0             " off
+let g:refhighlight_delay = 150     " ms after the cursor stops
+let g:refhighlight_min = 3         " ignore names shorter than this
+:RefHighlightToggle
+```
+
 ## Relation window (nvim only)
 
 The Source Insight style relation window opens by itself when nvim starts
