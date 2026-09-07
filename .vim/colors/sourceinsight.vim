@@ -105,7 +105,9 @@ else
   " 타입 이름은 모두 초록: 내장 타입(int/void/char)도, uint32_t/size_t/bool
   " 도, 프로젝트의 struct/enum/typedef 이름도. 정의하는 자리만 아래
   " @si.declaration.function 이 짙은 파랑으로 덮는다.
-  " 'static'/'const' 같은 저장 클래스·한정자는 예약어라 네이비 볼드다.
+  " 저장 클래스(static/extern/inline/register)도 초록이다 - 타입 앞에 붙는
+  " 수식자라 화면에서 타입과 같은 색으로 나온다. 한정자(const/volatile)는
+  " 예약어 색(네이비 볼드)으로 남는다.
   let s:c.type     = ['#008000', 28,  'darkgreen']
   let s:c.typeref  = ['#008000', 28,  'darkgreen']
   let s:c.decl     = s:c.keyword
