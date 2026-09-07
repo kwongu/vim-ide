@@ -100,7 +100,7 @@ highlight Cursor guifg=#ffffff guibg=#000000
 highlight! link CursorIM Cursor
 
 " ── 코드: SI 는 색을 적게 쓴다 ─────────────────────────────────────────────
-call s:hi('Comment',       'comment', '',          'italic')
+call s:hi('Comment',       'comment', '',          '')
 call s:hi('Constant',      'number',  '',          '')
 call s:hi('String',        'string',  '',          '')
 call s:hi('Character',     'string',  '',          '')
@@ -121,14 +121,16 @@ call s:hi('Include',       'preproc', '',          '')
 call s:hi('Define',        'preproc', '',          '')
 call s:hi('Macro',         'macro',   '',          '')
 call s:hi('PreCondit',     'preproc', '',          '')
-call s:hi('Type',          'type',    '',          'bold')
+" SI 는 프로젝트 타입 이름을 색칠하지 않는다(본문과 같은 검정).
+" 'int'/'uint32_t' 처럼 언어가 아는 타입만 키워드 색이 된다.
+call s:hi('Type',          'fg',      '',          '')
 call s:hi('StorageClass',  'keyword', '',          'bold')
-call s:hi('Structure',     'type',    '',          'bold')
-call s:hi('Typedef',       'type',    '',          'bold')
+call s:hi('Structure',     'keyword', '',          'bold')
+call s:hi('Typedef',       'fg',      '',          '')
 call s:hi('Special',       'fg',      '',          '')
 call s:hi('SpecialChar',   'string',  '',          '')
 call s:hi('Delimiter',     'fg',      '',          '')
-call s:hi('SpecialComment','comment', '',          'bold,italic')
+call s:hi('SpecialComment','comment', '',          'bold')
 call s:hi('Debug',         'macro',   '',          '')
 call s:hi('Underlined',    'keyword', '',          'underline')
 call s:hi('Ignore',        'linenr',  '',          '')
@@ -192,14 +194,14 @@ let s:ts = {
       \ 'keyword.directive':  ['preproc', ''],
       \ 'keyword.directive.define': ['preproc', ''],
       \ 'keyword.import':     ['preproc', ''],
-      \ 'type':               ['type',    'bold'],
-      \ 'type.builtin':       ['type',    'bold'],
-      \ 'type.definition':    ['type',    'bold'],
+      \ 'type':               ['fg',      ''],
+      \ 'type.builtin':       ['keyword', 'bold'],
+      \ 'type.definition':    ['fg',      ''],
       \ 'type.qualifier':     ['keyword', 'bold'],
       \ 'storageclass':       ['keyword', 'bold'],
-      \ 'structure':          ['type',    'bold'],
-      \ 'comment':            ['comment', 'italic'],
-      \ 'comment.documentation': ['comment', 'italic'],
+      \ 'structure':          ['keyword', 'bold'],
+      \ 'comment':            ['comment', ''],
+      \ 'comment.documentation': ['comment', ''],
       \ 'string':             ['string',  ''],
       \ 'string.escape':      ['string',  'bold'],
       \ 'string.special':     ['string',  ''],
@@ -237,6 +239,11 @@ let s:ts = {
 for [s:g, s:v] in items(s:ts)
   call s:hi('@' . s:g, s:v[0], '', s:v[1])
 endfor
+
+" 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
+" SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
+call s:hi('@si.declaration',          'fg',      '', 'underline')
+call s:hi('@si.declaration.function', 'fg',      '', 'bold,underline')
 
 " LSP 의미 토큰도 같은 배색으로
 highlight! link @lsp.type.class      @type
