@@ -688,6 +688,23 @@ local function sig_name(lines, brace_line)
   return nil
 end
 
+-- Does file-scope code resume right after 'line'? This is what separates a
+-- stray '}' in the first column - a hand-unindented block or a local
+-- initializer written '};', both of which sit INSIDE a function - from the
+-- real end of a definition whose braces did not add up. Only asked when the
+-- running count still says we are nested.
+local function top_level_follows(lines, line)
+  for k = line + 1, math.min(#lines, line + 40) do
+    local l = lines[k]
+    if l and not l:match('^%s*$') and not l:match('^%s*#')
+        and not l:match('^%s*//') and not l:match('^%s*/%*')
+        and not l:match('^%s*%*') then
+      return l:match('^[%a_}]') ~= nil
+    end
+  end
+  return true -- nothing but blanks and directives to the end of the file
+end
+
 local function build_ranges(content, defs)
   local lines = vim.split(content, '\n', { plain = true })
   local ranges = {}
@@ -795,11 +812,15 @@ local function build_ranges(content, defs)
       end
       local opens = select(2, code:gsub('{', ''))
       local closes = select(2, code:gsub('}', ''))
-      -- A '}' in the first column ends a top-level definition in this style
-      -- of C. Trust it over the running count: one unbalanced brace (again,
-      -- typically inside an '#ifdef' that is never compiled) would
-      -- otherwise leave a range open to the end of the file and blame every
-      -- reference below it on that one function.
+      -- A '}' in the first column FOLLOWED BY file-scope code ends a
+      -- top-level definition in this style of C. Trust that over the
+      -- running count: one unbalanced brace (typically inside an '#ifdef'
+      -- that is never compiled, so it never breaks a build and nobody
+      -- notices) would otherwise leave a range open to the end of the file
+      -- and blame every reference below it on that one function. The
+      -- lookahead is what keeps a '}' that is merely unindented - inside a
+      -- function, with more of that function after it - from cutting the
+      -- function short.
       local col0_end = closes > opens and raw:match('^}') ~= nil
       if depth == 0 and opens > 0 then
         -- Who owns this block? The name in front of the parameter list is
@@ -840,7 +861,7 @@ local function build_ranges(content, defs)
         end
       end
       depth = depth + opens - closes
-      if col0_end and depth > 0 then
+      if col0_end and depth > 0 and top_level_follows(lines, i) then
         depth = 0 -- a miscount: the file says this definition is over
       end
       if depth <= 0 then
