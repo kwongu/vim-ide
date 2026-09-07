@@ -54,6 +54,9 @@
 --                              wants a prefix instead of listing
 --                              everything (default 40)
 --   g:projectfiles_symbol_max  most symbols to list at once (default 200000)
+--   g:projectfiles_symbol_timeout
+--                              ms to wait for the definition dump
+--                              (default 20000)
 
 if vim.g.loaded_projectfiles then
   return
@@ -667,7 +670,7 @@ local function global_cmd()
   return vim.fn.executable(p) == 1 and p or nil
 end
 
-local function global_lines(root, args)
+local function global_lines(root, args, timeout)
   local cmd = { global_cmd() }
   if not cmd[1] then
     return {}
@@ -675,7 +678,7 @@ local function global_lines(root, args)
   vim.list_extend(cmd, args)
   local ok, o = pcall(function()
     return vim.system(cmd, { text = true, cwd = root,
-      env = { GTAGSOBJDIR = dbdir() } }):wait(4000)
+      env = { GTAGSOBJDIR = dbdir() } }):wait(timeout or 4000)
   end)
   if not ok or not o or o.code ~= 0 or not o.stdout then
     return {}
@@ -1149,6 +1152,27 @@ end
 -- what kind of thing a definition line defines. Cosmetic, but it is what
 -- makes a list of 30000 names readable: the struct and the function that
 -- share a name are told apart at a glance.
+-- the column of 'name' in 'text' as a WHOLE word. A plain find lands inside
+-- a longer identifier on 866 of this index's 31480 definitions
+-- ('SR_FGT(SYS_AFSR0_EL1, HFGxTR, AFSR0_EL1, 1)' when looking for
+-- AFSR0_EL1), which would leave the cursor - and therefore <cword>, and the
+-- next C-] - on the wrong symbol.
+local function word_col(text, name)
+  local at = 1
+  while true do
+    local b, e = text:find(name, at, true)
+    if not b then
+      return nil
+    end
+    local before = b > 1 and text:sub(b - 1, b - 1) or ''
+    local after = text:sub(e + 1, e + 1)
+    if not before:match('[%w_]') and not after:match('[%w_]') then
+      return b
+    end
+    at = e + 1
+  end
+end
+
 local function symbol_kind(name, text)
   local t = text:gsub('^%s+', '')
   if t:match('^#%s*define') then
@@ -1169,7 +1193,10 @@ local function symbol_kind(name, text)
       return kw == 'enum' and 'enum val' or 'member'
     end
   end
-  local at = t:find(name, 1, true)
+  -- the same whole-word rule as the cursor: a plain find would see the '('
+  -- of a LONGER identifier ('SR_FGT(SYS_AFSR0_EL1, ...)' when the symbol is
+  -- AFSR0_EL1) and call 167 rows of this index functions
+  local at = word_col(t, name)
   if at and t:sub(at + #name):match('^%s*%(') then
     return 'func'
   end
@@ -1177,27 +1204,6 @@ local function symbol_kind(name, text)
     return 'enum val'
   end
   return 'var'
-end
-
--- the column of 'name' in 'text' as a WHOLE word. A plain find lands inside
--- a longer identifier on 866 of this index's 31480 definitions
--- ('SR_FGT(SYS_AFSR0_EL1, HFGxTR, AFSR0_EL1, 1)' when looking for
--- AFSR0_EL1), which would leave the cursor - and therefore <cword>, and the
--- next C-] - on the wrong symbol.
-local function word_col(text, name)
-  local at = 1
-  while true do
-    local b, e = text:find(name, at, true)
-    if not b then
-      return nil
-    end
-    local before = b > 1 and text:sub(b - 1, b - 1) or ''
-    local after = text:sub(e + 1, e + 1)
-    if not before:match('[%w_]') and not after:match('[%w_]') then
-      return b
-    end
-    at = e + 1
-  end
 end
 
 -- the paths the database holds, as a set. 'global -x' separates the path
@@ -1255,7 +1261,11 @@ local function symbols_of(root, prefix)
   local known, npaths = indexed_paths(root)
   local list = {}
   local cap = cfg('symbol_max', 200000)
-  for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', pat })) do
+  -- a whole definition dump is worth more than four seconds: on a timeout
+  -- vim.system kills global and its output is lost, and with nothing cached
+  -- every '\fs' would pay that wait again
+  for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', pat },
+      cfg('symbol_timeout', 20000))) do
     if #list >= cap then
       break
     end
@@ -1378,8 +1388,11 @@ local function pick_symbol(prefill)
     elseif not uv.fs_stat(root .. '/' .. d .. '/GTAGS')
         and not uv.fs_stat(root .. '/GTAGS') then
       why = '이 프로젝트에 색인이 없습니다 (:GtagsIndex)'
+    elseif prefill == nil or prefill == '' then
+      why = 'global 이 정의를 돌려주지 않았습니다 - 접두어로 좁혀보세요'
+          .. ' (:ProjectSymbols <접두어>, 또는 :GtagsIndexStatus 로 확인)'
     else
-      why = 'global 이 정의를 돌려주지 않았습니다 (:GtagsIndexStatus 로 확인)'
+      why = ("'%s' 로 시작하는 정의가 없습니다"):format(prefill)
     end
     notify(why, vim.log.levels.WARN)
     return
