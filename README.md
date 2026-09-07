@@ -191,7 +191,7 @@ window of its own: everything runs through telescope pickers.
 \fm  choose the preset                  (auto included, ^d deletes mine)
 \fS  save the current entries as a preset
 \fR  reindex now
-\fs  find any symbol in the index      (^r opens the relation window)
+\fs  find any symbol in the index      (<F3> sends it to the relation window)
 \fw  the same, for the symbol under the cursor
 ```
 
@@ -209,8 +209,10 @@ tagged with what it is (`func`, `struct`, `macro`, `enum`, `typedef`, `var`)
 so the struct and the function that share a name are told apart at a glance.
 `<CR>` jumps to the definition in the edit window (the jumplist is kept, so
 `C-o` comes back, and the landed symbol gets the same sky blue marker `C-]`
-leaves); `^r` hands the symbol to the relation window instead, which is where
-the next question - who calls this? - is answered. `\fw` opens it on the word
+leaves); `<F3>` (or `^g`) hands the symbol to the relation window instead,
+which is where the next question - who calls this? - is answered. On an index
+too large to list at once (over `g:projectfiles_symbol_db_max_mb`, 40 MB of
+GTAGS) it asks `global` for the prefix you typed instead of for everything. `\fw` opens it on the word
 under the cursor, and `:ProjectSymbols <Tab>` completes symbol names straight
 out of the index. The list is built once per database and rebuilt after a
 re-index.

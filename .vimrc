@@ -295,10 +295,10 @@ _G.rv_setup('aerial', {
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 
-" 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O). tags 파일 기반이라
-" gutentags 가 만든 색인을 그대로 쓴다. LSP(clangd) 를 켜면
-" ':Telescope lsp_workspace_symbols' 도 함께 쓸 수 있다.
-nnoremap <silent> <Leader>fs <Cmd>Telescope tags<CR>
+" 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O)은 <leader>fs =
+" :ProjectSymbols 가 담당한다(gtags 색인 기반, 아래 Project files 절).
+" ctags(tags 파일) 쪽 목록을 보고 싶으면 ':Telescope tags',
+" LSP(clangd) 를 켰다면 ':Telescope lsp_workspace_symbols' 도 쓸 수 있다.
 
 " ------------------------------------
 " neo-tree: 사이드바 파일 트리 (NERDTree 상위 호환)
@@ -1396,7 +1396,7 @@ let g:relationview_unpin_delay = 3000
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
-"     <leader>fs  색인된 심볼 검색 (^r 이면 relation window 로)
+"     <leader>fs  색인된 심볼 검색 (<F3> 또는 ^g 로 relation window 로 넘김)
 "     <leader>fw  커서 밑 심볼로 바로 검색
 "   :ProjectFilesPresetShare <name>
 "     preset 을 vim-ide 저장소(.vim/presets)에 넣는다. 커밋/푸시하면
@@ -1419,7 +1419,7 @@ nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
-nnoremap <silent> <leader>fw :ProjectSymbols <C-r><C-w><CR>
+nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
 
 
 "==============================================================================

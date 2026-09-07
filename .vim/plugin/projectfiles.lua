@@ -34,7 +34,8 @@
 --                              other machines after a commit/push)
 --   :ProjectFilesReindex       rebuild the index for the current list
 --   :ProjectSymbols [name]     find any symbol the index knows and jump to
---                              its definition (^r opens the relation window)
+--                              its definition (<F3> in the picker hands it
+--                              to the relation window)
 --
 -- In a picker
 --   <CR> take the entry     <Tab> several at once
@@ -48,6 +49,11 @@
 --   g:projectfiles_width       view width (default: the context width)
 --   g:projectfiles_height      view height in its column (default 12)
 --   g:projectfiles_exts        indexed extensions (default as indexfiles.sh)
+--   g:projectfiles_symbol_db_max_mb
+--                              past this much GTAGS, ':ProjectSymbols'
+--                              wants a prefix instead of listing
+--                              everything (default 40)
+--   g:projectfiles_symbol_max  most symbols to list at once (default 200000)
 
 if vim.g.loaded_projectfiles then
   return
@@ -489,6 +495,9 @@ end
 -- longer there), and the usual "this would shrink the index" guard must not
 -- get in the way.
 local function reindex(root)
+  if s.symbols then
+    s.symbols[root] = nil -- the symbol list is about to change
+  end
   if vim.fn.exists(':GtagsIndexRefresh') == 2 then
     pcall(vim.cmd, 'GtagsIndexRefresh!')
   end
@@ -1107,8 +1116,12 @@ local function open_in_edit(root, rel)
   if target then
     api.nvim_win_set_buf(target, buf)
     api.nvim_set_current_win(target)
-  else
+  elseif vim.bo.buftype == '' then
     vim.cmd('edit ' .. vim.fn.fnameescape(abs))
+  else
+    -- every window is a panel/preview/terminal: make one rather than
+    -- replacing a special buffer (or failing with a stack traceback)
+    vim.cmd('botright split ' .. vim.fn.fnameescape(abs))
   end
 end
 
@@ -1202,18 +1215,50 @@ local function indexed_paths(root)
   return set, n
 end
 
-local function symbols_of(root)
-  local d = dbdir() or '.tags'
-  local db = root .. '/' .. d .. '/GTAGS'
-  local st = uv.fs_stat(db) or uv.fs_stat(root .. '/GTAGS')
-  local key = st and tostring(st.mtime.sec) or 'none'
+-- 'global' answers from the database GTAGSOBJDIR points at, so the cache has
+-- to be keyed on the same one - and on its size, because mtime seconds alone
+-- would serve a stale list after a re-index that finished inside the same
+-- second ('global --single-update' takes about 20 ms).
+local function db_stat(root)
+  local d = dbdir()
+  if d and d ~= '' then
+    local st = uv.fs_stat(root .. '/' .. d .. '/GTAGS')
+    if st then
+      return st
+    end
+  end
+  return uv.fs_stat(root .. '/GTAGS')
+end
+
+-- A whole kernel tree in auto mode holds millions of definitions: dumping
+-- all of them would build millions of Lua tables and freeze nvim. Past this
+-- much database, the picker asks 'global' for the prefix that was typed
+-- instead of for everything.
+local function huge_db(st)
+  return st ~= nil
+      and st.size > (cfg('symbol_db_max_mb', 40) * 1024 * 1024)
+end
+
+local function symbols_of(root, prefix)
+  local st = db_stat(root)
+  local key = st and (tostring(st.mtime.sec) .. ':' .. tostring(st.size))
+      or 'none'
+  key = key .. '\0' .. (prefix or '')
   local hit = s.symbols and s.symbols[root]
   if hit and hit.key == key then
     return hit.list
   end
+  local pat = '.*'
+  if prefix and prefix ~= '' then
+    pat = '^' .. prefix:gsub('[%^%$%(%)%%%.%[%]%*%+%-%?{}|\\]', '\\%0')
+  end
   local known, npaths = indexed_paths(root)
   local list = {}
-  for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', '.*' })) do
+  local cap = cfg('symbol_max', 200000)
+  for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', pat })) do
+    if #list >= cap then
+      break
+    end
     -- 'name  line  path  text', the columns padded by global
     local name, line, rest = l:match('^(%S+)%s+(%d+)%s+(.*)$')
     local path, text = nil, nil
@@ -1253,30 +1298,78 @@ local function symbols_of(root)
     return list -- a failed 'global' run must not be remembered as "no symbols"
   end
   s.symbols = s.symbols or {}
-  s.symbols[root] = { key = key, list = list }
+  s.symbols[root] = { key = key, list = list, capped = #list >= cap }
   return list
 end
 
 -- jump to a definition in a real source window (never the panel or the
 -- preview), leaving the jumplist intact so C-o comes back
 local function jump_to_symbol(root, e)
-  open_in_edit(root, e.path)
+  local abs = e.path:sub(1, 1) == '/' and e.path or (root .. '/' .. e.path)
+  -- the database can outlive the file: opening it would silently make an
+  -- empty buffer under that name, which a later ':w' would turn into a file
+  if not uv.fs_stat(abs) then
+    notify(('%s 는 더 이상 없습니다 (색인이 오래되었습니다: <leader>fR)')
+      :format(e.path), vim.log.levels.WARN)
+    return
+  end
+  -- the jumplist entry belongs to where we are NOW: nvim_win_set_buf pushes
+  -- one by itself, and an 'm\'' after the switch would mark the file we just
+  -- landed in instead
+  pcall(vim.cmd, [[normal! m']])
+  local ok = pcall(open_in_edit, root, e.path)
+  if not ok then
+    notify('편집할 창을 찾지 못했습니다: ' .. e.path, vim.log.levels.WARN)
+    return
+  end
   local win = api.nvim_get_current_win()
   local buf = api.nvim_win_get_buf(win)
-  pcall(vim.cmd, [[normal! m']])
-  local text = api.nvim_buf_get_lines(buf, e.line - 1, e.line, false)[1] or ''
+  -- and the file can have changed since it was indexed
+  local last = api.nvim_buf_line_count(buf)
+  local line = math.max(1, math.min(e.line, last))
+  local text = api.nvim_buf_get_lines(buf, line - 1, line, false)[1] or ''
   local at = word_col(text, e.name) or text:find(e.name, 1, true)
-  pcall(api.nvim_win_set_cursor, win, { e.line, at and (at - 1) or 0 })
+  pcall(api.nvim_win_set_cursor, win, { line, at and (at - 1) or 0 })
   pcall(vim.cmd, 'normal! zz')
-  if _G.relationview_flash then
-    pcall(_G.relationview_flash, buf, e.line, e.name)
+  if line ~= e.line then
+    notify(('%s:%d 은 파일 끝을 넘어갑니다 (색인이 오래되었습니다: <leader>fR)')
+      :format(e.path, e.line), vim.log.levels.WARN)
+  elseif _G.relationview_flash then
+    pcall(_G.relationview_flash, buf, line, e.name)
   end
+end
+
+-- \fs is often pressed while the cursor sits in the relation panel or its
+-- preview - both 'nofile' buffers, for which cur_root() falls back to the
+-- cwd and would answer for the wrong project. Prefer a real source buffer
+-- from this tab.
+local function symbol_root()
+  if vim.bo.buftype == '' and api.nvim_buf_get_name(0) ~= '' then
+    return cur_root()
+  end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local b = api.nvim_win_get_buf(w)
+    local n = api.nvim_buf_get_name(b)
+    if vim.bo[b].buftype == '' and n ~= '' and not n:match('RelationView') then
+      return root_of(n)
+    end
+  end
+  return cur_root()
 end
 
 -- <leader>fs : find any symbol the index knows and jump to its definition
 local function pick_symbol(prefill)
-  local root = cur_root()
-  local syms = symbols_of(root)
+  local root = symbol_root()
+  local st = db_stat(root)
+  local huge = huge_db(st)
+  if huge and (prefill == nil or #prefill < 2) then
+    notify(('색인이 커서(%d MB) 접두어가 필요합니다: '):format(
+        math.floor((st and st.size or 0) / 1024 / 1024))
+      .. ':ProjectSymbols <접두어> 또는 <leader>fw (커서 밑 심볼)',
+      vim.log.levels.WARN)
+    return
+  end
+  local syms = symbols_of(root, huge and prefill or nil)
   if #syms == 0 then
     local d = dbdir() or '.tags'
     local why
@@ -1295,24 +1388,28 @@ local function pick_symbol(prefill)
   if not t then
     -- no telescope: narrow by the prefill and let vim.ui.select do it
     local items, map = {}, {}
+    local want = prefill and prefill ~= '' and prefill:lower() or nil
+    local more = false
     for _, e in ipairs(syms) do
-      if prefill == nil or prefill == '' or e.name:find(prefill, 1, true) then
+      if want == nil or e.name:lower():find(want, 1, true) then
+        if #items >= 200 then
+          more = true
+          break
+        end
         items[#items + 1] = e.display
         map[e.display] = e
       end
-      if #items >= 200 then
-        break
-      end
     end
-    return fallback_select(items, 'Project symbols', function(c)
-      if map[c] then
-        jump_to_symbol(root, map[c])
-      end
-    end)
+    return fallback_select(items,
+      more and 'Project symbols (앞 200개만)' or 'Project symbols',
+      function(c)
+        if map[c] then
+          jump_to_symbol(root, map[c])
+        end
+      end)
   end
   t.pickers.new({}, {
-    prompt_title = ('Project symbols [%s] (%d)  <CR> jump  ^r relation window')
-        :format(active_preset(root) or 'auto', #syms),
+    prompt_title = ('Symbols %d  <CR> jump  <F3> relation'):format(#syms),
     default_text = prefill,
     finder = t.finders.new_table({
       results = syms,
@@ -1329,19 +1426,26 @@ local function pick_symbol(prefill)
         local entry = t.state.get_selected_entry()
         t.actions.close(bufnr)
         if entry then
-          jump_to_symbol(root, entry.value)
+          -- after the prompt closes: leaving insert mode moves the cursor
+          -- one column left, which would take it off the symbol
+          vim.schedule(function() jump_to_symbol(root, entry.value) end)
         end
       end)
-      -- the relation window answers the next question ('who calls this?')
-      map({ 'i', 'n' }, '<C-r>', function()
+      -- the relation window answers the next question ('who calls this?').
+      -- Not <C-r>: telescope owns that as the prefix of <C-r><C-w> and
+      -- friends, so a bare mapping there waits for a second key and then
+      -- leaks it. <F3> is what opens the relation window outside telescope.
+      local to_relation = function()
         local entry = t.state.get_selected_entry()
         t.actions.close(bufnr)
         if entry then
           vim.schedule(function()
-            pcall(vim.cmd, 'RelationView ' .. entry.value.name)
+            pcall(vim.cmd, 'RelationView ' .. vim.fn.fnameescape(entry.value.name))
           end)
         end
-      end)
+      end
+      map({ 'i', 'n' }, '<F3>', to_relation)
+      map({ 'i', 'n' }, '<C-g>', to_relation)
       return true
     end,
   }):find()
@@ -1841,9 +1945,6 @@ api.nvim_create_user_command('ProjectFilesReindex', function()
   local root = cur_root()
   materialize(root)
   reindex(root)
-  if s.symbols then
-    s.symbols[root] = nil -- the symbol list is about to change
-  end
   notify('재색인 시작')
 end, { desc = 'Rebuild the index for the current file list' })
 
