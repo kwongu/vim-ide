@@ -219,11 +219,52 @@ background is often invisible. The theme wires the group in and the cursor
 becomes a black block (nvim then emits `OSC 12`, which iTerm2 and friends
 honour); `let g:sourceinsight_cursor = '#0087ff'` for something more vivid.
 
-24-bit colour is turned on when the terminal advertises it (`$COLORTERM`);
-without that the themes fall back to their 256-colour approximations. The
-relation window follows whichever theme is on - its panel is a list, not
+The relation window follows whichever theme is on - its panel is a list, not
 code, so paths and tree glyphs stay grey rather than comment-green, and the
 sky blue box on a jump landing is the same in all three.
+
+### 24-bit colour, and why the cursor can be invisible over SSH
+
+`termguicolors` is what makes the exact hexes above reachable, and it is
+turned on when the terminal advertises 24-bit colour in `$COLORTERM`. It is
+also what makes the cursor colour work at all: nvim sends the cursor colour
+to the terminal as `OSC 12`, and it only sends it when `termguicolors` is on.
+
+```
+termguicolors=on   ->  OSC 12;#000000 sent, cursor turns black
+termguicolors=off  ->  nothing sent, the terminal's own cursor colour stays
+```
+
+`ssh` forwards `TERM` but not `COLORTERM`, so a session that is fine locally
+comes up with 24-bit colour off on the remote machine - 256-colour
+approximations instead of the palette, and an invisible cursor on white.
+`:VimIdeColorCheck` prints what is actually on and how to fix it:
+
+```
+termguicolors : off
+$COLORTERM    : (비어 있음)
+접속          : SSH (/dev/pts/3)
+커서색 전송   : 아니오 - termguicolors 가 꺼져 있어 커서색을 못 바꾼다
+```
+
+Any one of these turns it on, on the machine you are editing on:
+
+```vim
+let g:vimide_truecolor = 1       " in a file read before ~/.vimrc
+```
+```sh
+export COLORTERM=truecolor       # in the remote ~/.bashrc
+```
+```
+# or forward it: ~/.ssh/config on the client
+Host myserver
+    SendEnv COLORTERM
+# and on the server, /etc/ssh/sshd_config
+AcceptEnv COLORTERM
+```
+
+Set it only where the terminal really does 24-bit colour; forcing it on a
+terminal that does not will make the colours worse, not better.
 
 ## Project files and presets (nvim only)
 

@@ -1461,14 +1461,22 @@ set path+=./include,./include/linux
 "=   let g:vimide_theme = 'light'   " ~/.vimrc 보다 먼저 읽히는 곳에서
 "=   :VimIdeTheme si / light / dark " 실행 중에 바꾸기
 "=
-"= 24bit 색이 있어야 팔레트가 제대로 나온다. 터미널이 truecolor 를 알리지
-"= 않으면(예: 오래된 SSH 세션) 256색으로 그대로 동작한다.
+"= 24bit 색이 있어야 팔레트가 제대로 나온다. $COLORTERM 이 truecolor 를
+"= 알리면 자동으로 켜진다. SSH 는 COLORTERM 을 넘기지 않으므로 원격에서는
+"= let g:vimide_truecolor = 1 을 넣어 직접 켠다. 꺼져 있으면 256색으로
+"= 근사되고 커서색도 바뀌지 않는다. 진단은 :VimIdeColorCheck.
 "==============================================================================
 let g:vimide_theme = get(g:, 'vimide_theme', 'si')
 
 function! s:VimIdeApplyTheme(which) abort
     let g:vimide_theme = a:which
-    if has('termguicolors') && ($COLORTERM ==# 'truecolor' || $COLORTERM ==# '24bit')
+    " 24bit 색을 켤지: 터미널이 스스로 알리는 $COLORTERM 이 1차 신호다.
+    " SSH 는 TERM 만 넘기고 COLORTERM 은 넘기지 않으므로 원격에서는 비어
+    " 있는 게 정상이다. 그때는 g:vimide_truecolor = 1 로 직접 켠다.
+    " termguicolors 가 꺼지면 팔레트가 256색으로 근사되고, 터미널 커서색도
+    " 바뀌지 않는다(nvim 은 24bit 일 때만 OSC 12 로 커서색을 내보낸다).
+    if has('termguicolors') && (get(g:, 'vimide_truecolor', 0)
+                \ || $COLORTERM ==# 'truecolor' || $COLORTERM ==# '24bit')
         set termguicolors
     endif
     " 터미널 커서 색은 guicursor 가 가리키는 하이라이트 그룹에서 온다.
@@ -1499,6 +1507,31 @@ function! s:VimIdeApplyTheme(which) abort
         silent! call airline#switch_theme(g:airline_theme)
     endif
 endfunction
+
+" 색·커서가 이상할 때 무엇이 켜져 있는지 한 눈에 (특히 SSH 원격)
+function! s:VimIdeColorCheck() abort
+    echo '테마          : ' . get(g:, 'colors_name', '?')
+                \ . '  (g:vimide_theme = ' . get(g:, 'vimide_theme', '?') . ')'
+    echo 'termguicolors : '
+                \ . (has('termguicolors') ? (&termguicolors ? 'on' : 'off') : '기능 없음')
+    echo '$COLORTERM    : ' . (empty($COLORTERM) ? '(비어 있음)' : $COLORTERM)
+    echo '$TERM         : ' . $TERM
+    echo '접속          : ' . (empty($SSH_TTY) ? '로컬' : 'SSH (' . $SSH_TTY . ')')
+    echo 'guicursor     : ' . (&guicursor =~# 'Cursor' ? 'Cursor 그룹 연결됨' : '그룹 없음')
+    echo 'Cursor 색      : ' . synIDattr(hlID('Cursor'), 'bg#')
+                \ . ' / ' . synIDattr(hlID('Cursor'), 'fg#')
+    echo '커서색 전송   : '
+                \ . ((&termguicolors && &guicursor =~# 'Cursor') ? '예 (OSC 12)'
+                \    : '아니오 - termguicolors 가 꺼져 있어 커서색을 못 바꾼다')
+    if has('termguicolors') && !&termguicolors
+        echo ''
+        echo '켜는 방법 (하나만 하면 된다):'
+        echo '  1) 원격 셸에  export COLORTERM=truecolor   (~/.bashrc)'
+        echo '  2) ~/.vimrc 보다 먼저 읽히는 곳에  let g:vimide_truecolor = 1'
+        echo '  3) 맥 ~/.ssh/config 에  SendEnv COLORTERM  (서버 sshd 는 AcceptEnv 필요)'
+    endif
+endfunction
+command! VimIdeColorCheck call s:VimIdeColorCheck()
 
 command! -nargs=1 -complete=customlist,s:VimIdeThemeComplete VimIdeTheme
             \ call s:VimIdeApplyTheme(<q-args>)
