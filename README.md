@@ -193,6 +193,25 @@ let g:vimide_theme = 'dark'      " in a file read before ~/.vimrc
 :VimIdeTheme si                  " or just switch now
 ```
 
+Source Insight draws the *name* in a function, struct or enum definition
+larger than the body text (140%) with a faint shadow. Neovim has no
+per-highlight font size - `nvim_set_hl` rejects `scale` and `font`, in a GUI
+as much as in a terminal - so the same "read this first" weight is carried by
+attributes instead, and how much of it you want is an option:
+
+```vim
+let g:sourceinsight_declaration_emphasis = 'strong'   " bold + underline + a
+                                                      " faint grey wash
+"                                          'bold'     " default: bold + underline
+"                                          'off'      " no emphasis
+```
+
+The symbol windows follow the same palette as SI's own list panes: white
+ground, black symbol names, navy bold section titles, grey paths, a pale
+blue bar on the row under the cursor. The telescope pickers
+(`\fs`, `\fo`) are themed to match, including the navy bold on the
+characters your search actually matched.
+
 24-bit colour is turned on when the terminal advertises it (`$COLORTERM`);
 without that the themes fall back to their 256-colour approximations. The
 relation window follows whichever theme is on - its panel is a list, not

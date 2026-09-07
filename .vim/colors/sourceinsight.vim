@@ -42,6 +42,7 @@ let s:c = {
       \ 'comment':   ['#008000', 28,  'darkgreen'],
       \ 'string':    ['#800000', 88,  'darkred'],
       \ 'stringbg':  ['#ffffbb', 230, 'yellow'],
+      \ 'declbg':    ['#e8e8e8', 254, 'lightgrey'],
       \ 'number':    ['#800000', 88,  'darkred'],
       \ 'preproc':   ['#000080', 18,  'darkblue'],
       \ 'macro':     ['#7f007f', 90,  'darkmagenta'],
@@ -59,7 +60,18 @@ let s:c = {
       \ 'diffchg':   ['#e6eeff', 189, 'lightblue'],
       \ }
 
+" SI 는 함수/구조체/enum 의 '선언된 이름'을 본문보다 크게(Scale 140%) 그리고
+" 옅은 그림자(#c0c0c0)까지 넣어 그린다. Neovim 은 하이라이트 단위 글자 크기를
+" 지원하지 않으므로(nvim_set_hl 은 scale/font 키를 거부한다) 크기 대신 굵기·
+" 밑줄·옅은 배경으로 같은 '눈에 먼저 들어오는' 효과를 낸다.
+"
+"   g:sourceinsight_declaration_emphasis
+"     'bold'   (기본) 네이비 볼드 + 밑줄
+"     'strong'        네이비 볼드 + 밑줄 + 옅은 회색 배경 (SI 의 큰 글자 +
+"                     그림자에 가장 가까운 효과)
+"     'off'           특별한 강조 없음
 let s:variant = get(g:, 'sourceinsight_palette', 'screen')
+let s:emph = get(g:, 'sourceinsight_declaration_emphasis', 'bold')
 if s:variant ==# 'factory'
   " SI 4.0 출고 기본 스타일셋 (themes.xml / 스톡 설치본)
   let s:c.keyword  = ['#008000', 28,  'darkgreen']   " int, char, static, struct
@@ -212,7 +224,7 @@ call s:hi('SpellRare',     'macro',   '',          'underline')
 " 패널은 코드가 아니라 목록이다: 주석 초록이 아니라 회색이 맞다.
 " (relationview.lua 는 이 그룹들을 default 로만 정의하므로 여기가 이긴다)
 call s:hi('RvHeader',       'keyword', '',           'bold')
-call s:hi('RvSection',      'keyword', '',           '')
+call s:hi('RvSection',      'keyword', '',           'bold')
 call s:hi('RvName',         'fg',      '',           '')
 call s:hi('RvLoc',          'linenr',  '',           '')
 call s:hi('RvDim',          'linenr',  '',           '')
@@ -222,6 +234,25 @@ call s:hi('RvMarker',       'macro',   '',           '')
 call s:hi('RvCursorSym',    'keyword', '',           'bold')
 call s:hi('RvCursorLine',   '',        'sel',        '')
 call s:hi('RvCursorLineNr', 'keyword', 'sel',        'bold')
+" telescope 픽커(ProjectSymbols/ProjectFiles)도 SI 의 목록 창처럼:
+" 흰 바탕 + 검정 글자, 고른 줄은 옅은 파랑, 일치한 글자만 네이비 볼드
+highlight! link TelescopeNormal        Normal
+highlight! link TelescopePreviewNormal Normal
+call s:hi('TelescopeBorder',        'ui',      '',        '')
+call s:hi('TelescopePromptBorder',  'ui',      '',        '')
+call s:hi('TelescopeResultsBorder', 'ui',      '',        '')
+call s:hi('TelescopePreviewBorder', 'ui',      '',        '')
+call s:hi('TelescopeTitle',         'keyword', '',        'bold')
+highlight! link TelescopePromptTitle   TelescopeTitle
+highlight! link TelescopeResultsTitle  TelescopeTitle
+highlight! link TelescopePreviewTitle  TelescopeTitle
+call s:hi('TelescopeSelection',     'fg',      'sel',     '')
+call s:hi('TelescopeSelectionCaret', 'keyword', 'sel',    'bold')
+call s:hi('TelescopeMatching',      'keyword', '',        'bold')
+call s:hi('TelescopePromptCounter', 'linenr',  '',        '')
+call s:hi('TelescopeResultsComment', 'linenr', '',        '')
+call s:hi('TelescopePreviewLine',   '',        'cursorline', '')
+
 " 점프가 착지한 심볼: 하늘색 상자는 두 테마 공통으로 쓴다
 highlight RvCtxSym guifg=#101820 guibg=#87d7ff ctermfg=16 ctermbg=117
             \ gui=bold cterm=bold
@@ -314,16 +345,23 @@ endfor
 call s:hi('@si.directive.cond', 'preproc', '', s:variant ==# 'factory' ? 'bold' : 'bold')
 
 " 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
+" 함수/구조체/enum/typedef 의 '정의된 이름' 강조 (위 g:..._emphasis)
+let s:name_attr = s:emph ==# 'off' ? '' :
+      \ (s:emph ==# 'strong' ? 'bold,underline' : 'bold,underline')
+let s:name_bg   = s:emph ==# 'strong' ? 'declbg' : ''
+let s:name_fg   = s:emph ==# 'off' ? '' : 'decl'
+
 if s:variant ==# 'factory'
   " 출고 기본값: 선언은 네이비 볼드고, 밑줄은 파라미터와 레이블에만 붙는다
   call s:hi('@si.declaration',           'decl', '', 'bold')
-  call s:hi('@si.declaration.function',  'decl', '', 'bold')
+  call s:hi('@si.declaration.function',  s:name_fg, s:name_bg,
+        \ s:emph ==# 'off' ? 'bold' : 'bold')
   call s:hi('@si.declaration.parameter', 'decl', '', 'bold,underline')
 else
   " 화면 기준: 함수/타입 정의 이름은 네이비 볼드, 변수·파라미터 선언은
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   call s:hi('@si.declaration',           '',     '', 'underline')
-  call s:hi('@si.declaration.function',  'decl', '', 'bold,underline')
+  call s:hi('@si.declaration.function',  s:name_fg, s:name_bg, s:name_attr)
   call s:hi('@si.declaration.parameter', '',     '', 'underline')
 endif
 
