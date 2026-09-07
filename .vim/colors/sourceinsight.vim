@@ -95,7 +95,8 @@ else
   "   함수 호출(심볼 참조)              짙은 초록 (볼드)
   "   상수형 매크로/NULL/숫자           빨강
   "   함수형 매크로, #ifdef 조건         네이비 볼드
-  "   주석 초록, 문자열 마룬 + 연노랑
+  "   주석 보라 #800080, 문자열 마룬 + 연노랑
+  "   #include / #define 은 초록, #if/#ifdef/#endif 는 네이비 볼드
   let s:c.control  = s:c.keyword
   let s:c.type     = ['#008000', 28,  'darkgreen']
   let s:c.decl     = s:c.keyword
@@ -103,8 +104,16 @@ else
   let s:c.reflocal = s:c.fg
   let s:c.delim    = s:c.fg
   let s:c.label    = s:c.keyword
-  let s:c.number   = ['#ff0000', 196, 'red']
+  let s:c.comment  = ['#800080', 90,  'darkmagenta']
+  " 상수 매크로/숫자: 새빨강(#ff0000)은 눈에 너무 세다는 판단으로 한 톤
+  " 낮춘 빨강. 흰 배경 대비 4.2:1 로 본문으로 읽을 수 있는 선이다.
+  let s:c.number   = ['#cc5555', 167, 'red']
   let s:c.macro    = s:c.keyword
+  " #include / #define 은 초록 (#if/#ifdef/#endif 는 네이비 볼드로 둔다)
+  let s:c.incdef   = ['#008000', 28,  'darkgreen']
+endif
+if !has_key(s:c, 'incdef')
+  let s:c.incdef = s:c.preproc
 endif
 
 " 평범한 키워드의 볼드 여부는 배색마다 다르다: 화면 기준은 볼드,
@@ -190,8 +199,8 @@ call s:hi('Operator',      s:variant ==# 'factory' ? 'ref' : 'fg', '', '')
 call s:hi('Keyword',       'keyword', '',          s:kw)
 call s:hi('Exception',     'control', '',          'bold')
 call s:hi('PreProc',       'preproc', '',          '')
-call s:hi('Include',       'preproc', '',          '')
-call s:hi('Define',        'preproc', '',          '')
+call s:hi('Include',       'incdef',  '',          '')
+call s:hi('Define',        'incdef',  '',          '')
 call s:hi('Macro',         'macro',   '',          '')
 call s:hi('PreCondit',     'preproc', '',          '')
 " struct/typedef 이름은 초록(심볼 참조 색), 'int'/'uint32_t' 처럼 언어가
@@ -283,9 +292,9 @@ let s:ts = {
       \ 'keyword.modifier':   ['keyword', s:kw],
       \ 'keyword.type':       ['keyword', s:kw],
       \ 'keyword.exception':  ['control', 'bold'],
-      \ 'keyword.directive':  ['preproc', ''],
-      \ 'keyword.directive.define': ['preproc', ''],
-      \ 'keyword.import':     ['preproc', ''],
+      \ 'keyword.directive':  ['preproc', s:kw],
+      \ 'keyword.directive.define': ['incdef', ''],
+      \ 'keyword.import':     ['incdef', ''],
       \ 'type':               ['type',    ''],
       \ 'type.builtin':       ['keyword', s:kw],
       \ 'type.definition':    ['type',    ''],
@@ -321,9 +330,9 @@ let s:ts = {
       \ 'punctuation.bracket':['fg',      ''],
       \ 'punctuation.delimiter': ['delim', ''],
       \ 'punctuation.special':['macro',   ''],
-      \ 'preproc':            ['preproc', ''],
-      \ 'define':             ['preproc', ''],
-      \ 'include':            ['preproc', ''],
+      \ 'preproc':            ['preproc', s:kw],
+      \ 'define':             ['incdef', ''],
+      \ 'include':            ['incdef', ''],
       \ 'attribute':          ['macro',   ''],
       \ 'module':             ['fg',      ''],
       \ 'tag':                ['keyword', 'bold'],
