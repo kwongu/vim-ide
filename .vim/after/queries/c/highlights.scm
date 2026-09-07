@@ -20,8 +20,14 @@
   name: (identifier) @si.declaration.function)
 
 ;; 변수/파라미터/멤버 선언
+;; 파라미터: SI 팩토리 기본 스타일셋에서 밑줄이 붙는 것은 여기(와 레이블)뿐
+;; 이라서 따로 잡아 둔다. 화면 기준 배색에서는 나머지 선언과 같이 취급한다.
 (parameter_declaration
-  declarator: (identifier) @si.declaration)
+  declarator: (identifier) @si.declaration.parameter)
+
+;; #define arpc_dbg(fmt, arg) 의 fmt, arg
+(preproc_params
+  (identifier) @si.declaration.parameter)
 
 (init_declarator
   declarator: (identifier) @si.declaration)
@@ -38,6 +44,16 @@
 (field_declaration
   declarator: (field_identifier) @si.declaration)
 
+;; struct arpc_device *dev;  /  uint8_t buf[N];  /  int32_t (*done)(void *);
+(pointer_declarator
+  declarator: (field_identifier) @si.declaration)
+
+(array_declarator
+  declarator: (field_identifier) @si.declaration)
+
+(function_declarator
+  declarator: (field_identifier) @si.declaration)
+
 ;; enum 값은 그 자리에서 정의된다
 (enum_specifier
   (enumerator_list
@@ -46,6 +62,17 @@
 
 ;; 타입 이름은 '정의하는 자리'에서만 (본문에서 쓰는 자리는 밑줄 없음)
 (type_definition
+  declarator: (type_identifier) @si.declaration.function)
+
+;; typedef struct x *handle_t;  /  typedef int (*cb_t)(void);
+;; typedef int cb_t(void);      /  typedef int arr_t[4];
+(pointer_declarator
+  declarator: (type_identifier) @si.declaration.function)
+
+(function_declarator
+  declarator: (type_identifier) @si.declaration.function)
+
+(array_declarator
   declarator: (type_identifier) @si.declaration.function)
 
 (struct_specifier

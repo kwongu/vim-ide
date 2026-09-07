@@ -184,7 +184,7 @@ Three, picked with `g:vimide_theme` (or `:VimIdeTheme <name>` while running):
 
 | | |
 |---|---|
-| `si` *(default)* | Source Insight's own colours: white background, black body text, navy bold keywords, green italic comments, maroon strings. `.vim/colors/sourceinsight.vim` - the palette is one table at the top of that file, and the treesitter (`@...`) groups are mapped to it so C and C++ look the same with nvim-treesitter on |
+| `si` *(default)* | Source Insight's colours - white background, black body, navy bold keywords, green comments, maroon strings on the pale yellow wash SI puts behind them, and SI's underline on declarations (`.vim/after/queries/{c,cpp}/highlights.scm` finds them; references stay plain). `.vim/colors/sourceinsight.vim` carries two palettes: `screen` (default) matches a real SI install's screen, and `g:sourceinsight_palette = 'factory'` switches to SI 4.0's shipped style set instead - seven inks, green plain keywords with navy bold control keywords, purple comments, navy strings, red numbers, navy bold declarations with the underline only on parameters. The palette is one table at the top of the file, and the treesitter (`@...`) groups are mapped to it |
 | `light` | PaperColor (light) - the closest ready-made light theme, though its keywords are pink and its comments grey |
 | `dark` | jellybeans, what this configuration used before |
 

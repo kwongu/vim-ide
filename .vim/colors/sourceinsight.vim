@@ -3,6 +3,24 @@
 "   순백 배경 + 검정 본문 + 진한 네이비 볼드 키워드 + 초록 이탤릭 주석
 "   + 마룬(적갈색) 문자열. 색을 아주 적게 쓰는 것이 SI 화면의 특징이다.
 "
+" 배색이 두 가지 있다 (g:sourceinsight_palette):
+"
+"   'screen'  (기본) 사용자가 실제로 쓰는 SI 화면 그대로:
+"             초록 주석, 마룬 문자열(연노랑 배경), 네이비 볼드 키워드,
+"             검정 타입, 모든 선언에 밑줄. VC6/Visual Studio 계열 배색을
+"             SI 에 올린 스타일셋이다.
+"   'factory' SI 4.0 이 출고될 때의 기본 스타일셋. 잉크가 일곱 색뿐이다:
+"             #000000 #000080 #008000 #008080 #800080 #ff0000 #808080
+"             - 평범한 키워드(int/char/static/struct)는 초록 #008000
+"             - 제어 키워드(if/for/return/goto)와 전처리기는 네이비 볼드
+"             - 주석은 보라 #800080, 숫자와 NULL 은 빨강 #ff0000
+"             - 문자열은 네이비 글자 + 연노랑 배경
+"             - 선언은 네이비 볼드, 밑줄은 '파라미터와 레이블만'
+"             - 심볼 참조는 초록, 지역변수 참조는 청록 #008080
+"             (themes.xml/스톡 설치본에서 확인한 값이다)
+"
+"   let g:sourceinsight_palette = 'factory'   " ~/.vimrc 에서
+"
 " 색을 바꾸고 싶으면 아래 s:c 표만 고치면 된다. Treesitter(@...) 그룹까지
 " 같이 묶어 두었으므로 nvim-treesitter 를 켠 C/C++ 에서도 같은 배색이 난다.
 "
@@ -40,6 +58,36 @@ let s:c = {
       \ 'diffdel':   ['#ffe0e0', 224, 'lightred'],
       \ 'diffchg':   ['#e6eeff', 189, 'lightblue'],
       \ }
+
+let s:variant = get(g:, 'sourceinsight_palette', 'screen')
+if s:variant ==# 'factory'
+  " SI 4.0 출고 기본 스타일셋 (themes.xml / 스톡 설치본)
+  let s:c.keyword  = ['#008000', 28,  'darkgreen']   " int, char, static, struct
+  let s:c.control  = ['#000080', 18,  'darkblue']    " if, for, return, goto
+  let s:c.type     = ['#008000', 28,  'darkgreen']
+  let s:c.comment  = ['#800080', 90,  'darkmagenta']
+  let s:c.string   = ['#000080', 18,  'darkblue']
+  let s:c.number   = ['#ff0000', 196, 'red']
+  let s:c.preproc  = ['#000080', 18,  'darkblue']
+  let s:c.macro    = ['#000080', 18,  'darkblue']
+  let s:c.decl     = ['#000080', 18,  'darkblue']
+  let s:c.ref      = ['#008000', 28,  'darkgreen']
+  let s:c.reflocal = ['#008080', 30,  'darkcyan']
+  let s:c.delim    = ['#800080', 90,  'darkmagenta']
+  let s:c.label    = ['#ff0000', 196, 'red']
+else
+  " 화면 기준 배색: 키워드는 제어/일반 구분 없이 네이비 볼드
+  let s:c.control  = s:c.keyword
+  let s:c.decl     = s:c.fg
+  let s:c.ref      = s:c.fg
+  let s:c.reflocal = s:c.fg
+  let s:c.delim    = s:c.fg
+  let s:c.label    = s:c.keyword
+endif
+
+" 평범한 키워드의 볼드 여부는 배색마다 다르다: 화면 기준은 볼드,
+" SI 출고 기본값은 Keyword 에 볼드가 없다(제어 키워드에만 있다).
+let s:kw = s:variant ==# 'factory' ? '' : 'bold'
 
 function! s:hi(group, fg, bg, attr) abort
   let l:cmd = 'highlight ' . a:group
@@ -107,17 +155,18 @@ call s:hi('Constant',      'number',  '',          '')
 call s:hi('String',        'string',  'stringbg',  '')
 call s:hi('Character',     'string',  'stringbg',  '')
 call s:hi('Number',        'number',  '',          '')
-call s:hi('Boolean',       'keyword', '',          'bold')
+call s:hi('Boolean',       'keyword', '',          s:kw)
 call s:hi('Float',         'number',  '',          '')
 call s:hi('Identifier',    'fg',      '',          '')
 call s:hi('Function',      'fg',      '',          '')
-call s:hi('Statement',     'keyword', '',          'bold')
-call s:hi('Conditional',   'keyword', '',          'bold')
-call s:hi('Repeat',        'keyword', '',          'bold')
-call s:hi('Label',         'keyword', '',          'bold')
-call s:hi('Operator',      'fg',      '',          '')
-call s:hi('Keyword',       'keyword', '',          'bold')
-call s:hi('Exception',     'keyword', '',          'bold')
+" 제어 키워드(if/for/return/goto)는 factory 에서 일반 키워드와 색이 다르다
+call s:hi('Statement',     'control', '',          'bold')
+call s:hi('Conditional',   'control', '',          'bold')
+call s:hi('Repeat',        'control', '',          'bold')
+call s:hi('Label',         'label',   '',          'bold')
+call s:hi('Operator',      s:variant ==# 'factory' ? 'ref' : 'fg', '', '')
+call s:hi('Keyword',       'keyword', '',          s:kw)
+call s:hi('Exception',     'control', '',          'bold')
 call s:hi('PreProc',       'preproc', '',          '')
 call s:hi('Include',       'preproc', '',          '')
 call s:hi('Define',        'preproc', '',          '')
@@ -126,12 +175,12 @@ call s:hi('PreCondit',     'preproc', '',          '')
 " SI 는 프로젝트 타입 이름을 색칠하지 않는다(본문과 같은 검정).
 " 'int'/'uint32_t' 처럼 언어가 아는 타입만 키워드 색이 된다.
 call s:hi('Type',          'fg',      '',          '')
-call s:hi('StorageClass',  'keyword', '',          'bold')
-call s:hi('Structure',     'keyword', '',          'bold')
+call s:hi('StorageClass',  'keyword', '',          s:kw)
+call s:hi('Structure',     'keyword', '',          s:kw)
 call s:hi('Typedef',       'fg',      '',          '')
 call s:hi('Special',       'fg',      '',          '')
 call s:hi('SpecialChar',   'string',  'stringbg',  '')
-call s:hi('Delimiter',     'fg',      '',          '')
+call s:hi('Delimiter',     'delim',   '',          '')
 call s:hi('SpecialComment','comment', '',          'bold')
 call s:hi('Debug',         'macro',   '',          '')
 call s:hi('Underlined',    'keyword', '',          'underline')
@@ -184,24 +233,24 @@ highlight! link DiagnosticUnderlineHint  SpellRare
 " nvim-treesitter 가 붙으면 @... 그룹이 위의 고전 그룹을 덮어쓰므로
 " 여기서 같은 배색으로 다시 묶어 준다.
 let s:ts = {
-      \ 'keyword':            ['keyword', 'bold'],
-      \ 'keyword.function':   ['keyword', 'bold'],
-      \ 'keyword.operator':   ['keyword', 'bold'],
-      \ 'keyword.return':     ['keyword', 'bold'],
-      \ 'keyword.repeat':     ['keyword', 'bold'],
-      \ 'keyword.conditional':['keyword', 'bold'],
-      \ 'keyword.modifier':   ['keyword', 'bold'],
-      \ 'keyword.type':       ['keyword', 'bold'],
-      \ 'keyword.exception':  ['keyword', 'bold'],
+      \ 'keyword':            ['keyword', s:kw],
+      \ 'keyword.function':   ['keyword', s:kw],
+      \ 'keyword.operator':   ['keyword', s:kw],
+      \ 'keyword.return':     ['control', 'bold'],
+      \ 'keyword.repeat':     ['control', 'bold'],
+      \ 'keyword.conditional':['control', 'bold'],
+      \ 'keyword.modifier':   ['keyword', s:kw],
+      \ 'keyword.type':       ['keyword', s:kw],
+      \ 'keyword.exception':  ['control', 'bold'],
       \ 'keyword.directive':  ['preproc', ''],
       \ 'keyword.directive.define': ['preproc', ''],
       \ 'keyword.import':     ['preproc', ''],
       \ 'type':               ['fg',      ''],
-      \ 'type.builtin':       ['keyword', 'bold'],
+      \ 'type.builtin':       ['keyword', s:kw],
       \ 'type.definition':    ['fg',      ''],
       \ 'type.qualifier':     ['keyword', 'bold'],
       \ 'storageclass':       ['keyword', 'bold'],
-      \ 'structure':          ['keyword', 'bold'],
+      \ 'structure':          ['keyword', s:kw],
       \ 'comment':            ['comment', ''],
       \ 'comment.documentation': ['comment', ''],
       \ 'string':             ['string',  ''],
@@ -211,25 +260,25 @@ let s:ts = {
       \ 'character.special':  ['string',  'bold'],
       \ 'number':             ['number',  ''],
       \ 'number.float':       ['number',  ''],
-      \ 'boolean':            ['keyword', 'bold'],
-      \ 'constant':           ['fg',      ''],
+      \ 'boolean':            ['keyword', s:kw],
+      \ 'constant':           ['ref',     ''],
       \ 'constant.builtin':   ['number',  ''],
       \ 'constant.macro':     ['macro',   ''],
-      \ 'function':           ['fg',      ''],
-      \ 'function.call':      ['fg',      ''],
-      \ 'function.builtin':   ['fg',      ''],
+      \ 'function':           ['ref',     ''],
+      \ 'function.call':      ['ref',     ''],
+      \ 'function.builtin':   ['ref',     ''],
       \ 'function.macro':     ['macro',   ''],
-      \ 'variable':           ['fg',      ''],
+      \ 'variable':           ['ref',     ''],
       \ 'variable.builtin':   ['keyword', 'bold'],
-      \ 'variable.parameter': ['fg',      ''],
-      \ 'variable.member':    ['fg',      ''],
-      \ 'property':           ['fg',      ''],
-      \ 'field':              ['fg',      ''],
-      \ 'label':              ['keyword', 'bold'],
-      \ 'operator':           ['fg',      ''],
+      \ 'variable.parameter': ['reflocal', ''],
+      \ 'variable.member':    ['ref',     ''],
+      \ 'property':           ['ref',     ''],
+      \ 'field':              ['ref',     ''],
+      \ 'label':              ['label',   'bold'],
+      \ 'operator':           [s:variant ==# 'factory' ? 'ref' : 'fg', ''],
       \ 'punctuation':        ['fg',      ''],
       \ 'punctuation.bracket':['fg',      ''],
-      \ 'punctuation.delimiter': ['fg',   ''],
+      \ 'punctuation.delimiter': ['delim', ''],
       \ 'punctuation.special':['macro',   ''],
       \ 'preproc':            ['preproc', ''],
       \ 'define':             ['preproc', ''],
@@ -250,10 +299,19 @@ endfor
 
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
-" 색은 건드리지 않고 밑줄만 얹는다: 그래야 아래에서 이미 칠해진 색
-" (매크로 이름의 보라 등)이 살아 있고, 변수/함수는 본문 검정 그대로다
-call s:hi('@si.declaration',          '',        '', 'underline')
-call s:hi('@si.declaration.function', '',        '', 'bold,underline')
+" 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
+if s:variant ==# 'factory'
+  " 출고 기본값: 선언은 네이비 볼드고, 밑줄은 파라미터와 레이블에만 붙는다
+  call s:hi('@si.declaration',           'decl', '', 'bold')
+  call s:hi('@si.declaration.function',  'decl', '', 'bold')
+  call s:hi('@si.declaration.parameter', 'decl', '', 'bold,underline')
+else
+  " 화면 기준: 색은 건드리지 않고 밑줄만 얹는다. 그래야 이미 칠해진 색
+  " (매크로 이름의 보라 등)이 살아 있고, 변수/함수는 본문 검정 그대로다
+  call s:hi('@si.declaration',           '',     '', 'underline')
+  call s:hi('@si.declaration.function',  '',     '', 'bold,underline')
+  call s:hi('@si.declaration.parameter', '',     '', 'underline')
+endif
 
 " LSP 의미 토큰도 같은 배색으로
 highlight! link @lsp.type.class      @type
