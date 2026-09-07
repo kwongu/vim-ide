@@ -90,7 +90,7 @@ if s:variant ==# 'factory'
 else
   " 화면 기준 배색 (실제 SI 화면 판독):
   "   struct/int/static 등 예약어      네이비 볼드
-  "   struct·typedef·enum 이름         초록 볼드
+  "   struct·typedef·enum 이름         짙은 파랑 볼드
   "   함수 정의 이름                    네이비 볼드
   "   함수 호출(심볼 참조)              짙은 초록 (볼드)
   "   상수형 매크로/NULL/숫자           빨강
@@ -100,7 +100,8 @@ else
   "   #ifdef/#ifndef 의 조건 이름은 옅은 빨강 (상수 매크로와 같은 색)
   "   enum 요소는 네이비 볼드, '=' 같은 연산자는 초록, 값은 옅은 빨강
   let s:c.control  = s:c.keyword
-  let s:c.type     = ['#008000', 28,  'darkgreen']
+  " enum/struct/typedef 이름은 함수 정의 이름과 같은 짙은 파랑
+  let s:c.type     = ['#000080', 18,  'darkblue']
   let s:c.decl     = s:c.keyword
   let s:c.ref      = ['#008000', 28,  'darkgreen']
   let s:c.reflocal = s:c.fg
@@ -353,6 +354,9 @@ endfor
 
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
+" __iomem/__user/__init 같은 커널 주석 매크로 (after/queries 가 잡아 준다)
+call s:hi('@si.kernel.attr', 'number', '', '')
+
 " #ifdef/#if defined() 의 조건 이름: 지시문과 같은 색 (코드 안의 상수
 " 매크로와 캡처가 같아서 확장 쿼리로 따로 잡아 낸다)
 call s:hi('@si.directive.cond', s:variant ==# 'factory' ? 'preproc' : 'number',

@@ -106,3 +106,16 @@
 
 (preproc_defined
   (identifier) @si.directive.cond)
+
+;; -- 커널 주석 매크로 (__iomem, __user, __init, __percpu, ...) ------------
+;; C 문법에 없는 토큰이라 'void __iomem *reg' 는 ERROR 노드가 되고, 그 안의
+;; __iomem 은 그냥 identifier/field_identifier 로 잡힌다. 구조로는 겨냥할 수
+;; 없으니 이름 규칙(__ + 소문자)으로 고른다.
+((identifier) @si.kernel.attr
+  (#lua-match? @si.kernel.attr "^__%l"))
+
+((field_identifier) @si.kernel.attr
+  (#lua-match? @si.kernel.attr "^__%l"))
+
+((type_identifier) @si.kernel.attr
+  (#lua-match? @si.kernel.attr "^__%l"))
