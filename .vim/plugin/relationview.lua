@@ -613,6 +613,81 @@ end
 --    '#endif' the depth continues from the CHOSEN branch's result
 --    (the first branch, or the '#else' branch for '#if 0'), so split
 --    function signatures across branches no longer double-count braces
+-- Tokens that can stand right before the '(' of a signature without being
+-- the name of the thing being defined.
+local SIG_SKIP = {
+  ['if'] = true, ['for'] = true, ['while'] = true, ['switch'] = true,
+  ['return'] = true, ['sizeof'] = true, ['do'] = true, ['else'] = true,
+  ['void'] = true, ['int'] = true, ['char'] = true, ['long'] = true,
+  ['short'] = true, ['unsigned'] = true, ['signed'] = true,
+  ['float'] = true, ['double'] = true, ['bool'] = true,
+  ['struct'] = true, ['union'] = true, ['enum'] = true,
+  ['const'] = true, ['volatile'] = true, ['static'] = true,
+  ['extern'] = true, ['inline'] = true, ['typedef'] = true,
+  ['register'] = true, ['__attribute__'] = true, ['__asm__'] = true,
+  ['asm'] = true, ['typeof'] = true, ['__typeof__'] = true,
+}
+
+-- The name of the definition whose body opens at 'brace_line', read off the
+-- signature above it. Needed because gtags stops recording definitions
+-- after the first unbalanced brace in a file - kernel sources hide those
+-- inside an inactive '#ifdef', so they compile and nobody notices - and
+-- every function below that point would otherwise have no name to group
+-- its callers under. Returns nil for a block that is not a function
+-- (a struct body, an initializer: no parameter list above it).
+-- The name in front of the OUTERMOST parameter list of 'text', or nil when
+-- that list starts further up ('text' begins inside it, i.e. a ')' closes
+-- something that was never opened here). Tracking the depth is what keeps
+-- the sparse annotations that follow a signature from winning:
+--   ') __releases(sl811->lock) __acquires(sl811->lock)' - the name is five
+-- lines above, and '__releases' is not it.
+local function decl_name(text)
+  local depth = 0
+  for i = 1, #text do
+    local c = text:sub(i, i)
+    if c == ')' then
+      depth = depth - 1
+      if depth < 0 then
+        return nil -- the declarator began above this text
+      end
+    elseif c == '(' then
+      if depth == 0 then
+        local pre = text:sub(1, i - 1):match('([%a_][%w_]*)%s*$')
+        if pre and not SIG_SKIP[pre] then
+          return pre
+        end
+      end
+      depth = depth + 1
+    end
+  end
+  return nil
+end
+
+local function sig_name(lines, brace_line)
+  local text = ''
+  for k = brace_line, math.max(1, brace_line - 12), -1 do
+    local raw = lines[k]
+    if not raw or raw:match('^%s*#') then
+      break
+    end
+    local l = raw:gsub('/%*.-%*/', ' '):gsub('//.*$', '')
+    if k < brace_line then
+      if l:match('%*/%s*$') or l:match('^%s*%*') then
+        break -- a comment block: a name inside it is not this signature
+      end
+      if l:match('[;}{]%s*$') then
+        break -- that line ends a previous statement
+      end
+    end
+    text = l .. ' ' .. text
+    local nm = decl_name(text)
+    if nm then
+      return nm, k
+    end
+  end
+  return nil
+end
+
 local function build_ranges(content, defs)
   local lines = vim.split(content, '\n', { plain = true })
   local ranges = {}
@@ -623,6 +698,12 @@ local function build_ranges(content, defs)
   local open_owner, open_start = nil, nil
   local di, last_def = 1, nil
   local used = {} -- local marker: never mutate the cached defs table
+  local def_by_name = {} -- first definition of each name, for the owner above
+  for _, d in ipairs(defs) do
+    if d.name and def_by_name[d.name] == nil then
+      def_by_name[d.name] = d
+    end
+  end
   for i, raw in ipairs(lines) do
     local skip = false
     if cont then
@@ -714,16 +795,44 @@ local function build_ranges(content, defs)
       end
       local opens = select(2, code:gsub('{', ''))
       local closes = select(2, code:gsub('}', ''))
+      -- A '}' in the first column ends a top-level definition in this style
+      -- of C. Trust it over the running count: one unbalanced brace (again,
+      -- typically inside an '#ifdef' that is never compiled) would
+      -- otherwise leave a range open to the end of the file and blame every
+      -- reference below it on that one function.
+      local col0_end = closes > opens and raw:match('^}') ~= nil
       if depth == 0 and opens > 0 then
-        -- a definition owns at most ONE top-level brace range: an anonymous
+        -- Who owns this block? The name in front of the parameter list is
+        -- the reliable answer: gtags misses a function whose parameters
+        -- span two lines and records the PARAMETERS instead ('name', 'root',
+        -- 'fn' for 'static void eeh_pe_report(const char *name, ... \n
+        -- eeh_report_fn fn, ...)'), and the last definition before the '{'
+        -- is then a parameter name. Blocks that are not functions (a struct
+        -- body, an initializer) have no parameter list above them, and
+        -- those still belong to the definition that precedes them.
+        --
+        -- A definition owns at most ONE top-level brace range: an anonymous
         -- block after it (e.g. a static variable initializer that gtags
-        -- does not record) must not be blamed on it again
-        if last_def and not used[last_def] then
+        -- does not record) must not be blamed on it again.
+        local nm, nline = sig_name(lines, i)
+        -- never reach back into the previous range
+        local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
+        if nm then
+          local d = def_by_name[nm]
+          open_owner = (d and not used[d]) and d or { name = nm, line = nline }
+          if d then
+            used[d] = true
+          end
+          -- the parameters gtags recorded instead of the function must not
+          -- own the next block either
+          if last_def and last_def.line >= (nline or i) then
+            used[last_def] = true
+          end
+          open_start = math.max(math.min(nline or i, i), floor_)
+        elseif last_def and not used[last_def] then
           open_owner = last_def
           used[last_def] = true
-          -- include the signature line(s) above the opening brace, but
-          -- never reach back into the previous range
-          local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
+          -- include the signature line(s) above the opening brace
           open_start = math.max(math.min(last_def.line, i), floor_)
         else
           open_owner = nil
@@ -731,6 +840,9 @@ local function build_ranges(content, defs)
         end
       end
       depth = depth + opens - closes
+      if col0_end and depth > 0 then
+        depth = 0 -- a miscount: the file says this definition is over
+      end
       if depth <= 0 then
         if open_start then
           -- definitions recorded INSIDE the closed range (enum members,
