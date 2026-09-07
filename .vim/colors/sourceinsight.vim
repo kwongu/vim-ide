@@ -90,8 +90,9 @@ if s:variant ==# 'factory'
 else
   " 화면 기준 배색 (실제 SI 화면 판독):
   "   struct/int/static 등 예약어      네이비 볼드
-  "   struct·typedef·enum 이름         정의 자리는 짙은 파랑 볼드,
-  "                                    쓰는 자리(uint32_t 포함)는 초록 볼드
+  "   타입 이름 전부                    초록 볼드 (int/void/char, uint32_t,
+  "                                    size_t, bool, struct·enum·typedef 이름)
+  "                                    단, 정의하는 자리는 짙은 파랑 볼드
   "   함수 정의 이름                    네이비 볼드
   "   함수 호출(심볼 참조)              짙은 초록 (볼드)
   "   상수형 매크로/NULL/숫자           빨강
@@ -101,9 +102,11 @@ else
   "   #ifdef/#ifndef 의 조건 이름은 옅은 빨강 (상수 매크로와 같은 색)
   "   enum 요소는 네이비 볼드, '=' 같은 연산자는 초록, 값은 옅은 빨강
   let s:c.control  = s:c.keyword
-  " 정의하는 자리의 이름은 짙은 파랑(아래 @si.declaration.function),
-  " 쓰는 자리의 타입 이름(uint32_t, enum tcc_..._t)은 초록
-  let s:c.type     = ['#000080', 18,  'darkblue']
+  " 타입 이름은 모두 초록: 내장 타입(int/void/char)도, uint32_t/size_t/bool
+  " 도, 프로젝트의 struct/enum/typedef 이름도. 정의하는 자리만 아래
+  " @si.declaration.function 이 짙은 파랑으로 덮는다.
+  " 'static'/'const' 같은 저장 클래스·한정자는 예약어라 네이비 볼드다.
+  let s:c.type     = ['#008000', 28,  'darkgreen']
   let s:c.typeref  = ['#008000', 28,  'darkgreen']
   let s:c.decl     = s:c.keyword
   let s:c.ref      = ['#008000', 28,  'darkgreen']
@@ -307,7 +310,7 @@ let s:ts = {
       \ 'keyword.directive.define': ['incdef', ''],
       \ 'keyword.import':     ['incdef', ''],
       \ 'type':               ['type',    'bold'],
-      \ 'type.builtin':       ['keyword', s:kw],
+      \ 'type.builtin':       ['typeref', 'bold'],
       \ 'type.definition':    ['type',    'bold'],
       \ 'type.qualifier':     ['keyword', 'bold'],
       \ 'storageclass':       ['keyword', 'bold'],

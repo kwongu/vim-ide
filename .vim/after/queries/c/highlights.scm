@@ -8,17 +8,9 @@
 ;; '정의하는 자리'를 다시 덮어야 하기 때문이다(뒤에 온 캡처가 이긴다).
 ((type_identifier) @si.type.ref)
 
-;; uint32_t/int8_t/size_t 같은 계열은 tree-sitter 문법이 int/void 와 같은
-;; primitive_type 으로 묶지만 실제로는 typedef 다. '_t' 로 끝나는 것만 골라
-;; 심볼 참조 색으로 내고, 진짜 예약어(int, void, char, bool, unsigned...)는
-;; 키워드 색으로 남긴다.
-((primitive_type) @si.type.ref
-  (#lua-match? @si.type.ref "_t$"))
-
-;; '_t' 로 끝나지 않지만 typedef 인 것들 (stdbool 의 bool 등). 초록으로
-;; 보내고 싶은 이름이 더 있으면 이 목록에 넣으면 된다.
-((primitive_type) @si.type.ref
-  (#any-of? @si.type.ref "bool"))
+;; int/void/char 같은 내장 타입(primitive_type)은 여기서 따로 잡지 않는다:
+;; 컬러스킴이 @type.builtin 자체를 타입 색(초록)으로 칠하기 때문에
+;; uint32_t·size_t·bool 도 같은 경로로 초록이 된다.
 
 ;; Source Insight 기본 스타일 흉내: "선언"에 밑줄을 그어 준다.
 ;; SI 화면에서는 함수 정의의 이름, 파라미터, 지역변수 선언, 구조체 멤버,
