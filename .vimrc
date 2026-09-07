@@ -1396,6 +1396,8 @@ let g:relationview_unpin_delay = 3000
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
+"     <leader>fs  색인된 심볼 검색 (^r 이면 relation window 로)
+"     <leader>fw  커서 밑 심볼로 바로 검색
 "   :ProjectFilesPresetShare <name>
 "     preset 을 vim-ide 저장소(.vim/presets)에 넣는다. 커밋/푸시하면
 "     다른 장비(리눅스)에서 git pull 만으로 같은 preset 을 쓴다.
@@ -1416,6 +1418,8 @@ nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
 nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
+nnoremap <silent> <leader>fs :ProjectSymbols<CR>
+nnoremap <silent> <leader>fw :ProjectSymbols <C-r><C-w><CR>
 
 
 "==============================================================================

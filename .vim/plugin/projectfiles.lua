@@ -33,6 +33,8 @@
 --                              copy a preset into vim-ide (shared with the
 --                              other machines after a commit/push)
 --   :ProjectFilesReindex       rebuild the index for the current list
+--   :ProjectSymbols [name]     find any symbol the index knows and jump to
+--                              its definition (^r opens the relation window)
 --
 -- In a picker
 --   <CR> take the entry     <Tab> several at once
@@ -77,6 +79,7 @@ local s = {
   buf = nil,
   rows = {},       -- line -> { path = , entry = }
   cache = {},      -- root -> { files = {...}, entries = {...}, preset = }
+  symbols = {},    -- root -> { key = <GTAGS mtime>, list = {...} }
 }
 
 local group = api.nvim_create_augroup('ProjectFiles', { clear = true })
@@ -1121,6 +1124,152 @@ local function fallback_select(items, prompt, on_choice)
   end)
 end
 
+-- ---------------------------------------------------------------------------
+-- symbols in the index (telescope)
+-- ---------------------------------------------------------------------------
+-- 'global -x -d' hands over every definition the database holds - name,
+-- line, file and the source line - and it answers in milliseconds even for
+-- a kernel-sized index (31k definitions in ~10 ms here), so the whole list
+-- goes into the picker and telescope (fzf-native) does the filtering. The
+-- list is built once per database and rebuilt after a re-index.
+
+-- what kind of thing a definition line defines. Cosmetic, but it is what
+-- makes a list of 30000 names readable: the struct and the function that
+-- share a name are told apart at a glance.
+local function symbol_kind(name, text)
+  local t = text:gsub('^%s+', '')
+  if t:match('^#%s*define') then
+    return t:match('^#%s*define%s+' .. vim.pesc(name) .. '%s*%(') and 'macro()'
+        or 'macro'
+  end
+  if t:match('^typedef') then
+    return 'typedef'
+  end
+  for _, kw in ipairs({ 'struct', 'union', 'enum' }) do
+    if t:match('^' .. kw .. '%s') and t:match('[{;,]%s*$') then
+      return kw
+    end
+  end
+  local at = t:find(name, 1, true)
+  if at and t:sub(at + #name):match('^%s*%(') then
+    return 'func'
+  end
+  if t:match('^[%u_][%u%d_]*%s*[=,]') then
+    return 'enum val'
+  end
+  return 'var'
+end
+
+local function symbols_of(root)
+  local d = dbdir() or '.tags'
+  local db = root .. '/' .. d .. '/GTAGS'
+  local st = uv.fs_stat(db) or uv.fs_stat(root .. '/GTAGS')
+  local key = st and tostring(st.mtime.sec) or 'none'
+  local hit = s.symbols and s.symbols[root]
+  if hit and hit.key == key then
+    return hit.list
+  end
+  local list = {}
+  for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', '.*' })) do
+    -- 'name  line  path  text', the columns padded by global
+    local name, line, path, text = l:match('^(%S+)%s+(%d+)%s+(%S+)%s(.*)$')
+    if name then
+      local kind = symbol_kind(name, text)
+      list[#list + 1] = {
+        name = name, line = tonumber(line), path = path,
+        text = (text:gsub('^%s+', ''):gsub('%s+$', '')),
+        kind = kind,
+        display = ('%-32s %-8s %s:%d'):format(name:sub(1, 32), kind, path, line),
+        ordinal = name .. ' ' .. path,
+      }
+    end
+  end
+  s.symbols = s.symbols or {}
+  s.symbols[root] = { key = key, list = list }
+  return list
+end
+
+-- jump to a definition in a real source window (never the panel or the
+-- preview), leaving the jumplist intact so C-o comes back
+local function jump_to_symbol(root, e)
+  open_in_edit(root, e.path)
+  local win = api.nvim_get_current_win()
+  local buf = api.nvim_win_get_buf(win)
+  pcall(vim.cmd, [[normal! m']])
+  local text = api.nvim_buf_get_lines(buf, e.line - 1, e.line, false)[1] or ''
+  local at = text:find(e.name, 1, true)
+  pcall(api.nvim_win_set_cursor, win, { e.line, at and (at - 1) or 0 })
+  pcall(vim.cmd, 'normal! zz')
+  if _G.relationview_flash then
+    pcall(_G.relationview_flash, buf, e.line, e.name)
+  end
+end
+
+-- <leader>fs : find any symbol the index knows and jump to its definition
+local function pick_symbol(prefill)
+  local root = cur_root()
+  local syms = symbols_of(root)
+  if #syms == 0 then
+    notify('색인에 심볼이 없습니다 (:GtagsIndex 로 색인하세요)',
+      vim.log.levels.WARN)
+    return
+  end
+  local t = telescope()
+  if not t then
+    -- no telescope: narrow by the prefill and let vim.ui.select do it
+    local items, map = {}, {}
+    for _, e in ipairs(syms) do
+      if prefill == nil or prefill == '' or e.name:find(prefill, 1, true) then
+        items[#items + 1] = e.display
+        map[e.display] = e
+      end
+      if #items >= 200 then
+        break
+      end
+    end
+    return fallback_select(items, 'Project symbols', function(c)
+      if map[c] then
+        jump_to_symbol(root, map[c])
+      end
+    end)
+  end
+  t.pickers.new({}, {
+    prompt_title = ('Project symbols [%s] (%d)  <CR> jump  ^r relation window')
+        :format(active_preset(root) or 'auto', #syms),
+    default_text = prefill,
+    finder = t.finders.new_table({
+      results = syms,
+      entry_maker = function(e)
+        return { value = e, display = e.display, ordinal = e.ordinal,
+          filename = root .. '/' .. e.path, lnum = e.line, col = 1,
+          text = e.text }
+      end,
+    }),
+    sorter = t.conf.generic_sorter({}),
+    previewer = t.conf.grep_previewer({}),
+    attach_mappings = function(bufnr, map)
+      t.actions.select_default:replace(function()
+        local entry = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if entry then
+          jump_to_symbol(root, entry.value)
+        end
+      end)
+      -- the relation window answers the next question ('who calls this?')
+      map({ 'i', 'n' }, '<C-r>', function()
+        local entry = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if entry then
+          vim.schedule(function()
+            pcall(vim.cmd, 'RelationView ' .. entry.value.name)
+          end)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
 -- <leader>fo : find a project file and jump to it
 local function pick_find()
   local root = cur_root()
@@ -1595,10 +1744,29 @@ end, { nargs = '?', complete = function()
   return preset_list()
 end, desc = 'Copy a preset into vim-ide so other machines get it' })
 
+api.nvim_create_user_command('ProjectSymbols', function(o)
+  pick_symbol(o.args ~= '' and o.args or nil)
+end, { nargs = '?', complete = function(arg)
+  if #arg < 2 then
+    return {}
+  end
+  local out = {}
+  for _, n in ipairs(global_lines(cur_root(), { '-c', arg })) do
+    out[#out + 1] = n
+    if #out >= 100 then
+      break
+    end
+  end
+  return out
+end, desc = 'Find a symbol in the index and jump to its definition' })
+
 api.nvim_create_user_command('ProjectFilesReindex', function()
   local root = cur_root()
   materialize(root)
   reindex(root)
+  if s.symbols then
+    s.symbols[root] = nil -- the symbol list is about to change
+  end
   notify('재색인 시작')
 end, { desc = 'Rebuild the index for the current file list' })
 

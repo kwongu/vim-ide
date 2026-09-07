@@ -1593,6 +1593,14 @@ end
 
 -- projectfiles.lua asks for these: one to sit above the preview, one to put
 -- the panel's height back if a new window in that column stole rows from it
+-- other plugins land on a symbol too (the ProjectSymbols picker): the same
+-- sky blue marker that C-] leaves, so a jump always looks the same
+function _G.relationview_flash(buf, line, sym)
+  if buf and line and sym then
+    pcall(flash_symbol, buf, line, sym)
+  end
+end
+
 function _G.relationview_panel_win()
   return (s.win and api.nvim_win_is_valid(s.win)) and s.win or nil
 end

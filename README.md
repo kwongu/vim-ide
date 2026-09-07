@@ -191,6 +191,8 @@ window of its own: everything runs through telescope pickers.
 \fm  choose the preset                  (auto included, ^d deletes mine)
 \fS  save the current entries as a preset
 \fR  reindex now
+\fs  find any symbol in the index      (^r opens the relation window)
+\fw  the same, for the symbol under the cursor
 ```
 
 (`<leader>` is `\` in this setup.) Every one of them is a telescope picker
@@ -199,6 +201,19 @@ behind it: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
 `:ProjectFilesRemove`, `:ProjectFilesPreset`, `:ProjectFilesSave`,
 `:ProjectFilesReindex` (each takes an optional argument to skip the picker),
 plus `:ProjectFilesPresetShare` (below).
+
+`\fs` (`:ProjectSymbols [name]`) is the symbol half of the same idea: every
+definition the database holds - `global -x -d` answers with all 31k of them in
+about ten milliseconds on this kernel index - goes into one telescope picker,
+tagged with what it is (`func`, `struct`, `macro`, `enum`, `typedef`, `var`)
+so the struct and the function that share a name are told apart at a glance.
+`<CR>` jumps to the definition in the edit window (the jumplist is kept, so
+`C-o` comes back, and the landed symbol gets the same sky blue marker `C-]`
+leaves); `^r` hands the symbol to the relation window instead, which is where
+the next question - who calls this? - is answered. `\fw` opens it on the word
+under the cursor, and `:ProjectSymbols <Tab>` completes symbol names straight
+out of the index. The list is built once per database and rebuilt after a
+re-index.
 
 Two modes:
 
