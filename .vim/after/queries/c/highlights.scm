@@ -15,6 +15,11 @@
 ((primitive_type) @si.type.ref
   (#lua-match? @si.type.ref "_t$"))
 
+;; '_t' 로 끝나지 않지만 typedef 인 것들 (stdbool 의 bool 등). 초록으로
+;; 보내고 싶은 이름이 더 있으면 이 목록에 넣으면 된다.
+((primitive_type) @si.type.ref
+  (#any-of? @si.type.ref "bool"))
+
 ;; Source Insight 기본 스타일 흉내: "선언"에 밑줄을 그어 준다.
 ;; SI 화면에서는 함수 정의의 이름, 파라미터, 지역변수 선언, 구조체 멤버,
 ;; goto 레이블이 밑줄로 표시되고, 같은 이름을 본문에서 참조할 때는 밑줄이
