@@ -624,8 +624,19 @@ local SIG_SKIP = {
   ['struct'] = true, ['union'] = true, ['enum'] = true,
   ['const'] = true, ['volatile'] = true, ['static'] = true,
   ['extern'] = true, ['inline'] = true, ['typedef'] = true,
-  ['register'] = true, ['__attribute__'] = true, ['__asm__'] = true,
-  ['asm'] = true, ['typeof'] = true, ['__typeof__'] = true,
+  ['register'] = true, ['asm'] = true, ['typeof'] = true,
+  ['__typeof__'] = true,
+  -- the annotations that sit between the type and the name, or on their own
+  -- line under the signature: none of them is ever the name
+  ['__attribute__'] = true, ['__attribute'] = true, ['__asm__'] = true,
+  ['__acquires'] = true, ['__releases'] = true, ['__must_hold'] = true,
+  ['__cond_acquires'] = true, ['__acquire'] = true, ['__release'] = true,
+  ['__printf'] = true, ['__scanf'] = true, ['__aligned'] = true,
+  ['__section'] = true, ['__alloc_size'] = true, ['__realloc_size'] = true,
+  ['__diagnose_as'] = true, ['__no_sanitize'] = true, ['__copy'] = true,
+  ['__alias'] = true, ['__assume_aligned'] = true, ['__nonstring'] = true,
+  ['__counted_by'] = true, ['__free'] = true, ['__cleanup'] = true,
+  ['__used'] = true, ['__weak'] = true, ['__init'] = true, ['__exit'] = true,
 }
 
 -- The name of the definition whose body opens at 'brace_line', read off the
@@ -642,19 +653,39 @@ local SIG_SKIP = {
 --   ') __releases(sl811->lock) __acquires(sl811->lock)' - the name is five
 -- lines above, and '__releases' is not it.
 local function decl_name(text)
+  -- Does this text close a parenthesis that was opened above it? Then it is
+  -- the tail of a parameter list, and any name in it is a PARAMETER:
+  --   'ssize_t (*format)(const struct net_device *, char *))' - the ')' at
+  -- the end belongs to 'netdev_show(' three lines up. Checking that FIRST
+  -- matters: the type in front of a function-pointer parameter would
+  -- otherwise be picked up before the stray ')' is ever reached.
   local depth = 0
+  for i = 1, #text do
+    local c = text:sub(i, i)
+    if c == '(' then
+      depth = depth + 1
+    elseif c == ')' then
+      depth = depth - 1
+      if depth < 0 then
+        return nil
+      end
+    end
+  end
+  depth = 0
   for i = 1, #text do
     local c = text:sub(i, i)
     if c == ')' then
       depth = depth - 1
-      if depth < 0 then
-        return nil -- the declarator began above this text
-      end
     elseif c == '(' then
       if depth == 0 then
         local pre = text:sub(1, i - 1):match('([%a_][%w_]*)%s*$')
         if pre and not SIG_SKIP[pre] then
-          return pre
+          -- was there a return type in front of it? An identifier standing
+          -- alone with its parameter list ('__must_hold(&x->lock)', a
+          -- macro-generated definition) is a weaker answer than one that
+          -- looks like a signature
+          local before = text:sub(1, i - 1 - #pre)
+          return pre, before:match('%S') == nil
         end
       end
       depth = depth + 1
@@ -665,6 +696,7 @@ end
 
 local function sig_name(lines, brace_line)
   local text = ''
+  local weak, weak_line = nil, nil
   for k = brace_line, math.max(1, brace_line - 12), -1 do
     local raw = lines[k]
     if not raw or raw:match('^%s*#') then
@@ -680,29 +712,37 @@ local function sig_name(lines, brace_line)
       end
     end
     text = l .. ' ' .. text
-    local nm = decl_name(text)
-    if nm then
-      return nm, k
+    local nm, bare = decl_name(text)
+    if nm and not bare then
+      return nm, k, false
     end
+    if nm and not weak then
+      weak, weak_line = nm, k -- keep looking for a real signature above it
+    end
+  end
+  if weak then
+    return weak, weak_line, true
   end
   return nil
 end
 
--- Does file-scope code resume right after 'line'? This is what separates a
--- stray '}' in the first column - a hand-unindented block or a local
--- initializer written '};', both of which sit INSIDE a function - from the
--- real end of a definition whose braces did not add up. Only asked when the
--- running count still says we are nested.
-local function top_level_follows(lines, line)
-  for k = line + 1, math.min(#lines, line + 40) do
-    local l = lines[k]
-    if l and not l:match('^%s*$') and not l:match('^%s*#')
-        and not l:match('^%s*//') and not l:match('^%s*/%*')
-        and not l:match('^%s*%*') then
-      return l:match('^[%a_}]') ~= nil
-    end
+-- Does this line start a definition at file scope? Used to recover from a
+-- brace count that has gone wrong: a signature in the first column while
+-- the count still says we are inside a function means we are not, and the
+-- range that is open has run away. Kernel C indents everything inside a
+-- function, so a signature at column 0 is a reliable marker - much more so
+-- than a '}' there, which is often just a hand-unindented block or a local
+-- initializer written '};'.
+local function starts_definition(lines, i)
+  local l = lines[i]
+  if not l or not l:match('^[%a_]') then
+    return false
   end
-  return true -- nothing but blanks and directives to the end of the file
+  local code = l:gsub('/%*.-%*/', ' '):gsub('//.*$', '')
+  if code:match(';%s*$') or code:match('^[%a_][%w_]*%s*:') then
+    return false -- a statement, a declaration, or a label
+  end
+  return decl_name(code) ~= nil
 end
 
 local function build_ranges(content, defs)
@@ -810,18 +850,22 @@ local function build_ranges(content, defs)
           in_block = true
         end
       end
+      -- One unbalanced brace - typically inside an '#ifdef' that is never
+      -- compiled, so it never breaks a build and nobody notices - used to
+      -- leave a range open to the end of the file and blame every reference
+      -- below it on that one function (tcc_asrc_drv.c:1240 is exactly
+      -- that). A definition starting in the first column says the count is
+      -- wrong: close the runaway here and carry on from file scope.
+      if depth > 0 and raw:match('^[%a_]') and starts_definition(lines, i) then
+        if open_start then
+          ranges[#ranges + 1] = { s = open_start, e = i - 1,
+            name = open_owner and open_owner.name or nil }
+          open_start, open_owner = nil, nil
+        end
+        depth = 0
+      end
       local opens = select(2, code:gsub('{', ''))
       local closes = select(2, code:gsub('}', ''))
-      -- A '}' in the first column FOLLOWED BY file-scope code ends a
-      -- top-level definition in this style of C. Trust that over the
-      -- running count: one unbalanced brace (typically inside an '#ifdef'
-      -- that is never compiled, so it never breaks a build and nobody
-      -- notices) would otherwise leave a range open to the end of the file
-      -- and blame every reference below it on that one function. The
-      -- lookahead is what keeps a '}' that is merely unindented - inside a
-      -- function, with more of that function after it - from cutting the
-      -- function short.
-      local col0_end = closes > opens and raw:match('^}') ~= nil
       if depth == 0 and opens > 0 then
         -- Who owns this block? The name in front of the parameter list is
         -- the reliable answer: gtags misses a function whose parameters
@@ -835,19 +879,20 @@ local function build_ranges(content, defs)
         -- A definition owns at most ONE top-level brace range: an anonymous
         -- block after it (e.g. a static variable initializer that gtags
         -- does not record) must not be blamed on it again.
-        local nm, nline = sig_name(lines, i)
+        local nm, nline, weak = sig_name(lines, i)
         -- never reach back into the previous range
         local floor_ = ranges[#ranges] and (ranges[#ranges].e + 1) or 1
-        if nm then
+        -- A name read off a real signature beats the definition list, which
+        -- misses a function whose parameters span two lines and records the
+        -- PARAMETERS instead. A name standing alone with its parameter list
+        -- (a macro-generated definition) does not: gtags usually knows what
+        -- that macro produced.
+        local take = nm and (not weak or not (last_def and not used[last_def]))
+        if take then
           local d = def_by_name[nm]
           open_owner = (d and not used[d]) and d or { name = nm, line = nline }
           if d then
             used[d] = true
-          end
-          -- the parameters gtags recorded instead of the function must not
-          -- own the next block either
-          if last_def and last_def.line >= (nline or i) then
-            used[last_def] = true
           end
           open_start = math.max(math.min(nline or i, i), floor_)
         elseif last_def and not used[last_def] then
@@ -859,11 +904,18 @@ local function build_ranges(content, defs)
           open_owner = nil
           open_start = i
         end
+        -- everything the definition list recorded inside the signature (the
+        -- parameters, the annotations) is consumed with it, or the next
+        -- block would be blamed on one of them
+        for k = di - 1, 1, -1 do
+          local d = defs[k]
+          if d.line < open_start then
+            break
+          end
+          used[d] = true
+        end
       end
       depth = depth + opens - closes
-      if col0_end and depth > 0 and top_level_follows(lines, i) then
-        depth = 0 -- a miscount: the file says this definition is over
-      end
       if depth <= 0 then
         if open_start then
           -- definitions recorded INSIDE the closed range (enum members,
