@@ -90,3 +90,13 @@
 ;; goto 레이블: 선언하는 자리만 ('goto x' 의 x 는 참조)
 (labeled_statement
   (statement_identifier) @si.declaration.function)
+
+;; -- #ifdef/#if defined() 의 조건 이름 -----------------------------------
+;; nvim-treesitter 는 이 이름을 코드 안의 상수 매크로(GFP_KERNEL 같은)와
+;; 똑같이 @constant 로 잡는다. SI 는 앞의 지시문과 같은 색으로 칠하므로
+;; (빨강이 아니라 네이비) 따로 구분해 준다.
+(preproc_ifdef
+  name: (identifier) @si.directive.cond)
+
+(preproc_defined
+  (identifier) @si.directive.cond)

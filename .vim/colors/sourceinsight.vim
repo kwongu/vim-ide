@@ -76,13 +76,23 @@ if s:variant ==# 'factory'
   let s:c.delim    = ['#800080', 90,  'darkmagenta']
   let s:c.label    = ['#ff0000', 196, 'red']
 else
-  " 화면 기준 배색: 키워드는 제어/일반 구분 없이 네이비 볼드
+  " 화면 기준 배색 (실제 SI 화면 판독):
+  "   struct/int/static 등 예약어      네이비 볼드
+  "   struct·typedef 이름              초록
+  "   함수 정의 이름                    네이비 볼드
+  "   함수 호출(심볼 참조)              짙은 초록 (볼드)
+  "   상수형 매크로/NULL/숫자           빨강
+  "   함수형 매크로, #ifdef 조건         네이비 볼드
+  "   주석 초록, 문자열 마룬 + 연노랑
   let s:c.control  = s:c.keyword
-  let s:c.decl     = s:c.fg
-  let s:c.ref      = s:c.fg
+  let s:c.type     = ['#008000', 28,  'darkgreen']
+  let s:c.decl     = s:c.keyword
+  let s:c.ref      = ['#008000', 28,  'darkgreen']
   let s:c.reflocal = s:c.fg
   let s:c.delim    = s:c.fg
   let s:c.label    = s:c.keyword
+  let s:c.number   = ['#ff0000', 196, 'red']
+  let s:c.macro    = s:c.keyword
 endif
 
 " 평범한 키워드의 볼드 여부는 배색마다 다르다: 화면 기준은 볼드,
@@ -158,7 +168,7 @@ call s:hi('Number',        'number',  '',          '')
 call s:hi('Boolean',       'keyword', '',          s:kw)
 call s:hi('Float',         'number',  '',          '')
 call s:hi('Identifier',    'fg',      '',          '')
-call s:hi('Function',      'fg',      '',          '')
+call s:hi('Function',      'ref',     '',          'bold')
 " 제어 키워드(if/for/return/goto)는 factory 에서 일반 키워드와 색이 다르다
 call s:hi('Statement',     'control', '',          'bold')
 call s:hi('Conditional',   'control', '',          'bold')
@@ -172,12 +182,12 @@ call s:hi('Include',       'preproc', '',          '')
 call s:hi('Define',        'preproc', '',          '')
 call s:hi('Macro',         'macro',   '',          '')
 call s:hi('PreCondit',     'preproc', '',          '')
-" SI 는 프로젝트 타입 이름을 색칠하지 않는다(본문과 같은 검정).
-" 'int'/'uint32_t' 처럼 언어가 아는 타입만 키워드 색이 된다.
-call s:hi('Type',          'fg',      '',          '')
+" struct/typedef 이름은 초록(심볼 참조 색), 'int'/'uint32_t' 처럼 언어가
+" 아는 타입은 키워드 색이 된다.
+call s:hi('Type',          'type',    '',          '')
 call s:hi('StorageClass',  'keyword', '',          s:kw)
 call s:hi('Structure',     'keyword', '',          s:kw)
-call s:hi('Typedef',       'fg',      '',          '')
+call s:hi('Typedef',       'type',    '',          '')
 call s:hi('Special',       'fg',      '',          '')
 call s:hi('SpecialChar',   'string',  'stringbg',  '')
 call s:hi('Delimiter',     'delim',   '',          '')
@@ -245,9 +255,9 @@ let s:ts = {
       \ 'keyword.directive':  ['preproc', ''],
       \ 'keyword.directive.define': ['preproc', ''],
       \ 'keyword.import':     ['preproc', ''],
-      \ 'type':               ['fg',      ''],
+      \ 'type':               ['type',    ''],
       \ 'type.builtin':       ['keyword', s:kw],
-      \ 'type.definition':    ['fg',      ''],
+      \ 'type.definition':    ['type',    ''],
       \ 'type.qualifier':     ['keyword', 'bold'],
       \ 'storageclass':       ['keyword', 'bold'],
       \ 'structure':          ['keyword', s:kw],
@@ -261,19 +271,19 @@ let s:ts = {
       \ 'number':             ['number',  ''],
       \ 'number.float':       ['number',  ''],
       \ 'boolean':            ['keyword', s:kw],
-      \ 'constant':           ['ref',     ''],
+      \ 'constant':           ['number',  ''],
       \ 'constant.builtin':   ['number',  ''],
-      \ 'constant.macro':     ['macro',   ''],
-      \ 'function':           ['ref',     ''],
-      \ 'function.call':      ['ref',     ''],
-      \ 'function.builtin':   ['ref',     ''],
-      \ 'function.macro':     ['macro',   ''],
-      \ 'variable':           ['ref',     ''],
+      \ 'constant.macro':     ['macro',   s:kw],
+      \ 'function':           ['ref',     'bold'],
+      \ 'function.call':      ['ref',     'bold'],
+      \ 'function.builtin':   ['ref',     'bold'],
+      \ 'function.macro':     ['macro',   'bold'],
+      \ 'variable':           ['fg',      ''],
       \ 'variable.builtin':   ['keyword', 'bold'],
       \ 'variable.parameter': ['reflocal', ''],
-      \ 'variable.member':    ['ref',     ''],
-      \ 'property':           ['ref',     ''],
-      \ 'field':              ['ref',     ''],
+      \ 'variable.member':    ['fg',      ''],
+      \ 'property':           ['fg',      ''],
+      \ 'field':              ['fg',      ''],
       \ 'label':              ['label',   'bold'],
       \ 'operator':           [s:variant ==# 'factory' ? 'ref' : 'fg', ''],
       \ 'punctuation':        ['fg',      ''],
@@ -299,6 +309,10 @@ endfor
 
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
+" #ifdef/#if defined() 의 조건 이름: 지시문과 같은 색 (코드 안의 상수
+" 매크로와 캡처가 같아서 확장 쿼리로 따로 잡아 낸다)
+call s:hi('@si.directive.cond', 'preproc', '', s:variant ==# 'factory' ? 'bold' : 'bold')
+
 " 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
 if s:variant ==# 'factory'
   " 출고 기본값: 선언은 네이비 볼드고, 밑줄은 파라미터와 레이블에만 붙는다
@@ -306,10 +320,10 @@ if s:variant ==# 'factory'
   call s:hi('@si.declaration.function',  'decl', '', 'bold')
   call s:hi('@si.declaration.parameter', 'decl', '', 'bold,underline')
 else
-  " 화면 기준: 색은 건드리지 않고 밑줄만 얹는다. 그래야 이미 칠해진 색
-  " (매크로 이름의 보라 등)이 살아 있고, 변수/함수는 본문 검정 그대로다
+  " 화면 기준: 함수/타입 정의 이름은 네이비 볼드, 변수·파라미터 선언은
+  " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   call s:hi('@si.declaration',           '',     '', 'underline')
-  call s:hi('@si.declaration.function',  '',     '', 'bold,underline')
+  call s:hi('@si.declaration.function',  'decl', '', 'bold,underline')
   call s:hi('@si.declaration.parameter', '',     '', 'underline')
 endif
 
