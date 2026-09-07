@@ -652,6 +652,48 @@ local SIG_SKIP = {
 -- the sparse annotations that follow a signature from winning:
 --   ') __releases(sl811->lock) __acquires(sl811->lock)' - the name is five
 -- lines above, and '__releases' is not it.
+-- the identifier ending at byte 'e' (inclusive), or nil. Walks backwards
+-- over bytes: no substring is copied, which matters because this runs on
+-- machine-generated C whose lines can be thousands of characters wide.
+local function word_before(text, e)
+  while e >= 1 do
+    local b = text:byte(e)
+    if b ~= 32 and b ~= 9 then
+      break
+    end
+    e = e - 1
+  end
+  local last = e
+  while e >= 1 do
+    local b = text:byte(e)
+    local word = b == 95 or (b >= 48 and b <= 57)
+        or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+    if not word then
+      break
+    end
+    e = e - 1
+  end
+  if e >= last then
+    return nil -- nothing, or something that is not an identifier
+  end
+  local b = text:byte(e + 1)
+  if b >= 48 and b <= 57 then
+    return nil -- a number, not a name
+  end
+  -- is there anything but whitespace in front of it?
+  local bare = true
+  local k = e
+  while k >= 1 do
+    local c = text:byte(k)
+    if c ~= 32 and c ~= 9 then
+      bare = false
+      break
+    end
+    k = k - 1
+  end
+  return text:sub(e + 1, last), bare
+end
+
 local function decl_name(text)
   -- Does this text close a parenthesis that was opened above it? Then it is
   -- the tail of a parameter list, and any name in it is a PARAMETER:
@@ -659,37 +701,44 @@ local function decl_name(text)
   -- the end belongs to 'netdev_show(' three lines up. Checking that FIRST
   -- matters: the type in front of a function-pointer parameter would
   -- otherwise be picked up before the stray ')' is ever reached.
-  local depth = 0
-  for i = 1, #text do
-    local c = text:sub(i, i)
-    if c == '(' then
+  local depth, i = 0, 1
+  while true do
+    local p = text:find('[()]', i)
+    if not p then
+      break
+    end
+    if text:byte(p) == 40 then
       depth = depth + 1
-    elseif c == ')' then
+    else
       depth = depth - 1
       if depth < 0 then
         return nil
       end
     end
+    i = p + 1
   end
-  depth = 0
-  for i = 1, #text do
-    local c = text:sub(i, i)
-    if c == ')' then
+  depth, i = 0, 1
+  while true do
+    local p = text:find('[()]', i)
+    if not p then
+      break
+    end
+    if text:byte(p) == 41 then
       depth = depth - 1
-    elseif c == '(' then
+    else
       if depth == 0 then
-        local pre = text:sub(1, i - 1):match('([%a_][%w_]*)%s*$')
+        -- was there a return type in front of the name? An identifier
+        -- standing alone with its parameter list ('__must_hold(&x->lock)',
+        -- a macro-generated definition) is a weaker answer than one that
+        -- looks like a signature.
+        local pre, bare = word_before(text, p - 1)
         if pre and not SIG_SKIP[pre] then
-          -- was there a return type in front of it? An identifier standing
-          -- alone with its parameter list ('__must_hold(&x->lock)', a
-          -- macro-generated definition) is a weaker answer than one that
-          -- looks like a signature
-          local before = text:sub(1, i - 1 - #pre)
-          return pre, before:match('%S') == nil
+          return pre, bare
         end
       end
       depth = depth + 1
     end
+    i = p + 1
   end
   return nil
 end
@@ -710,6 +759,9 @@ local function sig_name(lines, brace_line)
       if l:match('[;}{]%s*$') then
         break -- that line ends a previous statement
       end
+    end
+    if #text + #l > 4000 then
+      break -- no hand-written signature is this wide; stop before it costs
     end
     text = l .. ' ' .. text
     local nm, bare = decl_name(text)

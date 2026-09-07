@@ -49,6 +49,8 @@
 --                            startup                          (default 1)
 --   g:autoindex_migrate      1: move a database found at a project root
 --                            into the hidden directory        (default 1)
+--   g:autoindex_spotlight_exclude  0 to skip the '.metadata_never_index'
+--                                marker in the database directory (macOS)
 --   g:autoindex_ctags_max_files  projects with more files than this are
 --                            too big for gutentags (default 5000, 0 = no
 --                            limit); their ctags file is built here instead
@@ -256,6 +258,21 @@ local function git_exclude(root)
   pcall(vim.fn.writefile, lines, file)
 end
 
+-- The databases are rewritten whole on every full index (GTAGS+GRTAGS are
+-- megabytes), and on macOS every rewrite is work for Spotlight - which can
+-- never do anything useful with a gtags database anyway. One marker file
+-- keeps mdworker out of the directory.
+local function never_index(dir)
+  if cfg('spotlight_exclude', 1) == 0 or vim.fn.has('mac') == 0 then
+    return
+  end
+  local marker = dir .. '/.metadata_never_index'
+  if uv.fs_stat(marker) then
+    return
+  end
+  pcall(vim.fn.writefile, {}, marker)
+end
+
 -- nearest directory at or above `dir` that holds a database
 local function scan_root(dir)
   local d = dir
@@ -374,6 +391,7 @@ local function build(root, why, opts)
   local function run_gtags(n)
     local dest = dbpath(root)
     vim.fn.mkdir(dest, 'p')
+    never_index(dest)
     local cmd = { 'sh', '-c', vim.fn.shellescape(gt) .. ' -f ' ..
       vim.fn.shellescape(list) .. ' ' .. vim.fn.shellescape(tmp) ..
       ' && mv -f ' .. vim.fn.shellescape(tmp) .. '/GTAGS ' ..
