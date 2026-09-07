@@ -11,8 +11,11 @@
 ;; extern / static / inline / register / auto : 타입 앞에 붙는 저장 클래스.
 ;; nvim-treesitter 는 이것들을 const/volatile(type_qualifier)와 똑같은
 ;; @keyword.modifier 로 잡는데, SI 화면에서는 타입과 같은 초록으로 나온다.
-;; 노드가 다르므로 저장 클래스만 골라낸다 (const/volatile 은 예약어 색 유지).
+;; 노드는 다르지만 둘 다 타입 색으로 보낸다.
 ((storage_class_specifier) @si.type.ref)
+
+;; const / volatile / restrict / _Atomic : 타입 한정자도 타입과 같은 초록.
+((type_qualifier) @si.type.ref)
 
 ;; int/void/char 같은 내장 타입(primitive_type)은 여기서 따로 잡지 않는다:
 ;; 컬러스킴이 @type.builtin 자체를 타입 색(초록)으로 칠하기 때문에
