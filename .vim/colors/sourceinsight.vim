@@ -290,14 +290,7 @@ call s:hi('TelescopePreviewLine',   '',        'cursorline', '')
 
 " 커서 밑 심볼의 모든 등장 위치 (SI 의 'Reference Highlight' 스타일 값)
 highlight SiRefHighlight guifg=#000000 guibg=#aae1ff ctermfg=16 ctermbg=153
-" clangd 등 LSP 를 켜도 같은 음영을 쓰게 한다
-highlight! link LspReferenceText  SiRefHighlight
-highlight! link LspReferenceRead  SiRefHighlight
-highlight! link LspReferenceWrite SiRefHighlight
 
-" '#if 0' 안의 죽은 코드: SI 의 'Inactive Code' 처럼 회색으로 눌러 둔다
-" (after/queries/c/highlights.scm 이 우선순위 105 로 잡아 준다)
-call s:hi('@si.inactive', 'linenr', '', '')
 
 " 점프가 착지한 심볼: 하늘색 상자는 두 테마 공통으로 쓴다
 highlight RvCtxSym guifg=#101820 guibg=#87d7ff ctermfg=16 ctermbg=117
@@ -306,6 +299,19 @@ highlight RvCtxSym guifg=#101820 guibg=#87d7ff ctermfg=16 ctermbg=117
 if !has('nvim')
   finish
 endif
+
+" ── 여기부터는 Neovim 전용 ────────────────────────────────────────────────
+" vim 은 '@' 로 시작하는 하이라이트 그룹 이름을 받지 않는다(E475). 그래서
+" treesitter/LSP 관련 그룹은 모두 이 아래에 있어야 한다.
+
+" clangd 등 LSP 를 켜도 커서 밑 심볼과 같은 음영을 쓰게 한다
+highlight! link LspReferenceText  SiRefHighlight
+highlight! link LspReferenceRead  SiRefHighlight
+highlight! link LspReferenceWrite SiRefHighlight
+
+" '#if 0' 안의 죽은 코드: SI 의 'Inactive Code' 처럼 회색으로 눌러 둔다
+" (after/queries/c/highlights.scm 이 우선순위 105 로 잡아 준다)
+call s:hi('@si.inactive', 'linenr', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

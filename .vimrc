@@ -1434,7 +1434,12 @@ nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
 " 기억한다), 목록은 <leader>fk. signcolumn 을 두 칸으로 둬서 vim-signify 의
 " 변경 표시와 북마크 표시가 서로를 덮지 않게 한다.
 nnoremap <silent> <leader>fk <cmd>Telescope marks<cr>
-set signcolumn=auto:2
+" 'auto:2' 는 nvim 전용이다 (vim 은 auto/yes/no 까지만 받는다: E474)
+if has('nvim')
+    set signcolumn=auto:2
+else
+    set signcolumn=auto
+endif
 
 
 "==============================================================================
@@ -1469,7 +1474,11 @@ function! s:VimIdeApplyTheme(which) abort
     " 터미널 커서 색은 guicursor 가 가리키는 하이라이트 그룹에서 온다.
     " 기본값은 그룹을 지정하지 않아 터미널 커서색이 그대로 쓰이고, 흰
     " 배경에서는 거의 보이지 않는다. 모드마다 Cursor 를 붙여 준다.
-    set guicursor=n-v-c-sm:block-Cursor,i-ci-ve:ver25-Cursor,r-cr-o:hor20-Cursor,t:block-blinkon500-blinkoff500-TermCursor
+    " nvim 전용: vim 은 이 모드 조합을 거부하고(E546), 터미널 커서색을
+    " 이렇게 바꾸지도 않는다.
+    if has('nvim')
+        set guicursor=n-v-c-sm:block-Cursor,i-ci-ve:ver25-Cursor,r-cr-o:hor20-Cursor,t:block-blinkon500-blinkoff500-TermCursor
+    endif
     if a:which ==# 'si'
         set background=light
         silent! colorscheme sourceinsight
