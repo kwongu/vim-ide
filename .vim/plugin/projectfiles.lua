@@ -1146,8 +1146,14 @@ local function symbol_kind(name, text)
     return 'typedef'
   end
   for _, kw in ipairs({ 'struct', 'union', 'enum' }) do
-    if t:match('^' .. kw .. '%s') and t:match('[{;,]%s*$') then
-      return kw
+    if t:match('^' .. kw .. '[%s{]') then
+      if t:match('^' .. kw .. '%s+' .. vim.pesc(name) .. '[%s{;,]')
+          or t:match('^' .. kw .. '%s+' .. vim.pesc(name) .. '$') then
+        return kw -- the tag itself
+      end
+      -- the name is something INSIDE that definition: a member, or one of
+      -- the values of a single-line 'enum { A, B }'
+      return kw == 'enum' and 'enum val' or 'member'
     end
   end
   local at = t:find(name, 1, true)
@@ -1160,6 +1166,42 @@ local function symbol_kind(name, text)
   return 'var'
 end
 
+-- the column of 'name' in 'text' as a WHOLE word. A plain find lands inside
+-- a longer identifier on 866 of this index's 31480 definitions
+-- ('SR_FGT(SYS_AFSR0_EL1, HFGxTR, AFSR0_EL1, 1)' when looking for
+-- AFSR0_EL1), which would leave the cursor - and therefore <cword>, and the
+-- next C-] - on the wrong symbol.
+local function word_col(text, name)
+  local at = 1
+  while true do
+    local b, e = text:find(name, at, true)
+    if not b then
+      return nil
+    end
+    local before = b > 1 and text:sub(b - 1, b - 1) or ''
+    local after = text:sub(e + 1, e + 1)
+    if not before:match('[%w_]') and not after:match('[%w_]') then
+      return b
+    end
+    at = e + 1
+  end
+end
+
+-- the paths the database holds, as a set. 'global -x' separates the path
+-- from the source line with spaces and quotes nothing, so a path with a
+-- space in it can only be recovered by asking which paths exist.
+local function indexed_paths(root)
+  local set, n = {}, 0
+  for _, l in ipairs(global_lines(root, { '-P', '' })) do
+    local rel = l:gsub('^%./', '')
+    if rel ~= '' then
+      set[rel] = true
+      n = n + 1
+    end
+  end
+  return set, n
+end
+
 local function symbols_of(root)
   local d = dbdir() or '.tags'
   local db = root .. '/' .. d .. '/GTAGS'
@@ -1169,20 +1211,46 @@ local function symbols_of(root)
   if hit and hit.key == key then
     return hit.list
   end
+  local known, npaths = indexed_paths(root)
   local list = {}
   for _, l in ipairs(global_lines(root, { '-x', '-d', '-e', '.*' })) do
     -- 'name  line  path  text', the columns padded by global
-    local name, line, path, text = l:match('^(%S+)%s+(%d+)%s+(%S+)%s(.*)$')
+    local name, line, rest = l:match('^(%S+)%s+(%d+)%s+(.*)$')
+    local path, text = nil, nil
     if name then
-      local kind = symbol_kind(name, text)
+      path, text = rest:match('^(%S+)%s+(.*)$')
+      if path and npaths > 0 and not known[path] then
+        -- the path holds a space: take tokens from the text until the
+        -- database recognises what we have
+        local acc, tail = path, text or ''
+        for _ = 1, 8 do
+          local tok, more = tail:match('^(%S+)%s*(.*)$')
+          if not tok then
+            break
+          end
+          acc, tail = acc .. ' ' .. tok, more
+          if known[acc] then
+            path, text = acc, tail
+            break
+          end
+        end
+      end
+    end
+    if name and path then
+      local kind = symbol_kind(name, text or '')
       list[#list + 1] = {
         name = name, line = tonumber(line), path = path,
-        text = (text:gsub('^%s+', ''):gsub('%s+$', '')),
+        text = ((text or ''):gsub('^%s+', ''):gsub('%s+$', '')),
         kind = kind,
-        display = ('%-32s %-8s %s:%d'):format(name:sub(1, 32), kind, path, line),
+        -- never truncate the name: 924 names here are longer than the
+        -- column, and 176 of them share a 32-character prefix with another
+        display = ('%-32s %-8s %s:%d'):format(name, kind, path, line),
         ordinal = name .. ' ' .. path,
       }
     end
+  end
+  if #list == 0 then
+    return list -- a failed 'global' run must not be remembered as "no symbols"
   end
   s.symbols = s.symbols or {}
   s.symbols[root] = { key = key, list = list }
@@ -1197,7 +1265,7 @@ local function jump_to_symbol(root, e)
   local buf = api.nvim_win_get_buf(win)
   pcall(vim.cmd, [[normal! m']])
   local text = api.nvim_buf_get_lines(buf, e.line - 1, e.line, false)[1] or ''
-  local at = text:find(e.name, 1, true)
+  local at = word_col(text, e.name) or text:find(e.name, 1, true)
   pcall(api.nvim_win_set_cursor, win, { e.line, at and (at - 1) or 0 })
   pcall(vim.cmd, 'normal! zz')
   if _G.relationview_flash then
@@ -1210,8 +1278,17 @@ local function pick_symbol(prefill)
   local root = cur_root()
   local syms = symbols_of(root)
   if #syms == 0 then
-    notify('색인에 심볼이 없습니다 (:GtagsIndex 로 색인하세요)',
-      vim.log.levels.WARN)
+    local d = dbdir() or '.tags'
+    local why
+    if not global_cmd() then
+      why = 'GNU Global(global) 을 찾을 수 없습니다'
+    elseif not uv.fs_stat(root .. '/' .. d .. '/GTAGS')
+        and not uv.fs_stat(root .. '/GTAGS') then
+      why = '이 프로젝트에 색인이 없습니다 (:GtagsIndex)'
+    else
+      why = 'global 이 정의를 돌려주지 않았습니다 (:GtagsIndexStatus 로 확인)'
+    end
+    notify(why, vim.log.levels.WARN)
     return
   end
   local t = telescope()
