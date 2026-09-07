@@ -808,9 +808,10 @@ if has('nvim') && !has('cscope')
     nmap <Leader><Leader>i :Gtags -g <C-R>=expand("<cfile>")<CR><CR>
     nmap <Leader><Leader>e :Gtags -g <C-R>=expand("<cword>")<CR><CR>
     nmap <Leader><Leader>a :Gtags -g <C-R>=expand("<cword>")<CR><CR>
-    " no gtags equivalent for 'functions called by' -> open the
-    " RelationView caller tree instead
-    nmap <Leader><Leader>d :RelationView<CR>
+    " 'functions called by this one' is cscope's 'd' query, which nvim
+    " dropped with cscope. RelationView answers it now by reading the
+    " function body with treesitter: <Leader><Leader>d opens that direction.
+    nmap <Leader><Leader>d :RelationViewCalls<CR>
     nmap <Leader>e :Gtags -g <C-R>=expand("<cword>")<CR>
     nmap <Leader>f :Gtags -P <C-R>=expand("<cword>")<CR>
 endif

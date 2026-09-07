@@ -378,11 +378,29 @@ Still missing, in the order it costs you:
 
 | | |
 |---|---|
-| Callees - the "Calls" direction | the relation window is caller-only; gtags cannot answer it, but treesitter can |
 | Custom commands with parsed output | `,mk` / `,mb` shell out and throw the output away; routing them through quickfix would make every build error a jump |
 | Outlining | `foldmethod=manual`; treesitter folds would give fold-by-function |
 | Smart rename / project-wide replace | `,H` is a single-buffer `:%s` |
 | Overview strip, clip window, snippets, file compare | lower value in a read-mostly workflow |
+
+### Both directions
+
+`d` in the panel switches between **Callers** (who calls this) and **Calls**
+(what this calls) - SI's Relationship dropdown. gtags cannot answer the
+second one, since GRTAGS indexes references by name rather than by containing
+function, so the Calls direction reads the function's body with treesitter:
+find the definition, collect its `call_expression`s in source order, and
+resolve each name with the same `global -d` the Definition row uses, so a row
+points at the callee's own definition and the tree grows downwards as you
+expand. `ops->probe(dev)` is filed under `probe`; a callee whose body is not
+readable (a prototype, a macro, a function outside the index) simply stops
+being expandable.
+
+```vim
+let g:relationview_relation = 'callees'   " start in the Calls direction
+let g:relationview_max_callees = 200      " per function
+:RelationViewCalls [symbol]               " or \\d on the symbol under the cursor
+```
 
 ## Reference highlight (nvim only)
 

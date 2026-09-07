@@ -2,6 +2,8 @@
 --
 -- Shows, in real time, what the symbol under the cursor is:
 --   * a function          -> definition + an expandable multi-depth CALLER TREE
+--                            (d switches to CALLS: what this function calls,
+--                             read out of its body with treesitter)
 --   * a struct/union/enum -> definition + its members
 --   * a variable          -> its declaration in the enclosing function
 --                           (parameters included), the definition and members
@@ -18,6 +20,7 @@
 --   <Enter> jump to the call site   o  jump but keep focus in the panel
 --   double click            jump to the clicked entry in the edit window
 --   mouse button 4 / 5      back / forward, like <C-o> / <C-i>
+--   d       switch direction: Callers <-> Calls (SI's Relation window)
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
 --   x  export the current tree as an HTML graph and open it in a browser
@@ -233,6 +236,10 @@ local s = {
   tree = nil,         -- current caller tree (see finish())
   pinned = false,
   auto = cfg('auto', 1) ~= 0,
+  -- 'callers' (누가 부르나) 또는 'callees' (무엇을 부르나). SI 의 Relation
+  -- window 방향 전환에 해당하고, 패널에서 d 로 바꾼다. nil 이면 아직 사용자가
+  -- 바꾼 적이 없다는 뜻이고, 그때는 g:relationview_relation 을 그때그때 읽는다.
+  relation = nil,
   gen = 0,            -- generation counter, stale async results are dropped
   timer = nil,        -- debounce timer
   items = {},         -- panel line number -> {node=?, loc={path,line,sym}}
@@ -257,6 +264,16 @@ local s = {
   as_type = false,    -- the current view read the symbol as a type usage
   warned = false,
 }
+
+-- which direction the relation window is showing. Read at query time, not at
+-- load time, so g:relationview_relation set later in a config still counts.
+local function relation()
+  if s.relation then
+    return s.relation
+  end
+  return (cfg('relation', 'callers') == 'callees') and 'callees' or 'callers'
+end
+
 
 -- sky blue for the symbol under the panel cursor, and for the same symbol
 -- in the context window ('termguicolors' is off in this setup, so the
@@ -314,6 +331,7 @@ local member_jump   -- 'msg->cmd': where that member is declared
 local update        -- the panel's own refresh, defined further down
 local render_rows
 local source_text
+local ts_tree       -- treesitter: a file's parse tree (defined further down)
 local include_at
 local resolve_include
 local hl_cursor_row
@@ -1135,6 +1153,205 @@ local function fetch_callers(root, mtime, sym, alive, cb)
     end, REF_STREAM_CAP)
 end
 
+-- ---------------------------------------------------------------------------
+-- callees: the other direction of Source Insight's Relation window
+-- ---------------------------------------------------------------------------
+-- gtags cannot answer "what does this function call" - GRTAGS is an index of
+-- references BY name, not by containing function - but treesitter can: parse
+-- the file that defines the symbol, find its function body, and collect the
+-- calls in it in source order. Each callee name is then resolved with the
+-- same 'global -d' the Definition row uses, so a row points at the callee's
+-- own definition and reading top-down works.
+
+-- the function_definition node whose name is 'sym', preferring the one that
+-- contains 'line' (a file can define the same name twice under #ifdef)
+local function func_body(root_node, source, sym, line)
+  local best
+  local function name_of(fd)
+    local d = fd:field('declarator')[1]
+    while d do
+      local t = d:type()
+      if t == 'identifier' then
+        return vim.treesitter.get_node_text(d, source)
+      end
+      if t == 'function_declarator' or t == 'pointer_declarator'
+          or t == 'parenthesized_declarator' or t == 'array_declarator' then
+        d = d:field('declarator')[1]
+      else
+        return nil
+      end
+    end
+    return nil
+  end
+  local function walk(node)
+    if node:type() == 'function_definition' then
+      if name_of(node) == sym then
+        local sr, _, er, _ = node:range()
+        if line and line >= sr + 1 - 2 and line <= er + 1 then
+          return node -- the one the definition line points into
+        end
+        best = best or node
+      end
+    end
+    for ch in node:iter_children() do
+      local hit = walk(ch)
+      if hit then
+        return hit
+      end
+    end
+    return nil
+  end
+  return walk(root_node) or best
+end
+
+-- ts_tree() 의 'source' 는 버퍼 번호이거나 파일 내용이다 (get_node_text 가
+-- 둘 다 받는다). 줄 텍스트를 꺼내려면 어느 쪽인지 가려야 하고, 문자열이면
+-- 한 번만 쪼개 둔다.
+local function line_reader(source)
+  if type(source) == 'number' then
+    return function(row)
+      return (api.nvim_buf_get_lines(source, row, row + 1, false)[1] or '')
+    end
+  end
+  local lines = vim.split(source, '\n', { plain = true })
+  return function(row)
+    return lines[row + 1] or ''
+  end
+end
+
+-- every call inside 'body', in source order, grouped by callee name
+local function calls_in(body, source, path, sym)
+  local order, map = {}, {}
+  local text_at = line_reader(source)
+  local function add(name, node)
+    if not name or name == sym or not is_symbol(name) then
+      return
+    end
+    local sr = select(1, node:range())
+    local e = map[name]
+    if not e then
+      e = { name = name, sites = {} }
+      map[name] = e
+      order[#order + 1] = e
+    end
+    if #e.sites < 20 then
+      e.sites[#e.sites + 1] = { path = path, line = sr + 1,
+        text = text_at(sr):gsub('^%s+', ''), fn = sym }
+    end
+  end
+  local function walk(node)
+    local t = node:type()
+    if t == 'call_expression' then
+      local f = node:field('function')[1]
+      if f then
+        local ft = f:type()
+        if ft == 'identifier' then
+          add(vim.treesitter.get_node_text(f, source), f)
+        elseif ft == 'field_expression' then
+          -- ops->probe(dev): the interesting name is the member
+          local m = f:field('field')[1]
+          if m then
+            add(vim.treesitter.get_node_text(m, source), m)
+          end
+        elseif ft == 'parenthesized_expression' then
+          local inner = f:named_child(0)
+          if inner and inner:type() == 'identifier' then
+            add(vim.treesitter.get_node_text(inner, source), inner)
+          end
+        end
+      end
+    end
+    for ch in node:iter_children() do
+      walk(ch)
+    end
+  end
+  walk(body)
+  return order
+end
+
+-- entries for the panel, in the shape group_refs() produces, with each
+-- callee's own definition resolved so the row jumps into it
+local function fetch_callees(root, mtime, sym, alive, cb, prefer)
+  local cap = cfg('max_callees', 200)
+  run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
+    function(lines)
+      if not alive() then
+        return
+      end
+      local defs = parse_ctags_mod(lines, 8)
+      -- the same name can be defined in several files (a static function per
+      -- driver): read the body in the file the query came from
+      if prefer and prefer ~= '' then
+        table.sort(defs, function(a, b)
+          local pa = a.path == prefer and 0 or 1
+          local pb = b.path == prefer and 0 or 1
+          if pa ~= pb then
+            return pa < pb
+          end
+          return (a.line or 0) < (b.line or 0)
+        end)
+      end
+      local entries
+      for _, d in ipairs(defs) do
+        local rnode, source = ts_tree(d.path)
+        if rnode then
+          local body = source and func_body(rnode, source, sym, d.line)
+          if body then
+            entries = calls_in(body, source, d.path, sym)
+            break
+          end
+        end
+      end
+      if not entries then
+        cb(nil) -- not a function we can read (a macro, a header prototype)
+        return
+      end
+      if #entries > cap then
+        local cut = {}
+        for i = 1, cap do
+          cut[i] = entries[i]
+        end
+        cut.truncated = #entries - cap
+        entries = cut
+      end
+      -- resolve each callee's definition, a few at a time
+      local idx, active, conc = 0, 0, ENCLOSE_CONC
+      local function launch()
+        if not alive() then
+          return
+        end
+        while active < conc and idx < #entries do
+          idx = idx + 1
+          local e = entries[idx]
+          active = active + 1
+          run_global({ '--result=ctags-mod', '-a', '-d', '-e', e.name }, root,
+            function(dl)
+              local d = parse_ctags_mod(dl or {}, 1)[1]
+              if d then
+                -- the row points at the definition; the call site stays in
+                -- 'sites' so <C-n>/<C-p> can still walk the call sites
+                e.def = d
+                table.insert(e.sites, 1, { path = d.path, line = d.line,
+                  text = d.text, fn = sym })
+              end
+              active = active - 1
+              if active == 0 and idx >= #entries then
+                if alive() then
+                  cb(entries)
+                end
+              else
+                launch()
+              end
+            end, 8)
+        end
+        if #entries == 0 and alive() then
+          cb(entries)
+        end
+      end
+      launch()
+    end, 8)
+end
+
 -- group references by their enclosing function (Source Insight shows one
 -- box per calling function, not one per call site)
 local function group_refs(refs)
@@ -1254,6 +1471,8 @@ local function ensure_buf()
   bmap('<C-n>', function() A.step(1) end, 'RelationView: next item')
   bmap('<C-p>', function() A.step(-1) end, 'RelationView: previous item')
   bmap('a', function() A.toggle_auto() end, 'RelationView: toggle auto')
+  bmap('d', function() A.toggle_relation() end,
+    'RelationView: callers <-> calls')
 
   -- Source Insight style: moving in the list previews the location under
   -- the cursor in the context window
@@ -1477,7 +1696,7 @@ local function header(sym, note)
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
     '  [⏎/^⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
-      '[c]ctx [p]pin [r]refresh [q]close',
+      '[d]calls/callers [c]ctx [p]pin [r]refresh [q]close',
   }
 end
 
@@ -2383,8 +2602,8 @@ render_tree = function()
     raw('  (no definition)')
   end
 
-  local title = t.kind == 'symbol'
-      and 'References (undefined symbol)' or 'Callers'
+  local title = t.relation == 'callees' and 'Calls'
+      or (t.kind == 'symbol' and 'References (undefined symbol)' or 'Callers')
   raw('')
   if t.truncated and t.truncated > 0 then
     raw(section_line(string.format('%s (%d) — %d of %d refs shown', title,
@@ -2561,7 +2780,7 @@ local function strip_attrs(text)
 end
 
 -- parse a file and return its root node plus the 'source' get_node_text needs
-local function ts_tree(path)
+ts_tree = function(path)
   local content, bufnr = source_text(path)
   if not content then
     return nil
@@ -3155,19 +3374,23 @@ local function finish(gen, sym, root, mtime, data)
     return
   end
   s.scope = nil
+  -- callees arrive already grouped by name; references need grouping
+  local entries = data.entries or group_refs(data.refs)
   local t = {
     sym = sym,
     root = root,
     mtime = mtime,
     def = data.def,
     kind = data.refs_kind,
-    truncated = data.refs_truncated,
-    shown = #data.refs,
+    relation = data.relation or relation(),
+    truncated = data.refs_truncated or entries.truncated,
+    shown = data.entries and #entries or #data.refs,
     capped = (data.refs_total or 0) >= REF_STREAM_CAP,
-    nodes = make_nodes(group_refs(data.refs), nil, sym),
+    nodes = make_nodes(entries, nil, sym),
   }
   if gtags_mtime(root) == mtime then
-    cache_put('S\0' .. sym .. '\0' .. root, mtime, t)
+    cache_put('S\0' .. (t.relation == 'callees' and 'C\0' or '')
+      .. sym .. '\0' .. root, mtime, t)
   end
   s.tree = t
   render_tree()
@@ -3460,7 +3683,8 @@ function update(sym, srcfile, force, manual, ctx)
     if not force and not (ctx and ctx.buf) then
       -- only the caller tree is cached: type/variable views depend on the
       -- cursor's function, which the key does not capture
-      local hit = cache_get('S\0' .. sym .. '\0' .. root, mtime)
+      local hit = cache_get('S\0' .. (relation() == 'callees' and 'C\0' or '')
+        .. sym .. '\0' .. root, mtime)
       if hit then
         s.note = nil
         s.tree = hit -- expansions done earlier on this tree are kept
@@ -3484,6 +3708,40 @@ function update(sym, srcfile, force, manual, ctx)
     end
 
     render_msg(sym, 'querying gtags …')
+
+    -- Calls 방향(SI 의 Relation window 방향 전환): 이 심볼이 부르는 함수들.
+    -- 정의를 읽어 본문의 호출을 모으는 것이라 참조 검색과 경로가 다르다.
+    if relation() == 'callees' then
+      local alive0 = function() return gen == s.gen end
+      run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
+        function(dl)
+          if gen ~= s.gen then
+            return
+          end
+          local defs0 = parse_ctags_mod(dl, 8)
+          local def = defs0[1]
+          for _, d in ipairs(defs0) do
+            if d.path == srcfile then
+              def = d -- 커서가 있는 파일의 정의를 Definition 행에 보여 준다
+              break
+            end
+          end
+          fetch_callees(root, mtime, sym, alive0, function(entries)
+            if gen ~= s.gen then
+              return
+            end
+            if not entries then
+              s.note = '본문을 읽을 수 없습니다 (함수가 아니거나 원형만 있음)'
+              finish(gen, sym, root, mtime,
+                { refs = {}, entries = {}, def = def, relation = 'callees' })
+              return
+            end
+            finish(gen, sym, root, mtime,
+              { refs = {}, entries = entries, def = def, relation = 'callees' })
+          end, srcfile)
+        end, 8)
+      return
+    end
 
     local max_refs = cfg('max_refs', 1000)
     local data = { refs = {}, refs_kind = 'ref' }
@@ -3849,14 +4107,29 @@ function A.toggle(mode)
       render_tree()
       local t = s.tree
       local alive = function() return s.tree == t end
-      fetch_callers(t.root, t.mtime, nd.name, alive, function(refs)
-        nd.loading = false
-        nd.children = make_nodes(group_refs(refs), nd, t.sym)
-        nd.expanded = true
-        if s.tree == t then
-          render_tree()
-        end
-      end)
+      if t.relation == 'callees' then
+        local prefer = nd.site and nd.site.path or nil
+        fetch_callees(t.root, t.mtime, nd.name, alive, function(entries)
+          nd.loading = false
+          nd.children = make_nodes(entries or {}, nd, t.sym)
+          nd.expanded = true
+          if not entries then
+            nd.expandable = false -- 읽을 함수 본문이 없다 (원형/매크로)
+          end
+          if s.tree == t then
+            render_tree()
+          end
+        end, prefer)
+      else
+        fetch_callers(t.root, t.mtime, nd.name, alive, function(refs)
+          nd.loading = false
+          nd.children = make_nodes(group_refs(refs), nd, t.sym)
+          nd.expanded = true
+          if s.tree == t then
+            render_tree()
+          end
+        end)
+      end
     end
   else
     return
@@ -3916,13 +4189,16 @@ function A.expand_all()
         absorb(nd.children, depth + 1)
       else
         nd.loading = true
-        fetch_callers(t.root, t.mtime, nd.name, alive, function(refs)
+        local callees = t.relation == 'callees'
+        local grab = callees and fetch_callees or fetch_callers
+        grab(t.root, t.mtime, nd.name, alive, function(got)
           nd.loading = false
           if not alive() then
             t.expanding = nil
             return
           end
-          nd.children = make_nodes(group_refs(refs), nd, t.sym)
+          nd.children = make_nodes(
+            callees and (got or {}) or group_refs(got), nd, t.sym)
           nd.expanded = true
           absorb(nd.children, depth + 1)
           render_tree() -- progressive feedback
@@ -4190,6 +4466,23 @@ function A.refresh()
   end
 end
 
+-- SI 의 Relation window 방향 전환: Callers <-> Calls
+function A.toggle_relation()
+  s.relation = (relation() == 'callees') and 'callers' or 'callees'
+  update_header()
+  local t = s.tree
+  local sym = s.sym or (t and t.sym)
+  if not sym then
+    return
+  end
+  local src = (t and t.def and t.def.path)
+      or (s.src_win and api.nvim_win_is_valid(s.src_win)
+        and api.nvim_buf_get_name(api.nvim_win_get_buf(s.src_win)))
+      or vim.fn.getcwd()
+  s.pinned = true
+  update(sym, src, true, true, nil)
+end
+
 function A.toggle_auto()
   s.auto = not s.auto
   update_header()
@@ -4367,8 +4660,16 @@ local function open_and_query(arg)
 end
 
 api.nvim_create_user_command('RelationView', function(o)
+  s.relation = 'callers'
   open_and_query(o.args)
-end, { nargs = '?', desc = 'Source Insight style relation window' })
+end, { nargs = '?', desc = 'Source Insight style relation window (callers)' })
+
+-- the other direction: what this function calls. cscope's 'd' query, which
+-- nvim dropped along with cscope support.
+api.nvim_create_user_command('RelationViewCalls', function(o)
+  s.relation = 'callees'
+  open_and_query(o.args)
+end, { nargs = '?', desc = 'Relation window, Calls direction (callees)' })
 
 api.nvim_create_user_command('RelationViewToggle', function()
   if panel_visible() or panel_win_here() then
