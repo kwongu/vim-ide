@@ -1390,6 +1390,19 @@ let g:relationview_context_height = 40
 " 리스트에 소스 코드 열까지 보여준다(심볼 | 파일경로 | 그 줄의 내용).
 " 패널이 화면 아래 전체 폭을 쓰므로 세 열이 들어간다.
 let g:relationview_show_text = 1
+" 관계 방향. 패널 안에서 d 로 돌려 가며 볼 수 있고, 여기 값이 기본값이다.
+"   'both'    Callers 트리 + Calls 평면 목록을 한 화면에 (기본)
+"   'callers' 누가 부르나만, 확장 가능한 트리로
+"   'callees' 무엇을 부르나만, 확장 가능한 트리로
+" 'both' 의 Calls 목록은 점프는 되지만 펼쳐지지는 않는다. 펼치려면 d 를
+" 눌러 그 방향을 트리로 바꾼다(<Leader><Leader>d 로 바로 갈 수도 있다).
+let g:relationview_relation = 'both'
+" 'both' 의 두 번째 목록에 보여 줄 최대 줄 수
+let g:relationview_max_extra = 40
+" struct/union/enum 을 고르면 멤버를 전부 나열할지. 커널 구조체는 멤버가
+" 수십 개라 그 목록만으로 패널이 가득 차서 기본은 꺼 둔다. 1 로 되살린다.
+" (꺼져 있어도, 특정 멤버나 enum 상수를 골라 들어온 경우 그 한 줄은 남는다)
+let g:relationview_members = 0
 " 리스트를 훑으면 PINNED 로 고정되고, 소스 창에서 한 심볼에 이만큼
 " 머무르면 고정이 풀리며 다시 커서를 따라간다
 let g:relationview_unpin_delay = 3000

@@ -1,13 +1,19 @@
 -- relationview.lua - Source Insight style "Relation Window" for nvim.
 --
 -- Shows, in real time, what the symbol under the cursor is:
---   * a function          -> definition + an expandable multi-depth CALLER TREE
---                            (d switches to CALLS: what this function calls,
---                             read out of its body with treesitter)
---   * a struct/union/enum -> definition + its members
+--   * a function          -> definition, an expandable multi-depth CALLER TREE
+--                            and, below it, a flat CALLS list: what this
+--                            function calls, read out of its body with
+--                            treesitter. d cycles which direction is the
+--                            expandable tree (both -> callers -> calls).
+--                            g:relationview_relation picks the default.
+--   * a struct/union/enum -> definition. The member list is folded away by
+--                            default (kernel structs have dozens); set
+--                            g:relationview_members = 1 to list them. The
+--                            one member you selected is still shown.
 --   * a variable          -> its declaration in the enclosing function
---                           (parameters included), the definition and members
---                           of its type, and its uses inside that function
+--                           (parameters included), the definition of its
+--                           type, and its uses inside that function
 -- Backed by GNU Global (gtags) - the same GTAGS database that F2
 -- (mktags.sh) already creates - plus treesitter for the members and for
 -- resolving a variable to its type.
@@ -15,12 +21,16 @@
 --   F3                  toggle the relation window (was "Empty")
 --   :RelationView [sym] open the window and show relations of sym/<cword>
 --   :RelationViewToggle same as F3
+--   :RelationViewBoth   both directions at once (the default)
+--   :RelationViewCalls  the Calls direction as an expandable tree
 --
 -- Inside the panel:
 --   <Enter> jump to the call site   o  jump but keep focus in the panel
 --   double click            jump to the clicked entry in the edit window
 --   mouse button 4 / 5      back / forward, like <C-o> / <C-i>
---   d       switch direction: Callers <-> Calls (SI's Relation window)
+--   d       cycle direction: both -> Callers -> Calls (SI's Relation window
+--           switches direction the same way; 'both' shows the other
+--           direction as a flat list you can jump into but not expand)
 --   <Space> expand/collapse the caller under the cursor ( + / - work too)
 --   *  expand the whole tree (bounded by max_depth/max_nodes)
 --   x  export the current tree as an HTML graph and open it in a browser
@@ -265,13 +275,39 @@ local s = {
   warned = false,
 }
 
--- which direction the relation window is showing. Read at query time, not at
--- load time, so g:relationview_relation set later in a config still counts.
-local function relation()
-  if s.relation then
-    return s.relation
+-- 관계 창이 보여 주는 방향. 질의 시점에 읽는다(로드 시점이 아니라). 그래야
+-- 설정 파일 뒤쪽에서 g:relationview_relation 을 바꿔도 반영된다.
+--
+--   'both'    (기본) Callers 트리 + Calls 평면 목록을 한 패널에
+--   'callers' 누가 이 심볼을 부르나 - 확장 가능한 트리
+--   'callees' 이 심볼이 무엇을 부르나 - 확장 가능한 트리
+--
+-- SI 의 Relation window 는 방향을 버튼으로 바꾸지만, 한쪽만 보이면 반대쪽이
+-- 있다는 걸 모르고 지나치기 쉽다. 그래서 기본은 양쪽을 같이 띄우고, d 로
+-- 한쪽을 트리로 펼치도록 했다.
+local function relation_mode()
+  local v = s.relation or cfg('relation', 'both')
+  if v == 'callees' or v == 'callers' or v == 'both' then
+    return v
   end
-  return (cfg('relation', 'callers') == 'callees') and 'callees' or 'callers'
+  return 'both'
+end
+
+-- 확장 가능한 트리로 그릴 방향
+local function relation()
+  return relation_mode() == 'callees' and 'callees' or 'callers'
+end
+
+-- 'both' 에서 덧붙는 두 번째(평면) 섹션의 방향. 아니면 nil.
+local function relation_extra()
+  return relation_mode() == 'both' and 'callees' or nil
+end
+
+-- 캐시 키. 방향과 'both' 여부가 다르면 다른 트리다.
+local function tree_key(sym, root, rel, extra)
+  return 'S\0' .. ((rel or relation()) == 'callees' and 'C\0' or '')
+      .. (((extra ~= nil) and extra or relation_extra()) and 'B\0' or '')
+      .. sym .. '\0' .. root
 end
 
 
@@ -1693,10 +1729,12 @@ local function header(sym, note)
   if s.pinned then flags[#flags + 1] = 'PINNED' end
   if not s.auto then flags[#flags + 1] = 'auto:off' end
   local tail = #flags > 0 and ('  [' .. table.concat(flags, ', ') .. ']') or ''
+  local mode = relation_mode()
+  local dir = mode == 'both' and 'both' or (mode == 'callees' and 'calls' or 'callers')
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
     '  [⏎/^⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
-      '[d]calls/callers [c]ctx [p]pin [r]refresh [q]close',
+      '[d]dir:' .. dir .. ' [c]ctx [p]pin [r]refresh [q]close',
   }
 end
 
@@ -2558,14 +2596,26 @@ render_tree = function()
       raw('  ' .. t.type_note)
     end
 
+    -- SI 는 타입을 고르면 멤버를 전부 나열한다. 커널 구조체는 멤버가 수십
+    -- 개라 그 목록만으로 패널이 가득 차므로 기본은 접어 둔다.
+    --   let g:relationview_members = 1   " 다시 나열
+    -- 목록을 껐어도, 특정 멤버나 enum 상수를 골라 들어온 경우에는 그 한 줄만
+    -- 보여 준다. 그게 없으면 무엇을 골랐는지가 화면에서 사라진다.
+    local show_members = cfg('members', 0) ~= 0
+    local mlist, mtitle = t.members, 'Members'
+    if not show_members then
+      local one = (t.focus_member and t.members)
+          and find_member(t.members, t.focus_member) or nil
+      mlist, mtitle = one and { one } or nil, 'Member'
+    end
     -- members only exist once the type definition was found and parsed
-    if t.def then
+    if t.def and (show_members or mlist) then
       raw('')
-      raw(section_line('Members', t.members and #t.members or nil))
-      if not t.members or #t.members == 0 then
+      raw(section_line(mtitle, mlist and #mlist or nil))
+      if not mlist or #mlist == 0 then
         raw('  ' .. (t.members_note or '(none)'))
       else
-        for _, m in ipairs(t.members) do
+        for _, m in ipairs(mlist) do
           local r = row('  ' .. m.name, t.def.path, m.line, m.text,
             { loc = { path = t.def.path, line = m.line, sym = m.name } },
             m.name)
@@ -2665,6 +2715,40 @@ render_tree = function()
     -- lower bound: the query is capped, the real total may be larger
     raw(string.format('  … %d more refs%s  (:Gtags -r %s)', t.truncated,
       t.capped and '+' or '', t.sym))
+  end
+
+  -- 'both': 반대 방향을 평면 목록으로 덧붙인다. 점프는 되고 확장은 안 된다
+  -- (확장하려면 d 로 그 방향을 트리로 바꾼다). 아직 오는 중이면 그렇게 적어
+  -- 두어야 목록이 없는 것과 구별된다.
+  if t.extra_rel then
+    local etitle = t.extra_rel == 'callees' and 'Calls' or 'Callers'
+    raw('')
+    if t.extra_pending then
+      raw(section_line(etitle .. ' …'))
+      raw('  (읽는 중)')
+    else
+      local ex = t.extra or {}
+      raw(section_line(etitle, #ex))
+      if #ex == 0 then
+        raw('  (none)')
+      else
+        local cap = cfg('max_extra', 40)
+        local shown = math.min(#ex, cap)
+        for i = 1, shown do
+          local nd = ex[i]
+          local branch = (i == shown) and '└─' or '├─'
+          row('  ' .. branch .. ' · ' .. nd.label,
+            nd.site.path, nd.site.line, nd.site.text,
+            { loc = { path = nd.site.path, line = nd.site.line,
+                      sym = nd.ref_sym } },
+            nd.label)
+        end
+        if #ex > shown then
+          raw(string.format('     … %d more  ([d] 로 트리로 펼침)',
+            #ex - shown))
+        end
+      end
+    end
   end
 
   render_rows(t, rows)
@@ -3369,6 +3453,32 @@ end
 -- mtime is the GTAGS mtime captured when the query STARTED: if the database
 -- was rebuilt mid-query the result may mix old and new data, so render it
 -- but never cache it
+-- 'both' 모드의 두 번째 섹션: 트리와 반대 방향을 평면 목록으로 덧붙인다.
+-- 트리 확장 로직은 한 방향만 다루므로 여기서는 노드를 만들되 자식은 펼치지
+-- 않는다. d 로 방향을 바꾸면 같은 목록이 완전한 트리가 된다.
+--
+-- t 는 캐시에 들어간 바로 그 테이블이라, 여기서 t.extra 를 채우면 캐시된
+-- 값도 같이 갱신된다. 따로 다시 넣을 필요가 없다.
+local function fetch_extra(gen, t)
+  if not (t and t.extra_pending) then
+    return
+  end
+  local alive = function() return gen == s.gen end
+  fetch_callees(t.root, t.mtime, t.sym, alive, function(entries)
+    if gen ~= s.gen or s.tree ~= t then
+      return
+    end
+    t.extra_pending = nil
+    if not entries then
+      -- 함수가 아니거나 본문을 못 읽었다: Calls 섹션 자체를 그리지 않는다
+      t.extra_rel = nil
+    else
+      t.extra = make_nodes(entries, nil, t.sym)
+    end
+    render_tree()
+  end, t.def and t.def.path or nil)
+end
+
 local function finish(gen, sym, root, mtime, data)
   if gen ~= s.gen then
     return
@@ -3388,12 +3498,20 @@ local function finish(gen, sym, root, mtime, data)
     capped = (data.refs_total or 0) >= REF_STREAM_CAP,
     nodes = make_nodes(entries, nil, sym),
   }
+  -- Callers 트리 옆에 Calls 를 덧붙일지. 정의가 있어야(=함수여야) 본문을
+  -- 읽을 수 있으므로 정의가 없으면 애초에 시도하지 않는다.
+  t.extra_rel = relation_extra()
+  if t.extra_rel and t.relation == 'callers' and data.def then
+    t.extra_pending = true
+  else
+    t.extra_rel = nil
+  end
   if gtags_mtime(root) == mtime then
-    cache_put('S\0' .. (t.relation == 'callees' and 'C\0' or '')
-      .. sym .. '\0' .. root, mtime, t)
+    cache_put(tree_key(sym, root, t.relation, t.extra_rel), mtime, t)
   end
   s.tree = t
   render_tree()
+  fetch_extra(gen, t)
 end
 
 -- a type NAME -> the definition that really has a body. Follows
@@ -3683,8 +3801,7 @@ function update(sym, srcfile, force, manual, ctx)
     if not force and not (ctx and ctx.buf) then
       -- only the caller tree is cached: type/variable views depend on the
       -- cursor's function, which the key does not capture
-      local hit = cache_get('S\0' .. (relation() == 'callees' and 'C\0' or '')
-        .. sym .. '\0' .. root, mtime)
+      local hit = cache_get(tree_key(sym, root), mtime)
       if hit then
         s.note = nil
         s.tree = hit -- expansions done earlier on this tree are kept
@@ -4466,9 +4583,13 @@ function A.refresh()
   end
 end
 
--- SI 의 Relation window 방향 전환: Callers <-> Calls
+-- SI 의 Relation window 방향 전환. both -> callers -> callees -> both.
+-- both 는 양쪽을 같이 보여 주고(Calls 는 평면), 단일 방향은 그 방향을
+-- 확장 가능한 트리로 보여 준다.
+local RELATION_CYCLE = { both = 'callers', callers = 'callees', callees = 'both' }
+
 function A.toggle_relation()
-  s.relation = (relation() == 'callees') and 'callers' or 'callees'
+  s.relation = RELATION_CYCLE[relation_mode()] or 'both'
   update_header()
   local t = s.tree
   local sym = s.sym or (t and t.sym)
@@ -4660,9 +4781,16 @@ local function open_and_query(arg)
 end
 
 api.nvim_create_user_command('RelationView', function(o)
-  s.relation = 'callers'
+  -- 설정된 기본 방향으로 되돌린다(g:relationview_relation). 예전에는 여기서
+  -- 'callers' 를 못박아서 그 설정이 F3 이외의 경로에서 무시되었다.
+  s.relation = nil
   open_and_query(o.args)
-end, { nargs = '?', desc = 'Source Insight style relation window (callers)' })
+end, { nargs = '?', desc = 'Source Insight style relation window' })
+
+api.nvim_create_user_command('RelationViewBoth', function(o)
+  s.relation = 'both'
+  open_and_query(o.args)
+end, { nargs = '?', desc = 'Relation window, Callers tree + Calls list' })
 
 -- the other direction: what this function calls. cscope's 'd' query, which
 -- nvim dropped along with cscope support.

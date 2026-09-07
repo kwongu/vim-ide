@@ -426,10 +426,23 @@ Still missing, in the order it costs you:
 
 ### Both directions
 
-`d` in the panel switches between **Callers** (who calls this) and **Calls**
-(what this calls) - SI's Relationship dropdown. gtags cannot answer the
-second one, since GRTAGS indexes references by name rather than by containing
-function, so the Calls direction reads the function's body with treesitter:
+A function opens with **both** directions on screen: the **Callers** tree
+(who calls this) and, under it, a flat **Calls** list (what this calls) -
+SI's Relationship dropdown, except you do not have to know it is there.
+
+`d` cycles which one is the expandable tree: `both` -> `Callers` -> `Calls`
+-> `both`, and the header says which you are in (`[d]dir:both`). In `both`
+the second list is jump-only; press `d` once and it becomes a full tree.
+`<Leader><Leader>d` goes straight to the Calls tree.
+
+```vim
+let g:relationview_relation = 'both'   " 'both' (default) / 'callers' / 'callees'
+let g:relationview_max_extra = 40      " rows in the flat second list
+```
+
+gtags cannot answer the Calls direction, since GRTAGS indexes references by
+name rather than by containing function, so it reads the function's body
+with treesitter:
 find the definition, collect its `call_expression`s in source order, and
 resolve each name with the same `global -d` the Definition row uses, so a row
 points at the callee's own definition and the tree grows downwards as you
@@ -438,10 +451,26 @@ readable (a prototype, a macro, a function outside the index) simply stops
 being expandable.
 
 ```vim
-let g:relationview_relation = 'callees'   " start in the Calls direction
 let g:relationview_max_callees = 200      " per function
-:RelationViewCalls [symbol]               " or \\d on the symbol under the cursor
+:RelationViewBoth  [symbol]               " both, the default
+:RelationViewCalls [symbol]               " the Calls tree, or \\d on the cursor
 ```
+
+### The member list is folded away
+
+Selecting a `struct`, `union` or `enum` used to list every member, and a
+kernel struct has dozens - the list was the whole panel. It is off by
+default now; the definition row is what you get, and the one member (or enum
+constant) you actually selected is still shown on its own so you can see
+what you picked.
+
+```vim
+let g:relationview_members = 1   " list them all again
+```
+
+Nothing else changed: `msg->cmd` still resolves through the base variable's
+type to the member's own declaration, and an enum constant still opens on
+its enum.
 
 ## Reference highlight (nvim only)
 
