@@ -83,6 +83,9 @@ Plug 'tpope/vim-unimpaired'
 Plug 'preservim/nerdcommenter'
 Plug 'vim-airline/vim-airline'
 Plug 'vim-airline/vim-airline-themes'
+" Source Insight 기본 테마(순백 배경 + 진한 네이비 키워드 + 초록 주석)에
+" 가장 가까운 라이트 테마. 적용은 파일 끝의 '테마' 절에서 한다.
+Plug 'NLKNguyen/papercolor-theme'
 Plug 'inkarkat/vim-ingo-library'
 Plug 'inkarkat/vim-mark'
 Plug 'ervandew/supertab'
@@ -1429,9 +1432,56 @@ set mouse=a
 set path+=/root/work/include,/usr/include,/usr/local/include,/usr/src/include
 set path+=./include,./include/linux
 
+"==============================================================================
+"= 테마 세 가지를 g:vimide_theme 로 고른다.
+"=
+"=   'si'     Source Insight 기본 배색 그대로 (~/.vim/colors/sourceinsight.vim)
+"=            순백 배경 + 검정 본문 + 네이비 볼드 키워드 + 초록 이탤릭 주석
+"=            + 마룬 문자열. Treesitter(@...) 그룹까지 같은 배색.
+"=   'light'  PaperColor(light) - 기성 라이트 테마 중 SI 에 가장 가깝다
+"=   'dark'   예전 jellybeans 어두운 화면
+"=
+"=   let g:vimide_theme = 'light'   " ~/.vimrc 보다 먼저 읽히는 곳에서
+"=   :VimIdeTheme si / light / dark " 실행 중에 바꾸기
+"=
+"= 24bit 색이 있어야 팔레트가 제대로 나온다. 터미널이 truecolor 를 알리지
+"= 않으면(예: 오래된 SSH 세션) 256색으로 그대로 동작한다.
+"==============================================================================
+let g:vimide_theme = get(g:, 'vimide_theme', 'si')
+
+function! s:VimIdeApplyTheme(which) abort
+    let g:vimide_theme = a:which
+    if has('termguicolors') && ($COLORTERM ==# 'truecolor' || $COLORTERM ==# '24bit')
+        set termguicolors
+    endif
+    if a:which ==# 'si'
+        set background=light
+        silent! colorscheme sourceinsight
+        let g:airline_theme = 'papercolor'
+    elseif a:which ==# 'light'
+        set background=light
+        silent! colorscheme PaperColor
+        let g:airline_theme = 'papercolor'
+    else
+        set background=dark
+        silent! colorscheme jellybeans
+        let g:airline_theme = 'hybrid'
+    endif
+    if exists('*airline#switch_theme')
+        silent! call airline#switch_theme(g:airline_theme)
+    endif
+endfunction
+
+command! -nargs=1 -complete=customlist,s:VimIdeThemeComplete VimIdeTheme
+            \ call s:VimIdeApplyTheme(<q-args>)
+function! s:VimIdeThemeComplete(a, l, p) abort
+    return filter(['si', 'light', 'dark'], 'v:val =~ "^" . a:a')
+endfunction
+
 "colorscheme desertEx
 "colorscheme badwolf
-colorscheme jellybeans
+"colorscheme jellybeans        " g:vimide_theme = 'dark' 가 이걸 쓴다
+call s:VimIdeApplyTheme(g:vimide_theme)
 
 "==============================================================================
 "= Cursor line
@@ -1444,14 +1494,28 @@ colorscheme jellybeans
 set cursorline
 
 function! s:RvCursorLineColors() abort
-    highlight CursorLine     term=NONE cterm=NONE ctermbg=238 guibg=#343a45
-    highlight CursorLineNr   cterm=bold ctermbg=238 ctermfg=117
-                \ gui=bold guibg=#343a45 guifg=#87d7ff
-    " the relation/context windows use a slightly stronger bar for the row
-    " under the panel cursor (see ~/.vim/plugin/relationview.lua)
-    highlight RvCursorLine   cterm=NONE ctermbg=240 guibg=#4e5561
-    highlight RvCursorLineNr cterm=bold ctermbg=240 ctermfg=117
-                \ gui=bold guibg=#4e5561 guifg=#87d7ff
+    " sourceinsight 테마는 이 색들을 스스로 정한다 (SI 배색의 일부)
+    if get(g:, 'colors_name', '') ==# 'sourceinsight'
+        return
+    endif
+    if &background ==# 'light'
+        " 흰 배경에서는 어두운 띠가 오히려 글자를 덮는다: 아주 옅은 회청색
+        highlight CursorLine     term=NONE cterm=NONE ctermbg=254 guibg=#e4e4e4
+        highlight CursorLineNr   cterm=bold ctermbg=254 ctermfg=24
+                    \ gui=bold guibg=#e4e4e4 guifg=#005f87
+        " the relation/context windows use a slightly stronger bar for the row
+        " under the panel cursor (see ~/.vim/plugin/relationview.lua)
+        highlight RvCursorLine   cterm=NONE ctermbg=252 guibg=#d0d0d0
+        highlight RvCursorLineNr cterm=bold ctermbg=252 ctermfg=24
+                    \ gui=bold guibg=#d0d0d0 guifg=#005f87
+    else
+        highlight CursorLine     term=NONE cterm=NONE ctermbg=238 guibg=#343a45
+        highlight CursorLineNr   cterm=bold ctermbg=238 ctermfg=117
+                    \ gui=bold guibg=#343a45 guifg=#87d7ff
+        highlight RvCursorLine   cterm=NONE ctermbg=240 guibg=#4e5561
+        highlight RvCursorLineNr cterm=bold ctermbg=240 ctermfg=117
+                    \ gui=bold guibg=#4e5561 guifg=#87d7ff
+    endif
 endfunction
 
 call s:RvCursorLineColors()

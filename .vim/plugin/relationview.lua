@@ -270,6 +270,7 @@ local NS_CTX = api.nvim_create_namespace('RelationViewCtxSym')
 -- highlights, so this runs again on every ColorScheme event. All groups are
 -- 'default', so anything set in .vimrc keeps winning.
 local function set_highlights()
+  local light = vim.o.background == 'light'
   local hl = {
     RvHeader = { link = 'Title' },
     RvHint = { link = 'Comment' },
@@ -279,14 +280,23 @@ local function set_highlights()
     RvLoc = { link = 'Directory' },
     RvDim = { link = 'Comment' },
     RvTree = { link = 'Comment' },
-    RvCursorSym = { fg = '#87d7ff', ctermfg = 117, bold = true },
+    -- pale sky blue disappears on a white background: on a light theme the
+    -- same role is played by a strong blue
+    RvCursorSym = light and { fg = '#005f87', ctermfg = 24, bold = true }
+        or { fg = '#87d7ff', ctermfg = 117, bold = true },
+    -- where a jump landed. This one carries its own background, so the same
+    -- sky blue box reads on either theme
     RvCtxSym = { fg = '#101820', bg = '#87d7ff', ctermfg = 16,
       ctermbg = 117, bold = true },
     -- the row the panel cursor is on: a visible bar, not the barely-there
-    -- one most dark colorschemes ship
-    RvCursorLine = { bg = '#4e5561', ctermbg = 240 },
-    RvCursorLineNr = { fg = '#87d7ff', bg = '#4e5561', ctermfg = 117,
-      ctermbg = 240, bold = true },
+    -- one most colorschemes ship
+    RvCursorLine = light and { bg = '#d0d0d0', ctermbg = 252 }
+        or { bg = '#4e5561', ctermbg = 240 },
+    RvCursorLineNr = light
+        and { fg = '#005f87', bg = '#d0d0d0', ctermfg = 24, ctermbg = 252,
+          bold = true }
+        or { fg = '#87d7ff', bg = '#4e5561', ctermfg = 117, ctermbg = 240,
+          bold = true },
   }
   for name, spec in pairs(hl) do
     spec.default = true
@@ -4287,6 +4297,8 @@ api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' },
   { group = group, callback = watch_unpin })
 api.nvim_create_autocmd('ColorScheme',
   { group = group, callback = set_highlights })
+api.nvim_create_autocmd('OptionSet',
+  { group = group, pattern = 'background', callback = set_highlights })
 
 -- the column widths (and therefore how much of each path fits) come from
 -- the panel's size, so a resize has to lay the rows out again

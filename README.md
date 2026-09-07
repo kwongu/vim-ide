@@ -178,6 +178,27 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 9 or a: Find places where this symbol is assigned a value
 ```
 
+## Theme
+
+Three, picked with `g:vimide_theme` (or `:VimIdeTheme <name>` while running):
+
+| | |
+|---|---|
+| `si` *(default)* | Source Insight's own colours: white background, black body text, navy bold keywords, green italic comments, maroon strings. `.vim/colors/sourceinsight.vim` - the palette is one table at the top of that file, and the treesitter (`@...`) groups are mapped to it so C and C++ look the same with nvim-treesitter on |
+| `light` | PaperColor (light) - the closest ready-made light theme, though its keywords are pink and its comments grey |
+| `dark` | jellybeans, what this configuration used before |
+
+```vim
+let g:vimide_theme = 'dark'      " in a file read before ~/.vimrc
+:VimIdeTheme si                  " or just switch now
+```
+
+24-bit colour is turned on when the terminal advertises it (`$COLORTERM`);
+without that the themes fall back to their 256-colour approximations. The
+relation window follows whichever theme is on - its panel is a list, not
+code, so paths and tree glyphs stay grey rather than comment-green, and the
+sky blue box on a jump landing is the same in all three.
+
 ## Project files and presets (nvim only)
 
 `~/.vim/plugin/projectfiles.lua` decides WHICH files are indexed. There is no
