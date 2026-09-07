@@ -54,11 +54,12 @@
 (function_declarator
   declarator: (field_identifier) @si.declaration)
 
-;; enum 값은 그 자리에서 정의된다
+;; enum 요소는 그 자리에서 정의된다. 상수 매크로(@constant)와 색을 따로
+;; 줘야 해서 전용 캡처를 쓴다.
 (enum_specifier
   (enumerator_list
     (enumerator
-      name: (identifier) @si.declaration)))
+      name: (identifier) @si.declaration.enumconst)))
 
 ;; 타입 이름은 '정의하는 자리'에서만 (본문에서 쓰는 자리는 밑줄 없음)
 (type_definition
@@ -91,12 +92,17 @@
 (labeled_statement
   (statement_identifier) @si.declaration.function)
 
-;; -- #ifdef/#if defined() 의 조건 이름 -----------------------------------
+;; -- #ifdef/#ifndef/#if defined() 의 조건 이름 ----------------------------
 ;; nvim-treesitter 는 이 이름을 코드 안의 상수 매크로(GFP_KERNEL 같은)와
-;; 똑같이 @constant 로 잡는다. SI 는 앞의 지시문과 같은 색으로 칠하므로
-;; (빨강이 아니라 네이비) 따로 구분해 준다.
+;; 똑같이 @constant 로 잡는다. 색을 따로 주고 싶을 때가 있어 전용 캡처를
+;; 둔다 (지금은 상수 매크로와 같은 옅은 빨강).
 (preproc_ifdef
   name: (identifier) @si.directive.cond)
+
+((preproc_call
+  directive: (preproc_directive) @_d
+  argument: (preproc_arg) @si.directive.cond)
+  (#any-of? @_d "#ifndef" "#ifdef"))
 
 (preproc_defined
   (identifier) @si.directive.cond)

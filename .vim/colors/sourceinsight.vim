@@ -97,6 +97,8 @@ else
   "   함수형 매크로, #ifdef 조건         네이비 볼드
   "   주석 보라 #800080, 문자열 마룬 + 연노랑
   "   #include / #define 은 초록, #if/#ifdef/#endif 는 네이비 볼드
+  "   #ifdef/#ifndef 의 조건 이름은 옅은 빨강 (상수 매크로와 같은 색)
+  "   enum 요소는 네이비 볼드, '=' 같은 연산자는 초록, 값은 옅은 빨강
   let s:c.control  = s:c.keyword
   let s:c.type     = ['#008000', 28,  'darkgreen']
   let s:c.decl     = s:c.keyword
@@ -195,7 +197,7 @@ call s:hi('Statement',     'control', '',          'bold')
 call s:hi('Conditional',   'control', '',          'bold')
 call s:hi('Repeat',        'control', '',          'bold')
 call s:hi('Label',         'label',   '',          'bold')
-call s:hi('Operator',      s:variant ==# 'factory' ? 'ref' : 'fg', '', '')
+call s:hi('Operator',      'ref',     '',          '')
 call s:hi('Keyword',       'keyword', '',          s:kw)
 call s:hi('Exception',     'control', '',          'bold')
 call s:hi('PreProc',       'preproc', '',          '')
@@ -325,7 +327,7 @@ let s:ts = {
       \ 'property':           ['fg',      ''],
       \ 'field':              ['fg',      ''],
       \ 'label':              ['label',   'bold'],
-      \ 'operator':           [s:variant ==# 'factory' ? 'ref' : 'fg', ''],
+      \ 'operator':           ['ref',     ''],
       \ 'punctuation':        ['fg',      ''],
       \ 'punctuation.bracket':['fg',      ''],
       \ 'punctuation.delimiter': ['delim', ''],
@@ -351,7 +353,8 @@ endfor
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
 " #ifdef/#if defined() 의 조건 이름: 지시문과 같은 색 (코드 안의 상수
 " 매크로와 캡처가 같아서 확장 쿼리로 따로 잡아 낸다)
-call s:hi('@si.directive.cond', 'preproc', '', s:variant ==# 'factory' ? 'bold' : 'bold')
+call s:hi('@si.directive.cond', s:variant ==# 'factory' ? 'preproc' : 'number',
+      \ '', s:variant ==# 'factory' ? 'bold' : '')
 
 " 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
 " 함수/구조체/enum/typedef 의 '정의된 이름' 강조 (위 g:..._emphasis)
@@ -366,12 +369,15 @@ if s:variant ==# 'factory'
   call s:hi('@si.declaration.function',  s:name_fg, s:name_bg,
         \ s:emph ==# 'off' ? 'bold' : 'bold')
   call s:hi('@si.declaration.parameter', 'decl', '', 'bold,underline')
+  call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
 else
   " 화면 기준: 함수/타입 정의 이름은 네이비 볼드, 변수·파라미터 선언은
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   call s:hi('@si.declaration',           '',     '', 'underline')
   call s:hi('@si.declaration.function',  s:name_fg, s:name_bg, s:name_attr)
   call s:hi('@si.declaration.parameter', '',     '', 'underline')
+  " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
+  call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
 endif
 
 " LSP 의미 토큰도 같은 배색으로
