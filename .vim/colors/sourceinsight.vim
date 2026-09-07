@@ -23,6 +23,7 @@ let s:c = {
       \ 'type':      ['#0000a8', 19,  'darkblue'],
       \ 'comment':   ['#008000', 28,  'darkgreen'],
       \ 'string':    ['#800000', 88,  'darkred'],
+      \ 'stringbg':  ['#ffffbb', 230, 'yellow'],
       \ 'number':    ['#800000', 88,  'darkred'],
       \ 'preproc':   ['#000080', 18,  'darkblue'],
       \ 'macro':     ['#7f007f', 90,  'darkmagenta'],
@@ -102,8 +103,9 @@ highlight! link CursorIM Cursor
 " ── 코드: SI 는 색을 적게 쓴다 ─────────────────────────────────────────────
 call s:hi('Comment',       'comment', '',          '')
 call s:hi('Constant',      'number',  '',          '')
-call s:hi('String',        'string',  '',          '')
-call s:hi('Character',     'string',  '',          '')
+" SI 의 String 스타일은 글자색뿐 아니라 연노랑 배경까지 포함한다
+call s:hi('String',        'string',  'stringbg',  '')
+call s:hi('Character',     'string',  'stringbg',  '')
 call s:hi('Number',        'number',  '',          '')
 call s:hi('Boolean',       'keyword', '',          'bold')
 call s:hi('Float',         'number',  '',          '')
@@ -128,7 +130,7 @@ call s:hi('StorageClass',  'keyword', '',          'bold')
 call s:hi('Structure',     'keyword', '',          'bold')
 call s:hi('Typedef',       'fg',      '',          '')
 call s:hi('Special',       'fg',      '',          '')
-call s:hi('SpecialChar',   'string',  '',          '')
+call s:hi('SpecialChar',   'string',  'stringbg',  '')
 call s:hi('Delimiter',     'fg',      '',          '')
 call s:hi('SpecialComment','comment', '',          'bold')
 call s:hi('Debug',         'macro',   '',          '')
@@ -156,7 +158,7 @@ call s:hi('RvName',         'fg',      '',           '')
 call s:hi('RvLoc',          'linenr',  '',           '')
 call s:hi('RvDim',          'linenr',  '',           '')
 call s:hi('RvTree',         'linenr',  '',           '')
-call s:hi('RvHint',         'linenr',  '',           'italic')
+call s:hi('RvHint',         'linenr',  '',           '')
 call s:hi('RvMarker',       'macro',   '',           '')
 call s:hi('RvCursorSym',    'keyword', '',           'bold')
 call s:hi('RvCursorLine',   '',        'sel',        '')
@@ -240,10 +242,18 @@ for [s:g, s:v] in items(s:ts)
   call s:hi('@' . s:g, s:v[0], '', s:v[1])
 endfor
 
+" 문자열은 연노랑 배경까지가 SI 의 String 스타일이다 (표는 글자색만 다룬다)
+for s:g in ['string', 'string.escape', 'string.special', 'string.special.path',
+      \ 'string.special.url', 'character', 'character.special']
+  call s:hi('@' . s:g, 'string', 'stringbg', '')
+endfor
+
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
-call s:hi('@si.declaration',          'fg',      '', 'underline')
-call s:hi('@si.declaration.function', 'fg',      '', 'bold,underline')
+" 색은 건드리지 않고 밑줄만 얹는다: 그래야 아래에서 이미 칠해진 색
+" (매크로 이름의 보라 등)이 살아 있고, 변수/함수는 본문 검정 그대로다
+call s:hi('@si.declaration',          '',        '', 'underline')
+call s:hi('@si.declaration.function', '',        '', 'bold,underline')
 
 " LSP 의미 토큰도 같은 배색으로
 highlight! link @lsp.type.class      @type
