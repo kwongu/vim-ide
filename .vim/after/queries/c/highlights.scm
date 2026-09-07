@@ -106,9 +106,11 @@
   name: (type_identifier) @si.declaration.function
   body: (enumerator_list))
 
-;; goto 레이블: 선언하는 자리만 ('goto x' 의 x 는 참조)
+;; goto 레이블: 선언하는 자리 ('goto x' 의 x 는 @label 로 잡힌다).
+;; SI 는 레이블을 빨강 볼드 밑줄로 그린다 - 선언 계열과 색이 다르므로
+;; 전용 캡처를 쓴다.
 (labeled_statement
-  (statement_identifier) @si.declaration.function)
+  (statement_identifier) @si.declaration.label)
 
 ;; -- #ifdef/#ifndef/#if defined() 의 조건 이름 ----------------------------
 ;; nvim-treesitter 는 이 이름을 코드 안의 상수 매크로(GFP_KERNEL 같은)와

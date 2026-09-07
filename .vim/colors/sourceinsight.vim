@@ -114,7 +114,8 @@ else
   let s:c.ref      = ['#008000', 28,  'darkgreen']
   let s:c.reflocal = s:c.fg
   let s:c.delim    = s:c.fg
-  let s:c.label    = s:c.keyword
+  " goto 레이블은 빨강 (SI 도 레이블만 빨강 볼드 밑줄로 그린다)
+  let s:c.label    = ['#ff5f5f', 203, 'red']
   let s:c.comment  = ['#800080', 90,  'darkmagenta']
   " 상수 매크로/숫자: 굵어 보이지 않는 얇은 빨강. 어두운 빨강(#cc5555)은
   " 획이 두껍게 읽히고, 새빨강(#ff0000)은 눈에 세다. 이 값은 흰 배경 대비
@@ -192,8 +193,15 @@ call s:hi('SpecialKey',    'ui',      '',          '')
 call s:hi('Whitespace',    'ui',      '',          '')
 call s:hi('Conceal',       'linenr',  '',          '')
 call s:hi('QuickFixLine',  '',        'sel',       '')
-highlight Cursor guifg=#ffffff guibg=#000000
+" 커서. 터미널 커서 색은 guicursor 가 가리키는 하이라이트 그룹에서 오므로
+" ~/.vimrc 의 s:VimIdeApplyTheme() 이 guicursor 에 'Cursor' 를 붙여 준다.
+" 색을 바꾸려면: let g:sourceinsight_cursor = '#0087ff'
+let s:cur = get(g:, 'sourceinsight_cursor', '#000000')
+execute 'highlight Cursor guifg=' . s:c.bg[0] . ' guibg=' . s:cur
+            \ . ' ctermfg=' . s:c.bg[1] . ' ctermbg=16'
+highlight! link lCursor Cursor
 highlight! link CursorIM Cursor
+highlight! link TermCursor Cursor
 
 " ── 코드: SI 는 색을 적게 쓴다 ─────────────────────────────────────────────
 call s:hi('Comment',       'comment', '',          '')
@@ -391,6 +399,7 @@ if s:variant ==# 'factory'
         \ s:emph ==# 'off' ? 'bold' : 'bold')
   call s:hi('@si.declaration.parameter', 'decl', '', 'bold,underline')
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
+  call s:hi('@si.declaration.label',     'label', '', 'bold,underline')
 else
   " 화면 기준: 함수/타입 정의 이름은 네이비 볼드, 변수·파라미터 선언은
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
@@ -399,6 +408,7 @@ else
   call s:hi('@si.declaration.parameter', '',     '', 'underline')
   " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
+  call s:hi('@si.declaration.label',     'label', '', 'bold,underline')
 endif
 
 " LSP 의미 토큰도 같은 배색으로

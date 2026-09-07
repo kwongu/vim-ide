@@ -1454,6 +1454,10 @@ function! s:VimIdeApplyTheme(which) abort
     if has('termguicolors') && ($COLORTERM ==# 'truecolor' || $COLORTERM ==# '24bit')
         set termguicolors
     endif
+    " 터미널 커서 색은 guicursor 가 가리키는 하이라이트 그룹에서 온다.
+    " 기본값은 그룹을 지정하지 않아 터미널 커서색이 그대로 쓰이고, 흰
+    " 배경에서는 거의 보이지 않는다. 모드마다 Cursor 를 붙여 준다.
+    set guicursor=n-v-c-sm:block-Cursor,i-ci-ve:ver25-Cursor,r-cr-o:hor20-Cursor,t:block-blinkon500-blinkoff500-TermCursor
     if a:which ==# 'si'
         set background=light
         silent! colorscheme sourceinsight
@@ -1466,6 +1470,9 @@ function! s:VimIdeApplyTheme(which) abort
         set background=dark
         silent! colorscheme jellybeans
         let g:airline_theme = 'hybrid'
+        highlight Cursor guifg=#151515 guibg=#f0f0f0 ctermfg=233 ctermbg=255
+        highlight! link lCursor Cursor
+        highlight! link TermCursor Cursor
     endif
     if exists('*airline#switch_theme')
         silent! call airline#switch_theme(g:airline_theme)

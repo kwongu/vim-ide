@@ -212,6 +212,13 @@ blue bar on the row under the cursor. The telescope pickers
 (`\fs`, `\fo`) are themed to match, including the navy bold on the
 characters your search actually matched.
 
+The cursor is a case of its own. Neovim colours the terminal cursor from the
+highlight group named in `'guicursor'`, and the default value names none for
+normal mode - so the terminal's own cursor colour is used, which on a white
+background is often invisible. The theme wires the group in and the cursor
+becomes a black block (nvim then emits `OSC 12`, which iTerm2 and friends
+honour); `let g:sourceinsight_cursor = '#0087ff'` for something more vivid.
+
 24-bit colour is turned on when the terminal advertises it (`$COLORTERM`);
 without that the themes fall back to their 256-colour approximations. The
 relation window follows whichever theme is on - its panel is a list, not
