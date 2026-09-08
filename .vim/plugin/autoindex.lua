@@ -562,8 +562,26 @@ local function marker_root(path)
   return found and vim.fs.dirname(found) or nil
 end
 
+local EXCLUDED, EXCLUDED_NAME = {}, {}
+for e in ('o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage'):gmatch('%S+') do
+  EXCLUDED[e] = true
+end
+for b in ('tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH core .DS_Store'):gmatch('%S+') do
+  EXCLUDED_NAME[b] = true
+end
+
+-- 기본은 '모든 파일'이다: 전부 색인 대상으로 보고 산출물/바이너리만 뺀다.
+-- projectfiles.lua 와 indexfiles.sh 의 같은 판정과 맞춰 두어야 한다.
+--   let g:autoindex_all_files = 0   " 예전처럼 확장자 허용목록만
 local function indexed_file(path)
   local base = path:match('([^/]+)$') or path
+  if cfg('all_files', 1) ~= 0 then
+    if EXCLUDED_NAME[base] then
+      return false
+    end
+    local e = base:match('%.([%w_]+)$')
+    return not (e and EXCLUDED[e:lower()])
+  end
   if INDEXED_NAME[base] then
     return true
   end

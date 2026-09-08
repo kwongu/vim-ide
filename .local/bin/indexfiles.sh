@@ -45,8 +45,63 @@ _alt() { printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | paste -sd'|' -; }
 # 통째로 갈아치우지 않고 덧붙이는 쪽이 흔하다
 EXTS="$EXTS ${INDEXFILES_EXTS_EXTRA:-}"
 NAMES="$NAMES ${INDEXFILES_NAMES_EXTRA:-}"
+
+# 기본은 '모든 파일'이다. 확장자 허용목록으로 고르면 새로운 종류가 나올
+# 때마다 목록을 늘려야 하고 그때까지 그 파일은 색인에 없다. 그래서 뒤집어서
+# 전부 넣고, 넣어서 해로운 것(산출물·바이너리)만 뺀다.
+#   INDEXFILES_ALL=0                    허용목록만 쓰기
+#   INDEXFILES_EXCLUDE_EXTS_EXTRA='log' 제외를 덧붙이기
+ALL=${INDEXFILES_ALL:-1}
+EXCL_EXTS=${INDEXFILES_EXCLUDE_EXTS-'o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage'}
+EXCL_NAMES=${INDEXFILES_EXCLUDE_NAMES-'tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH core .DS_Store'}
+EXCL_EXTS="$EXCL_EXTS ${INDEXFILES_EXCLUDE_EXTS_EXTRA:-}"
+EXCL_NAMES="$EXCL_NAMES ${INDEXFILES_EXCLUDE_NAMES_EXTRA:-}"
+PRUNE_DIRS=${INDEXFILES_PRUNE_DIRS-'.git .svn .hg .tags node_modules __pycache__ .repo .ccache'}
 EXT_ALT=$(_alt "$EXTS")
 NAME_ALT=$(_alt "$NAMES")
+EXCL_ALT=$(_alt "$EXCL_EXTS")
+EXCL_NAME_ALT=$(_alt "$EXCL_NAMES")
+EXCL_RE=''
+if [ -n "$EXCL_ALT" ]; then
+	EXCL_RE="\.($EXCL_ALT)$"
+fi
+if [ -n "$EXCL_NAME_ALT" ]; then
+	[ -n "$EXCL_RE" ] && EXCL_RE="$EXCL_RE|"
+	EXCL_RE="$EXCL_RE(^|/)($EXCL_NAME_ALT)$"
+fi
+[ -n "$EXCL_RE" ] || EXCL_RE='$^'
+
+# 무엇을 넣을지 정하는 곳을 하나로: 모든 파일 모드면 제외목록만, 아니면
+# 허용목록만 본다.
+# git ls-files / cscope.files 에는 디렉터리 가지치기가 적용되지 않는다
+# (find 는 -prune 으로 하지만 git 은 자기 목록을 그대로 준다). 보통은
+# .gitignore 가 걸러 주지만, 커밋된 node_modules 같은 것도 있다.
+filter_prune() {
+	if [ -z "$PRUNE_DIRS" ]; then
+		cat
+		return 0
+	fi
+	_pf=$(mktemp 2>/dev/null) || { cat; return 0; }
+	printf '%s\n' $PRUNE_DIRS > "$_pf"
+	awk -v pf="$_pf" '
+		BEGIN { while ((getline l < pf) > 0) if (l != "") p[++n] = l }
+		{ s = $0; sub(/^\.\//, "", s)
+		  split(s, seg, "/")
+		  for (i = 1; i < length(seg); i++)
+		    for (j = 1; j <= n; j++)
+		      if (seg[i] == p[j]) next
+		  print }'
+	rm -f "$_pf"
+}
+
+filter_types() {
+	if [ "$ALL" -eq 1 ]; then
+		grep -Eiv "$EXCL_RE"
+	else
+		grep -E "$EXT_RE"
+	fi
+}
+
 EXT_RE=''
 if [ -n "$EXT_ALT" ]; then
 	EXT_RE="\.($EXT_ALT)$"
@@ -117,18 +172,25 @@ elif [ -f .indexfiles ]; then
 elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# --others --exclude-standard: 아직 커밋하지 않은 새 파일도 색인 대상
 	# (.gitignore 는 그대로 존중한다)
-	git ls-files --cached --others --exclude-standard | grep -E "$EXT_RE" |
-		filter_nested
+	# 'core.quotepath=off': 이게 없으면 git 이 ASCII 밖의 이름을
+	# "\355\225\234…" 처럼 escape 해서 내놓고, 그 문자열로는 파일을
+	# 열 수도 색인할 수도 없다(한글 파일명이 그렇게 깨진다).
+	git -c core.quotepath=off ls-files --cached --others --exclude-standard |
+		filter_prune | filter_types | filter_nested
 elif [ -f cscope.files ]; then
-	grep -v '^[[:space:]]*$' cscope.files | filter_nested
+	grep -v '^[[:space:]]*$' cscope.files | filter_prune | filter_types |
+		filter_nested
 else
 	# 'set -f' 로 글로브를 끈 뒤에 쪼갠다. 이게 없으면 '-name *.java' 의
 	# '*.java' 가 셸에서 현재 디렉터리 기준으로 먼저 확장되어(-name Foo.java)
 	# 하위 디렉터리의 같은 확장자를 놓친다.
+	# 디렉터리 가지치기만 find 가 하고, 무엇을 넣을지는 filter_types 가 본다
 	set -f
-	# shellcheck disable=SC2046  # find_names 는 술어 목록을 의도적으로 쪼갠다
-	find . \( -name .git -o -name .svn -o -name node_modules \
-		-o -name .tags \) -prune -o \
-		-type f \( $(find_names) \) -print | filter_nested
+	prune=''
+	for d in $PRUNE_DIRS; do
+		[ -z "$prune" ] && prune="-name $d" || prune="$prune -o -name $d"
+	done
+	# shellcheck disable=SC2086  # prune 은 술어 목록이라 쪼개져야 한다
+	find . \( $prune \) -prune -o -type f -print | filter_types | filter_nested
 	set +f
 fi

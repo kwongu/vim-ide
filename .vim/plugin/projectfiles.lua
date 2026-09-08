@@ -115,6 +115,34 @@ local DEFAULT_NAMES = table.concat({
   'LICENSE NOTICE',
 }, ' ')
 
+-- 기본은 '모든 파일'이다. 확장자 허용목록으로 고르면 새 언어나 설정 파일이
+-- 나올 때마다 목록을 늘려야 하고, 그때까지 그 파일은 색인에 없다.
+-- 그래서 반대로 뒤집었다: 전부 넣고, 넣어서 해로운 것만 뺀다.
+--
+-- 빼는 것은 산출물과 바이너리다. 목록에 넣어도 열어 볼 일이 없고, 수만
+-- 개가 들어와 피커와 색인을 느리게 만든다(.o/.so/.png/.zip …).
+--
+--   let g:projectfiles_all_files = 0        " 예전처럼 허용목록만
+--   let g:projectfiles_exclude_exts_extra = 'log bak'
+local EXCLUDE_EXTS = table.concat({
+  'o a so ko obj lo la exe',
+  'dll dylib bin img elf hex bpf gz',
+  'bz2 xz zst lz4 zip tar tgz tbz',
+  'jar apk aar dex odex vdex rar 7z',
+  'iso dmg png jpg jpeg gif bmp ico',
+  'webp tiff tif psd svgz mp3 mp4 avi',
+  'mkv wav flac ogg opus webm pdf doc',
+  'docx xls xlsx ppt pptx odt ods pyc',
+  'pyo pyd class pdb ilk exp d cmd',
+  'pack idx swp swo swn ttf otf woff',
+  'woff2 eot db sqlite sqlite3 dat rom fw',
+  'uimage',
+}, ' ')
+local EXCLUDE_NAMES = table.concat({
+  'tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH',
+  'core .DS_Store',
+}, ' ')
+
 local EXT, BASE = {}, {}
 -- exts/names 를 통째로 갈아치우는 대신 덧붙이고 싶을 때가 대부분이다:
 --   let g:projectfiles_exts_extra = 'proto gn'
@@ -553,8 +581,30 @@ end
 -- ---------------------------------------------------------------------------
 -- expanding a preset into a file list
 -- ---------------------------------------------------------------------------
+local EXCL, EXCL_NAME = {}, {}
+for e in tostring(cfg('exclude_exts', EXCLUDE_EXTS)):gmatch('%S+') do
+  EXCL[e:lower()] = true
+end
+for e in tostring(cfg('exclude_exts_extra', '')):gmatch('%S+') do
+  EXCL[e:lower()] = true
+end
+for b in tostring(cfg('exclude_names', EXCLUDE_NAMES)):gmatch('%S+') do
+  EXCL_NAME[b] = true
+end
+for b in tostring(cfg('exclude_names_extra', '')):gmatch('%S+') do
+  EXCL_NAME[b] = true
+end
+
 local function indexed(path)
   local base = path:match('([^/]+)$') or path
+  if cfg('all_files', 1) ~= 0 then
+    -- 전부 넣고, 산출물/바이너리만 뺀다
+    if EXCL_NAME[base] then
+      return false
+    end
+    local e = base:match('%.([%w_]+)$')
+    return not (e and EXCL[e:lower()])
+  end
   if BASE[base] then
     return true
   end
@@ -641,18 +691,17 @@ local function expand_entry(root, entry)
     return indexed(abs) and { rel_to(root, abs) } or {}, true
   end
   local out = {}
-  local names = {}
-  for e in pairs(EXT) do
-    names[#names + 1] = "-name '*." .. e .. "'"
-  end
-  for b in pairs(BASE) do
-    names[#names + 1] = "-name '" .. b .. "'"
+  -- 파일은 전부 찾고 indexed() 로 걸른다: 무엇을 넣을지 정하는 곳이 하나여야
+  -- '모든 파일' 모드와 허용목록 모드가 어긋나지 않는다.
+  local prune = {}
+  for d in tostring(cfg('prune_dirs', '.git .svn .hg .tags node_modules __pycache__ .repo .ccache')):gmatch('%S+') do
+    prune[#prune + 1] = "-name '" .. d .. "'"
   end
   local cmd = "find " .. vim.fn.shellescape(abs) ..
-      " \\( -name .git -o -name .tags -o -name node_modules \\) -prune -o " ..
-      " -type f \\( " .. table.concat(names, ' -o ') .. " \\) -print 2>/dev/null"
+      " \\( " .. table.concat(prune, ' -o ') .. " \\) -prune -o " ..
+      " -type f -print 2>/dev/null"
   for _, l in ipairs(vim.fn.systemlist(cmd)) do
-    if l ~= '' then
+    if l ~= '' and indexed(l) then
       out[#out + 1] = rel_to(root, l)
     end
   end

@@ -362,6 +362,35 @@ generated lists, `projectfiles.lua` for presets, `autoindex.lua` for
 deciding whether a save is worth an index update. If they drift, auto
 mode and preset mode index different files.
 
+**Everything, minus what is not worth having.** An allowlist of extensions
+means every new kind of file is missing from the index until someone
+notices and adds it, so it is the other way round: every file goes in, and
+a denylist takes out the build output and binaries - `.o .so .ko .a`,
+archives, images, media, `.pyc`, `tags`, `GTAGS`, and the like. Those
+would be tens of thousands of entries nobody ever opens.
+
+Files with no extension are in, which is how `Makefile`, `Kconfig`,
+`INSTALL` and a bare script get there. So are names with spaces and
+non-ASCII names - `git ls-files` is run with `core.quotepath=off`, without
+which a Korean filename comes back as `"\355\225\234…"` and cannot be
+opened or indexed.
+
+Directories are pruned rather than filtered: `.git .svn .hg .tags
+node_modules __pycache__ .repo .ccache`. `out` and `build` are *not*
+pruned - in this tree `android/build/bazel` holds real sources.
+
+```vim
+let g:projectfiles_all_files = 0              " back to the allowlist below
+let g:projectfiles_exclude_exts_extra = 'log bak'
+let g:projectfiles_prune_dirs = '.git out build'
+```
+```sh
+INDEXFILES_ALL=0                              # the same, for the script
+INDEXFILES_EXCLUDE_EXTS_EXTRA='log'
+```
+
+The allowlist is still there for `all_files = 0`:
+
 ```
 sources     c cc cpp cxx h hh hpp hxx s S java kt kts rs aidl
 scripts     py pl sh bash zsh ksh awk lua vim tcl
@@ -373,15 +402,6 @@ link/misc   ld lds def map te pc
 by name     Makefile makefile GNUmakefile Kconfig Kbuild BUILD
             WORKSPACE Dockerfile README LICENSE NOTICE
 ```
-
-Names are matched as well as extensions because `Makefile` has none.
-`g:projectfiles_exts_extra` / `_names_extra` (and
-`INDEXFILES_EXTS_EXTRA` / `_NAMES_EXTRA`) append to these rather than
-replacing them, which is usually what you want.
-
-A wide set means a long list in a big tree - an Android checkout has tens
-of thousands of `.xml` alone. Trim with `g:projectfiles_exts` if that
-matters more than finding them.
 
 What gtags reads for *symbols* is a smaller set - C, C++, Java, assembler.
 The rest (`.py`, `.xml`, `.json`, `.bp`, `.bb`, `Makefile`, and `.dts`
