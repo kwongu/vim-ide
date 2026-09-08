@@ -24,7 +24,49 @@ set -e
 DIR=${1:-.}
 cd "$DIR"
 
-EXT_RE='\.\(dts\|dtsi\|c\|cpp\|cc\|h\|s\|S\|reg\)$'
+# 색인 목록에 넣을 파일. projectfiles.lua 와 autoindex.lua 의 같은 목록과
+# 맞춰 두어야 한다 - 어긋나면 auto 모드와 preset 모드가 서로 다른 파일을
+# 색인한다.
+#
+# 'Makefile' 처럼 확장자가 없는 것이 있어서 두 벌로 둔다.
+# gtags 가 심볼까지 읽는 것은 C/C++/Java/asm 정도이고, 나머지는 목록에만
+# 들어간다(찾아서 열 수는 있다). ctags 쪽은 python·java·make 도 읽는다.
+#
+#   INDEXFILES_EXTS / INDEXFILES_NAMES 로 바꿀 수 있다.
+# ':-' 가 아니라 '-' 다: 빈 값을 명시하면 그대로 비운다 (한쪽만 쓰고 싶을 때)
+EXTS=${INDEXFILES_EXTS-'c h cpp cc cxx hxx hh hpp s S dts dtsi reg java bp xml json py bb bbappend mk'}
+NAMES=${INDEXFILES_NAMES-'Makefile makefile Kconfig Kbuild'}
+
+# grep 용 정규식. 확장 정규식(grep -E)을 쓴다: POSIX 기본 정규식에서는
+# '$' 와 '^' 가 정규식의 맨 끝/맨 앞이 아니면 앵커가 아니라 그냥 문자라서,
+# '\.\(c\)$\|^\(Makefile\)$' 처럼 여러 대안에 앵커를 붙이면 마지막
+# 대안만 동작한다(실제로 그래서 .c/.java 가 하나도 걸리지 않았다).
+_alt() { printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | paste -sd'|' -; }
+EXT_ALT=$(_alt "$EXTS")
+NAME_ALT=$(_alt "$NAMES")
+EXT_RE=''
+if [ -n "$EXT_ALT" ]; then
+	EXT_RE="\.($EXT_ALT)$"
+fi
+if [ -n "$NAME_ALT" ]; then
+	[ -n "$EXT_RE" ] && EXT_RE="$EXT_RE|"
+	EXT_RE="$EXT_RE(^|/)($NAME_ALT)$"
+fi
+# 둘 다 비면 아무 것도 고르지 않는다(맞지 않는 정규식)
+[ -n "$EXT_RE" ] || EXT_RE='$^'
+
+# find 용 술어:  -name '*.c' -o -name '*.h' … -o -name 'Makefile' …
+find_names() {
+	first=1
+	for e in $EXTS; do
+		[ $first -eq 1 ] && first=0 || printf ' -o '
+		printf -- "-name *.%s" "$e"
+	done
+	for b in $NAMES; do
+		[ $first -eq 1 ] && first=0 || printf ' -o '
+		printf -- "-name %s" "$b"
+	done
+}
 
 # 하위에 자기 색인('.tags')을 가진 디렉터리는 별개의 프로젝트다. 그 밑의
 # 파일은 이 프로젝트의 목록에서 뺀다. 넣으면 같은 파일이 두 색인에 들어가고,
@@ -72,14 +114,18 @@ elif [ -f .indexfiles ]; then
 elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# --others --exclude-standard: 아직 커밋하지 않은 새 파일도 색인 대상
 	# (.gitignore 는 그대로 존중한다)
-	git ls-files --cached --others --exclude-standard | grep "$EXT_RE" |
+	git ls-files --cached --others --exclude-standard | grep -E "$EXT_RE" |
 		filter_nested
 elif [ -f cscope.files ]; then
 	grep -v '^[[:space:]]*$' cscope.files | filter_nested
 else
+	# 'set -f' 로 글로브를 끈 뒤에 쪼갠다. 이게 없으면 '-name *.java' 의
+	# '*.java' 가 셸에서 현재 디렉터리 기준으로 먼저 확장되어(-name Foo.java)
+	# 하위 디렉터리의 같은 확장자를 놓친다.
+	set -f
+	# shellcheck disable=SC2046  # find_names 는 술어 목록을 의도적으로 쪼갠다
 	find . \( -name .git -o -name .svn -o -name node_modules \
 		-o -name .tags \) -prune -o \
-		-type f \( -name '*.dts' -o -name '*.dtsi' -o -name '*.c' \
-		-o -name '*.cpp' -o -name '*.cc' -o -name '*.h' -o -name '*.s' \
-		-o -name '*.S' -o -name '*.reg' \) -print | filter_nested
+		-type f \( $(find_names) \) -print | filter_nested
+	set +f
 fi

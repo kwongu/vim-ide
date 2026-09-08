@@ -89,10 +89,16 @@ local function enabled()
   return cfg('gtags', 1) ~= 0
 end
 
--- the same extensions mktags.sh and indexfiles.sh use
-local INDEXED = {}
-for e in ('c h cpp cc s S dts dtsi reg'):gmatch('%S+') do
+-- the same set indexfiles.sh and projectfiles.lua use - keep the three in
+-- step, or a save updates the index for a file the list does not contain
+-- (or fails to update one it does). 'Makefile' has no extension, so names
+-- are matched too.
+local INDEXED, INDEXED_NAME = {}, {}
+for e in ('c h cpp cc cxx hxx hh hpp s S dts dtsi reg java bp xml json py bb bbappend mk'):gmatch('%S+') do
   INDEXED[e] = true
+end
+for b in ('Makefile makefile Kconfig Kbuild'):gmatch('%S+') do
+  INDEXED_NAME[b] = true
 end
 
 local function global_cmd()
@@ -557,7 +563,11 @@ local function marker_root(path)
 end
 
 local function indexed_file(path)
-  local ext = path:match('%.([%w_]+)$')
+  local base = path:match('([^/]+)$') or path
+  if INDEXED_NAME[base] then
+    return true
+  end
+  local ext = base:match('%.([%w_]+)$')
   return ext ~= nil and INDEXED[ext] == true
 end
 

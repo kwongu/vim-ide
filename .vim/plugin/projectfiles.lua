@@ -55,6 +55,9 @@
 --   g:projectfiles_width       view width (default: the context width)
 --   g:projectfiles_height      view height in its column (default 12)
 --   g:projectfiles_exts        indexed extensions (default as indexfiles.sh)
+--   g:projectfiles_names       indexed by exact name, for files with no
+--                              extension (default 'Makefile makefile
+--                              Kconfig Kbuild')
 --   g:projectfiles_symbol_db_max_mb
 --                              past this much GTAGS, ':ProjectSymbols'
 --                              wants a prefix instead of listing
@@ -84,9 +87,29 @@ local function cfg(name, default)
   return v
 end
 
-local EXT = {}
-for e in tostring(cfg('exts', 'c h cpp cc s S dts dtsi reg')):gmatch('%S+') do
+-- 색인 목록에 넣을 파일: 확장자로 고르는 것과, 이름 그대로 고르는 것.
+--
+-- 'Makefile' 처럼 확장자가 없는 파일이 있어서 두 벌이 필요하다.
+-- indexfiles.sh 와 autoindex.lua 의 같은 목록과 맞춰 두어야 한다 - 세
+-- 군데가 어긋나면 auto 모드와 preset 모드가 서로 다른 파일을 색인한다.
+--
+-- gtags 가 심볼까지 읽는 것은 C/C++/Java/asm 정도다. 나머지(.py, .xml,
+-- .json, .bp, .bb, Makefile …)는 목록에만 들어간다 - \fo 로 찾아 열 수는
+-- 있고, ctags 쪽(gutentags / :CtagsIndex)은 python·java·make 도 읽는다.
+-- .dts/.dtsi 가 원래 그런 상태였다.
+--
+--   let g:projectfiles_exts  = 'c h cpp java …'   " 확장자
+--   let g:projectfiles_names = 'Makefile Kconfig' " 이름 그대로
+local DEFAULT_EXTS = 'c h cpp cc cxx hxx hh hpp s S dts dtsi reg'
+    .. ' java bp xml json py bb bbappend mk'
+local DEFAULT_NAMES = 'Makefile makefile Kconfig Kbuild'
+
+local EXT, BASE = {}, {}
+for e in tostring(cfg('exts', DEFAULT_EXTS)):gmatch('%S+') do
   EXT[e] = true
+end
+for b in tostring(cfg('names', DEFAULT_NAMES)):gmatch('%S+') do
+  BASE[b] = true
 end
 
 local s = {
@@ -462,12 +485,19 @@ end
 -- expanding a preset into a file list
 -- ---------------------------------------------------------------------------
 local function indexed(path)
-  local e = path:match('%.([%w_]+)$')
+  local base = path:match('([^/]+)$') or path
+  if BASE[base] then
+    return true
+  end
+  local e = base:match('%.([%w_]+)$')
   return e ~= nil and EXT[e] == true
 end
 
 local function rel_to(root, path)
   local p = vim.fn.fnamemodify(path, ':p'):gsub('/+$', '')
+  if p == root then
+    return '.' -- 프로젝트 루트 자체. 절대 경로로 적으면 이식되지 않는다
+  end
   if p:sub(1, #root + 1) == root .. '/' then
     return p:sub(#root + 2)
   end
@@ -545,6 +575,9 @@ local function expand_entry(root, entry)
   local names = {}
   for e in pairs(EXT) do
     names[#names + 1] = "-name '*." .. e .. "'"
+  end
+  for b in pairs(BASE) do
+    names[#names + 1] = "-name '" .. b .. "'"
   end
   local cmd = "find " .. vim.fn.shellescape(abs) ..
       " \\( -name .git -o -name .tags -o -name node_modules \\) -prune -o " ..

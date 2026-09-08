@@ -355,6 +355,36 @@ uses is remembered in `<root>/.tags/preset` and applied again when nvim
 starts; `g:projectfiles_preset` names the one to fall back on for a project
 that has none yet. Adding a path while in auto mode starts a preset for you.
 
+### Which files count
+
+Three places decide, and they are kept in step - `indexfiles.sh` for the
+generated lists, `projectfiles.lua` for presets, `autoindex.lua` for
+deciding whether a save is worth an index update. If they drift, auto
+mode and preset mode index different files.
+
+```
+extensions  S bb bbappend bp c cc cpp cxx dts dtsi h hh hpp hxx
+            java json mk py reg s xml
+by name     Makefile makefile Kconfig Kbuild
+```
+
+Names are matched as well as extensions because `Makefile` has none.
+
+What gtags reads for *symbols* is a smaller set - C, C++, Java, assembler.
+The rest (`.py`, `.xml`, `.json`, `.bp`, `.bb`, `Makefile`, and `.dts`
+before them) are in the list so `\fo` finds and opens them, and ctags
+(`gutentags`, `:CtagsIndex`) does read Python, Java and Make. Measured:
+a `.java` file's class and methods come back from `global`; a `.py` file's
+do not.
+
+```vim
+let g:projectfiles_exts  = 'c h cpp java'      " extensions
+let g:projectfiles_names = 'Makefile Kconfig'  " matched by name
+```
+```sh
+INDEXFILES_EXTS='java' INDEXFILES_NAMES=''     # the same, for the script
+```
+
 ### A project inside a project
 
 A directory under the tree that has its own `.tags` is a separate project,
