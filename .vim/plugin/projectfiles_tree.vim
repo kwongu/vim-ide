@@ -166,6 +166,13 @@ augroup ProjectFilesTreeVisual
     autocmd FileType nerdtree call s:MapVisual()
 augroup END
 
+" 표시가 어느 프로젝트 기준인지는 현재 디렉터리에 달려 있다. cd 하면
+" 기억해 둔 '경로 -> 루트'를 버려서 다음 렌더가 새 기준으로 다시 판단한다.
+augroup ProjectFilesTreeRoot
+    autocmd!
+    autocmd DirChanged * call luaeval('_G.projectfiles_tree_invalidate()')
+augroup END
+
 " 범위를 커맨드로도 쓸 수 있게 (:'<,'>ProjectFilesIndexAdd)
 command! -range -bar ProjectFilesIndexAdd
             \ call ProjectFilesTreeAddRange(<line1>, <line2>)
@@ -180,8 +187,17 @@ function! s:OnPathEvent(event) abort
     call l:path.flagSet.clearFlags('projectfiles')
     " 트리가 열고 있는 루트를 같이 넘긴다: 표시는 '지금 보고 있는
     " 프로젝트'의 목록이어야 하고, 하위 프로젝트의 목록이 섞이면 안 된다.
-    let l:root = exists('b:NERDTree') ? b:NERDTree.root.path.str() : ''
-    let l:m = luaeval('_G.projectfiles_tree_flag(_A[0], _A[1])',
+    "
+    " luaeval 은 vim 리스트를 1-기반 Lua 테이블로 넘긴다. _A[0] 은 nil 이다 -
+    " 그렇게 써서 경로가 nil 로 들어가 표시가 통째로 사라져 있었다.
+    "
+    " b:NERDTree 는 이 콜백이 트리 버퍼 문맥에서 불릴 때만 있다. 없을 때를
+    " 위해 마지막으로 본 루트를 기억해 둔다.
+    if exists('b:NERDTree')
+        let s:last_tree_root = b:NERDTree.root.path.str()
+    endif
+    let l:root = get(s:, 'last_tree_root', '')
+    let l:m = luaeval('_G.projectfiles_tree_flag(_A[1], _A[2])',
                 \ [l:path.str(), l:root])
     if type(l:m) == v:t_string && !empty(l:m)
         call l:path.flagSet.addFlag('projectfiles', l:m)

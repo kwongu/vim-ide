@@ -582,6 +582,13 @@ everything is in):
 ▸ docs/            <- nothing indexable under it
 ```
 
+The marks belong to the project you are *in*, not to the one the tree
+happens to be pointing at. Open the tree inside a subdirectory that has
+its own `.tags` and you still see the current directory's list, rebased -
+`nested/other.c` from the outer preset is marked, while the inner
+preset's `deep/d.c` is not. Otherwise one screen would be showing two
+different indexes at once. `:cd` re-decides it on the next render.
+
 Select lines with `v`, `V` or `<C-v>` and `+` / `-` act on the whole
 range. That is one commit, not one per line: adding a path rewrites the
 preset, re-expands the list (a `find` per directory entry) and reindexes,

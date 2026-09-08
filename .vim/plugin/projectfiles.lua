@@ -1393,7 +1393,10 @@ function _G.projectfiles_tree_flag(path, treeroot)
   local root = flag_root[key]
   if root == nil then
     if treeroot and treeroot ~= '' then
-      root = root_from_dir((tostring(treeroot):gsub('/+$', ''))) or false
+      -- root_of 를 거쳐야 '현재 디렉터리 기준' 고정(anchor_cwd)이 함께
+      -- 적용된다. root_of 는 인자의 dirname 에서 출발하므로 자식 하나를
+      -- 붙여 준다.
+      root = root_of((tostring(treeroot):gsub('/+$', '')) .. '/x') or false
     else
       root = root_of(path) or false
     end
