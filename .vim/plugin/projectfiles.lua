@@ -459,6 +459,55 @@ local function rel_to(root, path)
   return p
 end
 
+-- 하위에 자기 색인('.tags')을 가진 디렉터리는 별개의 프로젝트다.
+--
+-- 그 밑의 파일을 이 프로젝트 목록에 넣으면 같은 파일이 두 색인에 들어가고,
+-- 상위에서 만든 목록이 하위 프로젝트의 preset 을 밀어내는 것처럼 보인다
+-- (실제로 그렇게 꼬였다: 상위 트리에서 저장한 preset 이 하위 트리의 경로로
+--  가득 차 있었다). 그래서 목록을 만들 때마다 빼 준다.
+--
+-- '실시간'이 요점이라 캐시는 아주 짧게만 둔다 - 한 번의 목록 생성 중에
+-- 여러 번 물어보는 것만 묶고, 다음 동작에서는 다시 찾는다.
+--   let g:projectfiles_nested_depth = 6   " 찾는 깊이 (0 이면 이 기능을 끈다)
+local nested_cache = {}
+
+local function nested_prefixes(root)
+  local depth = tonumber(cfg('nested_depth', 6)) or 6
+  if depth <= 0 then
+    return {}
+  end
+  local d = dbdir() or '.tags'
+  local now = uv.now()
+  local c = nested_cache[root]
+  if c and c.depth == depth and (now - c.at) < 2000 then
+    return c.list
+  end
+  local cmd = ('find %s -mindepth 2 -maxdepth %d -type d -name %s -prune -print 2>/dev/null')
+      :format(vim.fn.shellescape(root), depth + 1, vim.fn.shellescape(d))
+  local list = {}
+  local tail = '/' .. d
+  for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
+    if l:sub(-#tail) == tail then
+      local dir = l:sub(1, #l - #tail)
+      if dir:sub(1, #root + 1) == root .. '/' then
+        list[#list + 1] = dir:sub(#root + 2) .. '/'
+      end
+    end
+  end
+  nested_cache[root] = { at = now, depth = depth, list = list }
+  return list
+end
+
+-- 이 상대 경로가 하위 프로젝트 안인가 (그렇다면 그 프로젝트의 상대 접두어)
+local function nested_owner(root, rel)
+  for _, pre in ipairs(nested_prefixes(root)) do
+    if rel:sub(1, #pre) == pre then
+      return (pre:gsub('/$', ''))
+    end
+  end
+  return nil
+end
+
 -- files of one entry, relative to root
 local function expand_entry(root, entry)
   local abs = entry.path:sub(1, 1) == '/' and entry.path
@@ -528,13 +577,32 @@ local function materialize(root)
     return nil, nil
   end
   local files, seen = {}, {}
+  local pre = nested_prefixes(root)
+  local dropped = 0
   for _, e in ipairs(entries) do
     for _, f in ipairs((expand_entry(root, e))) do
       if not seen[f] then
-        seen[f] = true
-        files[#files + 1] = f
+        local nested = false
+        for _, q in ipairs(pre) do
+          if f:sub(1, #q) == q then
+            nested = true
+            break
+          end
+        end
+        if nested then
+          dropped = dropped + 1
+        else
+          seen[f] = true
+          files[#files + 1] = f
+        end
       end
     end
+  end
+  if dropped > 0 and s.nested_told ~= (root .. '\0' .. dropped) then
+    s.nested_told = root .. '\0' .. dropped
+    notify(('하위 프로젝트(자기 .tags 가 있는 디렉터리)의 파일 %d개를 '):format(dropped)
+      .. '목록에서 뺐습니다: ' .. table.concat(pre, ' ')
+      .. '  (g:projectfiles_nested_depth = 0 으로 끌 수 있습니다)')
   end
   table.sort(files)
   vim.fn.mkdir(root .. '/' .. d, 'p')
@@ -676,6 +744,13 @@ local function add_path(root, path)
     -- check BEFORE switching modes: a typo must not turn the project into
     -- an empty preset (which would index nothing at all)
     bnotify('없는 경로: ' .. path, vim.log.levels.WARN)
+    return
+  end
+  -- 하위 프로젝트의 파일은 그 프로젝트가 자기 색인으로 관리한다
+  local owner = nested_owner(root, rel_to(root, abs))
+  if owner then
+    bnotify(("'%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다 - "):format(owner)
+      .. '거기서 담으세요', vim.log.levels.WARN)
     return
   end
   if not name then
@@ -985,6 +1060,20 @@ local function drop_root(paths)
   return keep, dropped
 end
 
+-- 대상 프로젝트가 지금 보고 있는 프로젝트와 다르면 그렇다고 말한다.
+--
+-- 경로는 스스로 어느 프로젝트에 속하는지 정한다(그래야 트리 창에서도 맞는
+-- 곳에 담긴다). 그 대신 '내가 보던 곳이 아닌 다른 프로젝트에 들어갔다'는
+-- 사실이 조용히 지나가면 안 된다 - 상위 트리에서 저장한 preset 이 하위
+-- 트리의 경로로 가득 찬 것을 아무도 눈치채지 못한 것이 그래서였다.
+local function announce_root(root)
+  local ok, cur = pcall(cur_root)
+  if ok and root and cur and root ~= cur then
+    notify(('대상 프로젝트: %s   (보고 있던 곳: %s)'):format(
+      vim.fn.fnamemodify(root, ':~'), vim.fn.fnamemodify(cur, ':~')))
+  end
+end
+
 local function tree_apply(arg, what, one)
   local paths, dropped = drop_root(tree_paths(arg))
   if #paths == 0 then
@@ -995,6 +1084,7 @@ local function tree_apply(arg, what, one)
     return false
   end
   local root = tree_root(paths[1])
+  announce_root(root)
   if #paths == 1 then
     one(root, paths[1])
   else
@@ -2112,7 +2202,8 @@ local function dir_candidates(root)
       "-o -name .svn \\) -prune -o -type d -print 2>/dev/null | sed 's|^\\./||'"
   local out = {}
   for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
-    if l ~= '' and l ~= '.' and not have[l] then
+    if l ~= '' and l ~= '.' and not have[l]
+        and not nested_owner(root, l .. '/') then
       out[#out + 1] = l
     end
   end
@@ -2359,7 +2450,9 @@ local function root_for_arg(arg)
     a = vim.fn.expand(a)
   end
   if a:sub(1, 1) == '/' then
-    return root_of(a)
+    local r = root_of(a)
+    announce_root(r)
+    return r
   end
   return cur_root()
 end

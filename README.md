@@ -355,6 +355,30 @@ uses is remembered in `<root>/.tags/preset` and applied again when nvim
 starts; `g:projectfiles_preset` names the one to fall back on for a project
 that has none yet. Adding a path while in auto mode starts a preset for you.
 
+### A project inside a project
+
+A directory under the tree that has its own `.tags` is a separate project,
+and its files are left out of this one's list. Put them in both and the
+same file lands in two indexes - and a list built from the outer tree
+looks like it is overwriting the inner project's preset. That is not
+hypothetical: a preset saved from an outer tree turned out to hold 638
+paths that only exist in an inner one.
+
+It is re-checked every time a list is built (a `find` bounded by
+`g:projectfiles_nested_depth`, default 6, and a two-second cache so one
+build does not repeat it), so a nested `.tags` that appears later is
+excluded from then on. `indexfiles.sh` does the same for the generated
+lists - `git ls-files`, `cscope.files`, `find` - and leaves the
+hand-written ones (`.indexfiles`, and the preset's own `.tags/files`)
+alone. `INDEXFILES_NESTED_DEPTH=0` or
+`let g:projectfiles_nested_depth = 0` turns it off.
+
+Adding a path that lies inside a nested project says so and does nothing.
+And when a path you name belongs to a *different* project than the one you
+are looking at, that is now said out loud - a path decides its own project
+so that the tree window works, but the switch used to be silent, which is
+how a preset ends up full of another tree's paths without anyone noticing.
+
 ### Which mode, decided once per project
 
 The mode lives in one line of `<root>/.tags/preset`: empty means auto, a
