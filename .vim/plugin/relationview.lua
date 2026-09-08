@@ -1131,6 +1131,86 @@ local ENCLOSE_CONC = 5
 
 -- annotate every ref with its enclosing function (r.fn) through a small
 -- worker pool; alive() aborts stale work, done() fires when all are set
+-- 참조가 걸린 파일들의 정의 목록을 한 번에 받아 둔다.
+--
+-- 예전에는 파일마다 'global -f <file>' 을 하나씩 띄웠다. 질의 자체는 싸지만
+-- 프로세스를 띄우는 값이 파일당 ~2ms 라, 참조 파일이 100개면 그것만으로
+-- 200ms 가 나간다. global -f 는 파일을 여러 개 받으므로 한 번에 물어보고
+-- 경로별로 나눠 담는다 (서버 실측: 60개를 개별로 125ms, 배치로 12ms).
+--
+-- get_filedefs 와 같은 캐시('F\0'..path)와 같은 inflight 큐를 쓰므로, 배치가
+-- 도는 중에 누가 같은 파일을 물어봐도 여기서 함께 답한다.
+--   let g:relationview_batch_filedefs = 0   " 예전처럼 파일마다 하나씩
+local BATCH_FILES = 40   -- 인자 줄 길이 한계를 넘지 않게 끊는다
+
+local function prefetch_filedefs(root, mtime, paths, cb)
+  if cfg('batch_filedefs', 1) == 0 then
+    cb()
+    return
+  end
+  local want = {}
+  for _, path in ipairs(paths) do
+    local key = 'F\0' .. path
+    if not cache_get(key, mtime) and not s.inflight[key] then
+      want[#want + 1] = path
+      s.inflight[key] = {} -- 이 배치가 답한다는 표시
+    end
+  end
+  if #want == 0 then
+    cb()
+    return
+  end
+  local chunks = {}
+  for i = 1, #want, BATCH_FILES do
+    local c = {}
+    for j = i, math.min(i + BATCH_FILES - 1, #want) do
+      c[#c + 1] = want[j]
+    end
+    chunks[#chunks + 1] = c
+  end
+  local left = #chunks
+  for _, chunk in ipairs(chunks) do
+    local args = { '-a', '-f' }
+    for _, path in ipairs(chunk) do
+      args[#args + 1] = rel_to(root, path)
+    end
+    run_global(args, root, function(lines)
+      local by = {}
+      for _, path in ipairs(chunk) do
+        by[path] = {}
+      end
+      if lines then
+        for _, l in ipairs(lines) do
+          -- cxref: name line path text. 색인에 없는 파일이면 global 이
+          -- 사람이 읽는 문장을 뱉으므로, 우리가 물어본 경로만 받는다.
+          local name, lno, fpath = l:match('^(%S+)%s+(%d+)%s+(%S+)')
+          if name and by[fpath] then
+            local t = by[fpath]
+            t[#t + 1] = { name = name, line = tonumber(lno) }
+          end
+        end
+      end
+      for _, path in ipairs(chunk) do
+        local key = 'F\0' .. path
+        local defs = by[path]
+        table.sort(defs, function(a, b) return a.line < b.line end)
+        if lines then
+          cache_put(key, mtime, defs) -- 실패했을 땐 캐시하지 않는다
+        end
+        local waiters = s.inflight[key] or {}
+        s.inflight[key] = nil
+        for _, w in ipairs(waiters) do
+          w(defs)
+        end
+      end
+      left = left - 1
+      if left == 0 then
+        cb()
+      end
+    end, math.min(4000 * #chunk, 120000))
+  end
+end
+
 local function annotate_pool(root, mtime, refs, alive, done)
   local seen, order = {}, {}
   for _, r in ipairs(refs) do
@@ -1169,7 +1249,17 @@ local function annotate_pool(root, mtime, refs, alive, done)
       end)
     end
   end
-  launch()
+  -- 파일별 정의 목록을 먼저 한 번에 받아 두면, 아래 루프는 캐시만 읽는다
+  local batch = {}
+  for i = 1, n do
+    batch[i] = order[i]
+  end
+  prefetch_filedefs(root, mtime, batch, function()
+    if not alive() then
+      return
+    end
+    launch()
+  end)
 end
 
 -- callers of one symbol: annotated references, ready for grouping
@@ -1307,7 +1397,7 @@ end
 
 -- entries for the panel, in the shape group_refs() produces, with each
 -- callee's own definition resolved so the row jumps into it
-local function fetch_callees(root, mtime, sym, alive, cb, prefer)
+local function fetch_callees_raw(root, mtime, sym, alive, cb, prefer)
   local cap = cfg('max_callees', 200)
   run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
     function(lines)
@@ -1387,6 +1477,35 @@ local function fetch_callees(root, mtime, sym, alive, cb, prefer)
       launch()
     end, 8)
 end
+
+-- Calls 방향의 결과를 캐시한다.
+--
+-- 이건 gtags 질의 하나 + 본문 treesitter 파싱 + callee 하나당 정의 해석
+-- (spawn N개)이라 함수 하나에 수십 ms 가 든다. relation='both' 가 기본이 된
+-- 뒤로는 함수 심볼을 볼 때마다 걸리므로, 같은 심볼로 되돌아올 때 다시 하지
+-- 않도록 한다. 키에 prefer 가 들어가는 이유: 같은 이름의 static 함수가 여러
+-- 파일에 있으면 어느 파일의 본문을 읽었는지에 따라 결과가 다르다.
+--   let g:relationview_callee_cache = 0   " 매번 새로 읽기
+local function fetch_callees(root, mtime, sym, alive, cb, prefer)
+  if cfg('callee_cache', 1) == 0 then
+    fetch_callees_raw(root, mtime, sym, alive, cb, prefer)
+    return
+  end
+  local key = 'E\0' .. sym .. '\0' .. (prefer or '') .. '\0' .. root
+  local hit = cache_get(key, mtime)
+  if hit ~= nil then
+    -- false 는 '함수가 아니라 읽을 본문이 없다'를 캐시한 것이다
+    cb(hit ~= false and hit or nil)
+    return
+  end
+  fetch_callees_raw(root, mtime, sym, alive, function(entries)
+    if gtags_mtime(root) == mtime then
+      cache_put(key, mtime, entries == nil and false or entries)
+    end
+    cb(entries)
+  end, prefer)
+end
+
 
 -- group references by their enclosing function (Source Insight shows one
 -- box per calling function, not one per call site)
@@ -3798,11 +3917,42 @@ function update(sym, srcfile, force, manual, ctx)
         .. ' root: ' .. root)
       return
     end
-    if not force and not (ctx and ctx.buf) then
-      -- only the caller tree is cached: type/variable views depend on the
-      -- cursor's function, which the key does not capture
+    -- 같은 심볼로 되돌아오는 것은 코드를 읽을 때 가장 흔한 동작인데, 트리
+    -- 캐시는 지금까지 기록만 되고 한 번도 읽히지 않았다. 조건이 'ctx.buf 가
+    -- 없을 때'였고 ctx.buf 는 거의 언제나 있기 때문이다.
+    --
+    -- 캐시에 들어 있는 것은 함수 트리뿐이다. 지금 커서 자리가 (1) 타입
+    -- 쓰임새이거나 (2) msg->cmd 같은 멤버 접근이거나 (3) 이 함수 안의 지역
+    -- 변수/파라미터라면 트리가 아니라 다른 뷰가 나와야 한다. 그 셋은 gtags
+    -- 없이 버퍼만 보고 판정되므로 여기서 확인하고 넘어간다.
+    --   let g:relationview_tree_cache = 0   " 캐시를 아예 쓰지 않기
+    local function tree_cache_ok()
+      if force or cfg('tree_cache', 1) == 0 then
+        return false
+      end
+      if not (ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf)) then
+        return true
+      end
+      if s.as_type then
+        return false
+      end
+      local okf, _, fields = pcall(cursor_field, ctx.buf, ctx.line or 1,
+        ctx.col or 0)
+      if okf and fields and #fields > 0 then
+        return false
+      end
+      local okd, decl = pcall(local_decl, ctx.buf, ctx.line or 1, sym)
+      if okd and decl then
+        return false
+      end
+      return true
+    end
+    if tree_cache_ok() then
       local hit = cache_get(tree_key(sym, root), mtime)
-      if hit then
+      -- '#include' 줄은 심볼이 아니라 파일에 대한 것이다: 캐시보다 먼저 본다
+      local inc0 = (ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf))
+          and include_at(ctx.buf, ctx.line or 1) or nil
+      if hit and not inc0 then
         s.note = nil
         s.tree = hit -- expansions done earlier on this tree are kept
         render_tree()

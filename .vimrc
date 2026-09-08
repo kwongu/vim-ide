@@ -49,7 +49,14 @@ filetype plugin indent on
 set notimeout ttimeout
 
 " In Milliseconds
-set timeoutlen=3000 ttimeoutlen=100
+" ttimeoutlen 은 Esc 를 눌렀을 때 '이게 방향키 같은 이스케이프 시퀀스의
+" 시작인가'를 기다리는 시간이다. 100ms 면 SSH 왕복까지 더해 Esc 한 번이
+" 실측 131ms 였다 - 삽입 모드를 빠져나올 때마다 매번. 25ms 로 줄이면 26ms 다.
+" 0 으로 두지 않는 이유: 방향키의 ESC 시퀀스가 TCP 세그먼트로 쪼개져 도착할
+" 여유는 남겨야 오작동이 없다. 25ms 는 실측 RTT(11.8ms)의 두 배다.
+"   let g:vimide_esc_wait = 100   " 예전 동작으로 되돌리기
+set timeoutlen=3000
+let &ttimeoutlen = get(g:, 'vimide_esc_wait', 25)
 
 " Not redraw while executing macros, and commands.
 set lazyredraw
@@ -497,6 +504,9 @@ filetype plugin indent on     " required!
 "set term=xterm-256color
 set t_Co=256
 let g:airline_powerline_fonts = 1
+" 이게 없으면 airline 이 버퍼/창을 옮길 때마다(BufEnter) 하이라이트 그룹을
+" 통째로 다시 계산한다. 실측 서버 4.5ms -> 2.7ms, 시작 시 45ms.
+let g:airline_highlighting_cache = 1
 let g:airline_theme='hybrid'
 "let g:airline_theme='badwolf'
 "let g:airline_theme='wombat'
@@ -1566,6 +1576,19 @@ call s:VimIdeApplyTheme(g:vimide_theme)
 "= Tune these three lines if you want it stronger or weaker.
 "==============================================================================
 set cursorline
+" 원격(SSH)에서 화면 갱신 바이트를 줄이는 두 가지. 보이는 동작이 달라지므로
+" 기본은 지금 그대로이고, 느리다고 느껴질 때 켜면 된다.
+"   let g:vimide_light_cursorline = 1  " 줄 전체 대신 줄번호만 강조
+"                                      "   (커서 이동 1회당 1051 -> 약 300 바이트)
+"   let g:vimide_scrolljump = 5        " 스크롤을 5줄씩 몰아서 (1회당 11.1KB
+"                                      "   재도색을 5분의 1로 분할상환)
+if get(g:, 'vimide_light_cursorline', 0) && !has('gui_running')
+    set cursorlineopt=number
+endif
+if get(g:, 'vimide_scrolljump', 0) > 0 && !has('gui_running')
+    let &scrolljump = g:vimide_scrolljump
+    set sidescroll=1
+endif
 
 function! s:RvCursorLineColors() abort
     " sourceinsight 테마는 이 색들을 스스로 정한다 (SI 배색의 일부)
