@@ -834,6 +834,54 @@ let g:vimide_scrolljump = 5         " scroll five lines at a time
                                     "   (a scrolling keypress repaints 11.1 KB)
 ```
 
+## Overview bar (nvim only)
+
+A thin bar down the right edge of the edit window standing for the whole
+file, the way Source Insight and VS Code have one. The part you are
+looking at is lit, the cursor's line is brighter still, and changed lines
+and diagnostics show as coloured ticks. Click or drag it and the edit
+window goes there.
+
+```
+<Leader>b        toggle
+:OverviewToggle  the same
+click / drag     go to that point in the file
+wheel            scroll the edit window
+```
+
+`.vim/plugin/overview.lua`. Two cells wide by default
+(`g:overview_width`), hidden for files under `g:overview_min` (40) lines
+and for windows too narrow to spare the room, and off entirely with
+`let g:overview = 0`. Colours are taken from whatever colourscheme is
+loaded - `CursorLine` for the bar, `Visual` for the viewport, `Cursor`
+for the cursor, `Diff*` and `Diagnostic*` for the ticks - so it suits
+`si`, `light` and `dark` without three sets of hex codes. Override
+`OverviewBg`, `OverviewView`, `OverviewCursor`, `OverviewAdd`,
+`OverviewChange`, `OverviewDelete`, `OverviewError`, `OverviewWarn` to
+taste. The ticks come from whatever placed a sign, so signify, gitsigns
+and LSP diagnostics all show up without knowing about any of them.
+
+Two things about the mouse were not obvious, and cost most of the work:
+
+- A click on a floating window does not move focus into it, and a mouse
+  mapping is looked up in the buffer that was current *before* the click.
+  So buffer-local `<LeftMouse>` on the bar never fires - the mapping was
+  demonstrably attached and the handler was demonstrably never called.
+  The maps are global, and fall through by returning `<LeftMouse>` when
+  the click was not on the bar (`noremap`, so that runs the built-in
+  behaviour rather than recursing). Clicking in the text still just moves
+  the cursor, and buffer-local maps elsewhere - the relation window's
+  double-click - still win over a global one.
+- Restoring focus to the edit window on the click broke dragging, because
+  the drag events then went to the edit window. Focus stays put until
+  `<LeftRelease>`.
+
+Verified by injecting mouse events at the bar's real screen position in a
+pty: on an 800-line file with a 20-row bar, clicking at 75% goes to line
+601, at 25% to 201, at 95% to 761, and a drag from 90% to 10% tracks down
+to line 81. Clicking in the text at screen row 9 still goes to line 9 and
+leaves you in normal mode.
+
 ## Reference highlight (nvim only)
 
 Source Insight washes every visible occurrence of the symbol under the
