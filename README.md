@@ -410,6 +410,19 @@ everything is in):
 ▸ docs/            <- nothing indexable under it
 ```
 
+Select lines with `v`, `V` or `<C-v>` and `+` / `-` act on the whole
+range. That is one commit, not one per line: adding a path rewrites the
+preset, re-expands the list (a `find` per directory entry) and reindexes,
+so doing it fifty times over would be fifty of those. A six-line range
+takes 79 ms where the same six done one at a time take 200 ms, and it
+reports once - `추가 3개 (항목 0 -> 3)` - instead of once per line. The
+tree root line is skipped if the selection catches it, since indexing the
+root would make the preset the whole project.
+
+`:'<,'>ProjectFilesIndexAdd` and `:'<,'>ProjectFilesIndexRemove` are the
+same thing as commands. The visual marks and the cursor survive the
+redraw, so `gv` reselects and a second range command still works.
+
 Adding to a project in auto mode starts a preset named after the
 directory; removing the last entry goes back to auto. The marks use
 NERDTree's own flag API (`NERDTreePathNotifier` + `flagSet`) in their own

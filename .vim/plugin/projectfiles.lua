@@ -518,6 +518,27 @@ end
 -- ---------------------------------------------------------------------------
 -- entry editing
 -- ---------------------------------------------------------------------------
+-- 여러 경로를 한 번에 담거나 뺄 때(트리에서 범위를 골랐을 때) 쓰는 문맥.
+--
+-- add_path 하나가 preset 쓰기 + 목록 다시 펼치기(디렉터리마다 find) +
+-- 재색인까지 전부 한다. 50줄을 고르면 그게 50번 도는데, 중간 상태는 아무도
+-- 보지 않는다. 그래서 배치 중에는 preset 파일만 갱신하고(다음 항목이 그걸
+-- 읽어야 한다) 펼치기와 재색인은 끝에서 한 번만 한다. 알림도 모아서 한 줄로.
+local batch = nil   -- { root =, msgs = {}, emptied = }
+
+-- done = true 는 '경로 하나를 실제로 처리했다'는 뜻이다. 요약에서 세는 것은
+-- 이것뿐이다 - 모드 전환 같은 일회성 알림까지 세면 개수가 부풀려진다.
+local function bnotify(msg, level, done)
+  if batch then
+    batch.msgs[#batch.msgs + 1] = { msg = msg, level = level }
+    if done then
+      batch.done = batch.done + 1
+    end
+    return
+  end
+  notify(msg, level)
+end
+
 local function save_entries(root, name, entries)
   if #entries == 0 then
     -- an empty preset indexes nothing, and an empty file list makes the
@@ -532,6 +553,10 @@ local function save_entries(root, name, entries)
       pcall(vim.fn.delete, mine)
     end
     set_active(root, '')
+    if batch then
+      batch.emptied = name
+      return nil -- 커밋은 배치 끝에서
+    end
     materialize(root)
     reindex(root)
     local sp = shared_path(name)
@@ -542,6 +567,9 @@ local function save_entries(root, name, entries)
     return nil
   end
   preset_write(name, entries)
+  if batch then
+    return nil -- 커밋은 배치 끝에서
+  end
   local files = materialize(root)
   reindex(root)
   return files
@@ -570,7 +598,7 @@ local function add_path(root, path)
   if not st then
     -- check BEFORE switching modes: a typo must not turn the project into
     -- an empty preset (which would index nothing at all)
-    notify('없는 경로: ' .. path, vim.log.levels.WARN)
+    bnotify('없는 경로: ' .. path, vim.log.levels.WARN)
     return
   end
   if not name then
@@ -594,24 +622,24 @@ local function add_path(root, path)
     end
     entries = {}
     set_active(root, name)
-    notify("auto -> preset '" .. name .. "'")
+    bnotify("auto -> preset '" .. name .. "'")
   end
   local rel = rel_to(root, abs)
   for _, e in ipairs(entries) do
     if e.path == rel then
-      notify('이미 있습니다: ' .. rel)
+      bnotify('이미 있습니다: ' .. rel, nil, true)
       return
     end
   end
   entries[#entries + 1] = { path = rel, kind = st.type == 'directory' and 'dir' or 'file' }
   save_entries(root, name, entries)
-  notify('추가: ' .. rel)
+  bnotify('추가: ' .. rel, nil, true)
 end
 
 local function remove_path(root, path)
   local entries, name = entries_of(root)
   if not name then
-    notify('auto 모드에서는 제거할 목록이 없습니다', vim.log.levels.WARN)
+    bnotify('auto 모드에서는 제거할 목록이 없습니다', vim.log.levels.WARN)
     return
   end
   local abs = abs_of(root, path)
@@ -646,12 +674,61 @@ local function remove_path(root, path)
     end
   end
   if not hit then
-    notify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
+    bnotify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
     return
   end
   save_entries(root, name, kept)
-  notify('제거: ' .. rel)
+  bnotify('제거: ' .. rel, nil, true)
 end
+
+-- 여러 경로를 한 번의 커밋으로 처리한다. fn 안에서는 add_path/remove_path 를
+-- 몇 번이든 불러도 되고, 목록 펼치기와 재색인은 여기서 한 번만 일어난다.
+local function in_batch(root, what, fn)
+  if batch then
+    fn() -- 중첩: 바깥 배치가 커밋한다
+    return
+  end
+  local before = #(entries_of(root) or {})
+  batch = { root = root, msgs = {}, done = 0 }
+  local ok, err = pcall(fn)
+  local b = batch
+  batch = nil
+
+  if b.emptied then
+    -- 배치로 마지막 항목까지 빠졌다: 단일 경로와 같은 규칙으로 auto 복귀
+    save_entries(root, b.emptied, {})
+  else
+    materialize(root)
+    reindex(root)
+  end
+
+  -- 알림은 한 줄로. 경고는 몇 개만 보여 주고 나머지는 수만 알린다.
+  local warns = {}
+  for _, m in ipairs(b.msgs) do
+    if m.level == vim.log.levels.WARN then
+      warns[#warns + 1] = m.msg
+    end
+  end
+  local after = #(entries_of(root) or {})
+  local head = ('%s %d개 (항목 %d -> %d)'):format(what, b.done, before, after)
+  if #warns > 0 then
+    local shown = {}
+    for i = 1, math.min(#warns, 3) do
+      shown[i] = warns[i]
+    end
+    if #warns > 3 then
+      shown[#shown + 1] = ('그 외 %d건'):format(#warns - 3)
+    end
+    notify(head .. ' | 건너뜀 ' .. #warns .. '개: '
+      .. table.concat(shown, ', '), vim.log.levels.WARN)
+  else
+    notify(head)
+  end
+  if not ok then
+    error(err)
+  end
+end
+
 
 -- ---------------------------------------------------------------------------
 -- 시작할 때 색인 모드를 물어보기
@@ -794,26 +871,71 @@ local function tree_root(path)
   return root_of(path)
 end
 
-function _G.projectfiles_add(path)
-  path = tostring(path or '')
-  if path == '' then
+-- 경로 하나 또는 여러 개. 트리에서 범위를 고르면 목록이 넘어온다.
+-- 여러 개일 때는 한 번만 펼치고 한 번만 재색인한다.
+local function tree_paths(arg)
+  local out = {}
+  if type(arg) == 'table' then
+    for _, p in ipairs(arg) do
+      p = tostring(p or ''):gsub('/+$', '')
+      if p ~= '' then
+        out[#out + 1] = p
+      end
+    end
+  else
+    local p = tostring(arg or ''):gsub('/+$', '')
+    if p ~= '' then
+      out[1] = p
+    end
+  end
+  return out
+end
+
+-- 트리 루트 자체는 건너뛴다. 범위를 크게 잡으면 루트 줄이 함께 들어오는데,
+-- 그걸 담으면 preset 이 프로젝트 전체가 되어 고른 범위와 무관해진다.
+local function drop_root(paths)
+  local keep, dropped = {}, 0
+  for _, p in ipairs(paths) do
+    if p == tree_root(p) then
+      dropped = dropped + 1
+    else
+      keep[#keep + 1] = p
+    end
+  end
+  return keep, dropped
+end
+
+local function tree_apply(arg, what, one)
+  local paths, dropped = drop_root(tree_paths(arg))
+  if #paths == 0 then
+    if dropped > 0 then
+      notify('트리 루트는 건너뜁니다 (범위에 루트만 있었습니다)',
+        vim.log.levels.WARN)
+    end
     return false
   end
-  local root = tree_root(path)
-  add_path(root, path)
-  reindex(root)
+  local root = tree_root(paths[1])
+  if #paths == 1 then
+    one(root, paths[1])
+  else
+    in_batch(root, what, function()
+      for _, p in ipairs(paths) do
+        one(root, p)
+      end
+    end)
+  end
+  if dropped > 0 then
+    notify('트리 루트 ' .. dropped .. '줄은 건너뜀')
+  end
   return true
 end
 
-function _G.projectfiles_remove(path)
-  path = tostring(path or '')
-  if path == '' then
-    return false
-  end
-  local root = tree_root(path)
-  remove_path(root, path)
-  reindex(root)
-  return true
+function _G.projectfiles_add(arg)
+  return tree_apply(arg, '추가', add_path)
+end
+
+function _G.projectfiles_remove(arg)
+  return tree_apply(arg, '제거', remove_path)
 end
 
 -- 트리 노드 옆의 표시.
