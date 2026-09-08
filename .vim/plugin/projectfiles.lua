@@ -817,6 +817,16 @@ local function add_path(root, path)
     bnotify("auto -> preset '" .. name .. "'")
   end
   local rel = rel_to(root, abs)
+  -- preset 은 '프로젝트 상대 경로 목록'이다. 그게 다른 체크아웃에서도 쓸 수
+  -- 있게 만드는 유일한 이유이고, vim-ide 로 공유하는 근거이기도 하다.
+  -- 이 프로젝트 밖의 경로는 상대 경로로 적을 수 없으니 절대 경로가 되어
+  -- 버리는데, 그런 항목은 다른 기계에서 무의미하고 지우기도 어렵다
+  -- (상대 경로로 :ProjectFilesRemove 해도 맞지 않는다). 담지 않는다.
+  if rel:sub(1, 1) == '/' then
+    bnotify(('이 프로젝트(%s) 밖의 경로는 담을 수 없습니다: %s'):format(
+      vim.fn.fnamemodify(root, ':~'), rel), vim.log.levels.WARN)
+    return
+  end
   for _, e in ipairs(entries) do
     if e.path == rel then
       bnotify('이미 있습니다: ' .. rel, nil, true)
