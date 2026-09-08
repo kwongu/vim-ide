@@ -6,7 +6,27 @@ scripte utf-8
 "==============================================================================
 
 " Revert all command settings before proceeding with other settings below
+"
+" 'set all&' 은 'columns'/'lines' 까지 기본값(80x24)으로 되돌린다. 터미널은
+" 시작할 때 크기를 한 번 알려 주고 그 뒤로는 창이 바뀔 때만 알리므로, 여기서
+" 되돌려 놓으면 화면이 80x24 인 채로 남는다. Ctrl+Z 로 나갔다 fg 로 돌아오면
+" 그때 SIGWINCH 가 와서 제 크기가 되고, 그래서 '두 번째부터는 정상'으로
+" 보였다. telescope 는 layout_config 의 비율(0.8)을 columns/lines 에 곱해
+" 창 크기를 정하기 때문에 이게 그대로 작은 대화상자로 나타난다.
+let s:vimide_size = [&columns, &lines]
+
 set all&
+
+" 붙어 있는 UI 의 크기가 권위 있는 값이다. UI 가 아직 없으면(--embed 로 띄운
+" 경우) 붙을 때 알아서 맞춰지므로, 여기서는 되돌리기만 한다.
+if has('nvim') && !empty(nvim_list_uis())
+    let &columns = nvim_list_uis()[0].width
+    let &lines = nvim_list_uis()[0].height
+elseif s:vimide_size[0] > 0 && s:vimide_size[1] > 0
+    let &columns = s:vimide_size[0]
+    let &lines = s:vimide_size[1]
+endif
+unlet s:vimide_size
 
 " 'set all&' resets 'runtimepath' too. Vim's built-in default includes
 " ~/.vim, but nvim's does not - restore it so colors/ and plugin/ keep

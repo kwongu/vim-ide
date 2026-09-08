@@ -610,6 +610,25 @@ subdirectory and revealing a file: forced on, one git process at 89%, then
 97% eight seconds in, then a second at 121%. With the guard, none at any
 step.
 
+### The first telescope window used to open tiny
+
+`set all&` at the top of `.vimrc` resets every option to its default -
+including `'columns'` and `'lines'`, whose defaults are 80 and 24. A
+terminal reports its size once at startup and then only when it changes,
+so nothing put the real size back: nvim sat at 80x24 inside a much larger
+window. `<C-z>` and `fg` produced a SIGWINCH, which is why the second
+attempt always looked right.
+
+telescope multiplies `layout_config`'s fractions by `columns`/`lines`, so
+0.8 of 80 is a 64-column box - and below `preview_cutoff = 120` it drops
+the preview pane entirely, which is what made it look broken rather than
+merely small. Measured in a 160x40 terminal, first picker: `64x13` with no
+preview before, `75` of results plus `53` of preview at `29` rows after.
+
+The size is now taken back after the reset, from the attached UI when
+there is one (that is the authoritative value) and from the saved value
+otherwise, so `--embed` still gets its size when the UI attaches.
+
 `:VimIdeColorCheck` for colour problems. For indexing, `:GtagsIndexStatus`
 says what is running and which database is in use, and
 `let g:autoindex_debug = 1` writes a line per index action to
