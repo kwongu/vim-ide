@@ -375,9 +375,27 @@ non-ASCII names - `git ls-files` is run with `core.quotepath=off`, without
 which a Korean filename comes back as `"\355\225\234…"` and cannot be
 opened or indexed.
 
-Directories are pruned rather than filtered: `.git .svn .hg .tags
-node_modules __pycache__ .repo .ccache`. `out` and `build` are *not*
-pruned - in this tree `android/build/bazel` holds real sources.
+Pruning directories does far more than any extension list. Measured on
+the QNX+Android SDK tree: "every file" was 222,616 of which **221,151
+were under `android/out/`** alone - Android build output. So `out` is
+pruned by default, and the same tree comes back as 1,465 files. `build`
+is *not* pruned: here `android/build/bazel` holds real sources.
+
+```
+.git .svn .hg .tags node_modules __pycache__ .repo .ccache out
+```
+
+The prune list is also handed to git as `--exclude`, because `--others`
+has to walk a tree to know what is untracked and filtering afterwards is
+too late. On that tree: 489,302 files in 2,978 ms plain, 63,211 in 617 ms
+with `--exclude=out`, 1,491 in 62 ms adding `.repo`. A `:(exclude)`
+pathspec made no difference - it filters after the walk. End to end the
+list went from 6,314 ms to 1,051 ms.
+
+For the kernels the two modes are close - `kernel/common` 82,272 files
+against 79,343, samsung-kernel 56,181 against 53,717 - so "everything"
+costs about 4% there and finds the scripts, configs and docs that were
+missing.
 
 ```vim
 let g:projectfiles_all_files = 0              " back to the allowlist below

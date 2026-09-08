@@ -563,7 +563,7 @@ local function marker_root(path)
 end
 
 local EXCLUDED, EXCLUDED_NAME = {}, {}
-for e in ('o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage'):gmatch('%S+') do
+for e in ('o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage flat rsp srcjar kapt_metadata jack toc lst gcno gcda su i ii stamp timestamp'):gmatch('%S+') do
   EXCLUDED[e] = true
 end
 for b in ('tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH core .DS_Store'):gmatch('%S+') do

@@ -52,11 +52,11 @@ NAMES="$NAMES ${INDEXFILES_NAMES_EXTRA:-}"
 #   INDEXFILES_ALL=0                    허용목록만 쓰기
 #   INDEXFILES_EXCLUDE_EXTS_EXTRA='log' 제외를 덧붙이기
 ALL=${INDEXFILES_ALL:-1}
-EXCL_EXTS=${INDEXFILES_EXCLUDE_EXTS-'o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage'}
+EXCL_EXTS=${INDEXFILES_EXCLUDE_EXTS-'o a so ko obj lo la exe dll dylib bin img elf hex bpf gz bz2 xz zst lz4 zip tar tgz tbz jar apk aar dex odex vdex rar 7z iso dmg png jpg jpeg gif bmp ico webp tiff tif psd svgz mp3 mp4 avi mkv wav flac ogg opus webm pdf doc docx xls xlsx ppt pptx odt ods pyc pyo pyd class pdb ilk exp d cmd pack idx swp swo swn ttf otf woff woff2 eot db sqlite sqlite3 dat rom fw uimage flat rsp srcjar kapt_metadata jack toc lst gcno gcda su i ii stamp timestamp'}
 EXCL_NAMES=${INDEXFILES_EXCLUDE_NAMES-'tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH core .DS_Store'}
 EXCL_EXTS="$EXCL_EXTS ${INDEXFILES_EXCLUDE_EXTS_EXTRA:-}"
 EXCL_NAMES="$EXCL_NAMES ${INDEXFILES_EXCLUDE_NAMES_EXTRA:-}"
-PRUNE_DIRS=${INDEXFILES_PRUNE_DIRS-'.git .svn .hg .tags node_modules __pycache__ .repo .ccache'}
+PRUNE_DIRS=${INDEXFILES_PRUNE_DIRS-'.git .svn .hg .tags node_modules __pycache__ .repo .ccache out'}
 EXT_ALT=$(_alt "$EXTS")
 NAME_ALT=$(_alt "$NAMES")
 EXCL_ALT=$(_alt "$EXCL_EXTS")
@@ -175,8 +175,24 @@ elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# 'core.quotepath=off': 이게 없으면 git 이 ASCII 밖의 이름을
 	# "\355\225\234…" 처럼 escape 해서 내놓고, 그 문자열로는 파일을
 	# 열 수도 색인할 수도 없다(한글 파일명이 그렇게 깨진다).
-	git -c core.quotepath=off ls-files --cached --others --exclude-standard |
+	#
+	# 가지치기 디렉터리는 git 에게 '--exclude' 로 알려 준다. 나중에
+	# filter_prune 으로 걸러도 결과는 같지만, '--others' 는 무엇이
+	# untracked 인지 알려고 트리를 다 훑기 때문에 그 전에 막아야 한다.
+	# 실측(QNX+Android SDK 트리): 그냥 489,302개 2,978ms →
+	# --exclude=out 으로 63,211개 617ms → .repo 까지 1,491개 62ms.
+	# ':(exclude)' pathspec 은 훑은 뒤에 거르는 것이어서 효과가 없었다.
+	set -f
+	gitex=''
+	for d in $PRUNE_DIRS; do
+		case $d in .git) continue ;; esac
+		gitex="$gitex --exclude=$d"
+	done
+	# shellcheck disable=SC2086  # gitex 는 옵션 목록이라 쪼개져야 한다
+	git -c core.quotepath=off ls-files --cached --others --exclude-standard \
+		$gitex |
 		filter_prune | filter_types | filter_nested
+	set +f
 elif [ -f cscope.files ]; then
 	grep -v '^[[:space:]]*$' cscope.files | filter_prune | filter_types |
 		filter_nested

@@ -122,6 +122,12 @@ local DEFAULT_NAMES = table.concat({
 -- 빼는 것은 산출물과 바이너리다. 목록에 넣어도 열어 볼 일이 없고, 수만
 -- 개가 들어와 피커와 색인을 느리게 만든다(.o/.so/.png/.zip …).
 --
+-- 확장자보다 디렉터리 가지치기가 훨씬 크게 듣는다. 실측: QNX+Android SDK
+-- 트리에서 '모든 파일'이 222,616개였고 그중 221,151개가 'android/out/' 한
+-- 곳에 있었다(Android 빌드 산출물). 그래서 'out' 은 기본으로 가지치기
+-- 한다. 'build' 는 하지 않는다 - 이 트리의 android/build 는 진짜 소스다.
+--   let g:projectfiles_prune_dirs = '.git out build .gradle'
+--
 --   let g:projectfiles_all_files = 0        " 예전처럼 허용목록만
 --   let g:projectfiles_exclude_exts_extra = 'log bak'
 local EXCLUDE_EXTS = table.concat({
@@ -137,6 +143,8 @@ local EXCLUDE_EXTS = table.concat({
   'pack idx swp swo swn ttf otf woff',
   'woff2 eot db sqlite sqlite3 dat rom fw',
   'uimage',
+  'flat rsp srcjar kapt_metadata jack toc lst gcno',
+  'gcda su i ii stamp timestamp',
 }, ' ')
 local EXCLUDE_NAMES = table.concat({
   'tags TAGS cscope.out cscope.in.out cscope.po.out GTAGS GRTAGS GPATH',
@@ -694,7 +702,8 @@ local function expand_entry(root, entry)
   -- 파일은 전부 찾고 indexed() 로 걸른다: 무엇을 넣을지 정하는 곳이 하나여야
   -- '모든 파일' 모드와 허용목록 모드가 어긋나지 않는다.
   local prune = {}
-  for d in tostring(cfg('prune_dirs', '.git .svn .hg .tags node_modules __pycache__ .repo .ccache')):gmatch('%S+') do
+  for d in tostring(cfg('prune_dirs',
+      '.git .svn .hg .tags node_modules __pycache__ .repo .ccache out')):gmatch('%S+') do
     prune[#prune + 1] = "-name '" .. d .. "'"
   end
   local cmd = "find " .. vim.fn.shellescape(abs) ..
