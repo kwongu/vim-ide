@@ -32,6 +32,8 @@
 --   :ProjectFilesPresetShare [name]
 --                              copy a preset into vim-ide (shared with the
 --                              other machines after a commit/push)
+--   :ProjectFilesMode          pick the indexing mode (the dialog that comes
+--                              up on startup when a project has none yet)
 --   :ProjectFilesReindex       rebuild the index for the current list
 --   :ProjectSymbols [name]     find any symbol the index knows and jump to
 --                              its definition (<F3> in the picker hands it
@@ -42,6 +44,10 @@
 --   ^a   add files (find)   ^d remove from the list, or delete a preset
 --
 -- Options (.vimrc)
+--   g:projectfiles_ask_mode    1 (default): a project whose mode was never
+--                              chosen asks on startup instead of silently
+--                              indexing everything. 0 keeps the old
+--                              behaviour. Never asks when headless.
 --   g:projectfiles_preset      preset to use when a project has none yet
 --   g:projectfiles_shared_presets
 --                              where the shared presets are ('' disables
@@ -645,6 +651,275 @@ local function remove_path(root, path)
   end
   save_entries(root, name, kept)
   notify('제거: ' .. rel)
+end
+
+-- ---------------------------------------------------------------------------
+-- 시작할 때 색인 모드를 물어보기
+-- ---------------------------------------------------------------------------
+-- 색인 모드는 '<root>/.tags/preset' 한 줄에 적힌다: 빈 줄이면 auto, 이름이
+-- 있으면 그 preset. 그 파일이 아예 없으면 아직 아무도 고르지 않은 것이고,
+-- 그때는 프로젝트 전체가 조용히 색인되기 시작한다 - 커널 트리에서는 그게
+-- 몇 분씩 걸리는 일이라 물어보는 편이 낫다.
+--
+-- 이미 골라 둔 프로젝트는 묻지 않는다. 다시 고르려면 :ProjectFilesMode.
+--   let g:projectfiles_ask_mode = 0   " 묻지 않고 예전처럼 auto 로 시작
+local ask_state = { open = false, queue = {}, asked = {} }
+
+local function mode_recorded(root)
+  return uv.fs_stat(active_file(root)) ~= nil
+end
+
+-- 헤드리스(스크립트/테스트)에서는 물어볼 상대가 없다. UI 가 붙어 있는지로
+-- 판단한다 - --headless 로 띄우면 목록이 비어 있다.
+local function interactive()
+  local ok, uis = pcall(api.nvim_list_uis)
+  return ok and #uis > 0
+end
+
+local NEW_PRESET = '\0new'
+local SKIP = '\0skip'
+
+local function mode_items(root)
+  local items = { { name = '', label = 'auto — 프로젝트 전체 (git ls-files / find)' } }
+  for _, nm in ipairs(preset_list()) do
+    local pr = preset_read(nm)
+    local cnt = pr and pr.entries and #pr.entries or 0
+    local where = preset_path and uv.fs_stat(preset_path(nm)) and '' or ' [vim-ide]'
+    items[#items + 1] = {
+      name = nm,
+      label = ("preset '%s' — %d entries%s"):format(nm, cnt, where),
+    }
+  end
+  items[#items + 1] = { name = NEW_PRESET, label = '새 preset 만들기 …' }
+  items[#items + 1] = { name = SKIP, label = '이번에는 색인하지 않기' }
+  return items
+end
+
+local choose_mode  -- 아래에서 정의
+
+-- 한 번에 하나만 띄운다. 시작할 때 버퍼의 디렉터리와 cwd 가 서로 다른
+-- 프로젝트면 두 번 물어볼 수 있는데, 창이 겹치면 답을 잃는다.
+local function ask_next()
+  if ask_state.open then
+    return
+  end
+  local job = table.remove(ask_state.queue, 1)
+  if not job then
+    return
+  end
+  ask_state.open = true
+  choose_mode(job.root, function(ok)
+    ask_state.open = false
+    job.cb(ok)
+    vim.schedule(ask_next)
+  end)
+end
+
+choose_mode = function(root, cb)
+  local items = mode_items(root)
+  local short = vim.fn.fnamemodify(root, ':~')
+  vim.ui.select(items, {
+    prompt = '색인 모드 — ' .. short,
+    format_item = function(it) return it.label end,
+  }, function(choice)
+    if not choice or choice.name == SKIP then
+      notify('색인을 건너뜁니다 (:ProjectFilesMode 로 다시 고를 수 있습니다)')
+      cb(false)
+      return
+    end
+    if choice.name == NEW_PRESET then
+      vim.ui.input({ prompt = '새 preset 이름: ' }, function(nm)
+        nm = nm and nm:gsub('^%s+', ''):gsub('%s+$', '') or ''
+        if nm == '' then
+          cb(false)
+          return
+        end
+        set_active(root, nm)
+        materialize(root)
+        notify(("preset '%s' 시작 — NERDTree 에서 m 으로 파일을 담으세요"):format(nm))
+        cb(true)
+      end)
+      return
+    end
+    set_active(root, choice.name)
+    local files = materialize(root)
+    if choice.name == '' then
+      notify('auto 모드: 프로젝트 전체를 색인합니다')
+    elseif files and #files == 0 then
+      -- preset 은 프로젝트 상대 경로 목록이라 다른 체크아웃에서도 쓸 수
+      -- 있는데, 그 대가로 여기 없는 경로는 조용히 빠진다. 전부 빠지면
+      -- 색인이 텅 비므로 그건 말해 줘야 한다.
+      notify(("preset '%s' 의 경로가 이 프로젝트에 하나도 없습니다 — "):format(
+          choice.name) .. '색인이 비어 있습니다. NERDTree 에서 + 로 담거나 '
+          .. ':ProjectFilesMode 로 auto 를 고르세요',
+        vim.log.levels.WARN)
+    else
+      notify(("preset '%s' 로 색인합니다 (%d files)"):format(choice.name,
+        files and #files or 0))
+      announce_fork(choice.name)
+    end
+    cb(true)
+  end)
+end
+
+-- autoindex.lua 가 색인을 시작하기 전에 부른다. 모드가 이미 정해져 있으면
+-- 그대로 통과시키고(=요청 1), 정해진 적이 없으면 물어본 뒤 통과시킨다.
+-- cb(false) 는 '이번에는 색인하지 말라'는 뜻이다.
+function _G.projectfiles_ensure_mode(root, cb)
+  cb = cb or function() end
+  if not root or root == '' then
+    cb(true)
+    return
+  end
+  if cfg('ask_mode', 1) == 0 or not interactive() or mode_recorded(root) then
+    cb(true)
+    return
+  end
+  if ask_state.asked[root] then
+    cb(false) -- 이 세션에서 이미 물었고 답이 '건너뛰기'였다
+    return
+  end
+  ask_state.asked[root] = true
+  ask_state.queue[#ask_state.queue + 1] = { root = root, cb = cb }
+  ask_next()
+end
+
+-- ---------------------------------------------------------------------------
+-- 파일 트리(NERDTree 등)에서 부르는 진입점
+-- ---------------------------------------------------------------------------
+-- 커맨드 쪽은 cur_root() 로 프로젝트를 찾는데, NERDTree 창의 버퍼에는 이름이
+-- 없어서 cwd 로 떨어진다. 트리에서 고른 노드는 절대 경로를 알고 있으니,
+-- 여기서는 그 경로에서 루트를 구한다.
+local function tree_root(path)
+  return root_of(path)
+end
+
+function _G.projectfiles_add(path)
+  path = tostring(path or '')
+  if path == '' then
+    return false
+  end
+  local root = tree_root(path)
+  add_path(root, path)
+  reindex(root)
+  return true
+end
+
+function _G.projectfiles_remove(path)
+  path = tostring(path or '')
+  if path == '' then
+    return false
+  end
+  local root = tree_root(path)
+  remove_path(root, path)
+  reindex(root)
+  return true
+end
+
+-- 트리 노드 옆의 표시.
+--
+-- NERDTree 는 그릴 때 노드마다 이 함수를 부른다. 그래서 읽는 것은 전부
+-- 캐시에서 나와야 한다: 목록 파일이 바뀌지 않는 한 다시 읽지 않고,
+-- 경로->루트 도 디렉터리 단위로 기억한다(root_of 는 상위로 올라가며
+-- fs_stat 을 반복한다).
+local flag_cache = {}   -- root -> { key =, files =, dirs =, preset = }
+local flag_root = {}    -- dir -> root
+
+local function flag_data(root)
+  local d = dbdir() or '.tags'
+  local lf = root .. '/' .. d .. '/files'
+  local st = uv.fs_stat(lf)
+  local key = st and ('%d:%d:%d'):format(st.mtime.sec, st.mtime.nsec or 0,
+    st.size) or 'none'
+  local c = flag_cache[root]
+  if c and c.key == key then
+    return c
+  end
+  local files, dirs = {}, {}
+  if st then
+    for _, rel in ipairs(vim.fn.readfile(lf)) do
+      if rel ~= '' then
+        files[rel] = true
+        -- 상위 디렉터리도 전부 표시 대상으로 (아래에 색인된 파일이 있다)
+        local up = rel
+        while true do
+          local parent = up:match('^(.*)/[^/]+$')
+          if not parent or parent == '' then
+            break
+          end
+          dirs[parent] = true
+          up = parent
+        end
+      end
+    end
+  end
+  c = { key = key, files = files, dirs = dirs, preset = st ~= nil }
+  flag_cache[root] = c
+  return c
+end
+
+-- 목록을 고쳤으니 다음 렌더에서 다시 읽으라는 뜻
+function _G.projectfiles_tree_invalidate()
+  flag_cache = {}
+  flag_root = {}
+end
+
+function _G.projectfiles_tree_flag(path)
+  path = tostring(path or ''):gsub('/+$', '')
+  if path == '' then
+    return ''
+  end
+  local dir = path:match('^(.*)/[^/]*$') or path
+  local root = flag_root[dir]
+  if root == nil then
+    root = root_of(path) or false
+    flag_root[dir] = root
+  end
+  if not root then
+    return ''
+  end
+  local c = flag_data(root)
+  if not c.preset then
+    return '' -- auto 모드: 전부 대상이라 표시할 게 없다
+  end
+  if path:sub(1, #root + 1) ~= root .. '/' then
+    return ''
+  end
+  local rel = path:sub(#root + 2)
+  if c.files[rel] then
+    return tostring(cfg('tree_mark_file', '●'))
+  end
+  if c.dirs[rel] then
+    return tostring(cfg('tree_mark_dir', '·'))
+  end
+  return ''
+end
+
+-- 이 경로가 지금 색인에 들어 있나. 트리에서 눌러 확인하는 용도.
+function _G.projectfiles_status(path)
+  path = tostring(path or '')
+  if path == '' then
+    return '(경로 없음)'
+  end
+  local root = tree_root(path)
+  local _, name = entries_of(root)
+  local rel = rel_to(root, abs_of(root, path))
+  local inlist = false
+  local d = dbdir() or '.tags'
+  local lf = root .. '/' .. d .. '/files'
+  if uv.fs_stat(lf) then
+    for _, l in ipairs(vim.fn.readfile(lf)) do
+      if l == rel or l:sub(1, #rel + 1) == rel .. '/' then
+        inlist = true
+        break
+      end
+    end
+  else
+    inlist = true -- auto 모드: 목록 파일이 없고 전체가 대상이다
+  end
+  return ("%s  |  모드: %s  |  색인: %s"):format(rel,
+    name and ("preset '" .. name .. "'") or 'auto',
+    inlist and '포함' or '제외')
 end
 
 -- ---------------------------------------------------------------------------
@@ -1896,6 +2171,16 @@ api.nvim_create_user_command('ProjectFilesAddDir', function(o)
   add_path(root, o.args)
 end, { nargs = '?', complete = 'dir',
   desc = 'Add a directory (everything indexable under it)' })
+
+-- 모드를 지금 다시 고른다. 시작할 때 뜨는 것과 같은 다이얼로그다.
+api.nvim_create_user_command('ProjectFilesMode', function()
+  local root = cur_root()
+  choose_mode(root, function(ok)
+    if ok then
+      reindex(root)
+    end
+  end)
+end, { desc = 'Pick the indexing mode for this project (auto / a preset)' })
 
 api.nvim_create_user_command('ProjectFilesPreset', function(o)
   local root = cur_root()

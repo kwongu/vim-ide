@@ -355,6 +355,73 @@ uses is remembered in `<root>/.tags/preset` and applied again when nvim
 starts; `g:projectfiles_preset` names the one to fall back on for a project
 that has none yet. Adding a path while in auto mode starts a preset for you.
 
+### Which mode, decided once per project
+
+The mode lives in one line of `<root>/.tags/preset`: empty means auto, a
+name means that preset. When that file does not exist yet, nobody has
+chosen - and what used to happen is that the whole tree started indexing
+quietly, which on a kernel is minutes of work you did not ask for. So it
+asks:
+
+```
+색인 모드 — ~/work1/_opensource/samsung-kernel
+1: auto — 프로젝트 전체 (git ls-files / find)
+2: preset 'default' — 151 entries
+3: preset 'kernel-audio_d3_under' — 219 entries
+4: 새 preset 만들기 …
+5: 이번에는 색인하지 않기
+```
+
+Indexing waits for the answer, and the answer is written down, so a
+project you have already decided on never asks again - it just indexes in
+the mode you chose. Cancelling (`q`) records nothing and asks next time.
+`:ProjectFilesMode` reopens the dialog whenever you want to change it.
+
+All three places that can start a first index go through this - startup,
+opening a file in an unindexed project, and saving in one. It never asks
+when there is nobody to ask (`--headless`), and
+`let g:projectfiles_ask_mode = 0` restores the old silent behaviour.
+
+A preset is a list of project-relative paths, so choosing one whose paths
+are not in *this* checkout would index nothing at all. That case is called
+out rather than left to be discovered later.
+
+### Editing the list from NERDTree
+
+`.vim/plugin/projectfiles_tree.vim`. On a node in the tree:
+
+| | |
+|---|---|
+| `+` | put this file or directory in the index, and reindex |
+| `-` | take it out |
+| `=` | say whether it is in, and which mode this project is in |
+| `m` | the usual NERDTree menu, with an `(i)ndex` submenu holding the same three plus "mode" and "index now" |
+
+In preset mode the tree marks what is in the index, so you can see the
+shape of a preset while you build it (`[●]` a file that is in, `[·]` a
+directory with indexed files under it; auto mode marks nothing, since
+everything is in):
+
+```
+▾ [·]src/
+    [●]a.c
+    [●]b.c
+    a.c            <- after '-' on it
+▸ docs/            <- nothing indexable under it
+```
+
+Adding to a project in auto mode starts a preset named after the
+directory; removing the last entry goes back to auto. The marks use
+NERDTree's own flag API (`NERDTreePathNotifier` + `flagSet`) in their own
+scope, so they sit next to nerdtree-git-plugin's rather than fighting it,
+and the lookup is a cached set so it costs nothing per node.
+
+```vim
+let g:projectfiles_tree = 0            " turn the whole thing off
+let g:projectfiles_tree_marks = 0      " keep the keys, drop the marks
+let g:projectfiles_tree_add_key = '+'  " and _remove_key / _info_key
+```
+
 ### Where presets live, and sharing them across machines
 
 A preset is JSON: a name and a list of project-relative paths. Nothing in it

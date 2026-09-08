@@ -905,6 +905,30 @@ local function in_list(root, path)
   return c.set[rel] == true
 end
 
+-- 색인을 시작하기 전에 '어떤 모드로 색인할지'가 정해져 있는지 확인한다.
+-- 정해져 있으면 그대로 진행하고(요청 1), 정해진 적이 없으면 projectfiles 가
+-- 물어본 뒤 진행한다(요청 2). 물어볼 수 없는 상황 - 헤드리스, 기능을 끈
+-- 경우, projectfiles 가 없는 경우 - 에서는 곧바로 통과한다.
+--
+-- 색인이 처음 만들어지는 자리가 셋이다: 시작할 때, 색인이 없는 프로젝트의
+-- 파일을 열 때, 그런 프로젝트에서 저장할 때. 세 곳 모두 여기를 지나야 한다.
+local function with_mode(root, run)
+  if not (root and root ~= '') then
+    return
+  end
+  if _G.projectfiles_ensure_mode then
+    _G.projectfiles_ensure_mode(root, function(ok)
+      if ok then
+        run()
+      else
+        dbg('색인 건너뜀 (모드를 고르지 않음) ' .. root)
+      end
+    end)
+  else
+    run()
+  end
+end
+
 local function update_file(path)
   if not (enabled() and indexed_file(path)) then
     dbg('update_file ignored ' .. path)
@@ -929,7 +953,7 @@ local function update_file(path)
     local mroot = marker_root(path)
     if mroot and not s.tried[mroot] then
       s.tried[mroot] = true
-      build(mroot, 'no GTAGS yet')
+      with_mode(mroot, function() build(mroot, 'no GTAGS yet') end)
     end
   end)
 end
@@ -1313,7 +1337,7 @@ api.nvim_create_autocmd('BufReadPost', {
       local mroot = marker_root(path)
       if mroot and not s.tried[mroot] then
         s.tried[mroot] = true
-        build(mroot, 'no GTAGS yet')
+        with_mode(mroot, function() build(mroot, 'no GTAGS yet') end)
       end
     end)
   end,
@@ -1365,7 +1389,7 @@ local function startup()
       if root then
         if not seen[root] then
           seen[root] = true
-          refresh(root, 'startup')
+          with_mode(root, function() refresh(root, 'startup') end)
         end
         return
       end
@@ -1377,7 +1401,7 @@ local function startup()
       if m and m ~= home and m ~= '/' and not seen[m] and not s.tried[m] then
         seen[m] = true
         s.tried[m] = true
-        build(m, 'startup')
+        with_mode(m, function() build(m, 'startup') end)
       end
     end)
   end
