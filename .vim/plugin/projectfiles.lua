@@ -100,15 +100,34 @@ end
 --
 --   let g:projectfiles_exts  = 'c h cpp java …'   " 확장자
 --   let g:projectfiles_names = 'Makefile Kconfig' " 이름 그대로
-local DEFAULT_EXTS = 'c h cpp cc cxx hxx hh hpp s S dts dtsi reg'
-    .. ' java bp xml json py bb bbappend mk'
-local DEFAULT_NAMES = 'Makefile makefile Kconfig Kbuild'
+local DEFAULT_EXTS = table.concat({
+  'c cc cpp cxx h hh hpp hxx s',
+  'S java kt kts rs aidl py pl sh',
+  'bash zsh',
+  'ksh awk lua vim tcl mk mak cmake gradle',
+  'pro bp bb bbappend bbclass inc dts dtsi xml',
+  'json yaml yml toml ini cfg conf properties env',
+  'rc reg md txt rst ld lds def map',
+  'te pc',
+}, ' ')
+local DEFAULT_NAMES = table.concat({
+  'Makefile makefile GNUmakefile Kconfig Kbuild BUILD WORKSPACE Dockerfile README',
+  'LICENSE NOTICE',
+}, ' ')
 
 local EXT, BASE = {}, {}
+-- exts/names 를 통째로 갈아치우는 대신 덧붙이고 싶을 때가 대부분이다:
+--   let g:projectfiles_exts_extra = 'proto gn'
 for e in tostring(cfg('exts', DEFAULT_EXTS)):gmatch('%S+') do
   EXT[e] = true
 end
+for e in tostring(cfg('exts_extra', '')):gmatch('%S+') do
+  EXT[e] = true
+end
 for b in tostring(cfg('names', DEFAULT_NAMES)):gmatch('%S+') do
+  BASE[b] = true
+end
+for b in tostring(cfg('names_extra', '')):gmatch('%S+') do
   BASE[b] = true
 end
 
@@ -174,10 +193,51 @@ local function root_from_dir(dir)
   return found and vim.fs.dirname(found) or vim.fn.getcwd()
 end
 
+-- 표시(marker)나 색인이 실제로 있는 루트만 돌려준다. root_from_dir 은 아무
+-- 것도 못 찾으면 cwd 를 돌려주는데, 그건 '프로젝트를 찾았다'가 아니다.
+local function marked_root(dir)
+  local r = root_from_dir(dir)
+  if not r or r == '' then
+    return nil
+  end
+  local hidden = dbdir()
+  if (hidden and uv.fs_stat(r .. '/' .. hidden .. '/GTAGS'))
+      or uv.fs_stat(r .. '/GTAGS') then
+    return r
+  end
+  for _, m in ipairs({ '.git', '.project', '.root' }) do
+    if uv.fs_stat(r .. '/' .. m) then
+      return r
+    end
+  end
+  return nil
+end
+
+-- 어느 프로젝트의 목록에 담는가 - 현재 디렉터리(nvim 을 띄운 곳) 기준.
+--
+-- 하위 디렉터리가 자기 '.tags' 를 갖고 있으면 위로 올라가는 탐색은 그
+-- 하위 프로젝트를 답한다. 그러면 상위 트리에서 작업하는 동안 \fo / \fp /
+-- NERDTree 가 하위 프로젝트의 목록을 보여 주고 담는 것도 그쪽으로 가서,
+-- '지금 보고 있는 프로젝트'와 어긋난다. 그래서 cwd 의 프로젝트가 그 경로를
+-- 품고 있으면 그 프로젝트를 기준으로 삼는다.
+--
+-- $HOME 이나 / 처럼 표시가 없는 곳에서 띄웠으면 고정하지 않는다(모든 것을
+-- 한 프로젝트로 삼아 버린다).
+--   let g:projectfiles_anchor_cwd = 0   " 경로가 속한 프로젝트를 그대로 쓴다
 local function root_of(path)
   local dir = path and path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
       or vim.fn.getcwd()
-  return root_from_dir(dir)
+  local r = root_from_dir(dir)
+  if cfg('anchor_cwd', 1) == 0 then
+    return r
+  end
+  local base = marked_root(vim.fn.getcwd())
+  local home = vim.fn.expand('~')
+  if base and base ~= r and base ~= home and base ~= '/'
+      and (dir == base or dir:sub(1, #base + 1) == base .. '/') then
+    return base
+  end
+  return r
 end
 
 -- 지금 보고 있는 프로젝트.
@@ -479,6 +539,15 @@ local function set_active(root, name)
   local f = active_file(root)
   vim.fn.mkdir(vim.fs.dirname(f), 'p')
   pcall(vim.fn.writefile, { name or '' }, f)
+end
+
+-- 색인 목록이 어느 .tags 에 저장되는지 한 줄로. NERDTree/피커/커맨드가
+-- 모두 이걸 보여 준다 - '어디에 담겼는지'를 화면에서 알 수 있어야 한다.
+--   ~/work2/.../d5_qnx_hyp/.tags [qnx_hypervisor_ivi_sdk_d5]
+local function target_label(root)
+  local d = dbdir() or '.tags'
+  return ('%s/%s [%s]'):format(vim.fn.fnamemodify(root, ':~'), d,
+    active_preset(root) or 'auto')
 end
 
 -- ---------------------------------------------------------------------------
@@ -862,13 +931,13 @@ local function add_path(root, path)
   end
   for _, e in ipairs(entries) do
     if e.path == rel then
-      bnotify('이미 있습니다: ' .. rel, nil, true)
+      bnotify('이미 있습니다: ' .. rel .. '  →  ' .. target_label(root), nil, true)
       return
     end
   end
   entries[#entries + 1] = { path = rel, kind = st.type == 'directory' and 'dir' or 'file' }
   save_entries(root, name, entries)
-  bnotify('추가: ' .. rel, nil, true)
+  bnotify('추가: ' .. rel .. '  →  ' .. target_label(root), nil, true)
 end
 
 local function remove_path(root, path)
@@ -916,7 +985,7 @@ local function remove_path(root, path)
     return
   end
   save_entries(root, name, kept)
-  bnotify('제거: ' .. rel, nil, true)
+  bnotify('제거: ' .. rel .. '  →  ' .. target_label(root), nil, true)
 end
 
 -- 여러 경로를 한 번의 커밋으로 처리한다. fn 안에서는 add_path/remove_path 를
@@ -948,7 +1017,8 @@ local function in_batch(root, what, fn)
     end
   end
   local after = #(entries_of(root) or {})
-  local head = ('%s %d개 (항목 %d -> %d)'):format(what, b.done, before, after)
+  local head = ('%s %d개 (항목 %d -> %d)  →  %s'):format(what, b.done,
+    before, after, target_label(root))
   if #warns > 0 then
     local shown = {}
     for i = 1, math.min(#warns, 3) do
@@ -1149,11 +1219,21 @@ end
 -- 곳에 담긴다). 그 대신 '내가 보던 곳이 아닌 다른 프로젝트에 들어갔다'는
 -- 사실이 조용히 지나가면 안 된다 - 상위 트리에서 저장한 preset 이 하위
 -- 트리의 경로로 가득 찬 것을 아무도 눈치채지 못한 것이 그래서였다.
+-- 어느 '.tags' 에 저장되는지 짧게 (피커 제목에도 같은 값을 넣는다)
+
+-- 색인 목록을 고칠 때마다 어디에 쓰는지 말해 준다. 보고 있던 프로젝트와
+-- 다르면 그것도 같이 - 그 침묵이 preset 이 엉뚱한 트리의 경로로 채워지는
+-- 것을 눈치채지 못한 원인이었다.
 local function announce_root(root)
+  if not root then
+    return
+  end
   local ok, cur = pcall(cur_root)
-  if ok and root and cur and root ~= cur then
-    notify(('대상 프로젝트: %s   (보고 있던 곳: %s)'):format(
-      vim.fn.fnamemodify(root, ':~'), vim.fn.fnamemodify(cur, ':~')))
+  if ok and cur and root ~= cur then
+    notify(('색인 대상: %s   (보고 있던 곳: %s)'):format(
+      target_label(root), vim.fn.fnamemodify(cur, ':~')))
+  else
+    notify('색인 대상: ' .. target_label(root))
   end
 end
 
@@ -1239,16 +1319,24 @@ function _G.projectfiles_tree_invalidate()
   flag_root = {}
 end
 
-function _G.projectfiles_tree_flag(path)
+-- treeroot: 파일 트리가 열고 있는 디렉터리. 주면 그 프로젝트의 목록으로
+-- 표시한다 - 트리에서 보이는 것은 '지금 보고 있는 프로젝트'의 색인이어야
+-- 하고, 하위 프로젝트의 목록이 섞이면 같은 화면에 두 기준이 겹친다.
+function _G.projectfiles_tree_flag(path, treeroot)
   path = tostring(path or ''):gsub('/+$', '')
   if path == '' then
     return ''
   end
   local dir = path:match('^(.*)/[^/]*$') or path
-  local root = flag_root[dir]
+  local key = dir .. '\0' .. tostring(treeroot or '')
+  local root = flag_root[key]
   if root == nil then
-    root = root_of(path) or false
-    flag_root[dir] = root
+    if treeroot and treeroot ~= '' then
+      root = root_from_dir((tostring(treeroot):gsub('/+$', ''))) or false
+    else
+      root = root_of(path) or false
+    end
+    flag_root[key] = root
   end
   if not root then
     return ''
@@ -2177,8 +2265,8 @@ local function pick_find()
       function(c) open_in_edit(root, c) end)
   end
   t.pickers.new({}, {
-    prompt_title = ('Project files [%s] (%d)  ^a add  ^d remove')
-        :format(active_preset(root) or 'auto', #files),
+    prompt_title = ('Project files (%d)  →  %s   ^a add  ^d remove')
+        :format(#files, target_label(root)),
     finder = t.finders.new_table({
       results = files,
       entry_maker = function(e)
@@ -2199,6 +2287,7 @@ local function pick_find()
         local entry = t.state.get_selected_entry()
         t.actions.close(bufnr)
         if entry then
+          announce_root(root)
           remove_path(root, entry.value)
         end
       end)
@@ -2240,8 +2329,8 @@ local function pick_add()
       function(c) add_with_related(root, c) end)
   end
   t.pickers.new({}, {
-    prompt_title = 'Add to project files (' .. #items ..
-        ')  <Tab> 여러 개  <CR> 추가',
+    prompt_title = ('Add to project files (%d)  →  %s   <Tab> 여러 개')
+        :format(#items, target_label(root)),
     finder = t.finders.new_table({
       results = items,
       entry_maker = function(e)
@@ -2259,6 +2348,7 @@ local function pick_add()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
+        announce_root(root)
         -- <Tab> 으로 여러 개를 골랐으면 한 번만 펼치고 한 번만 재색인한다
         in_batch(root, '추가', function()
           for _, e in ipairs(picks) do
@@ -2305,8 +2395,8 @@ local function pick_add_dir()
       function(c) add_path(root, c) end)
   end
   t.pickers.new({}, {
-    prompt_title = ('Add directories (%d)  <Tab> 여러 개  <CR> 추가')
-        :format(#items),
+    prompt_title = ('Add directories (%d)  →  %s   <Tab> 여러 개')
+        :format(#items, target_label(root)),
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr)
@@ -2318,6 +2408,7 @@ local function pick_add_dir()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
+        announce_root(root)
         in_batch(root, '추가', function()
           for _, e in ipairs(picks) do
             add_path(root, e[1] or e.value)
@@ -2496,7 +2587,8 @@ local function pick_remove()
     return fallback_select(items, '제거할 항목', drop)
   end
   t.pickers.new({}, {
-    prompt_title = 'Remove from project files (' .. #items .. ')',
+    prompt_title = ('Remove from project files (%d)  →  %s')
+        :format(#items, target_label(root)),
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr)
@@ -2508,6 +2600,7 @@ local function pick_remove()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
+        announce_root(root)
         in_batch(root, '제거', function()
           for _, e in ipairs(picks) do
             drop(e[1] or e.value)
@@ -2533,12 +2626,14 @@ local function root_for_arg(arg)
   if a:sub(1, 1) == '~' then
     a = vim.fn.expand(a)
   end
+  local r
   if a:sub(1, 1) == '/' then
-    local r = root_of(a)
-    announce_root(r)
-    return r
+    r = root_of(a)
+  else
+    r = cur_root()
   end
-  return cur_root()
+  announce_root(r)
+  return r
 end
 
 api.nvim_create_user_command('ProjectFiles', function() pick_find() end,

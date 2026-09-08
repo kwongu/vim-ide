@@ -178,7 +178,11 @@ command! -range -bar ProjectFilesIndexRemove
 function! s:OnPathEvent(event) abort
     let l:path = a:event.subject
     call l:path.flagSet.clearFlags('projectfiles')
-    let l:m = luaeval('_G.projectfiles_tree_flag(_A)', l:path.str())
+    " 트리가 열고 있는 루트를 같이 넘긴다: 표시는 '지금 보고 있는
+    " 프로젝트'의 목록이어야 하고, 하위 프로젝트의 목록이 섞이면 안 된다.
+    let l:root = exists('b:NERDTree') ? b:NERDTree.root.path.str() : ''
+    let l:m = luaeval('_G.projectfiles_tree_flag(_A[0], _A[1])',
+                \ [l:path.str(), l:root])
     if type(l:m) == v:t_string && !empty(l:m)
         call l:path.flagSet.addFlag('projectfiles', l:m)
     endif

@@ -34,14 +34,17 @@ cd "$DIR"
 #
 #   INDEXFILES_EXTS / INDEXFILES_NAMES 로 바꿀 수 있다.
 # ':-' 가 아니라 '-' 다: 빈 값을 명시하면 그대로 비운다 (한쪽만 쓰고 싶을 때)
-EXTS=${INDEXFILES_EXTS-'c h cpp cc cxx hxx hh hpp s S dts dtsi reg java bp xml json py bb bbappend mk'}
-NAMES=${INDEXFILES_NAMES-'Makefile makefile Kconfig Kbuild'}
+EXTS=${INDEXFILES_EXTS-'c cc cpp cxx h hh hpp hxx s S java kt kts rs aidl py pl sh bash zsh ksh awk lua vim tcl mk mak cmake gradle pro bp bb bbappend bbclass inc dts dtsi xml json yaml yml toml ini cfg conf properties env rc reg md txt rst ld lds def map te pc'}
+NAMES=${INDEXFILES_NAMES-'Makefile makefile GNUmakefile Kconfig Kbuild BUILD WORKSPACE Dockerfile README LICENSE NOTICE'}
 
 # grep 용 정규식. 확장 정규식(grep -E)을 쓴다: POSIX 기본 정규식에서는
 # '$' 와 '^' 가 정규식의 맨 끝/맨 앞이 아니면 앵커가 아니라 그냥 문자라서,
 # '\.\(c\)$\|^\(Makefile\)$' 처럼 여러 대안에 앵커를 붙이면 마지막
 # 대안만 동작한다(실제로 그래서 .c/.java 가 하나도 걸리지 않았다).
 _alt() { printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | paste -sd'|' -; }
+# 통째로 갈아치우지 않고 덧붙이는 쪽이 흔하다
+EXTS="$EXTS ${INDEXFILES_EXTS_EXTRA:-}"
+NAMES="$NAMES ${INDEXFILES_NAMES_EXTRA:-}"
 EXT_ALT=$(_alt "$EXTS")
 NAME_ALT=$(_alt "$NAMES")
 EXT_RE=''

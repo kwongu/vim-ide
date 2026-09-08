@@ -94,10 +94,10 @@ end
 -- (or fails to update one it does). 'Makefile' has no extension, so names
 -- are matched too.
 local INDEXED, INDEXED_NAME = {}, {}
-for e in ('c h cpp cc cxx hxx hh hpp s S dts dtsi reg java bp xml json py bb bbappend mk'):gmatch('%S+') do
+for e in ('c cc cpp cxx h hh hpp hxx s S java kt kts rs aidl py pl sh bash zsh ksh awk lua vim tcl mk mak cmake gradle pro bp bb bbappend bbclass inc dts dtsi xml json yaml yml toml ini cfg conf properties env rc reg md txt rst ld lds def map te pc'):gmatch('%S+') do
   INDEXED[e] = true
 end
-for b in ('Makefile makefile Kconfig Kbuild'):gmatch('%S+') do
+for b in ('Makefile makefile GNUmakefile Kconfig Kbuild BUILD WORKSPACE Dockerfile README LICENSE NOTICE'):gmatch('%S+') do
   INDEXED_NAME[b] = true
 end
 

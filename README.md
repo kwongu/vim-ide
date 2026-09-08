@@ -363,12 +363,25 @@ deciding whether a save is worth an index update. If they drift, auto
 mode and preset mode index different files.
 
 ```
-extensions  S bb bbappend bp c cc cpp cxx dts dtsi h hh hpp hxx
-            java json mk py reg s xml
-by name     Makefile makefile Kconfig Kbuild
+sources     c cc cpp cxx h hh hpp hxx s S java kt kts rs aidl
+scripts     py pl sh bash zsh ksh awk lua vim tcl
+build       mk mak cmake gradle pro bp bb bbappend bbclass inc
+device tree dts dtsi
+config      xml json yaml yml toml ini cfg conf properties env rc reg
+text        md txt rst
+link/misc   ld lds def map te pc
+by name     Makefile makefile GNUmakefile Kconfig Kbuild BUILD
+            WORKSPACE Dockerfile README LICENSE NOTICE
 ```
 
 Names are matched as well as extensions because `Makefile` has none.
+`g:projectfiles_exts_extra` / `_names_extra` (and
+`INDEXFILES_EXTS_EXTRA` / `_NAMES_EXTRA`) append to these rather than
+replacing them, which is usually what you want.
+
+A wide set means a long list in a big tree - an Android checkout has tens
+of thousands of `.xml` alone. Trim with `g:projectfiles_exts` if that
+matters more than finding them.
 
 What gtags reads for *symbols* is a smaller set - C, C++, Java, assembler.
 The rest (`.py`, `.xml`, `.json`, `.bp`, `.bb`, `Makefile`, and `.dts`
@@ -384,6 +397,34 @@ let g:projectfiles_names = 'Makefile Kconfig'  " matched by name
 ```sh
 INDEXFILES_EXTS='java' INDEXFILES_NAMES=''     # the same, for the script
 ```
+
+### Whose list am I editing
+
+Every add and remove says where it landed, and the pickers say it in
+their title:
+
+```
+추가: sound/soc/x.c  →  ~/work2/…/d5_qnx_hyp/.tags [qnx_hypervisor_ivi_sdk_d5]
+```
+
+That is the project's database directory and the preset in use. It is
+there because the answer is not always obvious: a path decides its own
+project, and a subdirectory with its own `.tags` is its own project.
+
+Which is why the project is anchored to the directory nvim was started
+in. If the cwd is a project and the path is inside it, that project wins -
+so working in an outer tree keeps `\fo`, `\fp`, `\fd` and the tree on the
+outer tree's list even where a subdirectory has an index of its own.
+Without it, adding `child/src/c.c` from the parent went into
+`child/.tags`. NERDTree's marks follow the tree's own root for the same
+reason.
+
+```vim
+let g:projectfiles_anchor_cwd = 0   " let each path pick its own project
+```
+
+$HOME and `/` never anchor - a directory with no project marker would
+otherwise swallow everything under it.
 
 ### A project inside a project
 
