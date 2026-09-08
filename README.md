@@ -498,6 +498,35 @@ looking at, that is now said out loud - a path decides its own project so
 that the tree window works, but the switch used to be silent, which is how
 a preset ends up full of another tree's paths without anyone noticing.
 
+### Borrowing a nested project's list
+
+Sometimes the files you want are the ones a nested project already picked -
+you are working in the outer tree, but the list lives in
+`kernel/common/.tags`. `:ProjectFilesAbsorb` copies those in, rebased on
+the current root, so `child/.tags/files` holding `src/b.c` becomes
+`child/src/b.c` here.
+
+What comes across is the nested project's *index list*, file by file, so
+re-expanding it here cannot change what it contains. A nested project in
+auto mode has no list, so it comes across as one directory entry - that
+tree, whole.
+
+It is not automatic. A preset is a hand-picked thing and pushing a few
+hundred entries into one at startup without asking is how presets get
+wrecked. When there is something to take, it says so once:
+
+```
+하위 프로젝트 2곳이 골라 둔 파일 3개를 이 프로젝트 목록으로 가져올 수 있습니다
+(:ProjectFilesAbsorb)
+```
+
+Running it twice is a no-op - entries already present are skipped.
+
+```vim
+let g:projectfiles_absorb = 1        " do it when a project is first opened
+let g:projectfiles_absorb_hint = 0   " not even the notice
+```
+
 ### Which mode, decided once per project
 
 The mode lives in one line of `<root>/.tags/preset`: empty means auto, a

@@ -34,6 +34,9 @@
 --                              other machines after a commit/push)
 --   :ProjectFilesMode          pick the indexing mode (the dialog that comes
 --                              up on startup when a project has none yet)
+--   :ProjectFilesAbsorb        pull the index lists of nested projects (a
+--                              subdirectory with its own '.tags') into this
+--                              project's preset, rebased on this root
 --   :ProjectFilesReindex       rebuild the index for the current list
 --   :ProjectSymbols [name]     find any symbol the index knows and jump to
 --                              its definition (<F3> in the picker hands it
@@ -1444,6 +1447,148 @@ function _G.projectfiles_status(path)
 end
 
 -- ---------------------------------------------------------------------------
+-- 하위 프로젝트가 골라 둔 목록을 가져오기
+-- ---------------------------------------------------------------------------
+-- 상위 트리에서 일하는데 정작 보고 싶은 파일은 하위 프로젝트가 자기 preset
+-- 으로 골라 둔 것일 때가 있다(예: d5_qnx_hyp 에서 일하지만 목록은
+-- kernel/common 에 있다). 그 목록을 현재 프로젝트 기준 경로로 바꿔 현재
+-- preset 에 넣는다.
+--
+-- 가져오는 것은 하위 프로젝트의 '색인 목록'(.tags/files)이다 - 그게 그
+-- 프로젝트가 실제로 색인하는 것이고, 파일 하나하나로 들어오므로 상위에서
+-- 다시 펼칠 때 설정 차이로 달라지지 않는다. auto 모드라 목록 파일이 없는
+-- 하위 프로젝트는 디렉터리 하나로 들어온다(그 트리 전체가 대상이라는 뜻).
+--
+-- 자동으로 하지 않는다: preset 은 사람이 고른 것이고, 시작할 때 말없이
+-- 수백 개를 밀어 넣는 것은 좋지 않다. 가져올 것이 있으면 한 번 알려 준다.
+--   :ProjectFilesAbsorb              지금 가져오기
+--   let g:projectfiles_absorb = 1    프로젝트를 처음 열 때 자동으로
+--   let g:projectfiles_absorb_hint = 0   알림도 끄기
+local function nested_lists(root)
+  local out = {}
+  local d = dbdir() or '.tags'
+  for _, pre in ipairs(nested_prefixes(root)) do
+    local nroot = root .. '/' .. pre:gsub('/$', '')
+    local lf = nroot .. '/' .. d .. '/files'
+    local item = { rel = pre, files = {}, whole = false }
+    if uv.fs_stat(lf) then
+      for _, f in ipairs(vim.fn.readfile(lf)) do
+        if f ~= '' then
+          item.files[#item.files + 1] = pre .. f
+        end
+      end
+    else
+      -- auto 모드인 하위 프로젝트: 그 트리 전체
+      item.whole = true
+    end
+    if item.whole or #item.files > 0 then
+      out[#out + 1] = item
+    end
+  end
+  return out
+end
+
+local function absorb_nested(root, quiet)
+  local lists = nested_lists(root)
+  if #lists == 0 then
+    if not quiet then
+      notify('가져올 하위 프로젝트 목록이 없습니다  →  ' .. target_label(root))
+    end
+    return 0
+  end
+  -- 이미 있는 항목은 건너뛴다
+  local have = {}
+  for _, e in ipairs(entries_of(root) or {}) do
+    have[e.path] = true
+  end
+  local todo, per = {}, {}
+  for _, it in ipairs(lists) do
+    local c = 0
+    if it.whole then
+      local dirrel = it.rel:gsub('/$', '')
+      if not have[dirrel] then
+        todo[#todo + 1] = dirrel
+        c = 1
+      end
+    else
+      for _, f in ipairs(it.files) do
+        if not have[f] then
+          todo[#todo + 1] = f
+          c = c + 1
+        end
+      end
+    end
+    per[#per + 1] = ('%s %d개%s'):format(it.rel:gsub('/$', ''), c,
+      it.whole and ' (트리 전체)' or '')
+  end
+  if #todo == 0 then
+    if not quiet then
+      notify(('하위 프로젝트 %d개의 목록은 이미 다 들어와 있습니다  →  %s')
+        :format(#lists, target_label(root)))
+    end
+    return 0
+  end
+  in_batch(root, '가져오기', function()
+    for _, rel in ipairs(todo) do
+      add_path(root, rel)
+    end
+  end)
+  notify(('하위 프로젝트에서 가져왔습니다: %s  →  %s'):format(
+    table.concat(per, ', '), target_label(root)))
+  return #todo
+end
+
+-- 가져올 것이 있으면 한 번만 알려 준다 (프로젝트당 세션당 한 번)
+local absorb_hinted = {}
+local function absorb_hint(root)
+  if cfg('absorb_hint', 1) == 0 or absorb_hinted[root] then
+    return
+  end
+  absorb_hinted[root] = true
+  if cfg('absorb', 0) ~= 0 then
+    absorb_nested(root, true)
+    return
+  end
+  local lists = nested_lists(root)
+  if #lists == 0 then
+    return
+  end
+  local have = {}
+  for _, e in ipairs(entries_of(root) or {}) do
+    have[e.path] = true
+  end
+  local n = 0
+  for _, it in ipairs(lists) do
+    if it.whole then
+      n = n + ((have[(it.rel:gsub('/$', ''))]) and 0 or 1)
+    else
+      for _, f in ipairs(it.files) do
+        n = n + (have[f] and 0 or 1)
+      end
+    end
+  end
+  if n > 0 then
+    notify(('하위 프로젝트 %d곳이 골라 둔 파일 %d개를 이 프로젝트 목록으로 '):format(
+        #lists, n)
+      .. '가져올 수 있습니다 (:ProjectFilesAbsorb)')
+  end
+end
+
+-- 시작할 때 한 번, 가져올 것이 있는지 알려 준다
+api.nvim_create_autocmd('VimEnter', {
+  group = group,
+  callback = function()
+    vim.defer_fn(function()
+      local ok, root = pcall(cur_root)
+      if ok and root then
+        pcall(absorb_hint, root)
+      end
+    end, 900)
+  end,
+})
+
+
+-- ---------------------------------------------------------------------------
 -- what a file drags in with it
 -- ---------------------------------------------------------------------------
 -- Picking one file is rarely what you mean: that file needs its headers, and
@@ -2726,6 +2871,11 @@ end, { nargs = '?', complete = 'dir',
   desc = 'Add a directory (everything indexable under it)' })
 
 -- 모드를 지금 다시 고른다. 시작할 때 뜨는 것과 같은 다이얼로그다.
+api.nvim_create_user_command('ProjectFilesAbsorb', function()
+  local root = cur_root()
+  absorb_nested(root, false)
+end, { desc = "Pull nested projects' index lists into this project's preset" })
+
 api.nvim_create_user_command('ProjectFilesMode', function()
   local root = cur_root()
   choose_mode(root, function(ok)
