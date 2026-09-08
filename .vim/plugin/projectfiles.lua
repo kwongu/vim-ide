@@ -507,7 +507,19 @@ local function reindex(root)
   if s.symbols then
     s.symbols[root] = nil -- the symbol list is about to change
   end
-  if vim.fn.exists(':GtagsIndexRefresh') == 2 then
+  if type(_G.projectfiles_tree_invalidate) == 'function' then
+    pcall(_G.projectfiles_tree_invalidate) -- 트리 표시도 다시 계산되게
+  end
+  -- 루트를 그대로 넘긴다. ':GtagsIndexRefresh' 는 현재 버퍼에서 프로젝트를
+  -- 다시 찾는데, 트리 창이나 telescope 프롬프트에서 부르면 그 버퍼에 이름이
+  -- 없어서 cwd 로 떨어진다 - cwd 가 다른 프로젝트면 엉뚱한 색인을 갱신하거나
+  -- 아무 것도 하지 않는다. 그래서 여기서 목록을 고친 프로젝트를 직접 준다.
+  local done = false
+  if type(_G.autoindex_refresh) == 'function' then
+    local ok, res = pcall(_G.autoindex_refresh, root, true, '목록 변경')
+    done = ok and res == true
+  end
+  if not done and vim.fn.exists(':GtagsIndexRefresh') == 2 then
     pcall(vim.cmd, 'GtagsIndexRefresh!')
   end
   if vim.fn.exists(':GutentagsUpdate') == 2 and vim.b.gutentags_files ~= nil then
@@ -2006,9 +2018,12 @@ local function pick_add()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
-        for _, e in ipairs(picks) do
-          add_with_related(root, e.value)
-        end
+        -- <Tab> 으로 여러 개를 골랐으면 한 번만 펼치고 한 번만 재색인한다
+        in_batch(root, '추가', function()
+          for _, e in ipairs(picks) do
+            add_with_related(root, e.value)
+          end
+        end)
       end)
       return true
     end,
@@ -2060,9 +2075,11 @@ local function pick_add_dir()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
-        for _, e in ipairs(picks) do
-          add_path(root, e[1] or e.value)
-        end
+        in_batch(root, '추가', function()
+          for _, e in ipairs(picks) do
+            add_path(root, e[1] or e.value)
+          end
+        end)
       end)
       return true
     end,
@@ -2248,9 +2265,11 @@ local function pick_remove()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
-        for _, e in ipairs(picks) do
-          drop(e[1] or e.value)
-        end
+        in_batch(root, '제거', function()
+          for _, e in ipairs(picks) do
+            drop(e[1] or e.value)
+          end
+        end)
       end)
       return true
     end,
@@ -2260,37 +2279,51 @@ end
 -- ---------------------------------------------------------------------------
 -- commands
 -- ---------------------------------------------------------------------------
+-- 인자로 절대 경로를 받으면 그 경로가 속한 프로젝트가 맞다.
+--
+-- cur_root() 는 현재 버퍼(이름이 없으면 cwd)를 본다. 이름 없는 버퍼에서 -
+-- 트리 창, telescope 프롬프트, :enew - 다른 프로젝트의 절대 경로를 주면
+-- 엉뚱한 프로젝트의 목록에 그 경로가 들어가고, 재색인도 그쪽으로 간다.
+-- 상대 경로는 지금까지처럼 '프로젝트 기준'으로 남긴다(abs_of 가 그렇게 푼다).
+local function root_for_arg(arg)
+  local a = tostring(arg or '')
+  if a:sub(1, 1) == '~' then
+    a = vim.fn.expand(a)
+  end
+  if a:sub(1, 1) == '/' then
+    return root_of(a)
+  end
+  return cur_root()
+end
+
 api.nvim_create_user_command('ProjectFiles', function() pick_find() end,
   { desc = 'Find a project file (telescope) - ^a add, ^d remove' })
 api.nvim_create_user_command('ProjectFilesFind', function() pick_find() end,
   { desc = 'Find a project file and jump to it' })
 
 api.nvim_create_user_command('ProjectFilesAdd', function(o)
-  local root = cur_root()
   if o.args == '' then
     pick_add()
     return
   end
-  add_with_related(root, o.args)
+  add_with_related(root_for_arg(o.args), o.args)
 end, { nargs = '?', complete = 'file',
   desc = 'Add a file/directory (with the headers and definitions it uses)' })
 
 api.nvim_create_user_command('ProjectFilesRemove', function(o)
-  local root = cur_root()
   if o.args == '' then
     pick_remove()
     return
   end
-  remove_path(root, o.args)
+  remove_path(root_for_arg(o.args), o.args)
 end, { nargs = '?', complete = 'file', desc = 'Remove a file/directory' })
 
 api.nvim_create_user_command('ProjectFilesAddDir', function(o)
-  local root = cur_root()
   if o.args == '' then
     pick_add_dir()
     return
   end
-  add_path(root, o.args)
+  add_path(root_for_arg(o.args), o.args)
 end, { nargs = '?', complete = 'dir',
   desc = 'Add a directory (everything indexable under it)' })
 

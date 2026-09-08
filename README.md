@@ -419,6 +419,15 @@ reports once - `추가 3개 (항목 0 -> 3)` - instead of once per line. The
 tree root line is skipped if the selection catches it, since indexing the
 root would make the preset the whole project.
 
+Every change reindexes by itself - from the tree, from `\fp` / `\fd` /
+`\fx`, from the commands. It used to go through `:GtagsIndexRefresh!`,
+which works out the project from the *current buffer* and falls back to
+the cwd; called from the tree window or a telescope prompt that buffer has
+no name, so the refresh went to whatever project the cwd happened to be
+in, or nowhere. autoindex now takes the root directly
+(`_G.autoindex_refresh`), and projectfiles hands it the project whose list
+it just changed.
+
 `:'<,'>ProjectFilesIndexAdd` and `:'<,'>ProjectFilesIndexRemove` are the
 same thing as commands. The visual marks and the cursor survive the
 redraw, so `gv` reselects and a second range command still works.

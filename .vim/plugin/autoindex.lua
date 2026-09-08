@@ -1434,6 +1434,24 @@ api.nvim_create_user_command('GtagsIndexUpdate', function()
   update_file(vim.fn.fnamemodify(path, ':p'))
 end, { desc = 'Update the GTAGS index for the current file' })
 
+-- 루트를 이미 아는 호출자를 위한 진입점.
+--
+-- :GtagsIndexRefresh 는 현재 버퍼의 이름에서(없으면 cwd 에서) 프로젝트를
+-- 다시 찾는다. NERDTree 창이나 telescope 프롬프트에서 부르면 그 버퍼에는
+-- 이름이 없어서 cwd 로 떨어지고, cwd 가 다른 프로젝트면 엉뚱한 색인을
+-- 갱신하거나 '색인이 없습니다' 로 끝난다. projectfiles 는 어느 프로젝트의
+-- 목록을 고쳤는지 정확히 알고 있으므로, 그 루트를 그대로 받는다.
+function _G.autoindex_refresh(root, force, why)
+  if not (root and root ~= '') then
+    return false
+  end
+  if not enabled() then
+    return false
+  end
+  refresh(root, why or 'list changed', force ~= false)
+  return true
+end
+
 api.nvim_create_user_command('GtagsIndexRefresh', function(o)
   local path = api.nvim_buf_get_name(0)
   local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
