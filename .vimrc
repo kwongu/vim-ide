@@ -156,6 +156,33 @@ Plug 'stevearc/aerial.nvim'
 Plug 'MunifTanjim/nui.nvim'
 Plug 'nvim-neo-tree/neo-tree.nvim', { 'branch': 'v3.x' }
 
+" supertab 이 로드되기 전에 nvim 의 기본 <S-Tab> 삽입 맵핑을 치운다.
+"
+" nvim 0.12 는 <Tab>/<S-Tab> 을 'snippet 이 활성이면 점프, 아니면 원래 키'
+" 라는 Lua expr 맵핑으로 잡아 둔다(vim/_core/defaults:241). supertab 은
+" 사용자가 이미 걸어 둔 <S-Tab> 맵핑을 보존하려고 그것을 함수로 만들려
+" 하는데(plugin/supertab.vim:974  let s:ShiftTab = function(stab)), 넘어오는
+" 값이 '<Lua 28: vim/_core/defaults:241>' 라서 실패한다. 그래서 nvim 을 켤
+" 때마다 아래 두 줄이 떴다:
+"     E129: Function name required
+"     E475: Invalid argument: <Lua 28: vim/_core/defaults:241>
+"
+" 없애는 것이 아니라 순서를 맞추는 것이다: supertab 은 어차피 바로 뒤에서
+" <S-Tab> 을 <Plug>SuperTabBackward 로 다시 맵핑하므로, 삽입 모드의 기본
+" 맵핑은 지금 지워도 최종 상태가 같다. select 모드('s')의 같은 맵핑은
+" 그대로 남으므로, snippet placeholder 안에서의 <S-Tab> 점프는 계속 된다
+" (iunmap 은 {'i','s'} 중 삽입 모드만 떼어 낸다).
+"
+" <Tab> 쪽은 건드리지 않는다. supertab 의 <tab> 분기는 smart-tab 플러그인
+" 패턴(\d\+_InsertSmartTab()$)만 보고 Lua 맵핑에는 반응하지 않아서 문제가
+" 없고, 필요 없는 변경을 더하지 않는다.
+"
+"   let g:vimide_keep_snippet_tab = 1   " 이 손질을 하지 않는다(에러는 다시 뜬다)
+if has('nvim') && get(g:, 'vimide_keep_snippet_tab', 0) == 0
+            \ && has_key(get(g:, 'plugs', {}), 'supertab')
+    silent! iunmap <S-Tab>
+endif
+
 call plug#end()
 " ------------------------------------
 " settings for nvim default
