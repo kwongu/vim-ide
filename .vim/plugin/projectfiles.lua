@@ -118,9 +118,7 @@ local function dbdir()
 end
 
 -- the same root autoindex.lua works with: a database above us, else a marker
-local function root_of(path)
-  local dir = path and path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
-      or vim.fn.getcwd()
+local function root_from_dir(dir)
   local d, hidden = dir, dbdir()
   while d and d ~= '' do
     if (hidden and uv.fs_stat(d .. '/' .. hidden .. '/GTAGS'))
@@ -138,12 +136,59 @@ local function root_of(path)
   return found and vim.fs.dirname(found) or vim.fn.getcwd()
 end
 
+local function root_of(path)
+  local dir = path and path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
+      or vim.fn.getcwd()
+  return root_from_dir(dir)
+end
+
+-- 지금 보고 있는 프로젝트.
+--
+-- 특수 버퍼 - NERDTree, telescope 프롬프트, quickfix - 에는 파일 이름이 없다.
+-- 예전에는 그때 곧바로 cwd 로 떨어졌는데, 그러면 트리에서 프로젝트 A 에
+-- 파일을 담고 그 창에서 그대로 \fo 를 누르면 cwd 의 프로젝트 B 목록이 나온다.
+-- '추가해도 \fo 에 반영이 안 된다'로 보이는 것이 이것이었다.
+--
+-- 그래서 이름 없는 버퍼에서는 cwd 로 가기 전에 두 군데를 먼저 본다.
 local function cur_root()
   local name = api.nvim_buf_get_name(0)
-  if name == '' or vim.bo.buftype ~= '' then
-    return root_of(nil)
+  if name ~= '' and vim.bo.buftype == '' then
+    return root_of(name)
   end
-  return root_of(name)
+  -- 1) 파일 트리가 현재 창이면, 그 트리가 열고 있는 곳이 사용자가 보는
+  --    프로젝트다 (NERDTree 는 b:NERDTree.root, neo-tree 는 state.path).
+  local ok, troot = pcall(function()
+    if vim.b.NERDTree then
+      return vim.fn.eval('b:NERDTree.root.path.str()')
+    end
+    local okm, mgr = pcall(require, 'neo-tree.sources.manager')
+    if okm and mgr and mgr.get_state then
+      local st = mgr.get_state('filesystem')
+      return st and st.path or nil
+    end
+  end)
+  if ok and type(troot) == 'string' and troot ~= '' then
+    return root_from_dir((troot:gsub('/+$', '')))
+  end
+  -- 2) 이 탭에 보이는 실제 파일 버퍼, 없으면 가장 최근에 쓴 파일 버퍼
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local b = api.nvim_win_get_buf(w)
+    local bn = api.nvim_buf_get_name(b)
+    if bn ~= '' and vim.bo[b].buftype == '' then
+      return root_of(bn)
+    end
+  end
+  local best
+  for _, bi in ipairs(vim.fn.getbufinfo({ buflisted = 1 })) do
+    if bi.name ~= '' and vim.bo[bi.bufnr].buftype == ''
+        and (not best or (bi.lastused or 0) > (best.lastused or 0)) then
+      best = bi
+    end
+  end
+  if best then
+    return root_of(best.name)
+  end
+  return root_from_dir(vim.fn.getcwd())
 end
 
 local function presets_dir()
@@ -448,6 +493,20 @@ local function entries_of(root)
   end
   local p = preset_read(name)
   if not p then
+    -- 파일이 아예 없으면 '이름만 정해 두고 아직 저장 안 한' 정상 상태다:
+    -- 빈 목록으로 시작한다. 파일은 있는데 읽히지 않으면(깨진 JSON 등)
+    -- 얘기가 다르다 - 빈 목록으로 시작하면 다음 저장이 그 preset 을
+    -- 한 항목으로 덮어써서 담아 둔 것을 전부 잃는다. 그건 막는다.
+    for _, f in ipairs({ preset_path(name), shared_path(name) }) do
+      if f and uv.fs_stat(f) then
+        notify(("preset '%s' 을 읽을 수 없습니다 (%s) — 덮어쓰지 않기 위해 "):format(
+            name, vim.fn.fnamemodify(f, ':~'))
+          .. '목록을 비워 시작하지 않습니다. 파일을 고치거나 '
+          .. ':ProjectFilesMode 로 다른 모드를 고르세요.',
+          vim.log.levels.ERROR)
+        return nil, nil, true -- 세 번째 값 = 읽을 수 없다(손대지 마라)
+      end
+    end
     return {}, name -- named but not saved yet: an empty preset to fill
   end
   return p.entries, name
@@ -455,7 +514,10 @@ end
 
 -- write '<root>/.tags/files' (preset mode) or remove it (auto mode)
 local function materialize(root)
-  local entries, name = entries_of(root)
+  local entries, name, bad = entries_of(root)
+  if bad then
+    return nil, nil -- 읽을 수 없는 preset: 목록도 색인도 그대로 둔다
+  end
   local d = dbdir() or '.tags'
   local list = root .. '/' .. d .. '/files'
   if not entries then
@@ -488,9 +550,9 @@ function _G.projectfiles_materialize(root)
   if not root or root == '' then
     return false
   end
-  local entries = entries_of(root)
-  if not entries then
-    return false -- auto mode: nothing to write
+  local entries, _, bad = entries_of(root)
+  if bad or not entries then
+    return false -- auto mode(또는 읽을 수 없는 preset): 쓸 것이 없다
   end
   materialize(root)
   return true
@@ -604,7 +666,10 @@ local function abs_of(root, path)
 end
 
 local function add_path(root, path)
-  local entries, name = entries_of(root)
+  local entries, name, bad = entries_of(root)
+  if bad then
+    return -- 읽을 수 없는 preset: 새 preset 을 시작해 버리면 더 나쁘다
+  end
   local abs = abs_of(root, path)
   local st = uv.fs_stat(abs)
   if not st then
@@ -649,7 +714,10 @@ local function add_path(root, path)
 end
 
 local function remove_path(root, path)
-  local entries, name = entries_of(root)
+  local entries, name, bad = entries_of(root)
+  if bad then
+    return
+  end
   if not name then
     bnotify('auto 모드에서는 제거할 목록이 없습니다', vim.log.levels.WARN)
     return
@@ -2358,7 +2426,11 @@ end, desc = 'Use a preset (auto = whole project)' })
 
 api.nvim_create_user_command('ProjectFilesSave', function(o)
   local root = cur_root()
-  local entries = entries_of(root) or {}
+  local entries, _, bad = entries_of(root)
+  if bad then
+    return -- 읽을 수 없는 preset을 빈 목록으로 덮어쓰지 않는다
+  end
+  entries = entries or {}
   if o.args == '' then
     pick_save()
     return

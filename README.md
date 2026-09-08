@@ -419,6 +419,17 @@ reports once - `추가 3개 (항목 0 -> 3)` - instead of once per line. The
 tree root line is skipped if the selection catches it, since indexing the
 root would make the preset the whole project.
 
+One thing they all share is *which* project they act on, and that used to
+depend on the window you were standing in. `cur_root()` looked at the
+current buffer's name and, finding none, went straight to the cwd - and a
+tree window, a telescope prompt and a quickfix window all have nameless
+buffers. So `+` on a node added to the project in the tree while `\fo`
+pressed in that same window listed the cwd's project instead: the entry
+was there on disk, in `.tags/files`, of the project you were looking at,
+and the picker was reading a different one. It now asks the tree for its
+root first, then a real file buffer in the tab, then the most recently
+used one, and only then the cwd.
+
 Every change reindexes by itself - from the tree, from `\fp` / `\fd` /
 `\fx`, from the commands. It used to go through `:GtagsIndexRefresh!`,
 which works out the project from the *current buffer* and falls back to
