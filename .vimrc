@@ -322,6 +322,24 @@ nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 "   netrw 는 nvim-tree 가 이미 가로채므로 neo-tree 는 건드리지 않는다.
 "   대용량 트리에서 발열/지연이 없도록 git status 는 비동기, 파일
 "   watcher 는 끈다.
+"
+" git 표시(색깔 마크)의 비용 - 실측 (56,220 파일 커널 repo, 공유 서버):
+"   git status --porcelain --ignored=traditional --untracked-files=no   10.2초
+"   git status --porcelain --ignored=no --untracked-files=no             6.4초
+"   git status ... -- drivers/spi        (경로 한정)                     109ms
+"   git ls-files --others --ignored      (무시 목록)                      56ms
+" 즉 무거운 것은 '전체 worktree 를 훑는 git status' 하나뿐이고, 그건 어떤
+" 플래그를 줘도 6초 아래로 내려가지 않는다. 두 가지로 나눠서 막는다.
+"
+"   1) git_status_scope_to_path - 하위 디렉터리를 보고 있을 때는 그 경로만
+"      묻는다. 6.4초 -> 109ms. 마크는 그대로 나온다.
+"   2) 트리 루트에서는 경로 한정이 곧 전체라 싸게 만들 방법이 없다. 그래서
+"      repo 가 크면(.git/index 크기 기준) git 표시를 아예 끈다. 마크만
+"      사라지고 트리는 그대로다.
+"
+"   let g:vimide_neotree_git = 1        " 크기 무시하고 항상 켜기
+"   let g:vimide_neotree_git = 0        " 항상 끄기
+"   let g:vimide_neotree_git_max_mb = 2 " 이 크기를 넘으면 자동으로 끈다
 " ------------------------------------
 lua << EOF
 _G.rv_setup('neo-tree', {
@@ -329,6 +347,8 @@ _G.rv_setup('neo-tree', {
   enable_git_status = true,
   enable_diagnostics = false,
   git_status_async = true,
+  -- 하위 디렉터리를 볼 때 worktree 전체가 아니라 그 경로만 묻는다
+  git_status_scope_to_path = true,
   window = { position = 'left', width = 32 },
   filesystem = {
     hijack_netrw_behavior = 'disabled',
@@ -341,8 +361,118 @@ _G.rv_setup('neo-tree', {
     },
   },
 })
+
+-- 큰 repo 에서 neo-tree 의 git 표시를 끈다.
+--
+-- neo-tree 는 스캔할 때마다 worktree 전체에 git status 를 돌린다. 파일이
+-- 수만 개면 그게 6~10초짜리 프로세스라, find/검색으로 스캔이 반복될 때마다
+-- CPU 를 하나씩 물고 늘어진다. repo 크기는 .git/index 크기로 즉시 알 수
+-- 있으므로(stat 한 번), 크면 표시를 끄고 그 사실을 한 번 알려 준다.
+do
+  local uv = vim.uv or vim.loop
+  local seen = {}       -- git dir -> 이미 알린 repo
+  local decided = {}    -- git dir -> true/false
+
+  -- '.git' 은 디렉터리이거나 'gitdir: <경로>' 한 줄이 든 파일이다
+  -- (worktree, submodule). 어느 쪽이든 index 파일을 찾아 준다.
+  local function index_path(dir)
+    local d = dir
+    for _ = 1, 40 do
+      local dot = d .. '/.git'
+      local st = uv.fs_stat(dot)
+      if st then
+        if st.type == 'directory' then
+          return dot .. '/index'
+        end
+        local line = (vim.fn.readfile(dot, '', 1)[1] or '')
+        local real = line:match('^gitdir:%s*(.+)$')
+        if real then
+          if real:sub(1, 1) ~= '/' then
+            real = d .. '/' .. real
+          end
+          return (real:gsub('/+$', '')) .. '/index'
+        end
+        return nil
+      end
+      local up = vim.fs.dirname(d)
+      if not up or up == d then
+        break
+      end
+      d = up
+    end
+    return nil
+  end
+
+  -- true 면 git 표시를 켜도 된다
+  local function affordable(dir)
+    local forced = vim.g.vimide_neotree_git
+    if forced ~= nil and forced ~= '' then
+      return tonumber(forced) ~= 0
+    end
+    local idx = index_path(dir or vim.fn.getcwd())
+    if not idx then
+      return true -- git repo 가 아니면 status 도 안 돌아간다
+    end
+    if decided[idx] ~= nil then
+      return decided[idx]
+    end
+    local st = uv.fs_stat(idx)
+    local max = (tonumber(vim.g.vimide_neotree_git_max_mb) or 2) * 1024 * 1024
+    local ok = not (st and st.size > max)
+    decided[idx] = ok
+    if not ok and not seen[idx] then
+      seen[idx] = true
+      vim.schedule(function()
+        vim.notify(('neo-tree: git 표시를 끕니다 - 이 repo 는 큽니다 '
+          .. '(.git/index %.1f MB). 전체 git status 가 수 초씩 걸려 '
+          .. '검색할 때마다 CPU 를 물기 때문입니다. '
+          .. 'let g:vimide_neotree_git = 1 로 강제할 수 있습니다.')
+          :format((st and st.size or 0) / 1048576))
+      end)
+    end
+    return ok
+  end
+
+  local function apply(dir)
+    local okmod, nt = pcall(require, 'neo-tree')
+    if not okmod or not nt.ensure_config then
+      return
+    end
+    local okc, conf = pcall(nt.ensure_config)
+    if okc and type(conf) == 'table' then
+      conf.enable_git_status = affordable(dir)
+    end
+  end
+  _G.vimide_neotree_git_apply = apply
+
+  vim.api.nvim_create_autocmd({ 'VimEnter', 'DirChanged' }, {
+    group = vim.api.nvim_create_augroup('VimIdeNeotreeGit', { clear = true }),
+    callback = function() vim.schedule(function() pcall(apply, nil) end) end,
+  })
+
+  -- neo-tree 를 열기 직전에 한 번 더. 스캔이 시작되기 전에 결정되어야 한다.
+  vim.api.nvim_create_user_command('NeotreeGuarded', function(o)
+    pcall(apply, nil)
+    vim.cmd('Neotree ' .. (o.args ~= '' and o.args or 'toggle'))
+  end, { nargs = '?', desc = 'Neotree, with the git-status size guard applied' })
+
+  -- 스캔 중에 처음 보는 worktree(중첩 repo 등)가 나타나면 그때도 판단한다.
+  -- 이 훅은 status 명령이 나가기 직전에 불리므로, 여기서 끄면 다음 스캔부터
+  -- 확실히 막힌다.
+  local okev, events = pcall(require, 'neo-tree.events')
+  if okev and events and events.subscribe then
+    pcall(events.subscribe, {
+      event = events.BEFORE_GIT_STATUS,
+      handler = function(args)
+        if args and args.git_root then
+          pcall(apply, args.git_root)
+        end
+      end,
+    })
+  end
+end
 EOF
-nnoremap <silent> <Leader>t <Cmd>Neotree toggle<CR>
+nnoremap <silent> <Leader>t <Cmd>NeotreeGuarded toggle<CR>
 
 " ------------------------------------
 " gutentags: ctags 자동 색인 (소스인사이트식 심볼 DB)
