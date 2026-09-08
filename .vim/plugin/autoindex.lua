@@ -134,6 +134,7 @@ local s = {
   ctags_tried = {},    -- root -> true once a ctags build was started
   lists = {},          -- root -> cached '.tags/files' membership
   refresh_again = {},  -- root -> a refresh requested while one was running
+  locked = {},         -- root -> true while THIS nvim holds the index lock
 }
 
 -- g:autoindex_debug = 1 -> append a line per index action to
@@ -180,6 +181,215 @@ local function dbpath(root)
   local d = dbdir_name()
   return d and (root .. '/' .. d) or root
 end
+
+-- ---------------------------------------------------------------------------
+-- 인덱서 프로세스 관리
+--
+-- 여기서 띄우는 것들은 몇 분씩 도는 명령이라 세 가지가 다 필요하다.
+--
+--  1. 고아가 되지 않을 것. 예전에는 전부 { 'sh', '-c', ... } 로 띄웠는데,
+--     nvim 이 끝날 때 죽는 것은 sh 이고 진짜 일꾼인 gtags 는 손자여서
+--     살아남아 PPID=1 이 된다. 공유 서버에서 실제로 gtags 11개가 각각
+--     99.9% CPU 로 16시간을 돌고 있었다(11코어 상시 점유). 그래서 무거운
+--     명령은 셸을 거치지 않고 argv 로 직접 띄운다. 그러면 vim.system 이
+--     쥐고 있는 pid 가 일꾼 자신이라 죽일 수 있다.
+--  2. 시간 제한. 한 번 멈춘 gtags 는 스스로 끝나지 않는다.
+--  3. 인스턴스 간 락. s.building/s.refreshing 은 이 nvim 안에서만 유효해서,
+--     같은 트리에 nvim 을 하나 더 띄우면 gtags 가 하나씩 더 붙었다.
+--
+--   g:autoindex_timeout_min    한 인덱스 작업의 제한 시간, 분 (기본 30, 0=무제한)
+--   g:autoindex_lock_stale_min 이만큼 지난 락은 죽은 것으로 본다 (기본 90)
+-- ---------------------------------------------------------------------------
+local jobs = {}   -- 진행 중인 vim.system 핸들 -> 명령 이름
+
+-- 바깥쪽 시간 제한.
+--
+-- vim.system 의 timeout 은 nvim 이 살아 있어야 동작한다. nvim 이 SIGKILL 로
+-- 죽거나 SSH 세션이 끊기면 그 제한도 같이 사라져서, 멈춘 색인이 영영 남는다
+-- (실제로 그렇게 16시간짜리가 생겼다). GNU timeout 은 별개의 프로세스라
+-- nvim 이 사라져도 제한을 지키고, 자기가 받은 TERM 을 자식에게 그대로
+-- 넘기므로 위의 h:kill() 도 여전히 통한다. 실측으로 확인했다.
+-- 없는 환경(맥 기본)에서는 nvim 쪽 제한만 걸린다.
+local timeout_cmd  -- nil: 아직 안 찾음, false: 없음
+local function timeout_prefix(ms)
+  if timeout_cmd == nil then
+    timeout_cmd = false
+    for _, c in ipairs({ 'timeout', 'gtimeout' }) do
+      if vim.fn.executable(c) == 1 then
+        timeout_cmd = c
+        break
+      end
+    end
+  end
+  if not timeout_cmd or not ms then
+    return nil
+  end
+  -- nvim 쪽 제한보다 조금 늦게 끊는다. 정상 경로에서는 nvim 이 먼저 처리해
+  -- 로그와 알림이 남고, 이건 nvim 이 없을 때만 실제로 발동한다.
+  return { timeout_cmd, '-k', '10', tostring(math.floor(ms / 1000) + 30) }
+end
+
+-- 셸 없이 띄우고, 핸들을 기억하고, 시간 제한을 건다.
+local function spawn(cmd, opts, cb)
+  opts = vim.tbl_extend('keep', opts or {}, {})
+  if opts.timeout == nil then
+    local m = tonumber(cfg('timeout_min', 30)) or 30
+    opts.timeout = m > 0 and math.floor(m * 60 * 1000) or nil
+  elseif opts.timeout == 0 then
+    opts.timeout = nil
+  end
+  local argv = cmd
+  local pre = timeout_prefix(opts.timeout)
+  if pre then
+    argv = vim.list_extend(pre, cmd)
+  end
+  local h
+  local ok, err = pcall(function()
+    h = vim.system(argv, opts, function(o)
+      if h then
+        jobs[h] = nil
+      end
+      cb(o)
+    end)
+  end)
+  if not ok or not h then
+    dbg('spawn 실패 (' .. tostring(cmd[1]) .. '): ' .. tostring(err))
+    return nil
+  end
+  jobs[h] = cmd[1]
+  return h
+end
+
+-- 목록 생성기의 stdout 을 파일로 쓰고 줄 수를 돌려준다. 예전에는 셸의
+-- '> list && wc -l' 이 하던 일이다.
+local function write_filelist(path, text)
+  if not text or text == '' then
+    return 0
+  end
+  if text:sub(-1) ~= '\n' then
+    text = text .. '\n'
+  end
+  local f = io.open(path, 'w')
+  if not f then
+    return 0
+  end
+  f:write(text)
+  f:close()
+  local n = 0
+  for _ in text:gmatch('[^\n]+') do n = n + 1 end
+  return n
+end
+
+local function pid_alive(pid)
+  if not pid or pid <= 0 then
+    return false
+  end
+  local ok, res, err = pcall(uv.kill, pid, 0)
+  if not ok then
+    return false
+  end
+  if res == 0 then
+    return true
+  end
+  -- 다른 사용자의 프로세스면 EPERM 이 온다. 살아 있다는 뜻이다.
+  return type(err) == 'string' and err:find('EPERM') ~= nil
+end
+
+local function lock_path(root, name)
+  return dbpath(root) .. '/.autoindex' .. (name and ('-' .. name) or '') .. '.lock'
+end
+
+local function read_lock(root, name)
+  local f = io.open(lock_path(root, name), 'r')
+  if not f then
+    return nil
+  end
+  local line = f:read('*l') or ''
+  f:close()
+  local pid, host, t = line:match('^(%d+)\t([^\t]*)\t(%d+)$')
+  if not pid then
+    return nil -- 형식이 깨진 락은 없는 것으로 본다
+  end
+  return { pid = tonumber(pid), host = host, t = tonumber(t) }
+end
+
+local function lock_held(info)
+  if not info then
+    return false
+  end
+  local stale = (tonumber(cfg('lock_stale_min', 90)) or 90) * 60
+  if os.time() - (info.t or 0) > stale then
+    return false
+  end
+  if info.host ~= uv.os_gethostname() then
+    return true -- 다른 기계의 pid 는 확인할 수 없으니 나이만 믿는다
+  end
+  return pid_alive(info.pid)
+end
+
+local function write_lock(root, name)
+  local body = ('%d\t%s\t%d\n'):format(uv.os_getpid(), uv.os_gethostname(),
+    os.time())
+  -- O_EXCL 로 만든다: 두 nvim 이 동시에 들어와도 하나만 성공한다
+  local fd = uv.fs_open(lock_path(root, name), 'wx', 420)
+  if not fd then
+    return false
+  end
+  pcall(uv.fs_write, fd, body)
+  pcall(uv.fs_close, fd)
+  return true
+end
+
+-- 이 트리의 색인 권한을 잡는다. false 면 다른 nvim 이 이미 돌리고 있다.
+local function take_lock(root, name)
+  local key = (name or '') .. '\0' .. root
+  if s.locked[key] then
+    return true
+  end
+  pcall(vim.fn.mkdir, dbpath(root), 'p')
+  if not write_lock(root, name) then
+    local cur = read_lock(root, name)
+    if lock_held(cur) then
+      dbg(('lock busy %s%s (pid %s @ %s)'):format(root,
+        name and (' [' .. name .. ']') or '', tostring(cur.pid),
+        tostring(cur.host)))
+      return false
+    end
+    -- 주인이 없는 락이다. 치우고 한 번만 다시 시도한다.
+    pcall(os.remove, lock_path(root, name))
+    if not write_lock(root, name) then
+      return false
+    end
+  end
+  s.locked[key] = { root = root, name = name }
+  return true
+end
+
+local function release_lock(root, name)
+  local key = (name or '') .. '\0' .. root
+  if not s.locked[key] then
+    return
+  end
+  s.locked[key] = nil
+  local cur = read_lock(root, name)
+  if cur and cur.pid == uv.os_getpid() and cur.host == uv.os_gethostname() then
+    pcall(os.remove, lock_path(root, name))
+  end
+end
+
+-- nvim 이 끝날 때 일꾼과 락을 같이 정리한다. 이게 없으면 고아가 남는다.
+api.nvim_create_autocmd('VimLeavePre', {
+  group = api.nvim_create_augroup('AutoIndexCleanup', { clear = true }),
+  callback = function()
+    for h in pairs(jobs) do
+      pcall(function() h:kill('sigterm') end)
+    end
+    for _, l in pairs(s.locked) do
+      release_lock(l.root, l.name)
+    end
+  end,
+})
+
 
 -- global(1) walks up looking for '<dir>/GTAGS'; with GTAGSOBJDIR set it also
 -- looks for '<dir>/$GTAGSOBJDIR/GTAGS'. One value covers every project (and
@@ -342,14 +552,19 @@ local function db_file_count(root, cb)
     cb(0)
     return
   end
-  local ok = pcall(vim.system,
-    { 'sh', '-c', vim.fn.shellescape(prog) .. ' -P "" 2>/dev/null | wc -l' },
-    { text = true, cwd = root, env = env_for(root) }, function(o)
+  -- 셸을 거치지 않는다(고아 방지). wc -l 은 Lua 가 대신 센다.
+  local h = spawn({ prog, '-P', '' },
+    { text = true, cwd = root, env = env_for(root),
+      timeout = 60 * 1000 }, function(o)
       vim.schedule(function()
-        cb(tonumber(((o.stdout or ''):gsub('%s', ''))) or 0)
+        local nlines = 0
+        if o.code == 0 then
+          for _ in (o.stdout or ''):gmatch('[^\n]+') do nlines = nlines + 1 end
+        end
+        cb(nlines)
       end)
     end)
-  if not ok then
+  if not h then
     cb(0)
   end
 end
@@ -368,8 +583,14 @@ local function build(root, why, opts)
     notify('gtags 또는 indexfiles.sh 를 찾을 수 없습니다', vim.log.levels.WARN)
     return
   end
-  s.building[root] = true
   local short = vim.fn.fnamemodify(root, ':~')
+  -- 다른 nvim 이 이미 이 트리를 색인 중이면 손대지 않는다. 이 락이 없던
+  -- 동안에는 nvim 을 열 때마다 같은 트리에 gtags 가 하나씩 더 붙었다.
+  if not take_lock(root) then
+    notify(short .. ' 은 다른 nvim 이 색인 중입니다 — 건너뜁니다')
+    return
+  end
+  s.building[root] = true
   notify('indexing ' .. short .. (why and (' (' .. why .. ')') or '') .. ' …')
   local t0 = uv.now()
   -- Build into a temporary database and move it in when it is complete:
@@ -381,6 +602,7 @@ local function build(root, why, opts)
 
   local function fail(msg)
     s.building[root] = nil
+    release_lock(root)
     pcall(vim.fn.delete, tmp, 'rf')
     if msg then
       notify(msg, vim.log.levels.WARN)
@@ -392,16 +614,31 @@ local function build(root, why, opts)
     local dest = dbpath(root)
     vim.fn.mkdir(dest, 'p')
     never_index(dest)
-    local cmd = { 'sh', '-c', vim.fn.shellescape(gt) .. ' -f ' ..
-      vim.fn.shellescape(list) .. ' ' .. vim.fn.shellescape(tmp) ..
-      ' && mv -f ' .. vim.fn.shellescape(tmp) .. '/GTAGS ' ..
-      vim.fn.shellescape(tmp) .. '/GRTAGS ' .. vim.fn.shellescape(tmp) ..
-      '/GPATH ' .. vim.fn.shellescape(dest) .. '/' }
-    local ok = pcall(vim.system, cmd,
+    -- 셸 없이 gtags 자체를 띄운다. 완성된 DB 를 옮기는 일은 Lua 가 한다.
+    -- (예전에는 sh -c '... && mv ...' 이라, nvim 이 죽으면 sh 만 죽고
+    --  gtags 는 손자로 살아남아 CPU 를 문 채 고아가 됐다.)
+    local ok = spawn({ gt, '-f', list, tmp },
       { text = true, cwd = root, env = { GTAGSROOT = root, GTAGSDBPATH = tmp } },
       function(o)
       vim.schedule(function()
+        if o.code == 0 then
+          for _, f in ipairs({ 'GTAGS', 'GRTAGS', 'GPATH' }) do
+            local from, to = tmp .. '/' .. f, dest .. '/' .. f
+            if not uv.fs_rename(from, to) then
+              -- 파일시스템이 다르면 rename 이 안 된다: 복사로 대신한다
+              if uv.fs_copyfile(from, to) then
+                pcall(uv.fs_unlink, from)
+              else
+                o = vim.tbl_extend('force', o,
+                  { code = 1, stderr = (o.stderr or '') ..
+                    '\n색인을 옮기지 못했습니다: ' .. to })
+                break
+              end
+            end
+          end
+        end
         s.building[root] = nil
+        release_lock(root)
         s.roots = {} -- a new database may have appeared above other dirs too
         pcall(vim.fn.delete, tmp, 'rf')
         git_exclude(root)
@@ -457,12 +694,12 @@ local function build(root, why, opts)
       _G.projectfiles_materialize(root)
     end
   end)
-  local ok = pcall(vim.system,
-    { 'sh', '-c', vim.fn.shellescape(fl) .. ' > ' ..
-      vim.fn.shellescape(list) .. ' && wc -l < ' .. vim.fn.shellescape(list) },
-    { text = true, cwd = root }, function(o)
+  -- 셸 없이 목록 생성기만 띄우고, 파일로 쓰는 것과 줄 세기는 Lua 가 한다
+  local ok = spawn({ fl }, { text = true, cwd = root,
+      timeout = (tonumber(cfg('filelist_timeout_sec', 300)) or 300) * 1000 },
+    function(o)
       vim.schedule(function()
-        local n = tonumber(((o.stdout or ''):gsub('%s', ''))) or 0
+        local n = write_filelist(list, o.code == 0 and o.stdout or nil)
         if o.code ~= 0 or n == 0 then
           fail('색인할 파일을 찾지 못했습니다: ' .. short)
           return
@@ -497,6 +734,11 @@ function refresh(root, why, force)
   if not gt or not fl then
     return
   end
+  -- build 와 같은 이유로 인스턴스 간 락을 먼저 잡는다
+  if not take_lock(root) then
+    dbg('refresh 건너뜀 (다른 nvim 이 색인 중) ' .. root)
+    return
+  end
   s.refreshing[root] = true
   local short = vim.fn.fnamemodify(root, ':~')
   local t0 = uv.now()
@@ -506,6 +748,7 @@ function refresh(root, why, force)
 
   local function done(msg, level)
     s.refreshing[root] = nil
+    release_lock(root)
     pcall(vim.fn.delete, tmp, 'rf')
     drain(root)
     if msg then
@@ -519,9 +762,8 @@ function refresh(root, why, force)
   end
 
   local function run_incremental(n)
-    local cmd = { 'sh', '-c', vim.fn.shellescape(gt) .. ' -i -f ' ..
-      vim.fn.shellescape(list) .. ' ' .. vim.fn.shellescape(dbpath(root)) }
-    local ok = pcall(vim.system, cmd,
+    -- 셸 없이. 고아가 된 gtags 11개가 전부 이 자리에서 나왔다.
+    local ok = spawn({ gt, '-i', '-f', list, dbpath(root) },
       { text = true, cwd = root, env = env_for(root) }, function(o)
         vim.schedule(function()
           local secs = (uv.now() - t0) / 1000
@@ -571,12 +813,11 @@ function refresh(root, why, force)
       _G.projectfiles_materialize(root)
     end
   end)
-  local ok = pcall(vim.system,
-    { 'sh', '-c', vim.fn.shellescape(fl) .. ' > ' .. vim.fn.shellescape(list) ..
-      ' && wc -l < ' .. vim.fn.shellescape(list) },
-    { text = true, cwd = root, env = env_for(root) }, function(o)
+  local ok = spawn({ fl }, { text = true, cwd = root, env = env_for(root),
+      timeout = (tonumber(cfg('filelist_timeout_sec', 300)) or 300) * 1000 },
+    function(o)
       vim.schedule(function()
-        local n = tonumber(((o.stdout or ''):gsub('%s', ''))) or 0
+        local n = write_filelist(list, o.code == 0 and o.stdout or nil)
         if o.code ~= 0 or n == 0 then
           done(nil)
           return
@@ -615,8 +856,10 @@ function drain(root)
   local rel = path:sub(1, #root + 1) == root .. '/' and path:sub(#root + 2)
       or path
   dbg('single-update ' .. rel .. ' (cwd ' .. root .. ')')
-  local ok = pcall(vim.system, { prog, '--single-update', rel },
-    { text = true, cwd = root, env = env_for(root) }, function(o)
+  local ok = spawn({ prog, '--single-update', rel },
+    { text = true, cwd = root, env = env_for(root),
+      timeout = (tonumber(cfg('update_timeout_sec', 120)) or 120) * 1000 },
+    function(o)
       vim.schedule(function()
         s.updating[root] = nil
         dbg('single-update rc=' .. tostring(o.code) .. ' ' .. rel ..
@@ -702,21 +945,36 @@ end
 -- ---------------------------------------------------------------------------
 local counted = {}
 
--- number of files the project would index, or nil if counting took too long
-local function count_files(root)
+-- 이 프로젝트가 색인할 파일 수를 세어 cb 로 넘긴다(모르면 nil).
+--
+-- 예전에는 여기서 vim.system(...):wait(1500) 으로 동기 대기를 했고, 그게
+-- BufReadPre 에 걸려 있어서 커널 트리에서 첫 파일을 열 때마다 최대 1.5초를
+-- 통째로 멈춰 세웠다. 이제는 비동기로 세고, 답이 오면 그때 판단한다.
+local function count_files(root, cb)
   local fl = filelist_cmd()
   if not fl then
-    return nil
+    cb(nil)
+    return
   end
-  local ok, o = pcall(function()
-    return vim.system({ 'sh', '-c', vim.fn.shellescape(fl) .. ' | wc -l' },
-      { text = true, cwd = root }):wait(1500)
-  end)
-  if not ok or not o or o.code ~= 0 then
-    return nil
+  local h = spawn({ fl }, { text = true, cwd = root,
+      timeout = (tonumber(cfg('filelist_timeout_sec', 300)) or 300) * 1000 },
+    function(o)
+      vim.schedule(function()
+        if o.code ~= 0 then
+          cb(nil)
+          return
+        end
+        local n = 0
+        for _ in (o.stdout or ''):gmatch('[^\n]+') do n = n + 1 end
+        cb(n)
+      end)
+    end)
+  if not h then
+    cb(nil)
   end
-  return tonumber((o.stdout or ''):match('%d+'))
 end
+
+local guard_ctags_decide  -- 아래에서 정의; 파일 수를 다 센 뒤에 불린다
 
 local function guard_ctags(path)
   local max = cfg('ctags_max_files', 5000)
@@ -728,7 +986,10 @@ local function guard_ctags(path)
     return
   end
   counted[root] = true
-  local n = count_files(root)
+  count_files(root, function(n) guard_ctags_decide(root, max, n) end)
+end
+
+guard_ctags_decide = function(root, max, n)
   if n ~= nil and n <= max then
     return
   end
@@ -824,41 +1085,54 @@ function ctags_build(root, why)
   if not ct or not fl then
     return
   end
-  s.ctags_building[root] = true
   local short = vim.fn.fnamemodify(root, ':~')
+  -- gtags 색인과는 별도의 자원이므로 락도 따로 잡는다
+  if not take_lock(root, 'ctags') then
+    dbg('ctags 빌드 건너뜀 (다른 nvim 이 만드는 중) ' .. root)
+    return
+  end
+  s.ctags_building[root] = true
   local file = ctags_file(root)
   vim.fn.mkdir(vim.fs.dirname(file), 'p')
   notify('ctags 색인 생성 중(백그라운드): ' .. short ..
     (why and (' - ' .. why) or ''))
   local t0 = uv.now()
   local tmp = file .. '.building'
+  local listf = tmp .. '.files'
+
+  local function fail(msg)
+    s.ctags_building[root] = nil
+    release_lock(root, 'ctags')
+    pcall(vim.fn.delete, tmp)
+    pcall(os.remove, listf)
+    if msg then
+      notify(msg, vim.log.levels.WARN)
+    end
+  end
+
   -- '--excmd=number' drops the search pattern from every entry (~30% smaller,
   -- 0.88 GB instead of 1.3 GB on a 69k-file kernel tree); '--tag-relative=never'
   -- with an absolute file list keeps the paths valid from a cache directory.
-  -- a preset decides which files exist for the indexer: write it out before
-  -- the list is generated, or the very first build indexes the whole tree
-  pcall(function()
-    if _G.projectfiles_materialize then
-      _G.projectfiles_materialize(root)
+  local function run_ctags()
+    local args = { ct, '-f', tmp, '-L', listf }
+    for a in tostring(cfg('ctags_args', '--fields=+n --excmd=number')):gmatch('%S+') do
+      args[#args + 1] = a
     end
-  end)
-  local sh = vim.fn.shellescape(fl) .. " | sed -e 's|^\\./||' -e 's|^|" ..
-    root .. "/|' | " .. vim.fn.shellescape(ct) .. ' -f ' ..
-    vim.fn.shellescape(tmp) .. ' -L - ' ..
-    cfg('ctags_args', '--fields=+n --excmd=number') ..
-    ' --tag-relative=never 2>/dev/null && mv -f ' .. vim.fn.shellescape(tmp) ..
-    ' ' .. vim.fn.shellescape(file)
-  local ok = pcall(vim.system, { 'sh', '-c', sh },
-    { text = true, cwd = root }, function(o)
+    args[#args + 1] = '--tag-relative=never'
+    local ok = spawn(args, { text = true, cwd = root }, function(o)
       vim.schedule(function()
-        s.ctags_building[root] = nil
+        pcall(os.remove, listf)
         if o.code ~= 0 then
-          pcall(vim.fn.delete, tmp)
-          notify(short .. ' ctags 색인 실패: ' ..
-            ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))),
-            vim.log.levels.WARN)
+          fail(short .. ' ctags 색인 실패: ' ..
+            ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))))
           return
         end
+        if not uv.fs_rename(tmp, file) then
+          fail(short .. ' ctags: tags 파일을 옮기지 못했습니다 -> ' .. file)
+          return
+        end
+        s.ctags_building[root] = nil
+        release_lock(root, 'ctags')
         local st = uv.fs_stat(file)
         notify(string.format('%s ctags 색인 완료 (%.0f MB, %.0fs)', short,
           (st and st.size or 0) / 1048576, (uv.now() - t0) / 1000))
@@ -871,10 +1145,60 @@ function ctags_build(root, why)
         end
       end)
     end)
+    if not ok then
+      fail(nil)
+    end
+  end
+
+  -- a preset decides which files exist for the indexer: write it out before
+  -- the list is generated, or the very first build indexes the whole tree
+  pcall(function()
+    if _G.projectfiles_materialize then
+      _G.projectfiles_materialize(root)
+    end
+  end)
+  -- 예전에는 fl | sed | ctags -L - && mv 를 sh -c 한 줄로 묶었다. nvim 이
+  -- 죽으면 sh 만 죽고 ctags 는 손자로 살아남는다. 이제 세 단계로 나눈다:
+  -- 목록 생성(셸 없이) -> Lua 가 경로를 절대경로로 정리 -> ctags(셸 없이).
+  local ok = spawn({ fl }, { text = true, cwd = root,
+      timeout = (tonumber(cfg('filelist_timeout_sec', 300)) or 300) * 1000 },
+    function(o)
+      vim.schedule(function()
+        if o.code ~= 0 then
+          fail(short .. ' ctags: 파일 목록을 만들지 못했습니다')
+          return
+        end
+        -- sed -e 's|^\./||' -e 's|^|<root>/|' 가 하던 일
+        local out, n = {}, 0
+        for line in (o.stdout or ''):gmatch('[^\n]+') do
+          if line:sub(1, 2) == './' then
+            line = line:sub(3)
+          end
+          if line:sub(1, 1) ~= '/' then
+            line = root .. '/' .. line
+          end
+          n = n + 1
+          out[n] = line
+        end
+        if n == 0 then
+          fail(short .. ' ctags: 색인할 파일이 없습니다')
+          return
+        end
+        local f = io.open(listf, 'w')
+        if not f then
+          fail(short .. ' ctags: 파일 목록을 쓰지 못했습니다')
+          return
+        end
+        f:write(table.concat(out, '\n'), '\n')
+        f:close()
+        run_ctags()
+      end)
+    end)
   if not ok then
-    s.ctags_building[root] = nil
+    fail(nil)
   end
 end
+
 
 -- ---------------------------------------------------------------------------
 -- 'tagfunc': C-], :tag, g], C-w ] answered from GTAGS
