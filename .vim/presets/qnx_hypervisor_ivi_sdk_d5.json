@@ -1,5 +1,5 @@
 {
-  "name": "kernel-audio_d3_under",
+  "name": "qnx_hypervisor_ivi_sdk_d5",
   "entries": [
     {"kind": "dir", "path": "sound/soc/telechips"},
     {"kind": "file", "path": "arch/arm64/boot/dts/telechips/tcc803x/overlay-tcc8030-lpd4321.dts"},
@@ -637,6 +637,7 @@
     {"kind": "file", "path": "include/sound/memalloc.h"},
     {"kind": "file", "path": "include/sound/soc-component.h"},
     {"kind": "file", "path": "sound/core/pcm_lib.c"},
-    {"kind": "dir", "path": "sound/virtio"}
+    {"kind": "dir", "path": "sound/virtio"},
+    {"kind": "dir", "path": "kernel/common/sound/soc/telechips_dpcm"}
   ]
 }

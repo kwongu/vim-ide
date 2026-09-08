@@ -523,6 +523,13 @@ not a deliberate save, since `C-]` on a symbol outside the preset adds the
 file that defines it) and every time a forked preset is put to use, because
 that is when a `git pull` stops having any effect on it.
 
+The development server is where presets are kept up to date, so its
+copies are the ones that go into the repository - when a preset changes
+there, that version is what gets committed. My own copy on another
+machine keeps shadowing the shared one until I delete it with `^d`, so
+pulling a newer shared preset never silently changes what that machine
+indexes.
+
 `^d` in that picker deletes only my copy - which is how the last case goes
 back to following the shared one; the shared original is removed by deleting
 the file in the repository. To ignore the shared presets entirely:
