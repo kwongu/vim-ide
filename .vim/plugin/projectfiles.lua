@@ -119,7 +119,22 @@ end
 
 -- the same root autoindex.lua works with: a database above us, else a marker
 local function root_from_dir(dir)
-  local d, hidden = dir, dbdir()
+  local hidden = dbdir()
+  -- '<root>/.tags' 안의 파일에서 출발하면 그 데이터베이스 디렉터리 자체가
+  -- 프로젝트 루트로 잡힌다: 예전 배치는 루트에 GTAGS 를 두었으므로 아래
+  -- 순회가 '<d>/GTAGS' 도 루트 표시로 인정하고, '<root>/.tags/GTAGS' 가
+  -- 바로 그 모양이기 때문이다.
+  --
+  -- 그렇게 잡히면 프로젝트가 '.tags' 가 되어 그 안을 색인하려 들고, 소스가
+  -- 없으니 목록이 비고, 빈 목록으로 색인이 지워진다. 실제로 22개 파일짜리
+  -- 프로젝트의 색인이 그렇게 0이 됐다. 그러니 먼저 그 디렉터리에서 나온다.
+  if hidden and hidden ~= '' then
+    local tail = '/' .. hidden
+    while #dir > #tail and dir:sub(-#tail) == tail do
+      dir = dir:sub(1, #dir - #tail)
+    end
+  end
+  local d = dir
   while d and d ~= '' do
     if (hidden and uv.fs_stat(d .. '/' .. hidden .. '/GTAGS'))
         or uv.fs_stat(d .. '/GTAGS') then

@@ -420,6 +420,11 @@ local function migrate(root)
   if not d or cfg('migrate', 1) == 0 or not uv.fs_stat(root .. '/GTAGS') then
     return
   end
+  -- 루트가 데이터베이스 디렉터리 자체면 옮기지 않는다: '<root>/.tags' 의
+  -- DB 를 '<root>/.tags/.tags/' 로 넣는 짓이 된다 (scan_root 의 설명 참고).
+  if vim.fs.basename(root) == d then
+    return
+  end
   if uv.fs_stat(root .. '/' .. d .. '/GTAGS') then
     -- both layouts present: the hidden one is used, say so once
     if not s.warned[root] then
@@ -485,7 +490,21 @@ end
 
 -- nearest directory at or above `dir` that holds a database
 local function scan_root(dir)
+  -- 데이터베이스 디렉터리 자체를 프로젝트 루트로 잡지 않는다.
+  --
+  -- has_db(d) 는 예전 배치(루트에 GTAGS)도 인정하므로, '<root>/.tags' 에서
+  -- 출발하면 거기서 '<root>/.tags/GTAGS' 를 보고 '.tags' 를 루트라고 답한다.
+  -- 그러면 migrate() 가 그 DB 를 '<root>/.tags/.tags/' 로 옮기고, 색인은
+  -- 원래 자리에서 사라진다. 실제로 그렇게 프로젝트 색인이 통째로 없어졌다
+  -- (그 안의 파일을 버퍼로 열기만 해도 걸린다). 먼저 그 디렉터리에서 나온다.
   local d = dir
+  local dbn = dbdir_name()
+  if dbn and dbn ~= '' then
+    local tail = '/' .. dbn
+    while d and #d > #tail and d:sub(-#tail) == tail do
+      d = d:sub(1, #d - #tail)
+    end
+  end
   while d and d ~= '' do
     if has_db(d) then
       return d
