@@ -466,9 +466,16 @@ end
 -- (실제로 그렇게 꼬였다: 상위 트리에서 저장한 preset 이 하위 트리의 경로로
 --  가득 차 있었다). 그래서 목록을 만들 때마다 빼 준다.
 --
+-- 단, 걸르는 것은 '자동으로 만들어진 목록'뿐이다 (auto 모드의 git ls-files /
+-- find - indexfiles.sh 가 처리한다). preset 에 담긴 항목은 사람이 직접 고른
+-- 것이므로 하위 프로젝트 안이라도 그대로 둔다. '.indexfiles' 를 건드리지
+-- 않는 것과 같은 이유다 - 명시적으로 고른 것이 규칙보다 우선한다.
+-- 그래도 preset 까지 걸르고 싶으면 g:projectfiles_nested_presets = 1.
+--
 -- '실시간'이 요점이라 캐시는 아주 짧게만 둔다 - 한 번의 목록 생성 중에
 -- 여러 번 물어보는 것만 묶고, 다음 동작에서는 다시 찾는다.
 --   let g:projectfiles_nested_depth = 6   " 찾는 깊이 (0 이면 이 기능을 끈다)
+--   let g:projectfiles_nested_presets = 1 " preset 항목도 걸른다 (기본 0)
 local nested_cache = {}
 
 local function nested_prefixes(root)
@@ -577,7 +584,8 @@ local function materialize(root)
     return nil, nil
   end
   local files, seen = {}, {}
-  local pre = nested_prefixes(root)
+  -- preset 항목은 사람이 고른 것이라 기본적으로 걸르지 않는다 (위 설명 참고)
+  local pre = cfg('nested_presets', 0) ~= 0 and nested_prefixes(root) or {}
   local dropped = 0
   for _, e in ipairs(entries) do
     for _, f in ipairs((expand_entry(root, e))) do
@@ -602,7 +610,20 @@ local function materialize(root)
     s.nested_told = root .. '\0' .. dropped
     notify(('하위 프로젝트(자기 .tags 가 있는 디렉터리)의 파일 %d개를 '):format(dropped)
       .. '목록에서 뺐습니다: ' .. table.concat(pre, ' ')
-      .. '  (g:projectfiles_nested_depth = 0 으로 끌 수 있습니다)')
+      .. '  (g:projectfiles_nested_presets = 0 으로 끌 수 있습니다)')
+  end
+  -- 항목은 있는데 펼친 결과가 하나도 없으면 빈 목록을 쓰지 않는다.
+  --
+  -- 빈 '.tags/files' 는 indexfiles.sh 에게 '색인할 파일이 없다'로 읽히고,
+  -- 그러면 색인이 낡은 채로 남거나 통째로 비워진다. 실제로 그렇게 22개
+  -- 파일짜리 프로젝트의 색인이 0이 됐다. 이 프로젝트에 없는 경로만 담긴
+  -- preset 을 골랐을 때도 같은 일이 난다. 조용히 넘길 일이 아니다.
+  if #files == 0 and #entries > 0 then
+    notify(("preset '%s' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다"):format(
+        name or '?')
+      .. ' — 목록과 색인을 그대로 둡니다. 다른 체크아웃의 preset 이거나'
+      .. ' 전부 하위 프로젝트 안입니다.', vim.log.levels.WARN)
+    return nil, name
   end
   table.sort(files)
   vim.fn.mkdir(root .. '/' .. d, 'p')
@@ -746,12 +767,16 @@ local function add_path(root, path)
     bnotify('없는 경로: ' .. path, vim.log.levels.WARN)
     return
   end
-  -- 하위 프로젝트의 파일은 그 프로젝트가 자기 색인으로 관리한다
+  -- 하위 프로젝트 안의 경로라도, 직접 담으라고 한 것은 담는다. 다만 그
+  -- 프로젝트가 자기 색인을 따로 갖고 있다는 사실은 알려 준다.
   local owner = nested_owner(root, rel_to(root, abs))
   if owner then
-    bnotify(("'%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다 - "):format(owner)
-      .. '거기서 담으세요', vim.log.levels.WARN)
-    return
+    if cfg('nested_presets', 0) ~= 0 then
+      bnotify(("'%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다 - "):format(owner)
+        .. '거기서 담으세요', vim.log.levels.WARN)
+      return
+    end
+    bnotify(("참고: '%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다"):format(owner))
   end
   if not name then
     -- auto mode: adding a path means "start a preset here"
@@ -2203,7 +2228,8 @@ local function dir_candidates(root)
   local out = {}
   for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
     if l ~= '' and l ~= '.' and not have[l]
-        and not nested_owner(root, l .. '/') then
+        and not (cfg('nested_presets', 0) ~= 0
+          and nested_owner(root, l .. '/')) then
       out[#out + 1] = l
     end
   end

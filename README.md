@@ -364,20 +364,30 @@ looks like it is overwriting the inner project's preset. That is not
 hypothetical: a preset saved from an outer tree turned out to hold 638
 paths that only exist in an inner one.
 
+This applies to the lists that are *generated* - auto mode's `git
+ls-files` and `find`, and `cscope.files`. What you put in a preset by hand
+is kept, nested or not: an explicit choice outranks the rule, the same
+reason `.indexfiles` is left alone. Adding such a path says which nested
+project it belongs to and adds it anyway.
+`let g:projectfiles_nested_presets = 1` filters preset entries too.
+
 It is re-checked every time a list is built (a `find` bounded by
 `g:projectfiles_nested_depth`, default 6, and a two-second cache so one
-build does not repeat it), so a nested `.tags` that appears later is
-excluded from then on. `indexfiles.sh` does the same for the generated
-lists - `git ls-files`, `cscope.files`, `find` - and leaves the
-hand-written ones (`.indexfiles`, and the preset's own `.tags/files`)
-alone. `INDEXFILES_NESTED_DEPTH=0` or
-`let g:projectfiles_nested_depth = 0` turns it off.
+build does not repeat it), so a nested `.tags` that appears later takes
+effect from then on. `INDEXFILES_NESTED_DEPTH=0` or
+`let g:projectfiles_nested_depth = 0` turns it off entirely.
 
-Adding a path that lies inside a nested project says so and does nothing.
-And when a path you name belongs to a *different* project than the one you
-are looking at, that is now said out loud - a path decides its own project
-so that the tree window works, but the switch used to be silent, which is
-how a preset ends up full of another tree's paths without anyone noticing.
+Getting this wrong the first way round emptied a project's index: the
+preset's paths all lay inside a nested project, so filtering them left no
+files, an empty `.tags/files` reads as "index nothing", and a 22-file
+index became 0. `materialize()` now refuses to write an empty list when
+the preset has entries - it says the paths did not expand here and leaves
+both the list and the index alone.
+
+When a path you name belongs to a *different* project than the one you are
+looking at, that is now said out loud - a path decides its own project so
+that the tree window works, but the switch used to be silent, which is how
+a preset ends up full of another tree's paths without anyone noticing.
 
 ### Which mode, decided once per project
 
