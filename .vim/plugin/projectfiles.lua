@@ -1081,14 +1081,42 @@ local function telescope()
 end
 
 -- the files that are indexed right now (preset list, or the whole project)
+local db_stat   -- 아래에서 정의: 색인 데이터베이스의 stat
+
+-- root -> { key = <파일 stat>, list = {...} }
+-- \fo 는 누를 때마다 이 목록을 통째로 다시 읽었다. 커널 트리에서 46,000 줄
+-- 이라 그 자체가 100ms 대의 정지였고, 목록이 바뀌지도 않았는데 매번 그랬다.
+--   let g:projectfiles_files_cache = 0   " 항상 다시 읽기
+local files_cache = {}
+
 local function current_files(root)
   local d = dbdir() or '.tags'
   local list = root .. '/' .. d .. '/files'
-  if uv.fs_stat(list) then
-    return vim.fn.readfile(list)
+  local st = uv.fs_stat(list)
+  if st then
+    -- 초 단위 mtime 만으로는 같은 초 안에 다시 쓰인 목록을 놓친다: 크기와
+    -- 나노초까지 키에 넣는다
+    local key = ('%d:%d:%d'):format(st.mtime.sec, st.mtime.nsec or 0, st.size)
+    local c = files_cache[root]
+    if cfg('files_cache', 1) ~= 0 and c and c.key == key then
+      return c.list
+    end
+    local out = vim.fn.readfile(list)
+    files_cache[root] = { key = key, list = out }
+    return out
   end
   local fl = vim.fn.expand('~/.local/bin/indexfiles.sh')
   if vim.fn.executable(fl) == 1 then
+    -- 목록 파일이 없는 트리(예전 mktags.sh 로 만든 색인)에서는 \fo 를 누를
+    -- 때마다 44,000 파일을 훑는 스크립트가 통째로 돌았다. 색인이 그대로면
+    -- 목록도 그대로라고 보고 색인 stat 을 키로 삼는다. 색인을 다시 만들면
+    -- (F2 / :GtagsIndex) 키가 바뀌어 자동으로 새로 읽는다.
+    local st2 = db_stat(root)
+    local key = st2 and ('gt:%d:%d'):format(st2.mtime.sec, st2.size) or nil
+    local c = key and files_cache[root]
+    if cfg('files_cache', 1) ~= 0 and c and c.key == key then
+      return c.list
+    end
     local o = vim.fn.systemlist({ 'sh', '-c', 'cd ' .. vim.fn.shellescape(root)
       .. ' && ' .. vim.fn.shellescape(fl) })
     local out = {}
@@ -1097,6 +1125,9 @@ local function current_files(root)
       if l ~= '' then
         out[#out + 1] = l
       end
+    end
+    if key and #out > 0 then
+      files_cache[root] = { key = key, list = out }
     end
     return out
   end
@@ -1209,7 +1240,21 @@ end
 -- the paths the database holds, as a set. 'global -x' separates the path
 -- from the source line with spaces and quotes nothing, so a path with a
 -- space in it can only be recovered by asking which paths exist.
+-- 색인된 경로 전부. 공백이 든 경로를 되살릴 때만 쓰인다.
+--
+-- 커널 트리에서 'global -P' 자체가 49ms 인데, 접두어를 바꿔 가며 검색하면
+-- 심볼 캐시가 무효화되면서 매번 다시 돌았다. 이건 접두어와 무관하므로
+-- 데이터베이스가 바뀌지 않는 한 한 번만 읽는다.
+--   let g:projectfiles_path_cache = 0   " 매번 다시 읽기
+local paths_cache = {}   -- root -> { key =, set =, n = }
+
 local function indexed_paths(root)
+  local st = db_stat(root)
+  local key = st and ('%d:%d'):format(st.mtime.sec, st.size) or 'none'
+  local c = paths_cache[root]
+  if cfg('path_cache', 1) ~= 0 and c and c.key == key then
+    return c.set, c.n
+  end
   local set, n = {}, 0
   for _, l in ipairs(global_lines(root, { '-P', '' })) do
     local rel = l:gsub('^%./', '')
@@ -1218,6 +1263,9 @@ local function indexed_paths(root)
       n = n + 1
     end
   end
+  if n > 0 then
+    paths_cache[root] = { key = key, set = set, n = n }
+  end
   return set, n
 end
 
@@ -1225,7 +1273,7 @@ end
 -- to be keyed on the same one - and on its size, because mtime seconds alone
 -- would serve a stale list after a re-index that finished inside the same
 -- second ('global --single-update' takes about 20 ms).
-local function db_stat(root)
+db_stat = function(root)
   local d = dbdir()
   if d and d ~= '' then
     local st = uv.fs_stat(root .. '/' .. d .. '/GTAGS')
@@ -1258,6 +1306,11 @@ local function symbols_of(root, prefix)
   if prefix and prefix ~= '' then
     pat = '^' .. prefix:gsub('[%^%$%(%)%%%.%[%]%*%+%-%?{}|\\]', '\\%0')
   end
+  -- 공백이 든 경로('my dir/a b.c')를 되살리는 데 쓴다. 이 트리에 그런 경로가
+  -- 하나도 없어도 목록 자체는 필요하다 - 어떤 줄이 잘렸는지는 이걸 봐야만
+  -- 알 수 있고, global -P 는 경로 패턴으로 걸러 주지 않는다(실측: 패턴을
+  -- 무시하고 전부 돌려준다). 대신 indexed_paths 를 캐시해 두어서, 접두어를
+  -- 바꿔 가며 검색해도 데이터베이스당 한 번만 읽는다.
   local known, npaths = indexed_paths(root)
   local list = {}
   local cap = cfg('symbol_max', 200000)
