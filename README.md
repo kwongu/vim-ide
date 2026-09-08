@@ -472,6 +472,34 @@ Nothing else changed: `msg->cmd` still resolves through the base variable's
 type to the member's own declaration, and an enum constant still opens on
 its enum.
 
+## When it feels slow
+
+Most of what made this configuration feel slower on a remote Linux box
+than on the laptop was not the box. It was measured, not guessed:
+
+| | |
+|---|---|
+| Leaked indexers | `autoindex.lua` ran `gtags` through `sh -c`, so nvim killed the shell and the indexer survived as an orphan - one per session. Eleven of them were pinned at 99.9% CPU, 11-17 hours old, on a shared build server: 1099% CPU, and the whole of that machine's load average of 11.4. Killing them took the load from 11.38 to 0.10. Every indexer now runs as a direct argv, holds a lock file so a second nvim does not start a second index of the same tree, carries a timeout, and is killed on `VimLeavePre` |
+| Esc | `ttimeoutlen=100` plus the network made every Esc take a measured 131 ms. It is 25 ms now - twice the measured RTT, so a split arrow-key sequence still arrives in time |
+| The relation window | One `global -f` process per referencing file, up to 100 of them: 125 ms for 60 files as separate spawns, 12 ms batched. The tree cache was written and never read. `fetch_callees` cached nothing. A heavy symbol (1607 references) went 916 ms -> 694 ms cold and 129 ms -> 28 ms on a revisit |
+| The pickers | `\fo` re-generated the whole 44,466-file list every press (239 ms -> 116 ms); `\fs` asked gtags for every indexed path before parsing a row, again on every prefix change (95 ms -> 8 ms) |
+| Not the cause | gtags queries are *faster* on the server than on the Mac (4 ms vs 19 ms). SSH round-trip is 12 ms and cannot be reduced; compression made it worse. Plugin sourcing is 35 ms total, so lazy-loading buys nothing |
+
+`:VimIdeColorCheck` for colour problems. For indexing, `:GtagsIndexStatus`
+says what is running and which database is in use, and
+`let g:autoindex_debug = 1` writes a line per index action to
+`stdpath('cache')/autoindex.log`.
+
+Two switches are left off because they change what you see, not just how
+fast it arrives:
+
+```vim
+let g:vimide_light_cursorline = 1   " highlight the line number, not the line
+                                    "   (1051 bytes a keypress, not 152)
+let g:vimide_scrolljump = 5         " scroll five lines at a time
+                                    "   (a scrolling keypress repaints 11.1 KB)
+```
+
 ## Reference highlight (nvim only)
 
 Source Insight washes every visible occurrence of the symbol under the
