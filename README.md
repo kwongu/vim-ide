@@ -552,6 +552,42 @@ than on the laptop was not the box. It was measured, not guessed:
 | The pickers | `\fo` re-generated the whole 44,466-file list every press (239 ms -> 116 ms); `\fs` asked gtags for every indexed path before parsing a row, again on every prefix change (95 ms -> 8 ms) |
 | Not the cause | gtags queries are *faster* on the server than on the Mac (4 ms vs 19 ms). SSH round-trip is 12 ms and cannot be reduced; compression made it worse. Plugin sourcing is 35 ms total, so lazy-loading buys nothing |
 
+### neo-tree's git marks on a big repo
+
+Finding or filtering in neo-tree makes it rescan, and every scan asked git
+for the status of the whole worktree. On a 56,220-file kernel repo that is
+one process at 90-120% CPU for six to ten seconds, and a new one for the
+next scan. Measured:
+
+| | |
+|---|---|
+| `git status --porcelain --ignored=traditional --untracked-files=no` | 10.2 s |
+| `git status --porcelain --ignored=no --untracked-files=no` | 6.4 s |
+| `git status … -- drivers/spi` | **109 ms** |
+| `git ls-files --others --ignored` | 56 ms |
+
+So only one command is expensive, no flag combination rescues it, and the
+ignored-file pass - the obvious suspect - costs 56 ms. The two cases get
+different answers:
+
+- Looking at a subdirectory: `git_status_scope_to_path` asks about that
+  path only. 6.4 s becomes 109 ms and the marks still work.
+- At the tree root, "that path" *is* the worktree, so there is nothing to
+  make cheap. Above a size threshold the marks are switched off instead -
+  decided from one stat of `.git/index` (5.4 MB for those 56k files) - and
+  it says so once, with the size, so a missing mark is not a mystery.
+
+```vim
+let g:vimide_neotree_git = 1         " always on, whatever the size
+let g:vimide_neotree_git = 0         " always off
+let g:vimide_neotree_git_max_mb = 2  " the threshold (default 2)
+```
+
+Counted live on the kernel repo while opening neo-tree, walking into a
+subdirectory and revealing a file: forced on, one git process at 89%, then
+97% eight seconds in, then a second at 121%. With the guard, none at any
+step.
+
 `:VimIdeColorCheck` for colour problems. For indexing, `:GtagsIndexStatus`
 says what is running and which database is in use, and
 `let g:autoindex_debug = 1` writes a line per index action to
