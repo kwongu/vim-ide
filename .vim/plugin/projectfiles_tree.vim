@@ -35,18 +35,6 @@ if get(g:, 'projectfiles_tree', 1) == 0
     finish
 endif
 
-" NERDTree 가 아직 없으면(지연 로딩) 나중에 다시 시도한다
-if !exists('g:NERDTreePathNotifier') && !exists('*NERDTreeAddKeyMap')
-    augroup ProjectFilesTreeLate
-        autocmd!
-        autocmd VimEnter,SourcePost * ++once
-                    \ if exists('*NERDTreeAddKeyMap')
-                    \ |   unlet! g:loaded_projectfiles_tree
-                    \ |   runtime plugin/projectfiles_tree.vim
-                    \ | endif
-    augroup END
-    finish
-endif
 
 " ---------------------------------------------------------------------------
 " 노드 -> 경로
@@ -162,29 +150,6 @@ function! ProjectFilesTreeReindex(...) abort
     call s:Rerender()
 endfunction
 
-" ---------------------------------------------------------------------------
-" 키
-" ---------------------------------------------------------------------------
-" NERDTree 의 기본 키를 피해서 고른 것들이다(+ - = 는 비어 있다).
-call NERDTreeAddKeyMap({
-            \ 'key': get(g:, 'projectfiles_tree_add_key', '+'),
-            \ 'scope': 'Node',
-            \ 'callback': 'ProjectFilesTreeAdd',
-            \ 'quickhelpText': '색인에 추가 (project index)' })
-call NERDTreeAddKeyMap({
-            \ 'key': get(g:, 'projectfiles_tree_remove_key', '-'),
-            \ 'scope': 'Node',
-            \ 'callback': 'ProjectFilesTreeRemove',
-            \ 'quickhelpText': '색인에서 제거' })
-call NERDTreeAddKeyMap({
-            \ 'key': get(g:, 'projectfiles_tree_info_key', '='),
-            \ 'scope': 'Node',
-            \ 'callback': 'ProjectFilesTreeInfo',
-            \ 'quickhelpText': '색인 상태 보기' })
-
-" NERDTreeAddKeyMap 은 normal 모드만 걸어 준다. 범위를 고르는 것은 visual
-" 모드이므로 트리 버퍼에 직접 건다. '<,'> 는 xnoremap 안에서 <C-u> 로 범위
-" 접두사를 지운 뒤 mark 로 읽는다(그래야 v / V / <C-v> 가 모두 같이 된다).
 function! s:MapVisual() abort
     let l:add = get(g:, 'projectfiles_tree_add_key', '+')
     let l:rem = get(g:, 'projectfiles_tree_remove_key', '-')
@@ -207,46 +172,97 @@ command! -range -bar ProjectFilesIndexAdd
 command! -range -bar ProjectFilesIndexRemove
             \ call ProjectFilesTreeRemoveRange(<line1>, <line2>)
 
-" ---------------------------------------------------------------------------
-" m 메뉴
-" ---------------------------------------------------------------------------
-if exists('*NERDTreeAddSubmenu')
-    let s:sub = NERDTreeAddSubmenu({ 'text': '(i)ndex - 프로젝트 색인',
-                \ 'shortcut': 'i' })
-    call NERDTreeAddMenuItem({ 'text': '(a)dd - 색인에 추가',
-                \ 'shortcut': 'a', 'callback': 'ProjectFilesTreeAdd',
-                \ 'parent': s:sub })
-    call NERDTreeAddMenuItem({ 'text': '(r)emove - 색인에서 제거',
-                \ 'shortcut': 'r', 'callback': 'ProjectFilesTreeRemove',
-                \ 'parent': s:sub })
-    call NERDTreeAddMenuItem({ 'text': '(s)tatus - 색인 상태',
-                \ 'shortcut': 's', 'callback': 'ProjectFilesTreeInfo',
-                \ 'parent': s:sub })
-    call NERDTreeAddMenuItem({ 'text': '(m)ode - 색인 모드 고르기',
-                \ 'shortcut': 'm', 'callback': 'ProjectFilesTreeMode',
-                \ 'parent': s:sub })
-    call NERDTreeAddMenuItem({ 'text': '(i)ndex now - 지금 재색인',
-                \ 'shortcut': 'i', 'callback': 'ProjectFilesTreeReindex',
-                \ 'parent': s:sub })
-endif
+
+" 이벤트의 대상은 a:event.subject 다 (a:event.path 가 아니다 -
+" nerdtree/lib/nerdtree/event.vim 의 Event.New 가 subject 로 담는다)
+function! s:OnPathEvent(event) abort
+    let l:path = a:event.subject
+    call l:path.flagSet.clearFlags('projectfiles')
+    let l:m = luaeval('_G.projectfiles_tree_flag(_A)', l:path.str())
+    if type(l:m) == v:t_string && !empty(l:m)
+        call l:path.flagSet.addFlag('projectfiles', l:m)
+    endif
+endfunction
 
 " ---------------------------------------------------------------------------
-" 노드 옆 표시
+" NERDTree API 가 필요한 부분
 " ---------------------------------------------------------------------------
-" nerdtree-git-plugin 과 같은 방식(PathNotifier + flagSet)이라 서로 간섭하지
-" 않는다. scope 이름만 다르면 각자의 표시가 나란히 붙는다.
-if get(g:, 'projectfiles_tree_marks', 1) != 0 && exists('g:NERDTreePathNotifier')
-    " 이벤트의 대상은 a:event.subject 다 (a:event.path 가 아니다 -
-    " nerdtree/lib/nerdtree/event.vim 의 Event.New 가 subject 로 담는다)
-    function! s:OnPathEvent(event) abort
-        let l:path = a:event.subject
-        call l:path.flagSet.clearFlags('projectfiles')
-        let l:m = luaeval('_G.projectfiles_tree_flag(_A)', l:path.str())
-        if type(l:m) == v:t_string && !empty(l:m)
-            call l:path.flagSet.addFlag('projectfiles', l:m)
-        endif
-    endfunction
-    call g:NERDTreePathNotifier.AddListener('init', function('s:OnPathEvent'))
-    call g:NERDTreePathNotifier.AddListener('refresh', function('s:OnPathEvent'))
-    call g:NERDTreePathNotifier.AddListener('refreshFlags', function('s:OnPathEvent'))
+" 이 파일은 ~/.vim/plugin 에 있고 그 디렉터리는 rtp 에서 plugged 보다 앞이라,
+" NERDTree 의 plugin/NERD_tree.vim 보다 먼저 읽힌다 (:scriptnames 실측으로
+" #19 대 #42). 그래서 여기서는 NERDTreeAddKeyMap 같은 함수가 아직 없다.
+"
+" 예전에는 그때 파일 전체를 finish 하고 VimEnter 에서 다시 읽었는데, 그러면
+" 시작 직후 한동안 ProjectFilesTreeAddRange 도 :ProjectFilesIndexAdd 도 없는
+" 상태가 된다. 이제 순서에 의존하는 것만 이 함수에 모으고, 나머지는 언제나
+" 정의된다.
+function! s:RegisterNERDTree() abort
+    if exists('g:loaded_projectfiles_tree_nt') || !exists('*NERDTreeAddKeyMap')
+        return
+    endif
+    let g:loaded_projectfiles_tree_nt = 1
+    " ---------------------------------------------------------------------------
+    " 키
+    " ---------------------------------------------------------------------------
+    " NERDTree 의 기본 키를 피해서 고른 것들이다(+ - = 는 비어 있다).
+    call NERDTreeAddKeyMap({
+                \ 'key': get(g:, 'projectfiles_tree_add_key', '+'),
+                \ 'scope': 'Node',
+                \ 'callback': 'ProjectFilesTreeAdd',
+                \ 'quickhelpText': '색인에 추가 (project index)' })
+    call NERDTreeAddKeyMap({
+                \ 'key': get(g:, 'projectfiles_tree_remove_key', '-'),
+                \ 'scope': 'Node',
+                \ 'callback': 'ProjectFilesTreeRemove',
+                \ 'quickhelpText': '색인에서 제거' })
+    call NERDTreeAddKeyMap({
+                \ 'key': get(g:, 'projectfiles_tree_info_key', '='),
+                \ 'scope': 'Node',
+                \ 'callback': 'ProjectFilesTreeInfo',
+                \ 'quickhelpText': '색인 상태 보기' })
+
+    " NERDTreeAddKeyMap 은 normal 모드만 걸어 준다. 범위를 고르는 것은 visual
+    " 모드이므로 트리 버퍼에 직접 건다. '<,'> 는 xnoremap 안에서 <C-u> 로 범위
+    " 접두사를 지운 뒤 mark 로 읽는다(그래야 v / V / <C-v> 가 모두 같이 된다).
+    " ---------------------------------------------------------------------------
+    " m 메뉴
+    " ---------------------------------------------------------------------------
+    if exists('*NERDTreeAddSubmenu')
+        let s:sub = NERDTreeAddSubmenu({ 'text': '(i)ndex - 프로젝트 색인',
+                    \ 'shortcut': 'i' })
+        call NERDTreeAddMenuItem({ 'text': '(a)dd - 색인에 추가',
+                    \ 'shortcut': 'a', 'callback': 'ProjectFilesTreeAdd',
+                    \ 'parent': s:sub })
+        call NERDTreeAddMenuItem({ 'text': '(r)emove - 색인에서 제거',
+                    \ 'shortcut': 'r', 'callback': 'ProjectFilesTreeRemove',
+                    \ 'parent': s:sub })
+        call NERDTreeAddMenuItem({ 'text': '(s)tatus - 색인 상태',
+                    \ 'shortcut': 's', 'callback': 'ProjectFilesTreeInfo',
+                    \ 'parent': s:sub })
+        call NERDTreeAddMenuItem({ 'text': '(m)ode - 색인 모드 고르기',
+                    \ 'shortcut': 'm', 'callback': 'ProjectFilesTreeMode',
+                    \ 'parent': s:sub })
+        call NERDTreeAddMenuItem({ 'text': '(i)ndex now - 지금 재색인',
+                    \ 'shortcut': 'i', 'callback': 'ProjectFilesTreeReindex',
+                    \ 'parent': s:sub })
+    endif
+
+    " ---------------------------------------------------------------------------
+    " 노드 옆 표시
+    " ---------------------------------------------------------------------------
+    " nerdtree-git-plugin 과 같은 방식(PathNotifier + flagSet)이라 서로 간섭하지
+    " 않는다. scope 이름만 다르면 각자의 표시가 나란히 붙는다.
+    if get(g:, 'projectfiles_tree_marks', 1) != 0 && exists('g:NERDTreePathNotifier')
+        call g:NERDTreePathNotifier.AddListener('init', function('s:OnPathEvent'))
+        call g:NERDTreePathNotifier.AddListener('refresh', function('s:OnPathEvent'))
+        call g:NERDTreePathNotifier.AddListener('refreshFlags', function('s:OnPathEvent'))
+    endif
+
+endfunction
+
+call s:RegisterNERDTree()
+if !exists('g:loaded_projectfiles_tree_nt')
+    augroup ProjectFilesTreeLate
+        autocmd!
+        autocmd VimEnter * ++once call s:RegisterNERDTree()
+    augroup END
 endif
