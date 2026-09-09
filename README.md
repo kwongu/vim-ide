@@ -922,6 +922,34 @@ let g:vimide_scrolljump = 5         " scroll five lines at a time
 
 ## Overview bar (nvim only)
 
+Dragging it used to stutter, and a fast drag threw:
+
+```
+E5108: Lua: overview.lua:417: E565: Not allowed to change text or change window
+```
+
+Three things, all in the mouse path:
+
+The mappings are `expr` mappings - they have to be, because a click on a
+focusable float never reaches a buffer-local map, so the bar catches the
+mouse globally and returns the key unchanged when the click was not on it.
+Inside an `expr` mapping you are under textlock: `nvim_set_current_win` is
+refused, which is the E565. Restoring focus to the edit window on
+`<LeftRelease>` did exactly that. It is deferred now.
+
+A drag emits events faster than they can be drawn, and each one was queued
+with its own `vim.schedule`. The callbacks piled up, so the view crawled
+through every intermediate position instead of following the mouse. Only
+the newest row is kept now, and one tick processes one move - 22 drag
+events in a fast sweep of a 3,000-line file land on line 2,922 with nothing
+queued behind them.
+
+And the first drag after a click jumped half a screen, because a click
+centred the line (`zz`) while a drag put it at the top (`zt`). Both centre
+now.
+
+
+
 A thin bar down the right edge of the edit window standing for the whole
 file, the way Source Insight and VS Code have one. The part you are
 looking at is lit, the cursor's line is brighter still, and changed lines

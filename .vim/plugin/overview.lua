@@ -356,8 +356,8 @@ goto_row = function(row, center)
   -- 편집 창으로 가 버려서 막대의 매핑이 불리지 않는다 - 드래그가 통째로
   -- 죽는다(실측: 아래에서 위로 끌어도 첫 클릭 자리에 머물렀다).
   -- 그래서 <LeftRelease> 에서만 되돌린다.
-  if not s.dragging then
-    api.nvim_set_current_win(s.target)
+  if not s.dragging and api.nvim_get_current_win() ~= s.target then
+    pcall(api.nvim_set_current_win, s.target)
   end
   schedule()
 end
@@ -401,6 +401,48 @@ local MOUSE_KEYS = { '<LeftMouse>', '<LeftDrag>', '<LeftRelease>',
   '<ScrollWheelUp>', '<ScrollWheelDown>' }
 local mouse_installed = false
 
+-- 드래그는 이벤트가 쏟아진다. 하나마다 vim.schedule 을 걸면 콜백이 쌓여
+-- 마지막 위치까지 가는 데 그만큼 밀리고, 지나간 위치를 전부 그리느라
+-- 끊겨 보인다. 마지막 요청만 남기고 한 틱에 한 번 처리한다.
+local pending_row
+local goto_queued = false
+
+local function request_goto(row)
+  pending_row = row
+  if goto_queued then
+    return
+  end
+  goto_queued = true
+  vim.schedule(function()
+    goto_queued = false
+    local r = pending_row
+    pending_row = nil
+    if not r then
+      return
+    end
+    -- 클릭과 드래그가 같은 방식이어야 한다. 예전에는 클릭만 가운데(zz)로
+    -- 맞추고 드래그는 맨 위(zt)로 붙여서, 누른 뒤 처음 움직이는 순간
+    -- 화면이 반 페이지 튀었다.
+    local ok, err = pcall(goto_row, r, true)
+    if not ok then
+      dbg('goto 실패: ' .. tostring(err))
+    end
+  end)
+end
+
+-- 초점을 편집 창으로 되돌린다. expr 매핑 안에서는 금지되므로 미룬다.
+local function restore_focus()
+  vim.schedule(function()
+    if s.dragging then
+      return -- 그 사이 다시 끌기 시작했다
+    end
+    if s.target and api.nvim_win_is_valid(s.target)
+        and api.nvim_get_current_win() ~= s.target then
+      pcall(api.nvim_set_current_win, s.target)
+    end
+  end)
+end
+
 local function install_mouse()
   if mouse_installed then
     return
@@ -413,9 +455,11 @@ local function install_mouse()
       if not r then
         if key == '<LeftRelease>' and s.dragging then
           s.dragging = false
-          if s.target and api.nvim_win_is_valid(s.target) then
-            api.nvim_set_current_win(s.target)
-          end
+          -- expr 매핑 안에서는 창을 바꿀 수 없다(textlock). 여기서 바로
+          -- 부르면 빠르게 끌 때 이 에러가 난다:
+          --   E565: Not allowed to change text or change window
+          -- 그래서 잠금이 풀린 뒤로 미룬다.
+          restore_focus()
         end
         return key -- 막대가 아니면 원래 동작
       end
@@ -429,14 +473,11 @@ local function install_mouse()
         end
       elseif key == '<LeftRelease>' then
         s.dragging = false
+        request_goto(r)
+        restore_focus()
       else
         s.dragging = true
-        vim.schedule(function()
-          local ok, err = pcall(goto_row, r, key == '<LeftMouse>')
-          if not ok then
-            dbg('goto 실패: ' .. tostring(err))
-          end
-        end)
+        request_goto(r)
       end
       return '<Ignore>'
     end, { expr = true, replace_keycodes = true, remap = false, silent = true })
