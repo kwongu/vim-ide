@@ -1245,14 +1245,21 @@ to do nothing, into `stdpath('cache')/rvctx.log`.
 
 ### Paths in the panel
 
-They are absolute (`g:relationview_full_path = 1`) and navy, the colour vim
-uses for paths everywhere else. The panel sits along the bottom at full
-width, so a real path fits with room to spare - 87 characters of
-`/home/.../kernel/common/sound/soc/telechips/tcc-snd-card.c:1243` and still
-space for the source line beside it. Longer than the column allows and the
-*front* is elided (`…`), so the filename and the directories nearest it stay
-readable. `let g:relationview_full_path = 0` goes back to paths relative to
-`:pwd`.
+Navy, the colour vim uses for paths everywhere else, and the whole path -
+relative to `:pwd`, not just the filename. Started at the project root that
+reads
+
+```
+kernel/common/include/sound/soc.h:437
+kernel/common/sound/soc/telechips/tcc-snd-card.c:1243
+```
+
+which is the full path from the root and shorter than the absolute form, so
+more of the source line fits beside it. `g:relationview_full_path = 1` makes
+them absolute instead; the panel is full width along the bottom so even those
+fit (87 characters of `/home/.../tcc-snd-card.c:1243` with room to spare),
+and anything longer than the column elides at the *front*, keeping the
+filename and the directories nearest it readable.
 
 ## Relation window (nvim only)
 

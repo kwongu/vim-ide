@@ -1754,10 +1754,11 @@ let g:relationview_position = 'bottom'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
 let g:relationview_height = 16
-" 경로를 절대 경로로 (기본 0 = :pwd 기준 상대 경로).
-" 패널이 아래 전체 폭을 쓰므로 긴 경로도 들어간다. 소스 줄까지 함께 보는
-" show_text 를 켜면 경로 칸이 넓어지도록(0.35 -> 0.62) 이미 조정된다.
-let g:relationview_full_path = 1
+" 경로는 :pwd 기준 상대 경로 전체로 (0 = 기본).
+" 프로젝트 루트에서 vim 을 켜면 kernel/common/sound/.../tcc-snd-card.c 처럼
+" 루트부터의 전체 경로가 나온다 - 파일명만 나오는 것이 아니다.
+" 1 로 두면 절대 경로가 된다.
+let g:relationview_full_path = 0
 let g:relationview_startup = 'both'
 "let g:relationview_cycle = ['context', 'off']          " 미리보기만 켜고 끄기
 let g:relationview_cycle = ['both', 'off']             " 통째로 켜고 끄기
