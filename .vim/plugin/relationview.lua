@@ -88,8 +88,13 @@
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
---   g:relationview_full_path  1: absolute paths; default 0 = relative to
---                             vim's current directory (:pwd)
+--   g:relationview_path_base  'root' (default): paths relative to the
+--                             outermost indexed project root, so the same
+--                             file always reads the same no matter where
+--                             nvim was started; 'pwd': relative to :pwd;
+--                             'abs': absolute
+--   g:relationview_full_path  1: absolute paths (old option, same as
+--                             path_base = 'abs')
 --   g:relationview_show_text  1: also show the source line (default 0:
 --                             only the symbol and its file:line)
 --   g:relationview_auto_open  1: open something on startup (default 1)
@@ -570,6 +575,46 @@ local function parse_ctags_mod(lines, max)
     end
   end
   return out
+end
+
+-- 가장 바깥쪽 색인 루트.
+--
+-- db_root 는 위로 올라가다 처음 만나는 GTAGS 에서 멈춘다. 그런데 이 트리에는
+-- 중첩 프로젝트가 있다(d5_qnx_hyp 와 그 안의 kernel/common 이 각각 .tags 를
+-- 갖는다). 그래서 어디서 vim 을 켰느냐에 따라 같은 파일이
+--   kernel/common/include/sound/soc.h   (바깥에서 켰을 때)
+--   include/sound/soc.h                 (kernel/common 안에서 켰을 때)
+-- 로 달리 보였다. 경로 표시는 켠 위치와 무관하게 늘 같아야 하므로, 여기서는
+-- 멈추지 않고 끝까지 올라가 가장 바깥의 색인 루트를 쓴다.
+local outer_cache = {}
+
+local function outer_root(dir)
+  if not dir or dir == '' then
+    return nil
+  end
+  local hit = outer_cache[dir]
+  if hit ~= nil then
+    return hit or nil
+  end
+  local hidden = db_dir()
+  local best, d = nil, dir
+  local home = vim.fn.expand('~')
+  while d and d ~= '' and d ~= '/' do
+    if (hidden and uv.fs_stat(d .. '/' .. hidden .. '/GTAGS'))
+        or uv.fs_stat(d .. '/GTAGS') then
+      best = d
+    end
+    if d == home then
+      break -- 홈보다 위로는 올라가지 않는다
+    end
+    local parent = vim.fs.dirname(d)
+    if not parent or parent == d then
+      break
+    end
+    d = parent
+  end
+  outer_cache[dir] = best or false
+  return best
 end
 
 -- find the GTAGS project root for a directory (async; only positive results
@@ -2601,8 +2646,25 @@ show_context = function(loc)
       s.ctx_hl_buf = b
     end
   end
-  local label = (cfg('full_path', 0) ~= 0 and loc.path
-      or vim.fn.fnamemodify(loc.path, ':.'))
+  -- 미리보기 창 제목도 패널과 같은 기준으로 (render_tree 의 rel 참고)
+  local lbase = tostring(cfg('path_base', 'root'))
+  if cfg('full_path', 0) ~= 0 then
+    lbase = 'abs'
+  elseif lbase ~= 'pwd' and lbase ~= 'abs' then
+    lbase = 'root'
+  end
+  local lroot = s.tree and s.tree.root
+  if lbase == 'root' and lroot and lroot ~= '' then
+    lroot = outer_root(lroot) or lroot
+  end
+  local shown = loc.path
+  if lbase == 'root' and lroot and lroot ~= ''
+      and loc.path:sub(1, #lroot + 1) == lroot .. '/' then
+    shown = loc.path:sub(#lroot + 2)
+  elseif lbase ~= 'abs' then
+    shown = vim.fn.fnamemodify(loc.path, ':.')
+  end
+  local label = shown
       .. ':' .. (line + off) .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
   pcall(function()
     vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
@@ -2643,13 +2705,36 @@ render_tree = function()
   if not t then
     return
   end
-  -- paths relative to vim's current directory, the way vim itself shows
-  -- them ('%:.'); g:relationview_full_path = 1 keeps them absolute
-  local full_path = cfg('full_path', 0) ~= 0
+  -- 경로를 무엇을 기준으로 보여줄까.
+  --
+  --   'root'  프로젝트 루트 기준 (기본). 이 트리를 만들 때 실제로 질의한
+  --           GTAGS 루트다 - 한 데이터베이스에서 나온 줄들이므로 그 루트를
+  --           기준으로 삼는 것이 앞뒤가 맞고, 어느 디렉터리에서 vim 을
+  --           켜든 같은 파일이 늘 같은 경로로 보인다.
+  --   'pwd'   :pwd 기준 (vim 이 '%:.' 로 보여주는 방식). 켠 위치에 따라
+  --           달라지고, 바깥 파일은 절대 경로가 된다.
+  --   'abs'   절대 경로.
+  --
+  --   let g:relationview_path_base = 'pwd'
+  --
+  -- g:relationview_full_path = 1 은 예전 옵션이라 'abs' 로 읽는다.
+  local base = tostring(cfg('path_base', 'root'))
+  if cfg('full_path', 0) ~= 0 then
+    base = 'abs'
+  elseif base ~= 'pwd' and base ~= 'abs' then
+    base = 'root'
+  end
+  -- 질의한 루트가 중첩 프로젝트일 수 있으므로 가장 바깥 루트로 올린다
+  local troot = (base == 'root' and t.root and t.root ~= '')
+      and (outer_root(t.root) or t.root) or nil
   local function rel(p)
-    if full_path then
+    if base == 'abs' then
       return p
     end
+    if troot and p:sub(1, #troot + 1) == troot .. '/' then
+      return p:sub(#troot + 2)
+    end
+    -- 루트 밖의 파일(다른 트리의 헤더 등)과 'pwd' 모드는 vim 의 방식대로
     return vim.fn.fnamemodify(p, ':.')
   end
 

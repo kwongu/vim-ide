@@ -1754,10 +1754,12 @@ let g:relationview_position = 'bottom'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
 let g:relationview_height = 16
-" 경로는 :pwd 기준 상대 경로 전체로 (0 = 기본).
-" 프로젝트 루트에서 vim 을 켜면 kernel/common/sound/.../tcc-snd-card.c 처럼
-" 루트부터의 전체 경로가 나온다 - 파일명만 나오는 것이 아니다.
-" 1 로 두면 절대 경로가 된다.
+" 경로는 프로젝트 루트 기준의 전체 상대 경로로.
+"   'root' (기본) 이 트리를 질의한 GTAGS 루트 기준 - 어느 디렉터리에서
+"                 vim 을 켜든 같은 파일이 늘 같은 경로로 보인다
+"   'pwd'         :pwd 기준 (켠 위치에 따라 달라진다)
+"   'abs'         절대 경로
+let g:relationview_path_base = 'root'
 let g:relationview_full_path = 0
 let g:relationview_startup = 'both'
 "let g:relationview_cycle = ['context', 'off']          " 미리보기만 켜고 끄기

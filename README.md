@@ -1245,21 +1245,30 @@ to do nothing, into `stdpath('cache')/rvctx.log`.
 
 ### Paths in the panel
 
-Navy, the colour vim uses for paths everywhere else, and the whole path -
-relative to `:pwd`, not just the filename. Started at the project root that
-reads
+Navy, the colour vim uses for paths everywhere else, and the whole path from
+the project root:
 
 ```
 kernel/common/include/sound/soc.h:437
 kernel/common/sound/soc/telechips/tcc-snd-card.c:1243
 ```
 
-which is the full path from the root and shorter than the absolute form, so
-more of the source line fits beside it. `g:relationview_full_path = 1` makes
-them absolute instead; the panel is full width along the bottom so even those
-fit (87 characters of `/home/.../tcc-snd-card.c:1243` with room to spare),
-and anything longer than the column elides at the *front*, keeping the
-filename and the directories nearest it readable.
+**The same file always reads the same**, wherever nvim was started. That
+needs saying because the obvious implementation does not do it. Relative to
+`:pwd` a file moves as you move. Relative to the root the panel queried it
+still moves, because this tree has a project inside a project - start inside
+`kernel/common`, which owns a `.tags` of its own, and `soc.h` shrinks to
+`include/sound/soc.h`. So the base is the *outermost* indexed root: walk up
+past every nested one, stopping at `$HOME`.
+
+| `g:relationview_path_base` | |
+|---|---|
+| `'root'` (default) | from the outermost indexed root - stable |
+| `'pwd'` | vim's own `%:.`, relative to `:pwd`, absolute for anything outside it |
+| `'abs'` | absolute. `g:relationview_full_path = 1` is the old name for this |
+
+A path longer than its column elides at the *front*, so the filename and the
+directories nearest it stay readable.
 
 ## Relation window (nvim only)
 
