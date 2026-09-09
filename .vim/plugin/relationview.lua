@@ -18,7 +18,10 @@
 -- (mktags.sh) already creates - plus treesitter for the members and for
 -- resolving a variable to its type.
 --
---   F3                  toggle the relation window (was "Empty")
+--   F3                  cycle the layout:
+--                         relation + context -> relation only ->
+--                         context only -> off
+--                       (:RelationViewMode <이름> 으로 바로 고를 수도 있다)
 --   :RelationView [sym] open the window and show relations of sym/<cword>
 --   :RelationViewToggle same as F3
 --   :RelationViewBoth   both directions at once (the default)
@@ -88,7 +91,9 @@
 --                             vim's current directory (:pwd)
 --   g:relationview_show_text  1: also show the source line (default 0:
 --                             only the symbol and its file:line)
---   g:relationview_auto_open  1: open the panel on startup (default 1)
+--   g:relationview_auto_open  1: open something on startup (default 1)
+--   g:relationview_startup    what to open then: 'context' (default),
+--                             'both', 'relation' or 'off'
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
 --   g:relationview_context_height  context height, 'right' layout (default 25,
@@ -258,6 +263,9 @@ local s = {
   roots = {},         -- dir -> gtags root (positive results only)
   procs = {},         -- in-flight vim.system handles of the current query
   inflight = {},      -- filedefs key -> list of waiting callbacks
+  mode = nil,         -- <F3> 가 도는 상태: both/relation/context/off
+  ctx_alone = false,  -- 패널 없이 context 만 떠 있다
+  ctx_sym = nil,      -- 그때 따라가고 있는 심볼
   ctx_win = nil,      -- context window (Source Insight style)
   ctx_ph = nil,       -- the scratch buffer the preview renders into
   ctx_file = nil,     -- {path=, stamp=, off=, n=} currently copied into it
@@ -374,6 +382,11 @@ local hl_cursor_row
 local find_member
 local ensure_ctx
 local update_context
+-- context 만 켠 모드에서 커서를 따라간다. 실제 함수는 파일 아래쪽에 있고
+-- 여기서 이름만 잡아 둔다 - CursorHold 훅이 그보다 위에서 등록되기 때문에,
+-- 여기에 선언이 없으면 훅 안의 이름이 전역(nil)으로 잡혀 아무 일도 하지
+-- 않는다.
+local ctx_follow
 local group = api.nvim_create_augroup('RelationView', { clear = true })
 
 -- The database lives in a hidden directory in the project root
@@ -1676,9 +1689,17 @@ local function panel_win_here()
   return nil
 end
 
+-- 패널을 열 때 context 도 같이 열까. 'relation only' 모드에서는 열지 않는다.
+local function want_ctx()
+  if s.mode == 'relation' then
+    return false
+  end
+  return cfg('context', 1) ~= 0
+end
+
 local function panel_open()
   if panel_visible() then
-    if cfg('context', 1) ~= 0 then
+    if want_ctx() then
       ensure_ctx()
     end
     return s.win
@@ -1687,7 +1708,7 @@ local function panel_open()
   local existing = panel_win_here()
   if existing then
     s.win = existing
-    if cfg('context', 1) ~= 0 then
+    if want_ctx() then
       ensure_ctx()
     end
     return existing
@@ -1727,7 +1748,7 @@ local function panel_open()
   if api.nvim_win_is_valid(prev) then
     api.nvim_set_current_win(prev)
   end
-  if cfg('context', 1) ~= 0 then
+  if want_ctx() then
     ensure_ctx()
   end
   return win
@@ -2048,11 +2069,17 @@ ensure_ctx = function()
   if ctx_visible() then
     return s.ctx_win
   end
-  if not panel_visible() then
+  -- context 만 켜는 모드에서는 패널이 없다. 그때는 'panel' 위치를 쓸 수
+  -- 없으니(쪼갤 패널이 없다) 편집 창 옆에 세운다.
+  local standalone = s.ctx_alone and not panel_visible()
+  if not panel_visible() and not standalone then
     return nil
   end
   local ctx
   local where = cfg('context_position', 'panel')
+  if standalone and where ~= 'left' then
+    where = 'right'
+  end
   if where == 'left' or where == 'right' then
     -- A window of its own, beside the file you are editing, instead of a
     -- split inside the panel: the panel keeps the whole bottom and the
@@ -4820,6 +4847,16 @@ end
 
 api.nvim_create_autocmd('CursorHold', { group = group, callback = on_hold })
 
+-- context 만 켜 둔 모드에서 커서가 멈추면 그 심볼의 정의로 미리보기를 옮긴다
+api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
+  group = group,
+  callback = function()
+    if ctx_follow then
+      pcall(ctx_follow, false)
+    end
+  end,
+})
+
 -- A pinned panel is frozen on purpose (the user is walking the list), but
 -- resting on a symbol in a source window means "this one now": after
 -- g:relationview_unpin_delay ms on the same symbol the pin is released and
@@ -4949,13 +4986,164 @@ api.nvim_create_user_command('RelationViewCalls', function(o)
   open_and_query(o.args)
 end, { nargs = '?', desc = 'Relation window, Calls direction (callees)' })
 
+-- ---------------------------------------------------------------------------
+-- <F3>: 네 상태를 돌아가며 켠다
+-- ---------------------------------------------------------------------------
+--   both      relation window + context window   (Source Insight 의 기본 배치)
+--   relation  relation window 만
+--   context   context window 만 - 편집 창의 커서 밑 심볼의 정의를 보여 준다
+--   off       둘 다 닫는다
+--
+-- 지금 상태는 기억해 두지 않고 화면에서 읽는다. 창을 손으로 닫았거나 다른
+-- 탭으로 옮겨 갔어도 <F3> 한 번이 늘 '다음 상태'로 간다.
+local function current_mode()
+  local p, c = panel_visible(), ctx_visible()
+  if p and c then
+    return 'both'
+  elseif p then
+    return 'relation'
+  elseif c then
+    return 'context'
+  end
+  return 'off'
+end
+
+local MODE_NEXT = {
+  both = 'relation',
+  relation = 'context',
+  context = 'off',
+  off = 'both',
+}
+local MODE_LABEL = {
+  both = 'relation + context',
+  relation = 'relation only',
+  context = 'context only',
+  off = 'off',
+}
+
+-- context 만 떠 있을 때, 편집 창의 커서 밑 심볼의 정의를 보여 준다.
+--
+-- 패널이 있을 때의 context 는 '목록에서 고른 항목'을 미리 보는 창이라
+-- update_context() 가 패널의 커서 줄에서 값을 얻는다. 패널이 없으면 그
+-- 출처가 없으므로, Source Insight 의 Context Window 처럼 편집 창의 커서를
+-- 따라간다: 심볼 하나를 gtags 에 물어 정의 위치를 얻고 그 자리를 띄운다.
+local function ctx_follow_impl(force)
+  local function trace(why)
+    if vim.g.relationview_ctx_debug ~= nil and vim.g.relationview_ctx_debug ~= 0 then
+      pcall(vim.fn.writefile, { os.date('%H:%M:%S') .. ' ' .. why },
+        vim.fn.stdpath('cache') .. '/rvctx.log', 'a')
+    end
+  end
+  if not (s.ctx_alone and ctx_visible()) then
+    trace(('멈춤: alone=%s visible=%s'):format(tostring(s.ctx_alone), tostring(ctx_visible())))
+    return
+  end
+  local win = api.nvim_get_current_win()
+  if win == s.ctx_win then
+    trace('멈춤: 미리보기 안')
+    return
+  end
+  local buf = api.nvim_win_get_buf(win)
+  if vim.bo[buf].buftype ~= '' then
+    return
+  end
+  local file = api.nvim_buf_get_name(buf)
+  if file == '' then
+    return
+  end
+  local sym = vim.fn.expand('<cword>')
+  if not is_symbol(sym) then
+    trace('멈춤: 심볼 아님 ' .. tostring(sym))
+    return
+  end
+  if not force and s.ctx_sym == sym then
+    trace('멈춤: 같은 심볼 ' .. sym)
+    return
+  end
+  s.ctx_sym = sym
+  trace('조회 ' .. sym)
+  root_for(file, function(root)
+    if not root or not (s.ctx_alone and ctx_visible()) or s.ctx_sym ~= sym then
+      trace('멈춤(root cb): root=' .. tostring(root) .. ' alone=' .. tostring(s.ctx_alone))
+      return
+    end
+    run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
+      function(lines)
+        if not (s.ctx_alone and ctx_visible()) or s.ctx_sym ~= sym then
+          return
+        end
+        local defs = parse_ctags_mod(lines, 8)
+        local d = defs and defs[1]
+        trace(('결과 %s: %d개'):format(sym, defs and #defs or -1))
+        if d then
+          show_context({ path = d.path, line = d.line, sym = sym })
+        end
+      end)
+  end)
+end
+
+local function apply_mode(m)
+  s.mode = m
+  if m == 'off' then
+    s.ctx_alone = false
+    A.close()
+    return
+  end
+  if m == 'context' then
+    -- 패널을 닫고 context 만 남긴다. A.close() 가 context 도 같이 닫으므로
+    -- 순서가 중요하다: 닫고 나서 다시 세운다.
+    s.ctx_alone = true
+    A.close()
+    if ensure_ctx() then
+      s.ctx_sym = nil
+      ctx_follow(true)
+    end
+    return
+  end
+  s.ctx_alone = false
+  if m == 'relation' and ctx_visible() then
+    api.nvim_win_close(s.ctx_win, false)
+    s.ctx_win, s.ctx_last, s.ctx_stack = nil, nil, {}
+  end
+  if not panel_visible() then
+    open_and_query(nil)
+  elseif m == 'both' and not ctx_visible() then
+    if ensure_ctx() then
+      update_context(true)
+    end
+  end
+end
+
+ctx_follow = ctx_follow_impl
+
+api.nvim_create_user_command('RelationViewCycle', function()
+  local m = MODE_NEXT[current_mode()]
+  apply_mode(m)
+  vim.notify('RelationView: ' .. MODE_LABEL[m])
+end, { desc = 'Cycle: relation+context -> relation -> context -> off' })
+
+api.nvim_create_user_command('RelationViewMode', function(o)
+  local m = o.args
+  if not MODE_NEXT[m] then
+    vim.notify('RelationView: both | relation | context | off 중에서',
+      vim.log.levels.WARN)
+    return
+  end
+  apply_mode(m)
+  vim.notify('RelationView: ' .. MODE_LABEL[m])
+end, {
+  nargs = 1,
+  complete = function() return { 'both', 'relation', 'context', 'off' } end,
+  desc = 'Set the relation/context layout',
+})
+
 api.nvim_create_user_command('RelationViewToggle', function()
   if panel_visible() or panel_win_here() then
     A.close()
   else
     open_and_query(nil)
   end
-end, { desc = 'Toggle the relation window' })
+end, { desc = 'Toggle the relation window (F3 cycles instead)' })
 
 -- One key for "next item in whatever list is in front of me": the relation
 -- list when the panel holds one, the quickfix list otherwise.
@@ -5170,14 +5358,39 @@ local function auto_open()
     return
   end
   vim.g.rv_auto_opened = true
+  -- 시작할 때 어느 상태로 열까. 기본은 context 만 - relation window 는
+  -- 아래를 12줄 가져가는데 늘 필요한 것은 아니고, 커서 밑 심볼의 정의를
+  -- 옆에 띄워 두는 쪽이 읽을 때 계속 쓰인다. <F3> 로 넘긴다.
+  --   let g:relationview_startup = 'both'      " 예전처럼 패널+미리보기
+  --   let g:relationview_startup = 'relation'  " 패널만
+  --   let g:relationview_startup = 'off'       " 아무것도 열지 않기
+  local m = tostring(cfg('startup', 'context'))
+  if not MODE_LABEL[m] then
+    m = 'context'
+  end
   vim.schedule(function()
-    if panel_visible() then
+    if m == 'off' then
       return
     end
     local prev = api.nvim_get_current_win()
-    panel_open()
-    if s.buf and api.nvim_buf_line_count(s.buf) <= 1 then
-      render_msg(nil, 'move the cursor onto a symbol in a source window')
+    if m == 'context' then
+      s.ctx_alone = true
+      s.mode = 'context'
+      if ensure_ctx() then
+        s.ctx_sym = nil
+        if ctx_follow then
+          pcall(ctx_follow, true)
+        end
+      end
+    else
+      if panel_visible() then
+        return
+      end
+      s.mode = m
+      panel_open()
+      if s.buf and api.nvim_buf_line_count(s.buf) <= 1 then
+        render_msg(nil, 'move the cursor onto a symbol in a source window')
+      end
     end
     if api.nvim_win_is_valid(prev) then
       api.nvim_set_current_win(prev)
@@ -5221,8 +5434,8 @@ function _G.relationview_open_include()
 end
 
 if vim.fn.maparg('<F3>', 'n') == '' then
-  vim.keymap.set('n', '<F3>', '<Cmd>RelationViewToggle<CR>',
-    { desc = 'RelationView toggle' })
+  vim.keymap.set('n', '<F3>', '<Cmd>RelationViewCycle<CR>',
+    { desc = 'RelationView: relation+context -> relation -> context -> off' })
 end
 
 

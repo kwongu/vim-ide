@@ -1015,6 +1015,35 @@ let g:refhighlight_min = 3         " ignore names shorter than this
 :RefHighlightToggle
 ```
 
+### F3 cycles four layouts
+
+`<F3>` walks the four states in order:
+
+| | |
+|---|---|
+| relation + context | the list at the bottom, the preview beside it |
+| relation only | just the list |
+| context only | just the preview - and it follows the cursor in the edit window |
+| off | neither |
+
+The state is read off the screen rather than remembered, so `<F3>` does the
+intuitive thing even after you closed a window by hand or moved to another
+tab. `:RelationViewMode both\|relation\|context\|off` jumps straight to one.
+
+**A new startup default: context only.** The relation list takes twelve rows
+off the bottom and is not always what you want; the definition of the symbol
+under the cursor, sitting beside the code, is useful the whole time you are
+reading. `let g:relationview_startup = 'both'` restores the old layout
+(`'relation'` and `'off'` are the other two).
+
+With the panel open the context window previews *the row you are on in the
+list* - that is what it has always done. On its own there is no list to read
+from, so it does what Source Insight's Context Window does: takes the symbol
+under the cursor in the edit window, asks gtags where it is defined, and
+shows that. One `global -d` per symbol, on `CursorHold`, skipped when the
+symbol has not changed. `g:relationview_ctx_debug = 1` logs why it decided
+to do nothing, into `stdpath('cache')/rvctx.log`.
+
 ## Relation window (nvim only)
 
 The Source Insight style relation window opens by itself when nvim starts
