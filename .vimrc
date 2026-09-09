@@ -1590,6 +1590,11 @@ let g:relationview_position = 'bottom'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 let g:relationview_auto_open = 1
 let g:relationview_height = 16
+let g:relationview_startup = 'both'
+"let g:relationview_cycle = ['context', 'off']          " 미리보기만 켜고 끄기
+let g:relationview_cycle = ['both', 'off']             " 통째로 켜고 끄기
+"let g:relationview_cycle = ['relation', 'context']     " 둘을 오간다
+"let g:relationview_cycle = ['context', 'both', 'off']  " 셋만
 " context view 는 패널 안이 아니라 편집 창 오른쪽에 따로 띄운다
 "   -> RelationView 는 아래 전체 폭, ContextView 는 오른쪽 세로 한 칸
 let g:relationview_context_position = 'right'
@@ -1615,7 +1620,7 @@ let g:relationview_max_extra = 40
 let g:relationview_members = 0
 " 리스트를 훑으면 PINNED 로 고정되고, 소스 창에서 한 심볼에 이만큼
 " 머무르면 고정이 풀리며 다시 커서를 따라간다
-let g:relationview_unpin_delay = 3000
+let g:relationview_unpin_delay = 2000
 
 " ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창
