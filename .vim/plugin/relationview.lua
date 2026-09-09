@@ -88,6 +88,14 @@
 --   g:relationview_max_depth  depth limit of '*'          (default 6)
 --   g:relationview_max_nodes  node limit of '*'           (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
+--   g:relationview_path_truncate  1: cut the path column to the window
+--                             width, eliding the front ('…'); default 0
+--                             shows the whole path and lets the line run
+--                             past the edge instead
+--   g:relationview_db_base    'outer' (default): always ask the outermost
+--                             index that holds this file, so the answer does
+--                             not depend on where nvim was started;
+--                             'cwd': the old behaviour
 --   g:relationview_path_base  'root' (default): paths relative to the
 --                             outermost indexed project root, so the same
 --                             file always reads the same no matter where
@@ -632,12 +640,63 @@ local function get_root(dir, cb)
   cb(root)
 end
 
--- The database ':Gtags' uses is the one above the WORKING directory. A tree
--- can hold stale nested GTAGS (a sub-directory indexed months ago), and
--- searching from the file's own directory would silently pick that one -
--- different files, different line numbers. Prefer the working directory's
--- database whenever it covers this file, and fall back to the file's own.
+-- 이 색인이 그 파일을 담고 있나. '<root>/.tags/files' 를 읽어 본다.
+--   true  담고 있다   false 담고 있지 않다   nil  알 수 없다
+-- (목록 파일이 없는 auto 모드에서는 알 수 없다 - 그때는 담고 있다고 본다)
+local list_cache = {}
+
+local function indexed_in(root, path)
+  if path:sub(1, #root + 1) ~= root .. '/' then
+    return false
+  end
+  local lf = root .. '/' .. (db_dir() or '.tags') .. '/files'
+  local st = uv.fs_stat(lf)
+  if not st then
+    return nil
+  end
+  local key = ('%d:%d'):format(st.mtime.sec, st.size)
+  local c = list_cache[root]
+  if not c or c.key ~= key then
+    local ok, lines = pcall(vim.fn.readfile, lf)
+    if not ok then
+      return nil
+    end
+    local set = {}
+    for _, l in ipairs(lines) do
+      if l ~= '' then
+        set[l] = true
+      end
+    end
+    c = { key = key, set = set }
+    list_cache[root] = c
+  end
+  return c.set[path:sub(#root + 2)] == true
+end
+
+-- 어느 데이터베이스에 물을 것인가.
+--
+-- 이 트리에는 프로젝트 안에 프로젝트가 있다(d5_qnx_hyp 와 그 안의
+-- kernel/common 이 각각 .tags 를 갖는다). 어느 쪽에 묻느냐로 같은 심볼의
+-- 답이 달라진다 - 실제로 참조가 4개로도 3개로도 나왔다.
+--
+-- 기본은 '가장 바깥 색인'이다: 어디서 vim 을 켜든 같은 답이 나온다. 다만
+-- 바깥 색인이 그 파일을 담고 있지 않으면(바깥은 kernel/common 파일을
+-- 39개만, 중첩은 407개를 담는다) 거기 물어도 아무것도 안 나오므로, 그때는
+-- 예전 방식으로 물러선다: 작업 디렉터리의 색인, 그다음 파일 자신의 것.
+--
+-- 예전 주석의 이유도 그대로 유효하다: 하위 디렉터리에 몇 달 전 만들어 둔
+-- GTAGS 가 남아 있으면 파일 자신의 디렉터리에서 찾는 것이 그걸 집어 들어
+-- 다른 파일, 다른 줄 번호를 답한다.
+--
+--   let g:relationview_db_base = 'cwd'   " 예전처럼 작업 디렉터리 기준
 local function root_for(path, cb)
+  if tostring(cfg('db_base', 'outer')) ~= 'cwd' then
+    local o = outer_root(vim.fs.dirname(path))
+    if o and indexed_in(o, path) ~= false then
+      cb(o)
+      return
+    end
+  end
   local cwd = vim.fn.getcwd()
   get_root(cwd, function(cwdroot)
     if cwdroot and path:sub(1, #cwdroot + 1) == cwdroot .. '/' then
@@ -3008,14 +3067,29 @@ render_rows = function(t, rows)
   -- 'symbol | path' only by default: g:relationview_show_text = 1 puts the
   -- source line back as a third column
   local show_text = cfg('show_text', 0) ~= 0
+  -- 경로는 자르지 않는다.
+  --
+  -- 예전에는 경로 칸을 창 폭에 맞춰 잘라 앞을 '…'로 줄였다. 깊은 트리에서는
+  -- 그게 자주 걸린다 - 어느 파일인지는 알겠는데 어디에 있는 파일인지가
+  -- 사라진다. 잘리느니 줄이 창 밖으로 나가는 편이 낫다: 경로는 줄 앞쪽에
+  -- 있으니 화면에 남고, 밀려나는 것은 그 뒤의 소스 줄이다.
+  --
+  -- 심볼 칸은 그대로 제한한다(이름 하나가 창을 다 먹으면 경로가 오른쪽으로
+  -- 밀려 그것대로 안 보인다).
+  --   let g:relationview_path_truncate = 1   " 예전처럼 창 폭에 맞춰 자른다
+  local trunc_path = cfg('path_truncate', 0) ~= 0
   if show_text then
     local wide = cfg('full_path', 0) ~= 0
     wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
-    wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
+    if trunc_path then
+      wloc = math.min(wloc, math.max(16, math.floor(avail * (wide and 0.62 or 0.35))))
+    end
   else
     -- no source column: the symbol keeps what it needs, the path gets the rest
     wsym = math.min(wsym, math.max(24, math.floor(avail * 0.5)))
-    wloc = math.min(wloc, math.max(16, avail - wsym - 3))
+    if trunc_path then
+      wloc = math.min(wloc, math.max(16, avail - wsym - 3))
+    end
   end
 
   local lines = header(t.sym)
@@ -3026,11 +3100,25 @@ render_rows = function(t, rows)
       lines[#lines + 1] = r.text
     else
       local symcell = pad(trunc_w(r.sym, wsym), wsym)
+      -- 경로 칸을 맞출지.
+      --
+      -- 자르지 않기로 했으니 가장 긴 경로에 맞춰 패딩하면, 깊은 경로 하나
+      -- 때문에 모든 줄이 그만큼 벌어지고 소스 줄이 화면 밖으로 밀린다.
+      -- 그래서 창에 들어갈 때만 칸을 맞추고, 넘치면 각 줄이 제 길이만 쓴다
+      -- (줄은 들쭉날쭉해지지만 잘리는 것은 없다).
+      local loccell
+      if trunc_path then
+        loccell = pad(trunc_tail(r.loc, wloc), wloc)
+      elseif wsym + 2 + wloc + 3 <= avail then
+        loccell = pad(r.loc, wloc)
+      else
+        loccell = r.loc
+      end
       if show_text then
         lines[#lines + 1] = string.format('%s  %s │ %s',
-          symcell, pad(trunc_tail(r.loc, wloc), wloc), trunc(r.text, 200))
+          symcell, loccell, trunc(r.text, 200))
       else
-        lines[#lines + 1] = symcell .. '  ' .. trunc_tail(r.loc, wloc)
+        lines[#lines + 1] = symcell .. '  ' .. loccell
       end
       items[#lines] = r.item
       if r.item and r.name then

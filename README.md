@@ -1267,8 +1267,35 @@ past every nested one, stopping at `$HOME`.
 | `'pwd'` | vim's own `%:.`, relative to `:pwd`, absolute for anything outside it |
 | `'abs'` | absolute. `g:relationview_full_path = 1` is the old name for this |
 
-A path longer than its column elides at the *front*, so the filename and the
-directories nearest it stay readable.
+**Nothing is cut.** The path column used to cap at a fraction of the panel
+width and elide at the front, which is fine for `src/util.c` and useless for
+`subcore/build/tcc8070-sub/tmp/work-shared/tcc8070-sub/kernel-source/sound/soc/telechips/tcc-snd-card.c`
+- the half you needed was the half that got eaten. Now the whole path is
+printed. The column is still padded to line up the source text, but only
+while that fits the panel; past that each row uses just the width it needs
+and the source column starts wherever the path ends. Ragged, and complete.
+`let g:relationview_path_truncate = 1` brings the old clipping back.
+
+### Which index answers the question
+
+This tree has a project inside a project - `d5_qnx_hyp` has a `.tags`, and
+so does `kernel/common` underneath it. They are not the same database: the
+outer one indexes 39 files under `kernel/common`, the nested one 407. Ask
+the nested database and you get fewer answers, and different ones depending
+on where you happened to start nvim.
+
+So the panel pins itself to the *outermost* index, the same one the paths
+are measured from. Standing in `d5_qnx_hyp/kernel/common/sound/soc` now
+gives the same `References (undefined symbol) (4)` as standing in
+`d5_qnx_hyp`; before this it gave 3. If the outer index provably does not
+contain the file - it has a `.tags/files` list and the file is not in it -
+the search falls back to the nearest one that does, so a file outside the
+big index is still searchable.
+
+| `g:relationview_db_base` | |
+|---|---|
+| `'root'` (default) | the outermost indexed root, whatever `:pwd` is |
+| `'cwd'` | the old behaviour: the index nearest `:pwd`, then the one nearest the file |
 
 ## Relation window (nvim only)
 
@@ -1318,8 +1345,8 @@ knows about it below) and the context window shows the header itself. The
 header is looked up next to the including file, then in the GTAGS path
 index, then in 'path'.
 
-Paths are shown relative to vim's current directory (`:pwd`), the way vim
-itself shows them; `g:relationview_full_path = 1` makes them absolute.
+Paths follow the rules in [Paths in the panel](#paths-in-the-panel) above:
+the whole path from the outermost indexed root, in navy, never cut.
 
 The row under the panel cursor has its symbol coloured sky blue, and the
 same symbol is highlighted in the context window.
