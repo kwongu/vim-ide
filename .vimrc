@@ -1975,6 +1975,7 @@ endfunc
 
 func! NERDTreeOnlyLeft()
 	:TagbarClose
+	:AerialClose
 	let g:NERDTreeWinPos="left"
 	:NERDTreeToggle
 endfunc
@@ -1988,6 +1989,7 @@ endfunc
 " 예전 NERDTree 왼쪽 창이 필요하면 :call NERDTreeOnlyLeft() 로 그대로 쓸 수 있다.
 func! NeoTreeOnlyLeft()
 	:TagbarClose
+	:AerialClose
 	:Neotree toggle left
 endfunc
 func! NeoTreeOnlyRight()
