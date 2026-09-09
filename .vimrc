@@ -2069,13 +2069,16 @@ nnoremap <silent> <F8> <Cmd>lua _G.yellowmark_toggle()<CR>
 "map <F10> :NvimTreeToggle<CR>
 "map <F10> :NERDTreeToggle<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
-" F9 = neo-tree, F11 = NERDTree (예전에는 반대였다). 각 트리가 서 있던
-" 쪽(neo-tree 오른쪽 / NERDTree 왼쪽)은 그대로다.
-map <F9> :call NeoTreeOnlyRight()<CR>
-"map <F9> :call NeoTreeOnlyLeft()<CR>
+" F9 = neo-tree(왼쪽), F11 = NERDTree(오른쪽).
+"
+" 왼쪽은 아웃라인(aerial)도 쓰는 자리라 NeoTreeOnlyLeft 가 그것을 닫는다.
+" 오른쪽은 RelationView 의 context 창이 쓰는데, NERDTree 는 토글이라
+" 필요할 때만 잠깐 겹친다.
+map <F9> :call NeoTreeOnlyLeft()<CR>
+"map <F9> :call NeoTreeOnlyRight()<CR>
 map <F10> :call TagbarOnly()<CR>
-"map <F11> :call NERDTreeOnlyRight()<CR>
-map <F11> :call NERDTreeOnlyLeft()<CR>
+"map <F11> :call NERDTreeOnlyLeft()<CR>
+map <F11> :call NERDTreeOnlyRight()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
 map <F12> :call Deltags()<CR>

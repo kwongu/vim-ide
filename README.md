@@ -88,10 +88,10 @@ F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
-F9: Toggle neo-tree (F11 used to be this one)
+F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left)
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
-F11: Toggle NERDTree (F9 used to be this one)
+F11: Toggle NERDTree on the right (F9 used to be this one)
 F12: Delete gtags files created with F2.
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one (previewed in the
@@ -617,6 +617,14 @@ its own `.tags` and you still see the current directory's list, rebased -
 preset's `deep/d.c` is not. Otherwise one screen would be showing two
 different indexes at once. `:cd` re-decides it on the next render.
 
+The same three keys work in **neo-tree**
+(`.vim/plugin/projectfiles_neotree.lua`), visual range included. Both trees
+read `g:projectfiles_tree_add_key` and friends, so a key changed in one
+place changes both, and both call the same entry points
+(`_G.projectfiles_add` / `_remove` / `_status`) - so a range is one commit
+there too. What neo-tree does not have yet is the marks; those need a
+custom renderer component, and this added only the four operations.
+
 Select lines with `v`, `V` or `<C-v>` and `+` / `-` act on the whole
 range. That is one commit, not one per line: adding a path rewrites the
 preset, re-expands the list (a `find` per directory entry) and reindexes,
@@ -976,7 +984,19 @@ schedules a second redraw on top of the one it already asked for.
 One latent bug turned up while testing the wheel over the bar: the scroll
 was written `3\22y` / `3\22e`, and `\22` is Ctrl-V, not Ctrl-Y. So the
 wheel ran `normal! 3<C-v>y` - it never scrolled, it selected a block and
-yanked it over your register. It is `\25` and `\5` now.
+yanked it over your register.
+
+Fixing the control codes then produced a third error, because the wheel
+branch was the one path still doing its work inline in the `expr` mapping:
+
+```
+E5108: overview.lua:579: Vim(normal):E523: Not allowed here
+```
+
+`:normal` is not allowed under textlock either. The wheel does not run
+`:normal` at all now - it moves `topline` through `winrestview`, deferred
+like everything else in that mapping. `g:overview_wheel_lines` (3) sets how
+far one notch goes.
 
 
 
