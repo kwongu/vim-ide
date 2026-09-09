@@ -634,6 +634,48 @@ let g:projectfiles_tree_marks = 0      " keep the keys, drop the marks
 let g:projectfiles_tree_add_key = '+'  " and _remove_key / _info_key
 ```
 
+### One keystroke can drop hundreds of entries
+
+`-` on a directory takes out the files under it too. That is the rule you
+want - you put `src/` in with one key, you take it out with one key - and
+it is what `remove_path` has always done:
+
+```lua
+-- removing a directory drops the files under it too
+if e.path == rel or e.path:sub(1, #rel + 1) == rel .. '/' then
+```
+
+What was not intended is how quiet it was. A single `-` on
+`arch/arm64/boot/dts/telechips` removed 487 entries from a preset and said
+only `제거: arch/arm64/boot/dts/telechips`. The write itself is an in-place
+truncate, so there was nothing left to compare against and nothing to undo -
+the loss was found days later by counting entries against a copy in git.
+
+Four things now stand in the way of that:
+
+| | |
+|---|---|
+| the count | `제거: <path> (항목 487개)` - the message says how much went |
+| a question | dropping `g:projectfiles_confirm_drop` entries or more (20) asks first. A visual range asks once at the end, not per line; headless says it and continues |
+| a copy | every write keeps the previous file under `<presets>/.backup/<name>.<stamp>.json`, newest 20 (`g:projectfiles_backups`) |
+| a way back | `:ProjectFilesRestore` lists those with their entry counts and the delta against now; `:ProjectFilesRestore 20260909-004155` takes one straight away |
+
+The copy is taken on the path that used to lose the most, too: dropping the
+last entry deletes my copy of the preset and falls back to auto mode, and
+that delete now backs up first. It also writes the name to
+`.tags/preset.last`, because the restore needs a name and auto mode has
+none - so `:ProjectFilesRestore` still works right after the list went
+empty, and turns the preset back on when it restores.
+
+Two smaller things that came out of the same reading. Entries are
+normalised and deduplicated on write: `grep -rl … .` answers with `./` on
+the front, `add_for_symbol` stored that verbatim, and a `./x` entry could
+not be matched by `x` - so it could not be removed and a second copy of it
+could be added. And when you take one file out of a directory entry, the
+entry is rewritten as the files that remain; that list is now deduplicated
+against what the preset already had, which is where 21 doubled entries
+under `sound/soc/telechips_dpcm/` came from.
+
 ### Where presets live, and sharing them across machines
 
 A preset is JSON: a name and a list of project-relative paths. Nothing in it

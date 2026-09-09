@@ -533,6 +533,94 @@ local function write_json(f, lines)
   return ok and ret == 0
 end
 
+-- 항목 경로를 preset 에 담기 전에 다듬는다.
+--
+-- grep 폴백('grep -rl ... .')의 출력은 './android/...' 처럼 './' 를 달고
+-- 나오고, add_for_symbol 은 그것을 rel_to 를 거치지 않고 그대로 담았다.
+-- 그렇게 담긴 항목은 문자열 비교로 찾을 수 없어서 제거도 안 되고 중복도
+-- 생긴다. 저장 직전에 한 곳에서 다듬으면 어느 경로로 들어와도 같은 모양이
+-- 된다.
+local function norm_rel(path)
+  local p = tostring(path or ''):gsub('/+', '/')
+  while p:sub(1, 2) == './' do
+    p = p:sub(3)
+  end
+  return (p:gsub('/+$', ''))
+end
+
+-- 같은 경로가 두 번 담기지 않게 한다.
+--
+-- remove_path 는 디렉터리 항목 아래의 파일 하나를 빼라고 하면 그 디렉터리를
+-- 개별 파일 목록으로 펼쳐 되쓴다. 그때 이미 목록에 있던 파일과 겹치는지
+-- 보지 않아서, 실제로 telechips_dpcm/ 아래 21개가 두 번씩 들어간 적이 있다.
+local function dedupe_entries(entries)
+  local seen, out, dropped = {}, {}, 0
+  for _, e in ipairs(entries) do
+    local path = norm_rel(e.path)
+    if path == '' then
+      dropped = dropped + 1
+    elseif seen[path] then
+      dropped = dropped + 1
+    else
+      seen[path] = true
+      out[#out + 1] = { path = path, kind = e.kind or 'file' }
+    end
+  end
+  return out, dropped
+end
+
+-- 저장 직전의 사본.
+--
+-- preset 쓰기는 제자리 truncate 다 - 되돌릴 방법이 없었다. 트리에서
+-- 디렉터리 하나에 '-' 를 누르면 그 아래 항목이 전부 빠지는데(의도된
+-- 동작이다), 그렇게 487개가 한 번에 사라진 뒤 남은 흔적이 아무것도 없었다.
+-- 그래서 쓰기 전마다 사본을 남기고 최근 것만 돌려 둔다.
+--   let g:projectfiles_backups = 0   " 백업 끄기
+local function backup_preset(name)
+  local keep = tonumber(cfg('backups', 20)) or 20
+  if keep <= 0 then
+    return nil
+  end
+  local src = preset_path(name)
+  if not uv.fs_stat(src) then
+    return nil -- 아직 없는 preset: 지킬 것이 없다
+  end
+  local dir = presets_dir() .. '/.backup'
+  local base = name:gsub('[^%w%-_.]', '_')
+  local dst = ('%s/%s.%s.json'):format(dir, base, os.date('%Y%m%d-%H%M%S'))
+  if uv.fs_stat(dst) then
+    return dst -- 같은 초에 두 번 저장: 먼저 남긴 것이 원본에 더 가깝다
+  end
+  pcall(vim.fn.mkdir, dir, 'p')
+  local lines = nil
+  local ok = pcall(function()
+    lines = vim.fn.readfile(src)
+  end)
+  if not ok or not lines then
+    return nil
+  end
+  if not write_json(dst, lines) then
+    return nil
+  end
+  -- 오래된 것부터 버린다 (이름에 시각이 들어 있으니 이름순 = 시간순)
+  local mine = {}
+  local h = uv.fs_scandir(dir)
+  while h do
+    local n = uv.fs_scandir_next(h)
+    if not n then
+      break
+    end
+    if n:sub(1, #base + 1) == base .. '.' and n:sub(-5) == '.json' then
+      mine[#mine + 1] = n
+    end
+  end
+  table.sort(mine)
+  for i = 1, #mine - keep do
+    pcall(vim.fn.delete, dir .. '/' .. mine[i])
+  end
+  return dst
+end
+
 -- Writing always targets MY copy, and my copy is the one that gets read. The
 -- first write against a name vim-ide carries therefore forks it on this
 -- machine: from then on a 'git pull' that updates the shared preset changes
@@ -542,6 +630,13 @@ local function preset_write(name, entries)
   local f = preset_path(name)
   local sp = shared_path(name)
   local forking = uv.fs_stat(f) == nil and sp ~= nil and uv.fs_stat(sp) ~= nil
+  local clean, dupes = dedupe_entries(entries)
+  if dupes > 0 then
+    notify(('중복 항목 %d개를 합쳤습니다 (%d -> %d)'):format(
+      dupes, #entries, #clean))
+  end
+  entries = clean
+  backup_preset(name)
   if not write_json(f, encode_preset(name, entries)) then
     notify('preset 을 저장하지 못했습니다: ' .. f, vim.log.levels.ERROR)
     return false
@@ -559,6 +654,29 @@ end
 local function active_file(root)
   local d = dbdir() or '.tags'
   return root .. '/' .. d .. '/preset'
+end
+
+-- auto 로 되돌아가며 잃어버린 preset 이름. 되돌리기(:ProjectFilesRestore)가
+-- 백업을 찾으려면 이름이 필요한데, 목록이 비면 set_active(root,'') 로 이름을
+-- 지워 버려서 정작 가장 필요한 순간에 찾을 수 없었다.
+local function last_file(root)
+  local d = dbdir() or '.tags'
+  return root .. '/' .. d .. '/preset.last'
+end
+
+local function last_preset(root)
+  local f = last_file(root)
+  if not uv.fs_stat(f) then
+    return nil
+  end
+  local l = (vim.fn.readfile(f)[1] or ''):gsub('%s+$', '')
+  return l ~= '' and l or nil
+end
+
+local function set_last(root, name)
+  local f = last_file(root)
+  pcall(vim.fn.mkdir, vim.fs.dirname(f), 'p')
+  pcall(vim.fn.writefile, { name or '' }, f)
 end
 
 local function active_preset(root)
@@ -891,8 +1009,12 @@ local function save_entries(root, name, entries)
     local mine = preset_path(name)
     local had_mine = uv.fs_stat(mine) ~= nil
     if had_mine then
+      -- 지우기 전에 사본을 남긴다. 이 경로가 곧 '마지막 항목까지 빠진'
+      -- 순간이고, 되돌리고 싶은 지점이 바로 여기다.
+      backup_preset(name)
       pcall(vim.fn.delete, mine)
     end
+    set_last(root, name)
     set_active(root, '')
     if batch then
       batch.emptied = name
@@ -1001,6 +1123,33 @@ local function add_path(root, path)
   bnotify('추가: ' .. rel .. '  →  ' .. target_label(root), nil, true)
 end
 
+-- 한 번의 제거가 목록의 상당 부분을 지우려 하면 되묻는다.
+--
+-- 'arch/arm64/boot/dts/telechips' 디렉터리 노드에서 '-' 한 번이 항목 487개를
+-- 조용히 지웠다. 규칙 자체는 의도된 것이지만(디렉터리를 빼면 그 아래도
+-- 빠진다), 그 규모를 말해 주지 않는 것은 의도가 아니었다.
+--   let g:projectfiles_confirm_drop = 0    " 되묻지 않기
+--   let g:projectfiles_confirm_drop = 100  " 100개 이상일 때만
+local function confirm_drop(root, rel, dropped, total)
+  local limit = tonumber(cfg('confirm_drop', 20)) or 20
+  if limit <= 0 or dropped < limit then
+    return true
+  end
+  local msg = ("'%s' 를 빼면 항목 %d개가 목록에서 빠집니다 (전체 %d개). "):format(
+    rel, dropped, total) .. target_label(root)
+  -- 배치(비주얼 범위)는 끝에서 합계를 보고하고, 줄마다 물으면 쓸 수 없다.
+  local uis = pcall(api.nvim_list_uis) and #api.nvim_list_uis() or 0
+  if batch or uis == 0 then
+    notify(msg, vim.log.levels.WARN)
+    return true
+  end
+  local ans = 0
+  pcall(function()
+    ans = vim.fn.confirm(msg .. '\n계속할까요?', "&예\n&아니오", 2, 'Question')
+  end)
+  return ans == 1
+end
+
 local function remove_path(root, path)
   local entries, name, bad = entries_of(root)
   if bad then
@@ -1012,11 +1161,12 @@ local function remove_path(root, path)
   end
   local abs = abs_of(root, path)
   local rel = rel_to(root, abs)
-  local kept, hit = {}, false
+  local kept, hit, dropped = {}, false, 0
   for _, e in ipairs(entries) do
     -- removing a directory drops the files under it too
     if e.path == rel or e.path:sub(1, #rel + 1) == rel .. '/' then
       hit = true
+      dropped = dropped + 1
     else
       kept[#kept + 1] = e
     end
@@ -1038,15 +1188,25 @@ local function remove_path(root, path)
       end
     end
     if hit then
-      kept = expanded
+      -- 펼치면서 이미 있던 항목과 겹칠 수 있다. 겹친 것을 그대로 두면
+      -- 목록에 같은 파일이 두 번 남는다.
+      kept = (dedupe_entries(expanded))
     end
   end
   if not hit then
     bnotify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
     return
   end
+  -- 몇 개가 빠지는지 말한다. 디렉터리에 '-' 를 한 번 누르면 그 아래가 전부
+  -- 빠지는데, 예전에는 '제거: <경로>' 한 줄만 나와서 487개가 사라진 것을
+  -- 화면에서 알 수 없었다.
+  if not confirm_drop(root, rel, dropped, #entries) then
+    bnotify('제거를 취소했습니다: ' .. rel, vim.log.levels.WARN)
+    return
+  end
   save_entries(root, name, kept)
-  bnotify('제거: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+  bnotify(('제거: %s (항목 %d개)  →  %s'):format(rel,
+    dropped > 0 and dropped or (#entries - #kept), target_label(root)), nil, true)
 end
 
 -- 여러 경로를 한 번의 커밋으로 처리한다. fn 안에서는 add_path/remove_path 를
@@ -1998,6 +2158,97 @@ api.nvim_create_user_command('ProjectFilesPrune', function()
   notify(('%d개 제거 (tools/ samples/ scripts/ Documentation/ selftests), %d개 남음')
     :format(#gone, #kept))
 end, { desc = 'Drop tools//samples//scripts entries from the preset' })
+
+-- 백업에서 되돌린다.
+--
+-- 저장 전마다 사본을 남기니(backup_preset), 잘못 지운 직후라면 그 사본이
+-- 지우기 전 상태다. 되돌리기 자체도 저장이므로 지금 상태의 사본이 먼저
+-- 남는다 - 되돌린 것을 다시 되돌릴 수 있다.
+api.nvim_create_user_command('ProjectFilesRestore', function(o)
+  local root = cur_root()
+  -- auto 로 돌아간 뒤에도 되돌릴 수 있어야 한다: 마지막으로 쓰던 이름을 본다
+  local name = active_preset(root)
+  local revive = false
+  if not name then
+    name = last_preset(root)
+    revive = name ~= nil
+  end
+  if not name then
+    notify('auto 모드입니다 (되돌릴 preset 이 없습니다)', vim.log.levels.WARN)
+    return
+  end
+  local dir = presets_dir() .. '/.backup'
+  local base = name:gsub('[^%w%-_.]', '_')
+  local list = {}
+  local h = uv.fs_scandir(dir)
+  while h do
+    local n = uv.fs_scandir_next(h)
+    if not n then
+      break
+    end
+    if n:sub(1, #base + 1) == base .. '.' and n:sub(-5) == '.json' then
+      local d = read_preset_file(dir .. '/' .. n)
+      list[#list + 1] = {
+        file = dir .. '/' .. n,
+        stamp = n:sub(#base + 2, -6),
+        count = d and d.entries and #d.entries or 0,
+      }
+    end
+  end
+  if #list == 0 then
+    notify(("'%s' 의 백업이 없습니다 (%s)"):format(name,
+      vim.fn.fnamemodify(dir, ':~')), vim.log.levels.WARN)
+    return
+  end
+  table.sort(list, function(a, b) return a.stamp > b.stamp end)
+  local cur = preset_read(name)
+  local now = cur and cur.entries and #cur.entries or 0
+  if o.args ~= '' then
+    -- :ProjectFilesRestore <stamp> - 확인 없이 그 사본으로
+    for _, it in ipairs(list) do
+      if it.stamp == o.args then
+        local d = read_preset_file(it.file)
+        if not d then
+          notify('백업을 읽을 수 없습니다: ' .. it.file, vim.log.levels.ERROR)
+          return
+        end
+        if revive then
+          set_active(root, name)
+        end
+        save_entries(root, name, d.entries)
+        notify(('%s 로 되돌렸습니다 (항목 %d -> %d)%s'):format(it.stamp, now,
+          #d.entries, revive and (" - preset '" .. name .. "' 을 다시 켰습니다") or ''))
+        return
+      end
+    end
+    notify('그런 백업이 없습니다: ' .. o.args, vim.log.levels.WARN)
+    return
+  end
+  local items = {}
+  for _, it in ipairs(list) do
+    items[#items + 1] = ('%s  항목 %d개%s'):format(it.stamp, it.count,
+      it.count > now and ('  (+%d)'):format(it.count - now)
+      or it.count < now and ('  (-%d)'):format(now - it.count) or '  (같음)')
+  end
+  vim.ui.select(items, {
+    prompt = ("'%s' 를 어느 시점으로? (지금 %d개)"):format(name, now),
+  }, function(_, idx)
+    if not idx then
+      return
+    end
+    local d = read_preset_file(list[idx].file)
+    if not d then
+      notify('백업을 읽을 수 없습니다: ' .. list[idx].file, vim.log.levels.ERROR)
+      return
+    end
+    if revive then
+      set_active(root, name)
+    end
+    save_entries(root, name, d.entries)
+    notify(('%s 로 되돌렸습니다 (항목 %d -> %d)  →  %s'):format(
+      list[idx].stamp, now, #d.entries, target_label(root)))
+  end)
+end, { nargs = '?', desc = 'Restore the preset from a backup taken before a write' })
 
 api.nvim_create_user_command('ProjectFilesAddSymbol', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
