@@ -1913,16 +1913,18 @@ map <F2> :call Maketags()<cr><cr>
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
 map <F6> :BufExplorer<CR>
-" <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색), <F8> 은 해제.
+" <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색).
+" <F8> 은 커서 밑 심볼에 노란 표시를 붙이고 뗀다 (yellowmark.lua).
 " 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.
 " 접기는 zf 와 za/zo/zc 가 그대로 한다.
 "
-" 먼저 해제한다: 예전 'map <F7>' 은 normal 뿐 아니라 visual/operator 에도
-" 걸려 있어서, 실행 중에 :source ~/.vimrc 하면 nnoremap 이 normal 만
-" 덮고 나머지 모드에 옛 접기 동작이 남는다.
+" 먼저 해제한다: 예전 'map <F7>'/'map <F8>' 은 normal 뿐 아니라
+" visual/operator 에도 걸려 있어서, 실행 중에 :source ~/.vimrc 하면
+" nnoremap 이 normal 만 덮고 나머지 모드에 옛 접기 동작이 남는다.
 silent! unmap <F7>
 silent! unmap <F8>
 nnoremap <silent> <F7> :ProjectSymbols<CR>
+nnoremap <silent> <F8> <Cmd>lua _G.yellowmark_toggle()<CR>
 "map <F9> :TagbarToggle<CR>
 "map <F10> :CocCommand explorer<CR>
 "map <F10> :NvimTreeToggle<CR>

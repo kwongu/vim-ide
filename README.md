@@ -87,7 +87,7 @@ F4: Mark the keyword under the cursor, the keyword is highlighted in different c
 F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
-F8: nothing - it used to unfold (`zo`, which is still there)
+F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
 F9: Toggle neo-tree, file system explorer on the left side (tagbar is closed with it, since both live on the left)
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
@@ -932,6 +932,34 @@ pty: on an 800-line file with a 20-row bar, clicking at 75% goes to line
 601, at 25% to 201, at 95% to 761, and a drag from 90% to 10% tracks down
 to line 81. Clicking in the text at screen row 9 still goes to line 9 and
 leaves you in normal mode.
+
+## Yellow marks (nvim only)
+
+Put the cursor on a symbol, press `<F8>`, and every occurrence of it goes
+yellow and stays yellow. Press `<F8>` on it again and the mark comes off.
+Several symbols can carry the mark at once, and the marks follow you -
+split the window or open another file and they are painted there too.
+`.vim/plugin/yellowmark.lua`, black on `#ffff00`.
+
+That is how you read code in Source Insight: pin the two or three names
+this function is really about, then stop looking for them.
+
+| | |
+|---|---|
+| `<F8>` | toggle the mark on the symbol under the cursor |
+| `:YellowMarkList` | which symbols are marked |
+| `:YellowMarkClear` | take them all off |
+
+Three highlights can sit on one word, so the order matters. vim-mark
+(`F4`) uses priorities from -10 down to -67, and the automatic reference
+highlight sits far below at -1010; a yellow mark is something you asked
+for by hand, so it goes above both at -8 (`g:yellowmark_priority`).
+
+One `matchadd` per window covers every marked symbol - the words are
+joined into a single `\V\%(\<a\>\|\<b\>\)` pattern - so marking more
+symbols does not cost more per window. Unlike the reference highlight,
+this one does not skip C keywords: if you press `<F8>` on `int`, you
+meant `int`.
 
 ## Reference highlight (nvim only)
 
