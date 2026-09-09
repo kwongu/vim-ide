@@ -166,7 +166,14 @@ end
 
 -- 버퍼에 놓인 sign 을 줄 -> 색으로 바꾼다. signify / gitsigns / 진단 모두
 -- sign 을 쓰므로, 이름만 보고 한 곳에서 처리한다.
-local function sign_rows(buf, per)
+-- sign 은 저장·진단·편집에서만 바뀐다. 그런데 렌더마다
+-- sign_getplaced(buf, {group='*'}) 로 버퍼의 sign 을 통째로 다시 긁고
+-- 있었다 - 막대를 끄는 동안에도 매번. 세대 번호로 캐시한다(아래
+-- autocmd 가 바뀔 만한 사건에서 번호를 올린다).
+local sign_gen = 0
+local sign_cache = { key = nil, rows = {} }
+
+local function sign_rows_uncached(buf, per)
   local out = {}
   local ok, placed = pcall(vim.fn.sign_getplaced, buf, { group = '*' })
   if not ok or not placed or not placed[1] then
@@ -198,6 +205,17 @@ local function sign_rows(buf, per)
     end
   end
   return out
+end
+
+local function sign_rows(buf, per)
+  local key = ('%d\0%d\0%d\0%d'):format(buf, per, sign_gen,
+    vim.b[buf] and vim.b[buf].changedtick or 0)
+  if sign_cache.key == key then
+    return sign_cache.rows
+  end
+  local rows = sign_rows_uncached(buf, per)
+  sign_cache = { key = key, rows = rows }
+  return rows
 end
 
 local function render()
@@ -233,14 +251,19 @@ local function render()
       pcall(map_bar)
     end
   end
-  local blank = string.rep(' ', width)
-  local rows = {}
-  for i = 1, height do
-    rows[i] = blank
+  -- 빈 줄은 높이가 바뀔 때만 다시 쓴다. 예전에는 렌더마다 height 줄을
+  -- 통째로 갈아 끼웠는데, 내용이 같아도 버퍼 쓰기는 공짜가 아니다.
+  if s.lines_h ~= height or s.lines_w ~= width then
+    local blank = string.rep(' ', width)
+    local rows = {}
+    for i = 1, height do
+      rows[i] = blank
+    end
+    vim.bo[s.buf].modifiable = true
+    api.nvim_buf_set_lines(s.buf, 0, -1, false, rows)
+    vim.bo[s.buf].modifiable = false
+    s.lines_h, s.lines_w = height, width
   end
-  vim.bo[s.buf].modifiable = true
-  api.nvim_buf_set_lines(s.buf, 0, -1, false, rows)
-  vim.bo[s.buf].modifiable = false
 
   -- 창
   local tw = api.nvim_win_get_width(target)
@@ -261,13 +284,20 @@ local function render()
     zindex = 40,
   }
   if s.win and api.nvim_win_is_valid(s.win) then
-    pcall(api.nvim_win_set_config, s.win, wcfg)
+    -- 배치가 그대로면 건드리지 않는다 (win_set_config 는 매번 창을 다시
+    -- 잡는다 - 끄는 동안 이것이 눈에 띄게 쌓인다)
+    local key = ('%d\0%d\0%d\0%d'):format(target, tw, width, height)
+    if s.wcfg_key ~= key then
+      s.wcfg_key = key
+      pcall(api.nvim_win_set_config, s.win, wcfg)
+    end
   else
     local ok, w = pcall(api.nvim_open_win, s.buf, false, wcfg)
     if not ok then
       return
     end
     s.win = w
+    s.wcfg_key = ('%d\0%d\0%d\0%d'):format(target, tw, width, height)
     vim.wo[s.win].winhighlight = 'Normal:OverviewBg,NormalFloat:OverviewBg'
     vim.wo[s.win].winblend = 0
   end
@@ -311,14 +341,19 @@ local function render()
   end
 end
 
-local function schedule()
+local function schedule(fast)
   if s.timer then
     s.timer:stop()
     s.timer:close()
     s.timer = nil
   end
   s.timer = uv.new_timer()
-  s.timer:start(30, 0, function()
+  -- 끄는 동안에는 더 자주 그린다. 30ms 는 가만히 있을 때는 넉넉하지만
+  -- 마우스를 따라갈 때는 눈에 띄게 뒤처진다.
+  --   let g:overview_drag_debounce = 8
+  local ms = fast and (tonumber(cfg('drag_debounce', 10)) or 10)
+      or (tonumber(cfg('debounce', 30)) or 30)
+  s.timer:start(ms, 0, function()
     if s.timer then
       s.timer:stop()
       s.timer:close()
@@ -345,10 +380,21 @@ goto_row = function(row, center)
   local line = math.min(total, math.max(1, (row - 1) * per + 1))
   dbg(('goto row=%d total=%d height=%d per=%d -> line=%d target=%s')
     :format(row, total, height, per, line, tostring(s.target)))
+  -- 'normal! zz' 대신 winrestview: 명령 한 번이 아니라 값 한 번이고,
+  -- normal 이 일으키는 부수 효과가 없다. topline 을 직접 정하므로 화면이
+  -- 어디에 놓일지도 분명하다.
+  local top
+  if center then
+    top = math.max(1, line - math.floor(height / 2))
+  else
+    top = line
+  end
+  top = math.min(top, math.max(1, total - height + 1))
+  s.self_move = true
   api.nvim_win_call(s.target, function()
-    api.nvim_win_set_cursor(s.target, { line, 0 })
-    vim.cmd(center and 'normal! zz' or 'normal! zt')
+    pcall(vim.fn.winrestview, { lnum = line, topline = top, col = 0 })
   end)
+  s.self_move = false
   -- 누르고 있는 동안에는 초점을 막대에 둔다.
   --
   -- 부동 창이 클릭을 받으려면 focusable 이어야 하고, 클릭은 그 창으로
@@ -359,9 +405,54 @@ goto_row = function(row, center)
   if not s.dragging and api.nvim_get_current_win() ~= s.target then
     pcall(api.nvim_set_current_win, s.target)
   end
-  schedule()
+  schedule(s.dragging)
 end
 
+
+-- 지금 보이는 구간이 막대의 몇 행인가 (render 와 같은 셈)
+local function view_rows()
+  if not (s.target and api.nvim_win_is_valid(s.target)) then
+    return nil
+  end
+  local buf = api.nvim_win_get_buf(s.target)
+  local total = api.nvim_buf_line_count(buf)
+  local height = api.nvim_win_get_height(s.target)
+  local per = math.max(1, math.ceil(total / height))
+  local info = vim.fn.getwininfo(s.target)[1]
+  if not info then
+    return nil
+  end
+  return math.floor((info.topline - 1) / per),
+      math.floor((info.botline - 1) / per), per, total, height
+end
+
+-- 막대의 '보이는 구간' 표시를 끌어서 화면을 옮긴다.
+--
+-- 예전에는 드래그 중에도 매 이벤트가 절대 점프였다: '이 행이 가리키는 줄을
+-- 화면 가운데로'. 그러면 표시를 잡는 순간 그 표시가 손가락 밑에서 튀고,
+-- 한 행이 파일의 여러 화면치(3000줄/47행이면 64줄, 창 높이 47줄보다 크다)
+-- 라서 끌 때마다 내용이 건너뛴다. 진짜 스크롤바처럼 '잡은 자리를 유지한 채'
+-- 표시를 옮긴다.
+local function drag_to(row)
+  local from, _, per, total, height = view_rows()
+  if not from then
+    return
+  end
+  -- mouse_row() 는 1-기반 막대 줄이고 render 의 행은 0-기반이다.
+  -- 그 변환을 빼먹으면 잡는 순간 한 행(= per 줄)만큼 튄다.
+  local want_top_row = (row - (s.grab_off or 0)) - 1
+  local top = math.max(1, want_top_row * per + 1)
+  top = math.min(top, math.max(1, total - height + 1))
+  s.self_move = true
+  api.nvim_win_call(s.target, function()
+    local view = vim.fn.winsaveview()
+    local lnum = math.min(total, math.max(top, view.lnum))
+    lnum = math.min(lnum, top + height - 1)
+    pcall(vim.fn.winrestview, { topline = top, lnum = lnum, col = view.col })
+  end)
+  s.self_move = false
+  schedule(true)
+end
 
 mouse_row = function()
   local ok, m = pcall(vim.fn.getmousepos)
@@ -430,6 +521,25 @@ local function request_goto(row)
   end)
 end
 
+local pending_drag
+local drag_queued = false
+
+local function request_drag(row)
+  pending_drag = row
+  if drag_queued then
+    return
+  end
+  drag_queued = true
+  vim.schedule(function()
+    drag_queued = false
+    local r = pending_drag
+    pending_drag = nil
+    if r then
+      pcall(drag_to, r)
+    end
+  end)
+end
+
 -- 초점을 편집 창으로 되돌린다. expr 매핑 안에서는 금지되므로 미룬다.
 local function restore_focus()
   vim.schedule(function()
@@ -467,17 +577,31 @@ local function install_mouse()
         -- 막대 위에서 휠: 편집 창을 굴린다
         if s.target and api.nvim_win_is_valid(s.target) then
           api.nvim_win_call(s.target, function()
-            vim.cmd('normal! ' .. (key == '<ScrollWheelUp>' and '3\22y' or '3\22e'))
+            -- Ctrl-Y(위로) = \25, Ctrl-E(아래로) = \5.
+            -- 예전에는 '3\22y' / '3\22e' 였는데 \22 는 Ctrl-V 다:
+            -- 'normal! 3<C-v>y' 가 되어 화면은 그대로 두고 블록을 잡아
+            -- yank 해 버렸다. 휠이 아무 일도 안 하는 것처럼 보인 이유다.
+            vim.cmd('normal! ' .. (key == '<ScrollWheelUp>' and '3\25' or '3\5'))
           end)
           schedule()
         end
       elseif key == '<LeftRelease>' then
         s.dragging = false
-        request_goto(r)
         restore_focus()
+      elseif key == '<LeftMouse>' then
+        -- 누른 자리가 '보이는 구간' 안이면 그 자리를 잡은 것으로 보고
+        -- 옮기지 않는다(스크롤바를 집는 동작). 바깥이면 거기로 간다.
+        local from, to = view_rows()
+        if from and r >= from + 1 and r <= to + 1 then
+          s.grab_off = r - (from + 1)
+        else
+          s.grab_off = 0
+          request_goto(r)
+        end
+        s.dragging = true
       else
         s.dragging = true
-        request_goto(r)
+        request_drag(r)
       end
       return '<Ignore>'
     end, { expr = true, replace_keycodes = true, remap = false, silent = true })
@@ -510,7 +634,24 @@ api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'WinScrolled',
   'WinResized', 'VimResized', 'BufWinEnter', 'WinEnter', 'TextChanged',
   'TextChangedI', 'BufWritePost', 'DiagnosticChanged' }, {
   group = group,
-  callback = function() schedule() end,
+  callback = function()
+    -- goto_row 가 방금 화면을 옮긴 것이라면 그 스스로 렌더를 예약한다.
+    -- 여기서 또 걸면 끄는 동안 렌더가 두 배로 돈다.
+    if s.self_move then
+      return
+    end
+    schedule(s.dragging)
+  end,
+})
+
+-- sign 은 텍스트가 안 바뀌어도 달라진다(비동기 진단, git 작업 뒤 gitsigns).
+-- changedtick 만으로는 못 잡으므로 이 사건들에서 캐시를 버린다.
+api.nvim_create_autocmd({ 'BufWritePost', 'DiagnosticChanged', 'TextChanged',
+  'TextChangedI', 'BufWinEnter' }, {
+  group = group,
+  callback = function()
+    sign_gen = sign_gen + 1
+  end,
 })
 
 api.nvim_create_autocmd('ColorScheme', {

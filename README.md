@@ -948,6 +948,36 @@ And the first drag after a click jumped half a screen, because a click
 centred the line (`zz`) while a drag put it at the top (`zt`). Both centre
 now.
 
+That got rid of the error and the pile-up, but it still did not feel like a
+scrollbar, because every drag event was an *absolute* jump: "put the line
+this row stands for in the middle of the window". Grab the viewport marker
+and it teleports out from under the cursor, and since one bar row covers
+`ceil(total/height)` lines - 64 lines of a 3,000-line file in a 47-row
+window, more than a screenful - each row you move skips past content you
+never see.
+
+Dragging is relative now, the way a scrollbar is. Pressing inside the
+viewport marker records where in the marker you grabbed it and moves
+nothing; from then on the marker's top tracks the mouse, so the point you
+grabbed stays under the cursor and the view moves exactly one row's worth
+per row of mouse travel. Pressing outside the marker still jumps there
+first. Measured on 3,000 lines with a 47-row bar (64 lines a row): pressing
+inside left the top line at 1, dragging down 20 rows put it at 1,281
+(1 + 20x64) and back up 15 rows at 321 - exact, both directions.
+
+Cheaper per frame, too, which matters when the events arrive faster than
+the redraw: the blank bar lines are only rewritten when the height changes,
+the float is only reconfigured when the geometry changes, `sign_getplaced`
+(which fetches every sign in the buffer) is cached until something that can
+change signs happens, the debounce drops to `g:overview_drag_debounce`
+(10 ms) while dragging, and a scroll the bar itself caused no longer
+schedules a second redraw on top of the one it already asked for.
+
+One latent bug turned up while testing the wheel over the bar: the scroll
+was written `3\22y` / `3\22e`, and `\22` is Ctrl-V, not Ctrl-Y. So the
+wheel ran `normal! 3<C-v>y` - it never scrolled, it selected a block and
+yanked it over your register. It is `\25` and `\5` now.
+
 
 
 A thin bar down the right edge of the edit window standing for the whole
