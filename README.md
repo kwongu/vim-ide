@@ -968,6 +968,42 @@ pty: on an 800-line file with a 20-row bar, clicking at 75% goes to line
 to line 81. Clicking in the text at screen row 9 still goes to line 9 and
 leaves you in normal mode.
 
+## The symbol outline (nvim only)
+
+`<F10>` and startup open **aerial**, on the left where tagbar used to sit.
+`:Tagbar` is still there for the files aerial cannot read - aerial's backends
+are treesitter, LSP, markdown and man, with no ctags fallback, so a language
+without a parser shows nothing. `let g:vimide_outline = 'tagbar'` puts the
+old one back everywhere.
+
+Two things make it behave like Source Insight's Symbol Window:
+
+| | |
+|---|---|
+| move the cursor in the outline | the edit window follows to that symbol, focus stays in the outline (`autojump`) |
+| double-click a symbol (or press `v`) | the edit window selects that function **including the comment above it** |
+
+The selection is the useful unit: a function without the comment that says
+what it is for is rarely what you wanted to copy or move. The comment is
+found through treesitter rather than a regex - walk up from the function's
+first line while the node covering that line is a `comment`, allowing
+`g:aerial_range_blank_gap` (1) blank lines between the comment block and the
+function, since that is how most of this tree is written. Measured on a file
+with all three shapes: a `/* */` block above `alpha` gave lines 3-9, two `//`
+lines and a blank above `beta` gave 11-18, and `gamma_no_comment` with
+nothing above gave just the function, 20-23. `g:aerial_range_comments = 0`
+selects the function alone. `:AerialSelectRange` does the same from a
+mapping of your own.
+
+Why aerial over tagbar at all: on measurement they are close - walking eight
+real kernel sources, tagbar stalled the UI twice for 100 ms total and aerial
+once for 62 ms. (An earlier note here claimed tagbar cost seconds per file;
+that was a benchmark that wiped the buffer before each open, which forces a
+synchronous rebuild that normal editing never triggers.) The reasons that
+survived are the outline itself - 27 entries against tagbar's 57 on the same
+file, because treesitter lists what you navigate by and ctags also lists
+macros, prototypes and variables - and that nothing has to spawn a process.
+
 ## Yellow marks (nvim only)
 
 Put the cursor on a symbol, press `<F8>`, and every occurrence of it goes

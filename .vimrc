@@ -359,12 +359,19 @@ _G.rv_setup('aerial', {
   -- 버퍼도 treesitter 도 아직이라 창만 뜨고 비어 있었다. 이건 aerial 이
   -- 심볼을 얻은 뒤에 열어 주므로 그 문제가 없다.
   open_automatic = true,
+  -- 아웃라인에서 커서를 옮기면 편집 창이 그 심볼로 간다. 포커스는
+  -- 아웃라인에 남는다 - tagbar 쪽에 손으로 만들어 둔 follow 동작과 같다
+  -- (s:TagbarFollowCursor, 아래 Tagbar 절).
+  --   autojump = false 로 끄면 <CR> 로만 이동한다.
+  autojump = true,
   attach_mode = 'window',
   close_on_select = false,
   show_guides = true,
 })
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
+" 아웃라인에서 더블클릭(또는 v)하면 편집 창에서 그 함수를 주석까지 블록으로
+" 잡는다 - ~/.vim/plugin/aerialrange.lua
 
 " 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O)은 <leader>fs 와 <F7> =
 " :ProjectSymbols 가 담당한다(gtags 색인 기반, 아래 Project files 절).
