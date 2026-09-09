@@ -527,6 +527,34 @@ let g:projectfiles_absorb = 1        " do it when a project is first opened
 let g:projectfiles_absorb_hint = 0   " not even the notice
 ```
 
+### none, auto, or a preset
+
+One file says what a project does: `<root>/.tags/preset`.
+
+| file | mode | what happens |
+|---|---|---|
+| (missing) | not decided yet | nothing. No index, no dialog, no ctags |
+| `none` | none | nothing, but the project is registered |
+| `auto` | auto | the whole project (`git ls-files` / `find`) |
+| `<name>` | preset | only what that preset lists |
+
+`<F2>` and `\fm` do the same thing: pick the mode. `:ProjectFilesPreset
+none|auto|<name>` sets it without the picker. Until a mode is picked, opening
+a file in that directory starts nothing - that includes gutentags, whose
+`generate_on_missing` would otherwise kick off a full ctags build of whatever
+tree you happened to open a file in. Older `.tags/preset` files hold an empty
+line where `auto` is written now; those still read as auto.
+
+The old behaviour was to ask, with a `vim.ui.select` on the first index of an
+unknown project. Being asked is better than being surprised, but not being
+touched at all is better than both, and `\fm` was always one key away.
+`:Maketags` still runs what `<F2>` used to (`mktags.sh` over the current
+directory) for the times you want exactly that.
+
+Dropping the last entry of a preset, or deleting the preset you were using,
+now leaves the project in `none` rather than falling back to `auto` - "there
+is nothing in my list" should not turn into "index all 220,000 files".
+
 ### Which mode, decided once per project
 
 The mode lives in one line of `<root>/.tags/preset`: empty means auto, a
