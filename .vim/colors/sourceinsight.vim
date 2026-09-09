@@ -261,7 +261,10 @@ call s:hi('SpellRare',     'macro',   '',          'underline')
 call s:hi('RvHeader',       'keyword', '',           'bold')
 call s:hi('RvSection',      'keyword', '',           'bold')
 call s:hi('RvName',         'fg',      '',           '')
-call s:hi('RvLoc',          'linenr',  '',           '')
+" 경로는 파랑. 목록의 나머지(트리 선, 힌트, 부가 정보)는 회색으로 두고
+" 파일 경로만 눈에 띄게 한다 - vim 이 경로에 쓰는 Directory 와 같은 남색이고,
+" relationview.lua 도 원래 RvLoc 를 Directory 에 link 해 두었다.
+call s:hi('RvLoc',          'keyword', '',           '')
 call s:hi('RvDim',          'linenr',  '',           '')
 call s:hi('RvTree',         'linenr',  '',           '')
 call s:hi('RvHint',         'linenr',  '',           '')
