@@ -864,8 +864,17 @@ function refresh(root, why, force)
 
   local function run_incremental(n)
     -- 셸 없이. 고아가 된 gtags 11개가 전부 이 자리에서 나왔다.
+    -- 증분 갱신에 30분(spawn 의 기본값)은 너무 관대하다. 목록이 정해져
+    -- 있으니 정상이면 초 단위로 끝나는데, gtags 가 이 DB 에서 병적으로
+    -- 도는 경우가 실제로 있었다 - 입력 파일은 하나도 열지 않고
+    -- GPATH/GTAGS 만 붙든 채 상태 R 로 코어 하나를 계속 먹었다(한 번은
+    -- 13시간, 한 번은 13분까지 확인). 전체 빌드는 커널 트리에서 수십 초가
+    -- 정상이라 그쪽 기본값은 그대로 둔다.
+    --   let g:autoindex_incremental_timeout_min = 0   " 제한 없음
+    local imin = tonumber(cfg('incremental_timeout_min', 5)) or 5
     local ok = spawn({ gt, '-i', '-f', list, dbpath(root) },
-      { text = true, cwd = root, env = env_for(root) }, function(o)
+      { text = true, cwd = root, env = env_for(root),
+        timeout = imin > 0 and math.floor(imin * 60 * 1000) or 0 }, function(o)
         vim.schedule(function()
           local secs = (uv.now() - t0) / 1000
           if o.code ~= 0 then
