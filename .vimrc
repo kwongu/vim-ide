@@ -538,6 +538,20 @@ let g:gutentags_generate_on_new = 1
 let g:gutentags_generate_on_missing = 1
 let g:gutentags_generate_on_write = 1
 let g:gutentags_generate_on_empty_buffer = 0
+" gutentags 가 버퍼에 붙기 전에 autoindex.lua 에 물어본다. 저장 갱신이
+" tags 파일을 통째로 다시 쓰기 때문에(plat/unix/update_tags.sh), 이미 커진
+" 프로젝트는 붙기 전에 떼어내야 한다 - 붙은 뒤에 제외 목록에 넣어도 그
+" 버퍼는 세션이 끝날 때까지 계속 다시 쓴다.
+"   let g:autoindex_ctags_max_bytes = 0  " 크기로 막지 않기
+"   let g:autoindex_gutentags_guard = 0  " 이 훅을 끄기
+if has('nvim')
+	function! VimIdeGutentagsOk(path) abort
+		" luaeval 은 리스트를 1-기반으로 넘긴다 (_A[0] 은 nil 이다)
+		return luaeval('_G.autoindex_gutentags_ok and
+					\ _G.autoindex_gutentags_ok(_A[1]) or 1', [a:path])
+	endfunction
+	let g:gutentags_init_user_func = 'VimIdeGutentagsOk'
+endif
 " 색인할 파일은 indexfiles.sh 가 정한다(ctags 와 gtags 가 같은 목록을 쓴다):
 "   .indexfiles -> cscope.files(F2) -> git ls-files -> find
 " 커널처럼 큰 트리는 git 이 추적하는 소스만, 그 밖의 프로젝트는 .indexfiles

@@ -141,6 +141,7 @@ local s = {
   lists = {},          -- root -> cached '.tags/files' membership
   refresh_again = {},  -- root -> a refresh requested while one was running
   locked = {},         -- root -> true while THIS nvim holds the index lock
+  gt = {},             -- gutentags 루트 -> 'no'/'yes' (붙일지 이미 판단했다)
 }
 
 -- g:autoindex_debug = 1 -> append a line per index action to
@@ -1108,6 +1109,80 @@ local function count_files(root, cb)
   end
 end
 
+-- 이 루트를 gutentags 에서 떼어내고, 대신 ctags 스냅숏을 우리가 만든다.
+local function exclude_gutentags(root, why)
+  local list = vim.g.gutentags_exclude_project_root or {}
+  local known = false
+  for _, r in ipairs(list) do
+    if r == root then
+      known = true
+      break
+    end
+  end
+  if not known then
+    table.insert(list, root)
+    vim.g.gutentags_exclude_project_root = list
+    -- keep this on one line: a wrapped message means a hit-enter prompt at
+    -- every start in a narrow terminal
+    notify(string.format('%s: %s - ctags 는 여기서 직접 만듭니다',
+      vim.fn.fnamemodify(root, ':~'), why or 'big tree'))
+  end
+  if cfg('ctags', 1) ~= 0 and not s.ctags_tried[root] then
+    local have = ctags_apply(root)
+    if not have or ctags_stale(root) then
+      s.ctags_tried[root] = true
+      ctags_build(root, have and '오래됨' or (why or 'big tree'))
+    end
+  end
+end
+
+-- gutentags 가 버퍼에 붙기 전에 묻는 자리 (g:gutentags_init_user_func).
+-- 0 을 돌려주면 그 버퍼에는 붙지 않는다 - 저장할 때 tags 를 다시 쓰지 않는다.
+--
+-- 왜 여기서 판단해야 하는가: guard_ctags 는 파일 수를 **비동기로** 센 뒤에
+-- 루트를 제외 목록에 넣는데, gutentags 는 그 답을 기다리지 않는다. 그래서
+-- 그 루트의 첫 버퍼는 이미 붙은 상태로 남고, 세션이 끝날 때까지 저장마다
+-- tags 를 통째로 다시 쓴다. 실측: android/external/bcc 가 제외 목록에
+-- 들어간 뒤에도 저장 때 update_tags.sh 가 181MB 파일을 다시 썼다.
+--
+-- 그리고 파일 수는 비용의 척도가 아니다. bcc 는 git 추적 1,145개인데 tags 가
+-- 181MB 다(5000개 기준으로는 영원히 걸리지 않는다). 비용은 바이트다 -
+-- gutentags 의 저장 갱신(plat/unix/update_tags.sh)은
+--   grep --text -Ev '^[^\t]+\t<그 파일>\t' tags > tags.temp
+-- 로 **전체를 읽어 다시 쓴다**. 그래서 stat 한 번으로 바로 정한다.
+--
+--   let g:autoindex_ctags_max_bytes = 0   " 크기로는 막지 않기
+--   let g:autoindex_gutentags_guard = 0   " 이 훅을 아예 끄기
+function _G.autoindex_gutentags_ok(path)
+  if cfg('gutentags_guard', 1) == 0 or not enabled() then
+    return 1
+  end
+  path = tostring(path or '')
+  if path == '' then
+    return 1
+  end
+  local ok, root = pcall(vim.fn['gutentags#get_project_root'], path)
+  if not ok or type(root) ~= 'string' or root == '' then
+    return 1
+  end
+  if s.gt[root] then
+    return s.gt[root] == 'no' and 0 or 1
+  end
+  local max = tonumber(cfg('ctags_max_bytes', 32 * 1024 * 1024)) or 0
+  if max > 0 then
+    local ok2, cache = pcall(vim.fn['gutentags#get_cachefile'], root, 'tags')
+    local st = ok2 and type(cache) == 'string' and uv.fs_stat(cache) or nil
+    if st and st.size > max then
+      s.gt[root] = 'no'
+      exclude_gutentags(root, ('tags %.0fMB'):format(st.size / 1048576))
+      return 0
+    end
+  end
+  -- 아직 크지 않다: gutentags 에 맡기고, 파일 수 가드는 그대로 돈다
+  s.gt[root] = 'yes'
+  return 1
+end
+
 local guard_ctags_decide  -- 아래에서 정의; 파일 수를 다 센 뒤에 불린다
 
 local function guard_ctags(path)
@@ -1127,26 +1202,7 @@ guard_ctags_decide = function(root, max, n)
   if n ~= nil and n <= max then
     return
   end
-  local list = vim.g.gutentags_exclude_project_root or {}
-  for _, r in ipairs(list) do
-    if r == root then
-      return
-    end
-  end
-  table.insert(list, root)
-  vim.g.gutentags_exclude_project_root = list
-  -- keep this on one line: a wrapped message means a hit-enter prompt at
-  -- every start in a narrow terminal
-  notify(string.format('%s: %s files - ctags 는 여기서 직접 만듭니다',
-    vim.fn.fnamemodify(root, ':~'), n and tostring(n) or 'many'))
-  if cfg('ctags', 1) ~= 0 and not s.ctags_tried[root] then
-    local have = ctags_apply(root)
-    if not have or ctags_stale(root) then
-      s.ctags_tried[root] = true
-      ctags_build(root, have and '오래됨' or
-        (n and (n .. ' files') or 'big tree'))
-    end
-  end
+  exclude_gutentags(root, n and (n .. ' files') or 'big tree')
 end
 
 -- ---------------------------------------------------------------------------
@@ -1194,8 +1250,26 @@ end
 -- put the project's tags file in front of &tags for this buffer
 function ctags_apply(root, buf)
   local file = ctags_file(root)
-  if not uv.fs_stat(file) then
+  local st = uv.fs_stat(file)
+  if not st then
     return false
+  end
+  -- 거대한 스냅숏은 디스크에 두되 'tags' 에는 넣지 않는다.
+  --
+  -- 'ignorecase' + 'smartcase' 에서 모든 매치를 찾아야 하는 태그 조회는
+  -- vim 이 이진 검색을 포기하고 tags 파일을 처음부터 끝까지 읽는다. 1.8GB
+  -- 짜리가 'tags' 에 들어 있으면 완성 한 번, :tag 한 번이 그 파일을 통째로
+  -- 훑는다. C-] 는 tagfunc(GTAGS)이 먼저 답하므로 이걸 빼도 점프는 그대로다.
+  --   let g:autoindex_tags_max_bytes = 0   " 크기와 무관하게 넣기
+  local cap = tonumber(cfg('tags_max_bytes', 256 * 1024 * 1024)) or 0
+  if cap > 0 and st.size > cap then
+    if not s.warned['tags:' .. root] then
+      s.warned['tags:' .. root] = true
+      notify(('%s: ctags 스냅숏이 %.0fMB 라 \'tags\' 에 넣지 않았습니다'):format(
+          vim.fn.fnamemodify(root, ':~'), st.size / 1048576)
+        .. ' - C-] 는 GTAGS 가 답합니다 (g:autoindex_tags_max_bytes)')
+    end
+    return true -- 파일은 있다: 다시 만들라고 하지는 않는다
   end
   buf = buf or api.nvim_get_current_buf()
   if not api.nvim_buf_is_valid(buf) then
