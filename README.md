@@ -1030,6 +1030,21 @@ The state is read off the screen rather than remembered, so `<F3>` does the
 intuitive thing even after you closed a window by hand or moved to another
 tab. `:RelationViewMode both\|relation\|context\|off` jumps straight to one.
 
+Four states is the default, not the rule - pick the ones you actually use and
+the order you want them in:
+
+```vim
+let g:relationview_cycle = ['context', 'off']          " just the preview
+let g:relationview_cycle = ['both', 'off']             " all of it, or none
+let g:relationview_cycle = ['relation', 'context']     " swap between the two
+let g:relationview_cycle = ['context', 'both', 'off']  " three
+```
+
+If the layout you are looking at is not in your list - you set it with
+`:RelationViewMode`, or closed a window by hand - `<F3>` goes to the first
+entry. A name that is not one of the four is dropped with one warning, and a
+list with nothing usable in it falls back to the default order.
+
 **A new startup default: context only.** The relation list takes twelve rows
 off the bottom and is not always what you want; the definition of the symbol
 under the cursor, sitting beside the code, is useful the whole time you are

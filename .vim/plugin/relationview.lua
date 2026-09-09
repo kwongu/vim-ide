@@ -21,7 +21,8 @@
 --   F3                  cycle the layout:
 --                         relation + context -> relation only ->
 --                         context only -> off
---                       (:RelationViewMode <이름> 으로 바로 고를 수도 있다)
+--                       g:relationview_cycle 로 순서와 개수를 정하고,
+--                       :RelationViewMode <이름> 으로 바로 고를 수도 있다
 --   :RelationView [sym] open the window and show relations of sym/<cword>
 --   :RelationViewToggle same as F3
 --   :RelationViewBoth   both directions at once (the default)
@@ -94,6 +95,9 @@
 --   g:relationview_auto_open  1: open something on startup (default 1)
 --   g:relationview_startup    what to open then: 'context' (default),
 --                             'both', 'relation' or 'off'
+--   g:relationview_cycle      the order <F3> walks, e.g.
+--                             ['context', 'off'] or ['both', 'off']
+--                             (default ['both','relation','context','off'])
 --   g:relationview_context    1: open the context window with the panel
 --                             (default 1; 'c' toggles it at runtime)
 --   g:relationview_context_height  context height, 'right' layout (default 25,
@@ -5008,18 +5012,62 @@ local function current_mode()
   return 'off'
 end
 
-local MODE_NEXT = {
-  both = 'relation',
-  relation = 'context',
-  context = 'off',
-  off = 'both',
-}
 local MODE_LABEL = {
   both = 'relation + context',
   relation = 'relation only',
   context = 'context only',
   off = 'off',
 }
+local MODE_DEFAULT_CYCLE = { 'both', 'relation', 'context', 'off' }
+
+-- <F3> 가 도는 순서는 사용자가 정한다. 네 배치를 다 거치고 싶지 않은 쪽이
+-- 많다 - 미리보기만 켜고 끄면 되는 사람에게 네 번 누르게 할 이유가 없다.
+--
+--   let g:relationview_cycle = ['context', 'off']         " 미리보기만 켜고 끄기
+--   let g:relationview_cycle = ['both', 'off']            " 통째로 켜고 끄기
+--   let g:relationview_cycle = ['context', 'both', 'off'] " 셋만
+--   let g:relationview_cycle = ['relation', 'context']    " 둘을 오간다
+--
+-- 모르는 이름은 버리고 한 번만 알려 준다. 남는 것이 없으면 기본 순서를 쓴다.
+local function cycle_list()
+  local raw = vim.g.relationview_cycle
+  if type(raw) ~= 'table' then
+    return MODE_DEFAULT_CYCLE
+  end
+  local out, bad = {}, {}
+  for _, v in ipairs(raw) do
+    local m = tostring(v):lower():gsub('%s', '')
+    if MODE_LABEL[m] then
+      out[#out + 1] = m
+    else
+      bad[#bad + 1] = tostring(v)
+    end
+  end
+  if #bad > 0 and not s.cycle_warned then
+    s.cycle_warned = true
+    vim.notify(('RelationView: g:relationview_cycle 에 모르는 이름 %s'):format(
+        table.concat(bad, ', '))
+      .. ' — both / relation / context / off 중에서 고르세요',
+      vim.log.levels.WARN)
+  end
+  if #out == 0 then
+    return MODE_DEFAULT_CYCLE
+  end
+  return out
+end
+
+-- 지금 화면 상태의 '다음'. 지금 상태가 목록에 없으면(사용자가 목록에서 뺀
+-- 배치에 있거나 창을 손으로 닫았으면) 목록의 처음으로 간다.
+local function next_mode()
+  local list = cycle_list()
+  local cur = current_mode()
+  for i, m in ipairs(list) do
+    if m == cur then
+      return list[(i % #list) + 1]
+    end
+  end
+  return list[1]
+end
 
 -- context 만 떠 있을 때, 편집 창의 커서 밑 심볼의 정의를 보여 준다.
 --
@@ -5117,14 +5165,14 @@ end
 ctx_follow = ctx_follow_impl
 
 api.nvim_create_user_command('RelationViewCycle', function()
-  local m = MODE_NEXT[current_mode()]
+  local m = next_mode()
   apply_mode(m)
   vim.notify('RelationView: ' .. MODE_LABEL[m])
-end, { desc = 'Cycle: relation+context -> relation -> context -> off' })
+end, { desc = 'Cycle the layout (g:relationview_cycle sets the order)' })
 
 api.nvim_create_user_command('RelationViewMode', function(o)
   local m = o.args
-  if not MODE_NEXT[m] then
+  if not MODE_LABEL[m] then
     vim.notify('RelationView: both | relation | context | off 중에서',
       vim.log.levels.WARN)
     return
