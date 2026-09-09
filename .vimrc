@@ -1683,6 +1683,14 @@ augroup RvUnpinKey
 	autocmd VimEnter * nnoremap <silent> <C-c> :call <SID>RvUnpin()<CR>
 augroup END
 
+
+"==============================================================================
+"= OverView: Source Insight style Overview (nvim only)
+"  \b toggle / :OverView - see ~/.vim/plugin/overview.lua
+"==============================================================================
+let g:overview_smooth = 0        " 즉시 도착 (예전 동작)
+let g:overview_smooth_step = 0.3 " 더 천천히 (기본 0.5)
+
 "==============================================================================
 "= RelationView: Source Insight style relation window (nvim only)
 "  F3 toggle / :RelationView - see ~/.vim/plugin/relationview.lua
