@@ -559,7 +559,6 @@
     {"kind": "file", "path": "drivers/char/tpm/tpm_infineon.c"},
     {"kind": "file", "path": "include/linux/libps2.h"},
     {"kind": "file", "path": "sound/soc/codecs/ak4601.h"},
-    {"kind": "file", "path": "sound/soc/codecs/ak4601.c"},
     {"kind": "file", "path": "include/linux/init.h"},
     {"kind": "file", "path": "include/linux/i2c.h"},
     {"kind": "file", "path": "include/linux/spi/spi.h"},
