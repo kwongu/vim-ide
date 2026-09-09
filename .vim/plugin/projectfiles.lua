@@ -724,6 +724,55 @@ for b in tostring(cfg('exclude_names_extra', '')):gmatch('%S+') do
   EXCL_NAME[b] = true
 end
 
+-- 색인에서 뺀 것을 한 번만 보고하기 위한 집계 (materialize 가 읽는다)
+local skipped = { big = 0, binary = 0, worst = nil }
+
+-- 확장자만으로는 걸러지지 않는 것: 이름에 점이 없는 바이너리.
+--
+-- '전부 넣는다'(all_files)는 확장자 거부목록으로만 판단하고 있었다. 그래서
+-- 확장자가 없는 'qnx/disk/qnx-ifs'(64MB QNX IFS 이미지),
+-- 'qnx/disk/guests/android/kernel-6.1'(33MB EFI 실행파일),
+-- '*.sym'(15MB ELF)이 색인 목록에 그대로 들어갔다. 실측(d5_qnx_hyp):
+-- 목록 1540개 중 83개가 바이너리로 합 164MB - ctags/gtags 가 매번 그걸
+-- 읽고 태그는 한 줄도 내지 않았다.
+--
+-- 크기도 본다. 생성된 헤더 vmlinux_*.h 3개(각 3MB)가 태그 485,469줄을
+-- 만들어 120MB tags 파일의 절반을 차지했고, gutentags 는 저장할 때 그
+-- 파일을 다시 쓴다.
+--
+--   let g:projectfiles_max_bytes = 0    " 크기 제한 없음
+--   let g:projectfiles_skip_binary = 0  " 내용 검사 안 함
+local function text_file(path)
+  local st = uv.fs_stat(path)
+  -- 볼 수 없으면 판단하지 않는다: 여기서 거절하면 상대 경로로 불린
+  -- 자리에서 멀쩡한 파일이 조용히 빠진다
+  if not st or st.type ~= 'file' then
+    return true
+  end
+  local max = tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0
+  if max > 0 and st.size > max then
+    skipped.big = skipped.big + 1
+    if not skipped.worst or st.size > skipped.worst.size then
+      skipped.worst = { size = st.size, path = path }
+    end
+    return false
+  end
+  if cfg('skip_binary', 1) == 0 then
+    return true
+  end
+  local fd = uv.fs_open(path, 'r', 438)
+  if not fd then
+    return true
+  end
+  local data = uv.fs_read(fd, 1024, 0)
+  uv.fs_close(fd)
+  if data and data:find('\0', 1, true) then
+    skipped.binary = skipped.binary + 1
+    return false
+  end
+  return true
+end
+
 local function indexed(path)
   local base = path:match('([^/]+)$') or path
   if cfg('all_files', 1) ~= 0 then
@@ -732,13 +781,16 @@ local function indexed(path)
       return false
     end
     local e = base:match('%.([%w_]+)$')
-    return not (e and EXCL[e:lower()])
+    if e and EXCL[e:lower()] then
+      return false
+    end
+    return text_file(path)
   end
   if BASE[base] then
-    return true
+    return text_file(path)
   end
   local e = base:match('%.([%w_]+)$')
-  return e ~= nil and EXT[e] == true
+  return e ~= nil and EXT[e] == true and text_file(path)
 end
 
 local function rel_to(root, path)
@@ -883,6 +935,7 @@ local function materialize(root)
   -- preset 항목은 사람이 고른 것이라 기본적으로 걸르지 않는다 (위 설명 참고)
   local pre = cfg('nested_presets', 0) ~= 0 and nested_prefixes(root) or {}
   local dropped = 0
+  skipped = { big = 0, binary = 0, worst = nil }
   for _, e in ipairs(entries) do
     for _, f in ipairs((expand_entry(root, e))) do
       if not seen[f] then
@@ -900,6 +953,27 @@ local function materialize(root)
           files[#files + 1] = f
         end
       end
+    end
+  end
+  -- 크기/바이너리로 뺀 것을 한 번만 말한다. 조용히 빼면 '왜 이 파일이
+  -- \fo 에 없지'가 된다.
+  if (skipped.big + skipped.binary) > 0 then
+    local key = ('%s\0%d\0%d'):format(root, skipped.big, skipped.binary)
+    if s.skip_told ~= key then
+      s.skip_told = key
+      local parts = {}
+      if skipped.binary > 0 then
+        parts[#parts + 1] = ('바이너리 %d개'):format(skipped.binary)
+      end
+      if skipped.big > 0 then
+        local w = skipped.worst
+        parts[#parts + 1] = ('%s 초과 %d개%s'):format(
+          ('%.0fMB'):format((tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0) / 1048576),
+          skipped.big,
+          w and (' (최대 %s, %.0fMB)'):format(vim.fs.basename(w.path), w.size / 1048576) or '')
+      end
+      notify('색인에서 뺐습니다: ' .. table.concat(parts, ', ')
+        .. '  (g:projectfiles_max_bytes / _skip_binary 로 조절)')
     end
   end
   if dropped > 0 and s.nested_told ~= (root .. '\0' .. dropped) then
@@ -2107,6 +2181,20 @@ local function update_step(root)
   local pre = update_timeout_prefix(ms)
   if pre then
     argv = vim.list_extend(pre, argv)
+  end
+  -- 저장할 때 도는 배경 작업이다. 타자보다 늦어도 되니 양보한다
+  -- (autoindex.lua 의 spawn() 과 같은 정책).
+  local np = {}
+  local n = tonumber(cfg('nice', 10)) or 0
+  if n > 0 and vim.fn.executable('nice') == 1 then
+    vim.list_extend(np, { 'nice', '-n', tostring(math.min(19, n)) })
+  end
+  local io_n = tonumber(cfg('ionice', 7)) or 0
+  if io_n > 0 and vim.fn.executable('ionice') == 1 then
+    vim.list_extend(np, { 'ionice', '-c', '2', '-n', tostring(math.min(7, io_n)) })
+  end
+  if #np > 0 then
+    argv = vim.list_extend(np, argv)
   end
   local h, watch, timed_out = nil, nil, false
   local ok = pcall(function()

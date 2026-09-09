@@ -1403,6 +1403,15 @@ endif
 " gutentags 도 같은 바이너리를 쓴다(설정 블록이 이 위에 있어 여기서 넘긴다)
 if exists('g:tagbar_ctags_bin')
 	let g:gutentags_ctags_executable = g:tagbar_ctags_bin
+	" 저장할 때마다 도는 ctags 는 양보하게 한다. 개발서버는 60코어에
+	" 841 로그인이고, 그 ctags 가 에디터와 같은 우선순위로 CPU/IO 를
+	" 다투면 타자가 걸린다. ctags-nice 는 우선순위만 바꾸고 인자는 그대로
+	" 넘긴다(CTAGS_NICE=0 으로 끄고, CTAGS_REAL 로 실제 바이너리를 준다).
+	" GTAGS 쪽은 autoindex.lua 의 spawn() 이 같은 정책을 쓴다.
+	if executable(expand('~/.local/bin/ctags-nice'))
+		let $CTAGS_REAL = g:tagbar_ctags_bin
+		let g:gutentags_ctags_executable = expand('~/.local/bin/ctags-nice')
+	endif
 endif
 "let g:tagbar_left=0
 let g:tagbar_left=1

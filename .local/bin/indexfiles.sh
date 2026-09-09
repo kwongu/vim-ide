@@ -102,6 +102,57 @@ filter_types() {
 	fi
 }
 
+# 확장자로는 걸러지지 않는 것: 이름에 점이 없는 바이너리, 그리고 거대한
+# 생성물.
+#
+# 실측(QNX+Android SDK 트리): 색인 목록 1540개 중 83개가 바이너리였다 -
+# 'qnx/disk/qnx-ifs'(64MB IFS 이미지), 'kernel-6.1'(33MB EFI 실행파일),
+# '*.sym'(15MB ELF). ctags/gtags 는 그 164MB 를 매번 읽고 태그는 한 줄도
+# 내지 않는다. 크기 쪽은 vmlinux_*.h 3개(각 3MB)가 태그 485,469줄을 만들어
+# 120MB tags 의 절반을 차지했고, gutentags 는 저장마다 그 파일을 다시 쓴다.
+#
+#   INDEXFILES_MAX_BYTES=0    크기 제한 없음
+#   INDEXFILES_SKIP_BINARY=0  내용 검사 안 함
+MAX_BYTES=${INDEXFILES_MAX_BYTES:-2097152}
+SKIP_BINARY=${INDEXFILES_SKIP_BINARY:-1}
+
+# GNU 와 BSD 의 stat 은 서로 다른 플래그를 쓴다 (맥과 리눅스 둘 다에서 돈다).
+#
+# 형식 문자열은 **한 인자**여야 한다. 예전에 이걸 'stat -c %s %n' 이라는
+# 문자열로 만들어 뒀다가 셸이 단어로 쪼개서 '%n' 이 파일 이름으로 먹혔고,
+# stat 이 아무것도 내놓지 못해 목록 1540개가 통째로 사라졌다.
+if stat -c %s . >/dev/null 2>&1; then
+	STAT_KIND=gnu
+elif stat -f %z . >/dev/null 2>&1; then
+	STAT_KIND=bsd
+else
+	STAT_KIND=none
+fi
+
+# 크기와 이름을 '<바이트> <경로>' 로 내놓는다. 파일마다 stat 을 띄우면 큰
+# 목록에서 그 자체가 비용이라 xargs 로 묶는다 - '-0' 은 GNU/BSD 양쪽에
+# 있다('-d' 는 GNU 전용이라 쓰지 않는다).
+_sizes() {
+	case $STAT_KIND in
+	gnu) tr '\n' '\0' | xargs -0 stat -c '%s %n' 2>/dev/null ;;
+	bsd) tr '\n' '\0' | xargs -0 stat -f '%z %N' 2>/dev/null ;;
+	esac
+}
+
+filter_size() {
+	[ "$MAX_BYTES" -le 0 ] && { cat; return; }
+	[ "$STAT_KIND" = none ] && { cat; return; }
+	_sizes | awk -v m="$MAX_BYTES" '$1 <= m { sub(/^[0-9]+[ \t]+/, ""); print }'
+}
+
+filter_binary() {
+	[ "$SKIP_BINARY" -eq 0 ] && { cat; return; }
+	# 'grep -I' 는 바이너리를 '일치 없음'으로 취급한다. 빈 패턴은 모든 줄에
+	# 일치하니 텍스트 파일만 이름이 나온다. 파일마다 head 를 띄우는 것보다
+	# 훨씬 싸다 - 한 프로세스가 여러 파일을 읽는다.
+	tr '\n' '\0' | xargs -0 grep -Il -e '' -- 2>/dev/null
+}
+
 EXT_RE=''
 if [ -n "$EXT_ALT" ]; then
 	EXT_RE="\.($EXT_ALT)$"
@@ -165,10 +216,12 @@ filter_nested() {
 }
 
 if [ -f .tags/files ]; then
-	# preset 모드: projectfiles.lua 가 만들어 둔 목록 (파일/디렉터리 preset)
-	grep -v '^[[:space:]]*$' .tags/files
+	# preset 모드: projectfiles.lua 가 만들어 둔 목록 (파일/디렉터리 preset).
+	# 그쪽에서 이미 걸렀지만, 목록을 손으로 고칠 수도 있으니 여기서도 본다.
+	grep -v '^[[:space:]]*$' .tags/files | filter_size | filter_binary
 elif [ -f .indexfiles ]; then
-	grep -v '^[[:space:]]*$' .indexfiles | grep -v '^[[:space:]]*#'
+	grep -v '^[[:space:]]*$' .indexfiles | grep -v '^[[:space:]]*#' |
+		filter_size | filter_binary
 elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# --others --exclude-standard: 아직 커밋하지 않은 새 파일도 색인 대상
 	# (.gitignore 는 그대로 존중한다)
@@ -191,11 +244,12 @@ elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# shellcheck disable=SC2086  # gitex 는 옵션 목록이라 쪼개져야 한다
 	git -c core.quotepath=off ls-files --cached --others --exclude-standard \
 		$gitex |
-		filter_prune | filter_types | filter_nested
+		filter_prune | filter_types | filter_nested |
+		filter_size | filter_binary
 	set +f
 elif [ -f cscope.files ]; then
 	grep -v '^[[:space:]]*$' cscope.files | filter_prune | filter_types |
-		filter_nested
+		filter_nested | filter_size | filter_binary
 else
 	# 'set -f' 로 글로브를 끈 뒤에 쪼갠다. 이게 없으면 '-name *.java' 의
 	# '*.java' 가 셸에서 현재 디렉터리 기준으로 먼저 확장되어(-name Foo.java)
@@ -207,6 +261,13 @@ else
 		[ -z "$prune" ] && prune="-name $d" || prune="$prune -o -name $d"
 	done
 	# shellcheck disable=SC2086  # prune 은 술어 목록이라 쪼개져야 한다
-	find . \( $prune \) -prune -o -type f -print | filter_types | filter_nested
+	# find 는 크기를 이미 알고 있으니 stat 을 다시 부를 필요가 없다
+	if [ "$MAX_BYTES" -gt 0 ]; then
+		find . \( $prune \) -prune -o -type f -size -"$((MAX_BYTES / 512 + 1))" -print |
+			filter_types | filter_nested | filter_binary
+	else
+		find . \( $prune \) -prune -o -type f -print |
+			filter_types | filter_nested | filter_binary
+	fi
 	set +f
 fi

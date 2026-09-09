@@ -236,6 +236,54 @@ local function timeout_prefix(ms)
 end
 
 -- 셸 없이 띄우고, 핸들을 기억하고, 시간 제한을 건다.
+-- 공유 서버에서는 색인이 에디터와 CPU/IO 를 다툰다.
+--
+-- 개발서버는 60코어에 841 로그인이고, 여기서 도는 색인기는 지금까지
+-- 에디터와 같은 우선순위였다. 색인은 몇 초 늦어도 되지만 타자는 그렇지
+-- 않으니, 배경 일꾼은 양보하게 한다.
+--
+-- 이 파일의 spawn() 은 전부 배경 작업이다(전체/증분 빌드, 파일목록,
+-- 저장 후 단일 갱신, ctags 빌드). C-] 이 쓰는 tagfunc 의 'global -d' 는
+-- spawn 을 거치지 않는다 - 그건 사용자가 답을 기다리는 자리라서 양보하면
+-- 오히려 나빠진다.
+--
+--   let g:autoindex_nice = 0     " 양보하지 않기
+--   let g:autoindex_nice = 19    " 최대한 양보 (부하가 높으면 굶을 수 있다)
+--   let g:autoindex_ionice = 0   " IO 우선순위는 건드리지 않기
+local nice_cmd, ionice_cmd  -- nil=미탐색, false=없음
+
+local function nice_prefix()
+  local out = {}
+  local n = tonumber(cfg('nice', 10)) or 0
+  if n > 0 then
+    if nice_cmd == nil then
+      nice_cmd = vim.fn.executable('nice') == 1
+    end
+    if nice_cmd then
+      out[#out + 1] = 'nice'
+      out[#out + 1] = '-n'
+      out[#out + 1] = tostring(math.min(19, n))
+    end
+  end
+  -- ionice 는 리눅스 것이다 (맥에는 없다). best-effort 의 가장 낮은
+  -- 우선순위를 쓴다 - idle 클래스(-c3)는 부하가 계속 있으면 아예 진행하지
+  -- 못할 수 있다.
+  local io_n = tonumber(cfg('ionice', 7)) or 0
+  if io_n > 0 then
+    if ionice_cmd == nil then
+      ionice_cmd = vim.fn.executable('ionice') == 1
+    end
+    if ionice_cmd then
+      out[#out + 1] = 'ionice'
+      out[#out + 1] = '-c'
+      out[#out + 1] = '2'
+      out[#out + 1] = '-n'
+      out[#out + 1] = tostring(math.min(7, io_n))
+    end
+  end
+  return #out > 0 and out or nil
+end
+
 local function spawn(cmd, opts, cb)
   opts = vim.tbl_extend('keep', opts or {}, {})
   if opts.timeout == nil then
@@ -248,6 +296,12 @@ local function spawn(cmd, opts, cb)
   local pre = timeout_prefix(opts.timeout)
   if pre then
     argv = vim.list_extend(pre, cmd)
+  end
+  -- nice 를 가장 앞에: 'nice ionice timeout <초> <명령>' 이라 timeout 이
+  -- 재는 대상은 명령 그대로다
+  local np = nice_prefix()
+  if np then
+    argv = vim.list_extend(np, argv)
   end
   local h
   local ok, err = pcall(function()

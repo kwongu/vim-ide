@@ -1,0 +1,50 @@
+#!/bin/sh
+# ctags-nice - ctags 를 양보시켜 돌린다 (vim-gutentags 가 부르는 자리).
+#
+# gutentags 는 파일을 저장할 때마다 ctags 를 띄워 tags 를 갱신한다. 개발
+# 서버는 60코어에 841 로그인이고, 그 ctags 가 에디터와 같은 우선순위로
+# CPU/IO 를 다투면 타자가 걸린다. 색인은 몇 초 늦어도 되니 양보한다.
+#
+# g:gutentags_ctags_executable 이 이 스크립트를 가리킨다(.vimrc). ctags 의
+# 인자는 그대로 넘긴다 - 이 파일은 우선순위만 바꾼다.
+#
+#   CTAGS_NICE=0      양보하지 않기
+#   CTAGS_NICE=19     최대한 양보
+#   CTAGS_IONICE=0    IO 우선순위는 건드리지 않기
+#   CTAGS_REAL=<경로> 실제 ctags (기본: PATH 에서 찾는다)
+set -u
+
+NICE=${CTAGS_NICE:-10}
+IONICE=${CTAGS_IONICE:-7}
+
+# 실제 ctags 를 찾는다. 이 스크립트 자신을 다시 부르지 않도록 이름으로
+# 비교한다(PATH 앞쪽에 이 파일이 놓일 수도 있다).
+real=${CTAGS_REAL:-}
+if [ -z "$real" ]; then
+	self=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")
+	for c in ctags universal-ctags exuberant-ctags; do
+		p=$(command -v "$c" 2>/dev/null) || continue
+		[ "$p" = "$self" ] && continue
+		real=$p
+		break
+	done
+fi
+if [ -z "$real" ]; then
+	echo "ctags-nice: ctags 를 찾지 못했습니다" >&2
+	exit 127
+fi
+
+# 접두어를 만든다. ctags 에게 갈 인자("$@")는 손대지 않아야 하므로
+# 접두어는 따로 모아 두고 마지막에 한 줄로 exec 한다.
+pre=''
+if [ "$NICE" -gt 0 ] && command -v nice >/dev/null 2>&1; then
+	pre="nice -n $NICE"
+fi
+# ionice 는 리눅스 것이다. best-effort 의 가장 낮은 우선순위 - idle(-c3)은
+# 부하가 계속 있으면 진행하지 못할 수 있다.
+if [ "$IONICE" -gt 0 ] && command -v ionice >/dev/null 2>&1; then
+	pre="$pre ionice -c 2 -n $IONICE"
+fi
+
+# shellcheck disable=SC2086  # pre 는 명령 접두어라 쪼개져야 한다
+exec $pre "$real" "$@"
