@@ -26,7 +26,7 @@
 --   :ProjectFiles              find an indexed file and open it (telescope)
 --   :ProjectFilesAdd [path]    add a file or directory (default: this buffer)
 --   :ProjectFilesRemove [path] remove one
---   :ProjectFilesPreset [name] switch to a preset ('' = auto mode); no
+--   :ProjectFilesPreset [name] switch mode: 'none' / 'auto' / a preset; no
 --                              argument lists what there is
 --   :ProjectFilesSave <name>   save the current entries as a preset
 --   :ProjectFilesPresetShare [name]
@@ -47,7 +47,9 @@
 --   ^a   add files (find)   ^d remove from the list, or delete a preset
 --
 -- Options (.vimrc)
---   g:projectfiles_ask_mode    1 (default): a project whose mode was never
+--   (g:projectfiles_ask_mode 는 더 쓰이지 않는다: 모드를 정하지 않은
+--    디렉터리에서는 묻지도 색인하지도 않고, <F2>/\fm 으로 고른다)
+--   g:projectfiles_ask_mode    (옛 옵션) 1 (default): a project whose mode was never
 --                              chosen asks on startup instead of silently
 --                              indexing everything. 0 keeps the old
 --                              behaviour. Never asks when headless.
@@ -679,23 +681,93 @@ local function set_last(root, name)
   pcall(vim.fn.writefile, { name or '' }, f)
 end
 
-local function active_preset(root)
+-- 색인 모드는 셋이다.
+--
+--   none          아무것도 하지 않는다. 프로젝트로 등록만 되어 있다.
+--   auto          프로젝트 전체를 색인한다 (git ls-files / find).
+--   <preset 이름>  그 목록만 색인한다.
+--
+-- 그리고 '.tags/preset 이 아예 없는' 네 번째 상태가 있다: 아직 아무것도
+-- 정하지 않은 디렉터리다. 그런 곳에서는 vim 을 켜도 아무 일도 하지 않는다 -
+-- 남의 트리나 홈 디렉터리에서 잠깐 파일을 열었을 뿐인데 색인이 시작되는
+-- 일이 없어야 한다. 모드를 고르는 것은 <F2> 나 \fm 이다.
+--
+-- 파일 내용이 곧 모드다. 예전 파일은 '빈 줄 = auto' 였으므로 그대로 읽어
+-- 준다(그때는 none 이 없었다).
+local MODE_NONE = 'none'
+local MODE_AUTO = 'auto'
+local MODE_UNSET = '\0unset'
+
+local function mode_of(root)
   local f = active_file(root)
-  if uv.fs_stat(f) then
-    local l = (vim.fn.readfile(f)[1] or ''):gsub('%s+$', '')
-    if l ~= '' then
-      return l
-    end
-    return nil -- explicit auto mode
+  if not uv.fs_stat(f) then
+    -- g:projectfiles_preset 을 정해 뒀으면 그것이 기본값이다
+    local d = cfg('preset', nil)
+    return d and tostring(d) or MODE_UNSET
   end
-  local d = cfg('preset', nil)
-  return d and tostring(d) or nil
+  local l = (vim.fn.readfile(f)[1] or ''):gsub('%s+$', '')
+  if l == '' then
+    return MODE_AUTO -- 예전 파일: 빈 줄이 '명시적 auto' 였다
+  end
+  return l
+end
+
+-- 이 프로젝트가 쓰는 preset 이름 (auto/none/미설정이면 nil).
+local function active_preset(root)
+  local m = mode_of(root)
+  if m == MODE_AUTO or m == MODE_NONE or m == MODE_UNSET then
+    return nil
+  end
+  return m
+end
+
+-- 자동으로(시작할 때, 저장할 때) 색인해도 되는 프로젝트인가.
+local function mode_indexes(root)
+  local m = mode_of(root)
+  return m ~= MODE_NONE and m ~= MODE_UNSET
 end
 
 local function set_active(root, name)
   local f = active_file(root)
   vim.fn.mkdir(vim.fs.dirname(f), 'p')
-  pcall(vim.fn.writefile, { name or '' }, f)
+  -- '' 는 예전 호출부가 'auto' 를 뜻하며 쓰던 값이다. 이제는 글자로 적는다 -
+  -- 파일만 보고도 무슨 모드인지 알 수 있어야 한다.
+  local v = name
+  if v == nil or v == '' then
+    v = MODE_AUTO
+  end
+  pcall(vim.fn.writefile, { v }, f)
+end
+
+-- autoindex.lua 가 색인을 시작하기 전에 물어보는 자리.
+function _G.projectfiles_mode(root)
+  if not root or root == '' then
+    return MODE_UNSET
+  end
+  local m = mode_of(root)
+  return m == MODE_UNSET and 'unset' or m
+end
+
+function _G.projectfiles_should_index(root)
+  if not root or root == '' then
+    return false
+  end
+  return mode_indexes(root)
+end
+
+-- 경로가 속한 프로젝트가 색인 대상인가. gutentags 는 자기 루트 판정
+-- (.git/.project/.root)을 쓰는데 모드는 '<projectfiles 루트>/.tags/preset'
+-- 에 있으므로, 루트가 아니라 파일 경로로 물어야 답이 맞는다.
+function _G.projectfiles_should_index_file(path)
+  path = tostring(path or '')
+  if path == '' then
+    return false
+  end
+  local ok, root = pcall(root_of, path)
+  if not ok or not root or root == '' then
+    return false
+  end
+  return mode_indexes(root)
 end
 
 -- 색인 목록이 어느 .tags 에 저장되는지 한 줄로. NERDTree/피커/커맨드가
@@ -703,8 +775,9 @@ end
 --   ~/work2/.../d5_qnx_hyp/.tags [qnx_hypervisor_ivi_sdk_d5]
 local function target_label(root)
   local d = dbdir() or '.tags'
+  local m = mode_of(root)
   return ('%s/%s [%s]'):format(vim.fn.fnamemodify(root, ':~'), d,
-    active_preset(root) or 'auto')
+    m == MODE_UNSET and '미설정' or m)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1089,7 +1162,10 @@ local function save_entries(root, name, entries)
       pcall(vim.fn.delete, mine)
     end
     set_last(root, name)
-    set_active(root, '')
+    -- 예전에는 여기서 auto 로 돌아갔다. 이제 none 이 있으니 그쪽이 맞다 -
+    -- '담아 둔 것이 하나도 남지 않았다'가 '프로젝트 전체를 색인해라'로
+    -- 바뀌는 것은 놀라운 일이다. :ProjectFilesRestore 로 되돌릴 수 있다.
+    set_active(root, MODE_NONE)
     if batch then
       batch.emptied = name
       return nil -- 커밋은 배치 끝에서
@@ -1098,9 +1174,9 @@ local function save_entries(root, name, entries)
     reindex(root)
     local sp = shared_path(name)
     notify(sp and uv.fs_stat(sp)
-      and ("목록이 비어 auto 모드로 돌아갑니다 (내 '%s' 사본은 지웠고 vim-ide "
+      and ("목록이 비어 none 모드로 돌아갑니다 (내 '%s' 사본은 지웠고 vim-ide "
         .. '공용본은 그대로입니다)'):format(name)
-      or '목록이 비어 auto 모드로 돌아갑니다 (프로젝트 전체 색인)')
+      or '목록이 비어 none 모드로 돌아갑니다 (색인하지 않습니다)')
     return nil
   end
   preset_write(name, entries)
@@ -1360,7 +1436,10 @@ local NEW_PRESET = '\0new'
 local SKIP = '\0skip'
 
 local function mode_items(root)
-  local items = { { name = '', label = 'auto — 프로젝트 전체 (git ls-files / find)' } }
+  local items = {
+    { name = MODE_NONE, label = 'none — 아무것도 하지 않는다 (자동 색인 없음)' },
+    { name = MODE_AUTO, label = 'auto — 프로젝트 전체 (git ls-files / find)' },
+  }
   for _, nm in ipairs(preset_list()) do
     local pr = preset_read(nm)
     local cnt = pr and pr.entries and #pr.entries or 0
@@ -1422,8 +1501,15 @@ choose_mode = function(root, cb)
       return
     end
     set_active(root, choice.name)
+    if choice.name == MODE_NONE then
+      materialize(root)
+      notify('none 모드: 이 프로젝트는 색인하지 않습니다'
+        .. ' (<F2> 나 \\fm 으로 다시 고를 수 있습니다)')
+      cb(false)
+      return
+    end
     local files = materialize(root)
-    if choice.name == '' then
+    if choice.name == MODE_AUTO then
       notify('auto 모드: 프로젝트 전체를 색인합니다')
     elseif files and #files == 0 then
       -- preset 은 프로젝트 상대 경로 목록이라 다른 체크아웃에서도 쓸 수
@@ -3133,9 +3219,14 @@ end
 local function pick_preset()
   local root = cur_root()
   local cur = active_preset(root)
+  local m = mode_of(root)
   local names = preset_list()
-  local items = { { name = nil, label = (cur == nil and '● ' or '  ') ..
-    'auto  (프로젝트 전체 색인)' } }
+  local items = {
+    { name = MODE_NONE, label = (m == MODE_NONE and '● ' or '  ') ..
+      'none  (아무것도 하지 않는다)' },
+    { name = MODE_AUTO, label = ((m == MODE_AUTO or m == MODE_UNSET) and '● ' or '  ') ..
+      'auto  (프로젝트 전체 색인)' },
+  }
   for _, n in ipairs(names) do
     -- say where a preset comes from: the ones vim-ide carries are on every
     -- machine, mine are only here. When both exist mine is the one in use,
@@ -3157,10 +3248,18 @@ local function pick_preset()
       :format(cur == n and '● ' or '  ', n, p and #p.entries or 0, tag) }
   end
   local function use(it)
-    set_active(root, it.name or '')
+    set_active(root, it.name)
     materialize(root)
+    if it.name == MODE_NONE then
+      notify('none 모드: 이 프로젝트는 색인하지 않습니다  →  ' .. target_label(root))
+      return
+    end
     reindex(root)
-    notify(it.name and ("preset '" .. it.name .. "'") or 'auto 모드')
+    if it.name == MODE_AUTO then
+      notify('auto 모드: 프로젝트 전체를 색인합니다  →  ' .. target_label(root))
+      return
+    end
+    notify(("preset '%s'  →  %s"):format(it.name, target_label(root)))
     announce_fork(it.name)
   end
   local t = telescope()
@@ -3220,9 +3319,9 @@ local function pick_preset()
           return
         end
         if cur == nm then
-          set_active(root, '')
+          -- 쓰던 preset 이 사라졌다: 전체 색인으로 올라타지 말고 멈춘다
+          set_active(root, MODE_NONE)
           materialize(root)
-          reindex(root)
         end
         notify("preset '" .. nm .. "' 삭제")
       end)
@@ -3397,11 +3496,16 @@ api.nvim_create_user_command('ProjectFilesPreset', function(o)
     pick_preset()
     return
   end
-  set_active(root, o.args == 'auto' and '' or o.args)
+  set_active(root, o.args)
   materialize(root)
+  if o.args == MODE_NONE then
+    notify('none 모드: 이 프로젝트는 색인하지 않습니다  →  ' .. target_label(root))
+    return
+  end
   reindex(root)
-  notify(o.args == 'auto' and 'auto 모드' or ("preset '" .. o.args .. "'"))
-  if o.args ~= 'auto' then
+  notify(o.args == MODE_AUTO and ('auto 모드  →  ' .. target_label(root))
+    or ("preset '" .. o.args .. "'  →  " .. target_label(root)))
+  if o.args ~= MODE_AUTO then
     announce_fork(o.args)
   end
 end, { nargs = '?', complete = function()

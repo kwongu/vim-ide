@@ -1023,21 +1023,33 @@ end
 --
 -- 색인이 처음 만들어지는 자리가 셋이다: 시작할 때, 색인이 없는 프로젝트의
 -- 파일을 열 때, 그런 프로젝트에서 저장할 때. 세 곳 모두 여기를 지나야 한다.
+-- 색인을 시작해도 되는 프로젝트인가.
+--
+-- 모드는 projectfiles.lua 가 '<root>/.tags/preset' 하나로 관리한다:
+--   (파일 없음)   아직 아무것도 정하지 않았다 - 아무 일도 하지 않는다
+--   none          정해 두었다: 색인하지 않는다
+--   auto          프로젝트 전체
+--   <preset 이름>  그 목록만
+--
+-- 예전에는 모드가 없으면 여기서 물어봤다(vim.ui.select). 이제는 묻지
+-- 않는다 - 남의 트리나 홈 디렉터리에서 파일 하나 열었을 뿐인데 대화상자가
+-- 뜨거나 색인이 시작되는 일이 없어야 한다. 모드를 고르는 것은 <F2> 나
+-- \fm 이고, 고르기 전까지 이 프로젝트는 조용하다.
 local function with_mode(root, run)
   if not (root and root ~= '') then
     return
   end
-  if _G.projectfiles_ensure_mode then
-    _G.projectfiles_ensure_mode(root, function(ok)
-      if ok then
-        run()
-      else
-        dbg('색인 건너뜀 (모드를 고르지 않음) ' .. root)
-      end
-    end)
-  else
-    run()
+  if _G.projectfiles_should_index then
+    if _G.projectfiles_should_index(root) then
+      run()
+    else
+      dbg('색인 건너뜀 (모드 ' ..
+        tostring(_G.projectfiles_mode and _G.projectfiles_mode(root) or '?')
+        .. ') ' .. root)
+    end
+    return
   end
+  run()
 end
 
 local function update_file(path)
@@ -1047,6 +1059,13 @@ local function update_file(path)
   end
   gtags_root(vim.fs.dirname(path), function(root)
     dbg('update_file ' .. path .. ' root=' .. tostring(root))
+    -- none / 미설정 프로젝트는 저장해도 색인하지 않는다. in_list() 는
+    -- 목록 파일이 없으면 '전부 대상'으로 답하므로 그 앞에서 막아야 한다.
+    if root and _G.projectfiles_should_index
+        and not _G.projectfiles_should_index(root) then
+      dbg('update_file skipped (색인하지 않는 모드) ' .. path)
+      return
+    end
     if root and not in_list(root, path) then
       dbg('update_file skipped (not in preset list) ' .. path)
       return
@@ -1160,6 +1179,14 @@ function _G.autoindex_gutentags_ok(path)
   path = tostring(path or '')
   if path == '' then
     return 1
+  end
+  -- 모드를 고르지 않은 디렉터리(.tags 없음)와 none 모드에서는 gutentags 도
+  -- 붙지 않는다. generate_on_missing 이 켜져 있어서, 붙는 순간 그 트리의
+  -- ctags 전체 빌드가 시작된다 - 남의 트리에서 파일 하나 열었을 뿐인데
+  -- 그러면 안 된다.
+  if _G.projectfiles_should_index_file
+      and not _G.projectfiles_should_index_file(path) then
+    return 0
   end
   local ok, root = pcall(vim.fn['gutentags#get_project_root'], path)
   if not ok or type(root) ~= 'string' or root == '' then

@@ -1932,7 +1932,14 @@ endfunc
 
 "map <F1> :call Man()<cr><cr>
 map <F1> :!man <C-R>=expand("<cword>") <cr><cr>
-map <F2> :call Maketags()<cr><cr>
+" <F2> 는 \fm 과 같다: 이 프로젝트의 색인 모드를 고른다
+"   none  아무것도 하지 않는다 (기본 - .tags 가 없는 디렉터리)
+"   auto  프로젝트 전체
+"   <preset 이름>  그 목록만
+" 모드를 고르기 전까지 vim 은 그 디렉터리에서 아무 색인도 시작하지 않는다.
+" 예전 F2(Maketags -> mktags.sh 로 즉시 색인)는 :Maketags 로 남겨 둔다.
+nnoremap <silent> <F2> :ProjectFilesPreset<CR>
+command! -bar Maketags call Maketags()
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
 map <F6> :BufExplorer<CR>
