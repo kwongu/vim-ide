@@ -1089,6 +1089,14 @@ are treesitter, LSP, markdown and man, with no ctags fallback, so a language
 without a parser shows nothing. `let g:vimide_outline = 'tagbar'` puts the
 old one back everywhere.
 
+It does not open while neo-tree is up. Both want the left column, so with
+the tree open, moving to another file had aerial elbow in and push the tree
+aside - `F9` closing aerial was not enough, because the next file brought it
+straight back. `open_automatic` takes a function, so it answers no while a
+`neo-tree` window is in the tab (and keeps aerial's own `is_ignored_buf`
+check, which the plain `true` form applies for you). Close the tree and the
+next file you open has the outline back.
+
 Two things make it behave like Source Insight's Symbol Window:
 
 | | |

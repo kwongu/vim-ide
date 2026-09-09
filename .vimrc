@@ -358,7 +358,24 @@ _G.rv_setup('aerial', {
   -- VimEnter 에서 :AerialOpen 을 부르는 방법도 써 봤는데, 그 시점에는
   -- 버퍼도 treesitter 도 아직이라 창만 뜨고 비어 있었다. 이건 aerial 이
   -- 심볼을 얻은 뒤에 열어 주므로 그 문제가 없다.
-  open_automatic = true,
+  --
+  -- 다만 neo-tree 가 떠 있으면 열지 않는다. 둘 다 왼쪽을 쓰기 때문에,
+  -- 트리를 열어 둔 채 다른 파일로 옮기면 aerial 이 끼어들어 트리를 밀어낸다
+  -- (F9 가 aerial 을 닫아도 다음 파일에서 다시 뜬다). 트리를 닫으면 다음에
+  -- 파일을 열 때 평소처럼 다시 뜬다.
+  --
+  -- true 를 주면 aerial 이 'is_ignored_buf 가 아니면 연다'로 바꿔 주므로
+  -- 함수로 줄 때도 그 검사를 그대로 이어 간다.
+  open_automatic = function(bufnr)
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local b = vim.api.nvim_win_get_buf(w)
+      if vim.bo[b].filetype == 'neo-tree' then
+        return false
+      end
+    end
+    local ok, util = pcall(require, 'aerial.util')
+    return not (ok and util.is_ignored_buf(bufnr))
+  end,
   -- 아웃라인에서 커서를 옮기면 편집 창이 그 심볼로 간다. 포커스는
   -- 아웃라인에 남는다 - tagbar 쪽에 손으로 만들어 둔 follow 동작과 같다
   -- (s:TagbarFollowCursor, 아래 Tagbar 절).
