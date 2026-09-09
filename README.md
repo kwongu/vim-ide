@@ -617,6 +617,17 @@ its own `.tags` and you still see the current directory's list, rebased -
 preset's `deep/d.c` is not. Otherwise one screen would be showing two
 different indexes at once. `:cd` re-decides it on the next render.
 
+The marks are red (`#cc0000`, the red this theme already uses for
+`ErrorMsg` and `DiffDelete`) and bold. They started out linked to `Special`,
+which in `sourceinsight` on a light background is plain black - the mark was
+there and you could not see it. `g:projectfiles_mark_hl` points them at a
+different group, `g:projectfiles_mark_color` just changes the colour.
+
+While we are here: the **orange, italic** names in neo-tree are not ours -
+that is `NeoTreeGitUntracked` (`#ff8700`), a file git is not tracking, and
+`NeoTreeGitConflict` shares it. Modified files are teal (`#007373`,
+`NeoTreeGitModified`).
+
 The same three keys work in **neo-tree**
 (`.vim/plugin/projectfiles_neotree.lua`), visual range included. Both trees
 read `g:projectfiles_tree_add_key` and friends, so a key changed in one

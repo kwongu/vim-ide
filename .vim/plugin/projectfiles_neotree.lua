@@ -191,11 +191,35 @@ local function mark_hl()
   return 'ProjectFilesIndexMark'
 end
 
-api.nvim_set_hl(0, 'ProjectFilesIndexMark', { link = 'Special', default = true })
+-- 표시는 눈에 띄어야 한다.
+--
+-- 처음에는 'Special' 에 link 해 뒀는데, 쓰고 있는 테마(sourceinsight,
+-- 밝은 배경)에서 Special 은 검정(#000000)이라 파일 이름과 구분이 되지
+-- 않았다. 이 테마의 빨강은 #cc0000 이다(ErrorMsg / Error / DiffDelete 가
+-- 모두 그 색). termguicolors 가 꺼진 환경도 있어서 cterm 값도 함께 준다.
+--
+--   let g:projectfiles_mark_hl = 'ErrorMsg'   " 다른 그룹을 따라가게
+--   let g:projectfiles_mark_color = '#ff0000' " 색만 바꾸기
+local function set_mark_hl()
+  local link = vim.g.projectfiles_mark_hl
+  if type(link) == 'string' and link ~= '' then
+    api.nvim_set_hl(0, 'ProjectFilesIndexMark', { link = link })
+    return
+  end
+  local fg = vim.g.projectfiles_mark_color
+  api.nvim_set_hl(0, 'ProjectFilesIndexMark', {
+    fg = (type(fg) == 'string' and fg ~= '') and fg or '#cc0000',
+    ctermfg = 160,
+    bold = true,
+  })
+end
+
+set_mark_hl()
 api.nvim_create_autocmd('ColorScheme', {
   group = api.nvim_create_augroup('ProjectFilesNeotreeHl', { clear = true }),
   callback = function()
-    api.nvim_set_hl(0, 'ProjectFilesIndexMark', { link = 'Special', default = true })
+    -- 컬러스킴이 바뀌면 그룹이 지워지므로 다시 건다
+    vim.schedule(set_mark_hl)
   end,
 })
 
