@@ -574,17 +574,37 @@ local function install_mouse()
         return key -- 막대가 아니면 원래 동작
       end
       if key == '<ScrollWheelUp>' or key == '<ScrollWheelDown>' then
-        -- 막대 위에서 휠: 편집 창을 굴린다
-        if s.target and api.nvim_win_is_valid(s.target) then
+        -- 막대 위에서 휠: 편집 창을 굴린다.
+        --
+        -- 여기가 expr 매핑 안이라는 것을 놓쳐서 두 번 틀렸다. 처음에는
+        -- ':normal' 을 바로 불러 이 에러가 났고
+        --   E523: Not allowed here
+        -- (드래그 쪽은 미뤄 뒀는데 휠만 그대로였다), 그 전에는 스크롤
+        -- 코드가 '3\22y' 라서 \22 = Ctrl-V 로 'normal! 3<C-v>y' 가 되어
+        -- 화면 대신 블록을 yank 하고 있었다.
+        --
+        -- 그래서 ':normal' 을 아예 쓰지 않고 topline 을 직접 옮기며,
+        -- 그것마저 잠금이 풀린 뒤로 미룬다.
+        local up = (key == '<ScrollWheelUp>')
+        local n = math.max(1, tonumber(cfg('wheel_lines', 3)) or 3)
+        vim.schedule(function()
+          if not (s.target and api.nvim_win_is_valid(s.target)) then
+            return
+          end
+          local buf = api.nvim_win_get_buf(s.target)
+          local total = api.nvim_buf_line_count(buf)
+          local h = api.nvim_win_get_height(s.target)
+          s.self_move = true
           api.nvim_win_call(s.target, function()
-            -- Ctrl-Y(위로) = \25, Ctrl-E(아래로) = \5.
-            -- 예전에는 '3\22y' / '3\22e' 였는데 \22 는 Ctrl-V 다:
-            -- 'normal! 3<C-v>y' 가 되어 화면은 그대로 두고 블록을 잡아
-            -- yank 해 버렸다. 휠이 아무 일도 안 하는 것처럼 보인 이유다.
-            vim.cmd('normal! ' .. (key == '<ScrollWheelUp>' and '3\25' or '3\5'))
+            local v = vim.fn.winsaveview()
+            local top = up and math.max(1, v.topline - n)
+                or math.min(math.max(1, total - h + 1), v.topline + n)
+            local lnum = math.min(total, math.max(top, math.min(v.lnum, top + h - 1)))
+            pcall(vim.fn.winrestview, { topline = top, lnum = lnum, col = v.col })
           end)
-          schedule()
-        end
+          s.self_move = false
+          schedule(true)
+        end)
       elseif key == '<LeftRelease>' then
         s.dragging = false
         restore_focus()

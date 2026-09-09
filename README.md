@@ -88,10 +88,10 @@ F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
-F9: Toggle neo-tree, file system explorer on the left side (tagbar is closed with it, since both live on the left)
+F9: Toggle neo-tree (F11 used to be this one)
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
-F11: Toggle NERDTree, file system explorer on the right side
+F11: Toggle NERDTree (F9 used to be this one)
 F12: Delete gtags files created with F2.
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one (previewed in the
