@@ -1243,6 +1243,17 @@ shows that. One `global -d` per symbol, on `CursorHold`, skipped when the
 symbol has not changed. `g:relationview_ctx_debug = 1` logs why it decided
 to do nothing, into `stdpath('cache')/rvctx.log`.
 
+### Paths in the panel
+
+They are absolute (`g:relationview_full_path = 1`) and navy, the colour vim
+uses for paths everywhere else. The panel sits along the bottom at full
+width, so a real path fits with room to spare - 87 characters of
+`/home/.../kernel/common/sound/soc/telechips/tcc-snd-card.c:1243` and still
+space for the source line beside it. Longer than the column allows and the
+*front* is elided (`…`), so the filename and the directories nearest it stay
+readable. `let g:relationview_full_path = 0` goes back to paths relative to
+`:pwd`.
+
 ## Relation window (nvim only)
 
 The Source Insight style relation window opens by itself when nvim starts
