@@ -42,6 +42,9 @@ end
 
 local map_bar    -- 아래에서 정의; 막대 버퍼를 만들 때 매핑을 붙인다
 local goto_row   -- 아래에서 정의
+-- 화면 위치를 옮기는 한 곳. goto_row 가 이보다 위에 있어서 여기서 이름을
+-- 잡아 둔다 - 없으면 goto_row 안의 이름이 전역(nil)으로 잡힌다.
+local set_top
 local mouse_row  -- 아래에서 정의
 
 -- g:overview_debug = '<파일>' 이면 마우스 이벤트를 그 파일에 적는다.
@@ -225,7 +228,11 @@ local function render()
   end
   local target = pick_target()
   if not target then
-    close()
+    -- 끄는 도중에는 닫지 않는다. 마우스가 잠깐 다른 창 위를 지나 대상 창을
+    -- 못 찾는 순간이 있는데, 그때 닫아 버리면 손에서 막대가 사라진다.
+    if not s.dragging then
+      close()
+    end
     return
   end
   s.target = target
@@ -241,6 +248,10 @@ local function render()
   -- 막대 버퍼
   if not (s.buf and api.nvim_buf_is_valid(s.buf)) then
     s.buf = api.nvim_create_buf(false, true)
+    -- 새 버퍼는 비어 있다. 줄 캐시를 버리지 않으면 '이미 채웠다'고 보고
+    -- 건너뛰어서 막대가 빈 채로 남는다 - 폭 2칸짜리 빈 부동 창은 눈에는
+    -- 사라진 것으로 보인다.
+    s.lines_h, s.lines_w = nil, nil
     vim.bo[s.buf].bufhidden = 'hide'
     vim.bo[s.buf].filetype = 'overview'
     -- 매핑은 버퍼를 만드는 이 자리에서 붙인다. 예전에는 VimEnter 에서
@@ -389,12 +400,9 @@ goto_row = function(row, center)
   else
     top = line
   end
-  top = math.min(top, math.max(1, total - height + 1))
-  s.self_move = true
-  api.nvim_win_call(s.target, function()
-    pcall(vim.fn.winrestview, { lnum = line, topline = top, col = 0 })
-  end)
-  s.self_move = false
+  -- 표시 밖을 클릭한 것도 미끄러져 간다 - 같은 손짓인데 클릭만 순간이동
+  -- 하면 그것대로 튄다.
+  set_top(top, true)
   -- 누르고 있는 동안에는 초점을 막대에 둔다.
   --
   -- 부동 창이 클릭을 받으려면 focusable 이어야 하고, 클릭은 그 창으로
@@ -405,9 +413,69 @@ goto_row = function(row, center)
   if not s.dragging and api.nvim_get_current_win() ~= s.target then
     pcall(api.nvim_set_current_win, s.target)
   end
-  schedule(s.dragging)
 end
 
+
+-- 부드러운 이동.
+--
+-- 막대 한 행은 파일의 ceil(total/height)줄이다 - 3000줄 파일에 47행이면
+-- 64줄로, 창 높이보다 크다. 그래서 한 행을 끌 때마다 화면이 한 화면
+-- 넘게 건너뛰고, 그게 '뚝뚝 끊긴다'로 느껴진다. 터미널은 셀 단위라 그보다
+-- 잘게 겨눌 수가 없으므로, 목표까지 몇 프레임에 걸쳐 미끄러지게 한다.
+--
+--   let g:overview_smooth = 0      " 즉시 이동(예전 동작)
+--   let g:overview_smooth_step = 0.5   " 한 프레임에 남은 거리의 몇 배
+set_top = function(target_top, smooth)
+  if not (s.target and api.nvim_win_is_valid(s.target)) then
+    return
+  end
+  local buf = api.nvim_win_get_buf(s.target)
+  local total = api.nvim_buf_line_count(buf)
+  local height = api.nvim_win_get_height(s.target)
+  local top = math.max(1, math.min(target_top, math.max(1, total - height + 1)))
+
+  local function place(t)
+    s.self_move = true
+    api.nvim_win_call(s.target, function()
+      local v = vim.fn.winsaveview()
+      local lnum = math.min(total, math.max(t, math.min(v.lnum, t + height - 1)))
+      pcall(vim.fn.winrestview, { topline = t, lnum = lnum, col = v.col })
+    end)
+    s.self_move = false
+    schedule(true)
+  end
+
+  if smooth == false or cfg('smooth', 1) == 0 then
+    s.anim_want = nil
+    place(top)
+    return
+  end
+  s.anim_want = top
+  if s.anim then
+    return -- 이미 미끄러지는 중이다. 목표만 바꿔 준다
+  end
+  s.anim = (uv.new_timer())
+  s.anim:start(0, 16, vim.schedule_wrap(function()
+    if not (s.anim_want and s.target and api.nvim_win_is_valid(s.target)) then
+      if s.anim then
+        s.anim:stop(); s.anim:close(); s.anim = nil
+      end
+      return
+    end
+    local cur = vim.fn.line('w0', s.target)
+    local diff = s.anim_want - cur
+    if diff == 0 then
+      if s.anim then
+        s.anim:stop(); s.anim:close(); s.anim = nil
+      end
+      s.anim_want = nil
+      return
+    end
+    local frac = tonumber(cfg('smooth_step', 0.5)) or 0.5
+    local step = math.max(1, math.floor(math.abs(diff) * frac + 0.5))
+    place(cur + (diff > 0 and math.min(step, diff) or math.max(-step, diff)))
+  end))
+end
 
 -- 지금 보이는 구간이 막대의 몇 행인가 (render 와 같은 셈)
 local function view_rows()
@@ -441,17 +509,7 @@ local function drag_to(row)
   -- mouse_row() 는 1-기반 막대 줄이고 render 의 행은 0-기반이다.
   -- 그 변환을 빼먹으면 잡는 순간 한 행(= per 줄)만큼 튄다.
   local want_top_row = (row - (s.grab_off or 0)) - 1
-  local top = math.max(1, want_top_row * per + 1)
-  top = math.min(top, math.max(1, total - height + 1))
-  s.self_move = true
-  api.nvim_win_call(s.target, function()
-    local view = vim.fn.winsaveview()
-    local lnum = math.min(total, math.max(top, view.lnum))
-    lnum = math.min(lnum, top + height - 1)
-    pcall(vim.fn.winrestview, { topline = top, lnum = lnum, col = view.col })
-  end)
-  s.self_move = false
-  schedule(true)
+  set_top(math.max(1, want_top_row * per + 1), true)
 end
 
 mouse_row = function()

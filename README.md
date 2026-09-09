@@ -998,6 +998,30 @@ E5108: overview.lua:579: Vim(normal):E523: Not allowed here
 like everything else in that mapping. `g:overview_wheel_lines` (3) sets how
 far one notch goes.
 
+Even exact, relative dragging still stepped, and for a reason no amount of
+tuning removes: one bar row is `ceil(total/height)` lines - 64 lines of a
+3,000-line file in a 47-row window, more than a screen. A terminal reports
+the mouse by cell, so the bar cannot be aimed any finer than that. What it
+can do is not arrive all at once. Each move now glides to its target, half
+the remaining distance every 16 ms, so one row of mouse travel reads as
+
+```
+1 -> 33 -> 49 -> 57 -> 61 -> 63 -> 64 -> 65
+```
+
+instead of a single jump, and a 20-row drag still lands exactly on 1,281.
+`g:overview_smooth = 0` goes back to arriving instantly;
+`g:overview_smooth_step` (0.5) is how much of the remaining distance one
+frame covers.
+
+The bar could also vanish after a few drags, and that one was mine: the
+render caches I added skip rewriting the bar's blank lines unless the height
+changed, but they were not cleared when the buffer itself was recreated, so
+the float stayed empty - and a two-column float with no content is
+invisible. The caches reset with the buffer now, and a render during a drag
+never closes the bar just because the target window was momentarily not
+found.
+
 
 
 A thin bar down the right edge of the edit window standing for the whole
