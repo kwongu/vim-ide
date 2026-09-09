@@ -2031,6 +2031,188 @@ local function grep_defining_async(root, sym, cb)
   step()
 end
 
+-- ---------------------------------------------------------------------------
+-- 'global --single-update': 한 DB 에 하나씩, 감독하면서
+-- ---------------------------------------------------------------------------
+--
+-- 예전에는 추가된 파일마다 이것을 한꺼번에 띄웠다. 한 데이터베이스에 동시
+-- 갱신이 들어가면 서로 물려 끝나지 않는다 - 실제로 gtags 두 개가 같은
+-- .tags 를 붙들고 13시간 동안 각각 CPU 100% 로 돌았다(사용자 CPU 47,927초,
+-- 상태 R, wchan 0 - 커널을 기다리는 게 아니라 그냥 돌고 있었다). 게다가
+-- 동기판은 ':wait(5000)' 이라 5초 뒤 손을 떼기만 하고 죽이지는 않아서,
+-- nvim 이 먼저 사라져도 일꾼은 남았다.
+--
+-- 그래서 셋을 지킨다: 루트마다 한 번에 하나, 시간이 지나면 정말 죽인다,
+-- nvim 이 끝날 때 같이 정리한다.
+--   let g:projectfiles_single_update_max = 0   " 즉시 갱신을 아예 끄기
+--   let g:projectfiles_single_update_timeout = 20   " 초
+local update_jobs = {}       -- 진행 중인 핸들 -> 명령 이름
+local update_queue = {}      -- root -> { rels..., running = bool, done = fn }
+local update_timeout_cmd     -- nil=미탐색, false=없음
+
+local function update_timeout_prefix(ms)
+  if update_timeout_cmd == nil then
+    update_timeout_cmd = false
+    for _, c in ipairs({ 'timeout', 'gtimeout' }) do
+      if vim.fn.executable(c) == 1 then
+        update_timeout_cmd = c
+        break
+      end
+    end
+  end
+  if not update_timeout_cmd or not ms then
+    return nil
+  end
+  -- global 은 gtags 를 자식으로 띄운다. nvim 이 global 만 죽이면 gtags 가
+  -- 고아로 남아 계속 돈다 - timeout(1) 은 자기 프로세스 그룹에 신호를
+  -- 보내므로 자식까지 함께 끊는다. nvim 쪽 제한보다 늦게 잡아서 정상
+  -- 경로에서는 nvim 이 먼저 처리하게 둔다.
+  return { update_timeout_cmd, '-k', '5', tostring(math.floor(ms / 1000) + 10) }
+end
+
+local function global_prog()
+  return vim.fn.executable('global') == 1 and 'global'
+      or vim.fn.expand('~/.local/bin/global')
+end
+
+-- 프로세스 그룹째 끊는다. 리더로 띄웠으니(detach) pgid == pid 다.
+-- nvim 의 h:kill() 은 리더 하나만 끊어서 자식이 남는다.
+local function kill_group(pid)
+  if not pid or pid <= 0 then
+    return
+  end
+  for _, sig in ipairs({ 'TERM', 'KILL' }) do
+    -- '-<pid>' = 그 프로세스 그룹 전체. 이미 없으면 조용히 실패한다.
+    pcall(vim.system, { 'kill', '-' .. sig, '-' .. tostring(pid) },
+      { text = true }, function() end)
+  end
+end
+
+local function update_step(root)
+  local q = update_queue[root]
+  if not q then
+    return
+  end
+  local rel = table.remove(q, 1)
+  if not rel then
+    q.running = false
+    update_queue[root] = nil
+    if q.done then
+      q.done()
+    end
+    return
+  end
+  local ms = (tonumber(cfg('single_update_timeout', 20)) or 20) * 1000
+  local argv = { global_prog(), '--single-update', rel }
+  local pre = update_timeout_prefix(ms)
+  if pre then
+    argv = vim.list_extend(pre, argv)
+  end
+  local h, watch, timed_out = nil, nil, false
+  local ok = pcall(function()
+    h = vim.system(argv, {
+      cwd = root,
+      env = { GTAGSOBJDIR = dbdir() or '.tags' },
+      -- 자기 프로세스 그룹의 리더로 띄운다: 'global' 은 'gtags' 를 자식으로
+      -- 두는데, global 만 죽이면 gtags 가 고아로 남아 계속 돈다(그게 13시간
+      -- 짜리였다). 리더로 두면 pgid == pid 라 그룹째 끊을 수 있다.
+      detach = true,
+      -- vim.system 의 timeout 은 여기서 쓰지 않는다: 그건 리더만 끊고,
+      -- 손자가 stdout 을 붙들고 있으면 종료 콜백 자체가 손자가 끝날 때까지
+      -- 오지 않는다. 그래서 시간 감시는 아래에서 직접 한다 - 콜백을
+      -- 기다렸다가 끊으면 순환이다.
+    }, function(o)
+      if watch then
+        pcall(function() watch:stop() end)
+      end
+      if h then
+        update_jobs[h] = nil
+      end
+      if timed_out then
+        vim.schedule(function()
+          notify(("'%s' 즉시 색인이 %d초를 넘겨 끊었습니다 - 뒤따르는 "):format(
+            rel, math.floor(ms / 1000)) .. '재색인이 맡습니다',
+            vim.log.levels.WARN)
+        end)
+      end
+      vim.schedule(function() update_step(root) end)
+    end)
+  end)
+  if not ok or not h then
+    return update_step(root) -- 못 띄웠으면 다음 것으로
+  end
+  update_jobs[h] = 'global'
+  watch = vim.defer_fn(function()
+    if update_jobs[h] then -- 아직 안 끝났다
+      timed_out = true
+      kill_group(h.pid)
+      pcall(function() h:kill('sigkill') end)
+    end
+  end, ms)
+end
+
+-- rels 를 이 루트의 큐에 붙인다. done 은 큐가 다 빌 때 한 번 불린다.
+local function single_update(root, rels, done)
+  local max = tonumber(cfg('single_update_max', 4)) or 4
+  local todo = {}
+  for i, rel in ipairs(rels) do
+    if max > 0 and i > max then
+      notify(('즉시 색인은 %d개까지만 합니다 (%d개는 재색인이 맡습니다)'):format(
+        max, #rels - max))
+      break
+    end
+    todo[#todo + 1] = rel
+  end
+  if #todo == 0 then
+    if done then
+      done()
+    end
+    return
+  end
+  local q = update_queue[root]
+  if q then
+    -- 이미 이 루트에서 돌고 있다: 뒤에 붙이고 done 을 이어 붙인다
+    for _, rel in ipairs(todo) do
+      q[#q + 1] = rel
+    end
+    local prev = q.done
+    q.done = function()
+      if prev then
+        prev()
+      end
+      if done then
+        done()
+      end
+    end
+    return
+  end
+  q = todo
+  q.running = true
+  q.done = done
+  update_queue[root] = q
+  update_step(root)
+end
+
+-- 테스트용 진입점. 큐가 정말 하나씩 돌리고 시간이 지나면 죽이는지는
+-- 가짜 'global' 을 PATH 앞에 두고 이걸 불러서 확인한다.
+function _G.projectfiles_single_update(root, rels, cb)
+  return single_update(root, rels, cb)
+end
+
+-- nvim 이 끝날 때 같이 정리한다. 이게 없으면 고아가 남는다.
+api.nvim_create_autocmd('VimLeavePre', {
+  group = api.nvim_create_augroup('ProjectFilesUpdateCleanup', { clear = true }),
+  callback = function()
+    for h in pairs(update_jobs) do
+      pcall(function() h:kill('sigterm') end)
+      -- 자식(gtags)까지. nvim 이 사라진 뒤에 남으면 아무도 치우지 않는다.
+      pcall(function()
+        vim.fn.system({ 'kill', '-KILL', '-' .. tostring(h.pid) })
+      end)
+    end
+  end,
+})
+
 function _G.projectfiles_add_for_symbol_async(sym, cb)
   cb = cb or function() end
   if type(sym) ~= 'string' or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
@@ -2059,31 +2241,15 @@ function _G.projectfiles_add_for_symbol_async(sym, cb)
     end
     preset_write(name, entries)
     materialize(root)
-    local prog = vim.fn.executable('global') == 1 and 'global'
-        or vim.fn.expand('~/.local/bin/global')
-    local left = #added
-    for _, rel in ipairs(added) do
-      local ok = pcall(vim.system, { prog, '--single-update', rel },
-        { cwd = root, env = { GTAGSOBJDIR = dbdir() or '.tags' } },
-        function()
-          vim.schedule(function()
-            left = left - 1
-            if left == 0 then
-              reindex(root)
-              notify(("'%s' 정의 파일 %d개 추가: %s")
-                :format(sym, #added, table.concat(added, ', ')))
-              cb(#added)
-            end
-          end)
-        end)
-      if not ok then
-        left = left - 1
-      end
-    end
-    if left <= 0 then
+    -- 새 파일을 지금 색인해 둔다: 이걸 부른 점프를 곧바로 다시 시도할 수
+    -- 있게. 한 번에 하나씩만 돌린다 (single_update 참고 - 동시에 띄우면
+    -- 같은 DB 를 붙들고 끝나지 않는다).
+    single_update(root, added, function()
       reindex(root)
+      notify(("'%s' 정의 파일 %d개 추가: %s")
+        :format(sym, #added, table.concat(added, ', ')))
       cb(#added)
-    end
+    end)
   end)
 end
 
@@ -2118,17 +2284,15 @@ function _G.projectfiles_add_for_symbol(sym)
   materialize(root)
   -- index the new files NOW so the jump that triggered this can be retried
   -- immediately; the full refresh below keeps everything else in step
-  local prog = vim.fn.executable('global') == 1 and 'global'
-      or vim.fn.expand('~/.local/bin/global')
-  for _, rel in ipairs(added) do
-    pcall(function()
-      vim.system({ prog, '--single-update', rel },
-        { cwd = root, env = { GTAGSOBJDIR = dbdir() or '.tags' } }):wait(5000)
-    end)
-  end
-  reindex(root)
-  notify(("'%s' 을(를) 정의한 파일 %d개를 추가했습니다: %s")
-    :format(sym, #added, table.concat(added, ', ')))
+  --
+  -- 예전에는 여기서 ':wait(5000)' 로 기다렸다. 5초가 지나면 손을 떼기만
+  -- 하고 죽이지 않아서, 늦게 끝나는 일꾼이 그대로 남아 다음 파일의 갱신과
+  -- 같은 DB 에서 겹쳤다. 지금은 큐가 하나씩 돌리고 시간이 지나면 죽인다.
+  single_update(root, added, function()
+    reindex(root)
+    notify(("'%s' 을(를) 정의한 파일 %d개를 추가했습니다: %s")
+      :format(sym, #added, table.concat(added, ', ')))
+  end)
   return #added
 end
 
