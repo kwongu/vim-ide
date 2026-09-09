@@ -1430,6 +1430,59 @@ endif
 "let g:tagbar_left=0
 let g:tagbar_left=1
 let g:tagbar_sort=0
+
+" ------------------------------------
+" tagbar: 아웃라인에서 #define 을 뺀다
+" ------------------------------------
+" tagbar 는 버퍼를 열 때마다 ctags 를 돌리고 그 출력을 vimscript 로 파싱해
+" 트리를 만든다. ctags 자체는 싸다 - 3000줄 C 파일에 27ms. 비싼 것은
+" 그다음이다: 같은 파일에서 tagbar 가 1538ms 를 썼다(맥 기준, 서버는
+" 6399ms). 태그 하나당 0.5ms 쯤이라 태그 수에 그대로 비례한다.
+"
+" 이 트리의 하드웨어 헤더가 정확히 그 경우다:
+"   kernel/common/sound/soc/telechips_dpcm/tcc_maic_hw.h
+"   2313줄, 태그 1016개 - 그중 945개가 #define 이다.
+" 945줄짜리 매크로 목록은 아웃라인으로 훑을 수 있는 것이 아니고, 매크로는
+" \fs(gtags)로 즉시 찾힌다. 그래서 아웃라인에서는 뺀다 - 남는 71개가
+" 실제로 이 파일을 돌아다닐 때 쓰는 것들이다.
+"
+"   let g:vimide_tagbar_macros = 1   " 매크로도 아웃라인에 넣기(예전 동작)
+if !get(g:, 'vimide_tagbar_macros', 0)
+	let s:tagbar_c_kinds = [
+				\ 'h:header files:1:0',
+				\ 'p:prototypes:1:0',
+				\ 'g:enums:0:1',
+				\ 'e:enumerators:0:0',
+				\ 't:typedefs:0:0',
+				\ 's:structs:0:1',
+				\ 'u:unions:0:1',
+				\ 'm:members:0:0',
+				\ 'v:variables:0:0',
+				\ 'f:functions:0:1',
+				\ ]
+	let g:tagbar_type_c = {
+				\ 'ctagstype' : 'c',
+				\ 'kinds'     : s:tagbar_c_kinds,
+				\ 'sro'       : '::',
+				\ 'kind2scope': {'g': 'enum', 's': 'struct', 'u': 'union'},
+				\ 'scope2kind': {'enum': 'g', 'struct': 's', 'union': 'u'},
+				\ }
+	let g:tagbar_type_cpp = {
+				\ 'ctagstype' : 'c++',
+				\ 'kinds'     : s:tagbar_c_kinds + [
+				\   'c:classes:0:1', 'n:namespaces:0:1' ],
+				\ 'sro'       : '::',
+				\ 'kind2scope': {'g': 'enum', 's': 'struct', 'u': 'union',
+				\                'c': 'class', 'n': 'namespace'},
+				\ 'scope2kind': {'enum': 'g', 'struct': 's', 'union': 'u',
+				\                'class': 'c', 'namespace': 'n'},
+				\ }
+	unlet s:tagbar_c_kinds
+endif
+" 그래도 태그가 터무니없이 많은 파일이 있을 수 있다. 바이트로 마지막
+" 안전선을 둔다 - 넘으면 그 버퍼의 아웃라인만 비고(:TagbarForceUpdate 로
+" 직접 만들 수 있다), 파일 열기는 막히지 않는다.
+let g:tagbar_file_size_limit = get(g:, 'tagbar_file_size_limit', 1024 * 1024)
 "let g:tagbar_width=30
 function! AutoLoadTagbar()
 	exe 'Tagbar'
