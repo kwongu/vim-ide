@@ -344,12 +344,21 @@ nnoremap <silent> <Leader>v <Cmd>DiffviewOpen<CR>
 " ------------------------------------
 " aerial: 현재 파일의 심볼 아웃라인(Source Insight 의 Symbol Window)
 "   <leader>o 로 토글. treesitter 백엔드라 LSP 없이도 동작한다.
-"   (F10 의 tagbar 는 그대로 유지 - 둘 중 편한 것을 쓰면 된다)
+"   F10 도 같은 aerial 을 연다(예전에는 tagbar 였다 - 파일 열기가 태그 수에
+"   비례해 느려져서 바꿨다. :Tagbar 로 tagbar 는 그대로 쓸 수 있다)
 " ------------------------------------
 lua << EOF
 _G.rv_setup('aerial', {
   backends = { 'treesitter', 'lsp', 'markdown', 'man' },
-  layout = { default_direction = 'right', width = 32 },
+  -- 아웃라인은 tagbar 시절부터 왼쪽에 있었다(g:tagbar_left=1). 그 자리를
+  -- 그대로 쓴다 - 오른쪽은 RelationView 의 context 창이 쓰고 있다.
+  layout = { default_direction = 'left', width = 40 },
+  -- 심볼이 있는 파일을 열면 aerial 이 알아서 뜬다.
+  --
+  -- VimEnter 에서 :AerialOpen 을 부르는 방법도 써 봤는데, 그 시점에는
+  -- 버퍼도 treesitter 도 아직이라 창만 뜨고 비어 있었다. 이건 aerial 이
+  -- 심볼을 얻은 뒤에 열어 주므로 그 문제가 없다.
+  open_automatic = true,
   attach_mode = 'window',
   close_on_select = false,
   show_guides = true,
@@ -1484,8 +1493,14 @@ endif
 " 직접 만들 수 있다), 파일 열기는 막히지 않는다.
 let g:tagbar_file_size_limit = get(g:, 'tagbar_file_size_limit', 1024 * 1024)
 "let g:tagbar_width=30
+" 시작할 때 여는 심볼 아웃라인. F10 과 같은 것을 연다(기본 aerial).
+" 이름은 예전 그대로 둔다 - 다른 곳에서 부르고 있을 수 있다.
 function! AutoLoadTagbar()
-	exe 'Tagbar'
+	if get(g:, 'vimide_outline', 'aerial') ==# 'tagbar' || !exists(':AerialOpen')
+		exe 'Tagbar'
+	endif
+	" aerial 은 open_automatic 으로 스스로 뜬다 (위 setup 참고).
+	" 여기서 열면 VimEnter 시점이라 비어 있는 창만 생긴다.
 endfunction
 autocmd VimEnter * call AutoLoadTagbar()
 
@@ -1977,10 +1992,37 @@ func! NERDTreeOnly()
 	:NERDTreeToggle
 endfunc
 
+" F10 의 심볼 아웃라인. 기본은 aerial 이다.
+"
+" 왜 tagbar 가 아닌가: tagbar 는 파일을 열 때마다 ctags 를 돌리고 그 출력을
+" vimscript 로 파싱해 트리를 만든다. ctags 는 싸다(3000줄 C 파일 27ms).
+" 비싼 것은 파싱이고, 태그 하나당 0.5ms(맥)~1.6ms(서버)라 태그 수에 그대로
+" 비례한다. 실측(서버, 파일 하나 열기):
+"
+"   파일                                  tagbar   aerial   둘 다 끔
+"   tcc_maic_hw.h (태그 1016, 매크로 945)    47ms     29ms      32ms
+"   합성 (태그 2400, 매크로 아님)          3908ms     47ms      46ms
+"
+" aerial 은 treesitter 가 하이라이트 때문에 이미 만들어 둔 트리를 Lua 로
+" 훑어서, 아무것도 안 켠 것과 차이가 없다.
+"
+" 잃는 것: aerial 은 treesitter 파서가 있는 언어만 다룬다(백엔드는
+" treesitter -> lsp -> markdown -> man 이고 ctags 폴백이 없다). 파서가 없는
+" 파일에서는 :Tagbar 를 부르면 된다 - 그대로 남겨 뒀다.
+"
+"   let g:vimide_outline = 'tagbar'   " F10 을 예전처럼 tagbar 로
+func! s:OutlineToggle() abort
+	if get(g:, 'vimide_outline', 'aerial') ==# 'tagbar' || !exists(':AerialToggle')
+		:TagbarToggle
+	else
+		:AerialToggle
+	endif
+endfunc
+
 func! TagbarOnly()
 	:NERDTreeClose
 	:Neotree close
-	:TagbarToggle
+	call s:OutlineToggle()
 endfunc
 
 func! NERDTree_and_Tagbar_Toggle()
