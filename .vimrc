@@ -357,7 +357,7 @@ _G.rv_setup('aerial', {
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 
-" 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O)은 <leader>fs =
+" 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O)은 <leader>fs 와 <F7> =
 " :ProjectSymbols 가 담당한다(gtags 색인 기반, 아래 Project files 절).
 " ctags(tags 파일) 쪽 목록을 보고 싶으면 ':Telescope tags',
 " LSP(clangd) 를 켰다면 ':Telescope lsp_workspace_symbols' 도 쓸 수 있다.
@@ -1606,6 +1606,7 @@ let g:relationview_unpin_delay = 3000
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
 "     <leader>fs  색인된 심볼 검색 (<F3> 또는 ^g 로 relation window 로 넘김)
+"                 <F7> 로도 같은 것을 연다
 "     <leader>fw  커서 밑 심볼로 바로 검색
 "     <leader>fk  북마크(mark) 목록      (ma..mz 로 표시, 'a 로 이동)
 "   :ProjectFilesPresetShare <name>
@@ -1629,6 +1630,7 @@ nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
+" 같은 것을 <F7> 로도 연다 - 펑션키는 아래 F1..F12 블록에서 한꺼번에 맵한다.
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
 " SI 의 Bookmark window: 표시는 ma..mz / mA..mZ (shada 가 세션 사이에도
 " 기억한다), 목록은 <leader>fk. signcolumn 을 두 칸으로 둬서 vim-signify 의
@@ -1911,8 +1913,16 @@ map <F2> :call Maketags()<cr><cr>
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
 map <F6> :BufExplorer<CR>
-map <F7> v]}zf
-map <F8> zo
+" <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색), <F8> 은 해제.
+" 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.
+" 접기는 zf 와 za/zo/zc 가 그대로 한다.
+"
+" 먼저 해제한다: 예전 'map <F7>' 은 normal 뿐 아니라 visual/operator 에도
+" 걸려 있어서, 실행 중에 :source ~/.vimrc 하면 nnoremap 이 normal 만
+" 덮고 나머지 모드에 옛 접기 동작이 남는다.
+silent! unmap <F7>
+silent! unmap <F8>
+nnoremap <silent> <F7> :ProjectSymbols<CR>
 "map <F9> :TagbarToggle<CR>
 "map <F10> :CocCommand explorer<CR>
 "map <F10> :NvimTreeToggle<CR>

@@ -86,8 +86,8 @@ F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
-F7: Fold a function body
-F8: Unfold a function body
+F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
+F8: nothing - it used to unfold (`zo`, which is still there)
 F9: Toggle neo-tree, file system explorer on the left side (tagbar is closed with it, since both live on the left)
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
