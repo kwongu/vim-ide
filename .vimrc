@@ -430,6 +430,23 @@ _G.rv_setup('neo-tree', {
   -- 하위 디렉터리를 볼 때 worktree 전체가 아니라 그 경로만 묻는다
   git_status_scope_to_path = true,
   window = { position = 'left', width = 32 },
+  -- 파일을 열 때 이 창들은 고르지 않는다.
+  --
+  -- RelationView 의 context 창이 문제였다: buftype 은 nofile 인데
+  -- filetype 은 미리보기 중인 파일의 것(c, h ...)이라 neo-tree 에게는
+  -- 평범한 편집 창으로 보인다. 그런데 그 창에는 winfixbuf 가 걸려 있어서
+  -- 거기로 파일을 열려다 이 에러가 났다:
+  --   E1513: Cannot switch buffer. 'winfixbuf' is enabled
+  -- (neo-tree 에 winfixbuf 복구 경로가 있긴 한데, 그 앞의
+  --  assert(pcall(...)) 이 먼저 던져서 도달하지 못한다.)
+  --
+  -- buftype 도 함께 검사하므로 'nofile' 하나로 패널과 미리보기가 모두
+  -- 빠진다 - 스크래치 창에 파일을 여는 일 자체가 없어야 맞다. 기본값
+  -- 목록은 이 키를 주면 대체되므로 함께 적는다.
+  open_files_do_not_replace_types = {
+    'terminal', 'Trouble', 'qf', 'edgy',
+    'nofile', 'relationview', 'aerial', 'tagbar', 'overview',
+  },
   filesystem = {
     -- 색인 표시([O]/[.])를 이름 앞에 끼워 넣는다. 계산과 그리기는
     -- ~/.vim/plugin/projectfiles_neotree.lua 가 한다.
@@ -467,9 +484,23 @@ _G.rv_setup('neo-tree', {
     hijack_netrw_behavior = 'disabled',
     use_libuv_file_watcher = false,
     follow_current_file = { enabled = true },
+    -- H 로 숨김 파일을 켜고 끈다.
+    --
+    -- H(toggle_hidden)는 filtered_items.visible 만 뒤집는데, 그 값은
+    -- '걸러진 항목을 흐리게라도 보여줄까'라는 뜻이다. hide_dotfiles 가
+    -- false 면 애초에 걸러지는 것이 없어서 H 를 눌러도 화면이 그대로다 -
+    -- 토글이 안 듣는 것처럼 보였던 이유다.
+    --
+    -- 그래서 거르기는 켜 두고(hide_dotfiles), 기본은 보이게 둔다
+    -- (visible = true, 흐리게 표시). 그러면 H 가 '흐리게 보임 <-> 숨김'
+    -- 을 오간다. .tags 나 .git 처럼 이 설정에서 자주 보는 것들이 기본
+    -- 화면에서 사라지지 않는다.
+    --
+    -- gitignore 쪽은 건드리지 않는다(hide_gitignored = false): 빌드
+    -- 산출물이 많은 트리에서 그것까지 걸면 화면이 크게 달라진다.
     filtered_items = {
       visible = true,
-      hide_dotfiles = false,
+      hide_dotfiles = true,
       hide_gitignored = false,
     },
   },

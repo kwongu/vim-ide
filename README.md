@@ -1081,6 +1081,33 @@ pty: on an 800-line file with a 20-row bar, clicking at 75% goes to line
 to line 81. Clicking in the text at screen row 9 still goes to line 9 and
 leaves you in normal mode.
 
+### Two neo-tree things that were not obvious
+
+**`H` looked broken.** It runs `toggle_hidden`, which flips one flag:
+`filtered_items.visible` - "show the filtered items, just differently".
+With `hide_dotfiles = false` nothing was ever filtered, so the flag flipped
+and the screen did not change. Filtering is on now (`hide_dotfiles = true`)
+with `visible = true`, so dotfiles still show by default, dimmed, and `H`
+takes them away and brings them back - with a `(2 hidden items)` line where
+they were. `hide_gitignored` stays off: turning that on in a tree full of
+build output changes the view far more than the key is worth.
+
+**Opening a file could fail** with
+
+```
+E1513: Cannot switch buffer. 'winfixbuf' is enabled
+```
+
+neo-tree picks a window to open into by looking at the last-used windows and
+skipping the types in `open_files_do_not_replace_types`. The relation
+window's context pane got picked: its `buftype` is `nofile`, but its
+`filetype` is that of the file being previewed (`c`, `h`, ...), so it reads
+as an ordinary edit window - and it has `winfixbuf` set, so the open failed.
+neo-tree does have a winfixbuf recovery path, but an `assert(pcall(...))`
+throws before it is reached. The list matches `buftype` as well as
+`filetype`, so `nofile` in it keeps every scratch window out - which is the
+right rule anyway.
+
 ## The symbol outline (nvim only)
 
 `<F10>` and startup open **aerial**, on the left where tagbar used to sit.
