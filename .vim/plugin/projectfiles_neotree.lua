@@ -107,6 +107,8 @@ local function leave_visual()
     api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
 end
 
+local refresh_trees  -- 아래에서 정의
+
 local function act(paths, fn, what)
   if #paths == 0 then
     vim.notify('ProjectFiles: 경로가 있는 줄이 아닙니다', vim.log.levels.WARN)
@@ -116,6 +118,11 @@ local function act(paths, fn, what)
   if not ok then
     vim.notify('ProjectFiles: ' .. what .. ' 실패 - ' .. tostring(err),
       vim.log.levels.ERROR)
+    return
+  end
+  -- 표시가 바로 따라오도록 (목록 캐시는 projectfiles.lua 가 이미 버렸다)
+  if refresh_trees then
+    vim.schedule(refresh_trees)
   end
 end
 
@@ -166,6 +173,60 @@ local function map_buf(buf)
     leave_visual()
     vim.schedule(function() do_remove(paths_in(f, l)) end)
   end, 'ProjectFiles: 고른 범위를 색인에서 빼기')
+end
+
+-- ---------------------------------------------------------------------------
+-- 색인 표시
+-- ---------------------------------------------------------------------------
+-- NERDTree 쪽과 같은 표시를 neo-tree 에도 단다:
+--   [O]  이 파일이 색인 목록에 있다
+--   [.]  이 디렉터리 아래에 색인된 파일이 있다
+-- (실제 글자는 g:projectfiles_tree_mark_file / _mark_dir 이고 기본은 ●/·)
+--
+-- neo-tree 는 줄을 '컴포넌트' 목록으로 그린다. .vimrc 의 setup 에서
+-- renderers 에 'projectfiles_index' 를 끼워 넣고, 그 컴포넌트가 여기를
+-- 부른다. 계산은 NERDTree 와 같은 _G.projectfiles_tree_flag 다 - 표시
+-- 기준(현재 디렉터리의 preset)도 자동으로 같아진다.
+local function mark_hl()
+  return 'ProjectFilesIndexMark'
+end
+
+api.nvim_set_hl(0, 'ProjectFilesIndexMark', { link = 'Special', default = true })
+api.nvim_create_autocmd('ColorScheme', {
+  group = api.nvim_create_augroup('ProjectFilesNeotreeHl', { clear = true }),
+  callback = function()
+    api.nvim_set_hl(0, 'ProjectFilesIndexMark', { link = 'Special', default = true })
+  end,
+})
+
+-- neo-tree 컴포넌트. .vimrc 의 setup 에서 이 함수를 부른다.
+-- 표시가 없을 때도 같은 폭을 차지해야 이름이 들쭉날쭉하지 않다.
+function _G.projectfiles_neotree_mark(_, node, state)
+  if not enabled() or type(_G.projectfiles_tree_flag) ~= 'function' then
+    return { text = '' }
+  end
+  local path = node and node.path
+  if type(path) ~= 'string' or path == '' then
+    return { text = '' }
+  end
+  local root = state and state.path or ''
+  local ok, m = pcall(_G.projectfiles_tree_flag, path, root)
+  if not ok or type(m) ~= 'string' or m == '' then
+    return { text = '   ' }
+  end
+  return { text = '[' .. m .. ']', highlight = mark_hl() }
+end
+
+-- 목록이 바뀌면 트리를 다시 그린다. NERDTree 쪽은 렌더를 직접 부르는데,
+-- neo-tree 는 자기 상태를 들고 있으므로 새로 고침을 부탁한다.
+refresh_trees = function()
+  local ok, manager = pcall(require, 'neo-tree.sources.manager')
+  if not ok then
+    return
+  end
+  for _, src in ipairs({ 'filesystem', 'buffers', 'git_status' }) do
+    pcall(manager.refresh, src)
+  end
 end
 
 -- neo-tree 가 자기 매핑을 건 뒤에 걸어야 우리 것이 이긴다. FileType 이

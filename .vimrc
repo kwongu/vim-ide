@@ -414,6 +414,39 @@ _G.rv_setup('neo-tree', {
   git_status_scope_to_path = true,
   window = { position = 'left', width = 32 },
   filesystem = {
+    -- 색인 표시([O]/[.])를 이름 앞에 끼워 넣는다. 계산과 그리기는
+    -- ~/.vim/plugin/projectfiles_neotree.lua 가 한다.
+    --
+    -- 전역 components/renderers 에 두면 안 된다: neo-tree 의
+    -- merge_renderers(setup/init.lua)가 전역 렌더러를 소스로 옮길 때
+    -- '그 소스의 components 에 있는 이름'만 남기고 나머지를 버린다.
+    -- 그래서 소스(filesystem) 안에 함께 둔다.
+    --
+    -- 기본 렌더러 목록은 통째로 베끼지 않고 defaults 에서 가져와 끼운다
+    -- (플러그인이 올라가도 따라간다).
+    components = {
+      projectfiles_index = function(config, node, state)
+        if type(_G.projectfiles_neotree_mark) == 'function' then
+          return _G.projectfiles_neotree_mark(config, node, state)
+        end
+        return { text = '' }
+      end,
+    },
+    renderers = (function()
+      local ok, nd = pcall(require, 'neo-tree.defaults')
+      if not ok or not nd.renderers then
+        return nil
+      end
+      local function with_mark(list)
+        local out = vim.deepcopy(list)
+        table.insert(out, 3, { 'projectfiles_index' }) -- indent, icon 다음
+        return out
+      end
+      return {
+        file = with_mark(nd.renderers.file),
+        directory = with_mark(nd.renderers.directory),
+      }
+    end)(),
     hijack_netrw_behavior = 'disabled',
     use_libuv_file_watcher = false,
     follow_current_file = { enabled = true },
