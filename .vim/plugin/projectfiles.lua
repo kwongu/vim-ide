@@ -1940,6 +1940,15 @@ local function absorb_hint(root)
   if cfg('absorb_hint', 1) == 0 or absorb_hinted[root] then
     return
   end
+  -- 모드를 정하지 않은(none 포함) 프로젝트는 건드리지 않는다. 아래
+  -- nested_lists() → nested_prefixes() 의 find 는 vim.fn.systemlist() -
+  -- 동기 호출이라 끝날 때까지 키 입력이 하나도 처리되지 않는다. Android
+  -- SDK 처럼 depth 7 에 디렉터리가 14만 개인 트리에서는 콜드 캐시 기준
+  -- 수 분이 걸린다. 파일 상단 주석의 설계 의도('모드를 정하지 않은
+  -- 디렉터리에서는 묻지도 색인하지도 않는다')와 맞춘다.
+  if not mode_indexes(root) then
+    return
+  end
   absorb_hinted[root] = true
   if cfg('absorb', 0) ~= 0 then
     absorb_nested(root, true)
@@ -3295,9 +3304,13 @@ local function pick_preset()
   local m = mode_of(root)
   local names = preset_list()
   local items = {
-    { name = MODE_NONE, label = (m == MODE_NONE and '● ' or '  ') ..
-      'none  (아무것도 하지 않는다)' },
-    { name = MODE_AUTO, label = ((m == MODE_AUTO or m == MODE_UNSET) and '● ' or '  ') ..
+    -- 아직 모드를 정하지 않은 프로젝트(MODE_UNSET)의 기본값은 none 이다.
+    -- 예전에는 auto 에 표시가 붙어서, 처음 F2 를 누른 사람이 '이 프로젝트는
+    -- 전체 색인 상태'로 읽고 그대로 <CR> 하면 SDK 전체를 색인했다.
+    { name = MODE_NONE, label = ((m == MODE_NONE or m == MODE_UNSET) and '● ' or '  ') ..
+      'none  (아무것도 하지 않는다)' ..
+      (m == MODE_UNSET and '   ← 기본값 (아직 정하지 않음)' or '') },
+    { name = MODE_AUTO, label = (m == MODE_AUTO and '● ' or '  ') ..
       'auto  (프로젝트 전체 색인)' },
   }
   for _, n in ipairs(names) do
