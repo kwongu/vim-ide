@@ -723,6 +723,50 @@ entry is rewritten as the files that remain; that list is now deduplicated
 against what the preset already had, which is where 21 doubled entries
 under `sound/soc/telechips_dpcm/` came from.
 
+### What the list costs to build
+
+Opening nvim in a preset project builds `<root>/.tags/files` before the
+first keystroke, and on the dev server that was **9.2 of the 9.6 seconds**
+nvim took to start. Two separate things were wrong.
+
+The larger one was not this code at all: an orphaned recursive `ugrep` over
+`$HOME`, left behind by a tooling session, had read **727 GB** and was
+sitting in uninterruptible I/O. It was evicting the page cache as fast as
+anything could fill it, so every `find` here ran cold. Killing it took the
+machine's load from 14.8 to 0.9 and this startup from 9,216 ms to 674 ms.
+Worth remembering when "vim got slow" and nothing in vim changed: measure
+the machine first.
+
+What remained was real, and it was the shape of the walk. `expand_entry()`
+ran one `find` per directory entry, and the preset for the QNX SDK has 17 of
+them. Forking a shell costs in proportion to the size of the parent, and a
+loaded nvim is not small:
+
+| | |
+|---|---|
+| `find` × 17, one per entry | 118 ms |
+| `find` × 1, all 17 roots at once | **26 ms** |
+| files found | 1,992 either way |
+
+`find` takes as many starting points as you give it, so directory entries
+are now expanded together in one call (split into batches if the command
+line would get near `ARG_MAX`). File entries still go through
+`expand_entry()` one at a time - there is nothing to batch there - and which
+entries are directories is decided by `fs_stat`, not by the `kind` written
+in the preset, because the preset records what was true when it was saved.
+
+Two smaller ones. `rel_to()` called `fnamemodify(':p')` on every path, 1,452
+crossings of the eval bridge to normalise paths that `find` had already
+handed over normalised; it now skips that when the path is plainly absolute
+already. And `materialize()` ran twice on every start - once while the
+plugin is sourced, once 200 ms later on `VimEnter` - so the second one is
+skipped when the project and preset have not changed since the first. The
+`VimEnter` pass still exists for the case it was written for: the real
+project only being known once the session is up.
+
+Sourcing the plugin in that project went **153 ms → 88 ms**, and the file it
+writes is byte-for-byte the same 1,452 lines.
+
 ### Where presets live, and sharing them across machines
 
 A preset is JSON: a name and a list of project-relative paths. Nothing in it

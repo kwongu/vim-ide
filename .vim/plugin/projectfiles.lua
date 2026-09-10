@@ -866,8 +866,25 @@ local function indexed(path)
   return e ~= nil and EXT[e] == true and text_file(path)
 end
 
+-- '/a/b/c' 처럼 더 손댈 것이 없는 절대 경로인가
+local function plain_abs(p)
+  if p:sub(1, 1) ~= '/' or p:sub(-1) == '/' or p:find('//', 1, true) then
+    return false
+  end
+  for seg in p:gmatch('[^/]+') do
+    if seg == '.' or seg == '..' then
+      return false
+    end
+  end
+  return true
+end
+
 local function rel_to(root, path)
-  local p = vim.fn.fnamemodify(path, ':p'):gsub('/+$', '')
+  -- 이미 정규화된 절대 경로면 fnamemodify() 를 건너뛴다. find 가 주는 경로가
+  -- 전부 그 모양이고 목록 하나에 1500~2000번 불리는 자리라, 그만큼 eval
+  -- 다리를 덜 건넌다 (1452개에 9ms).
+  local p = plain_abs(path) and path
+      or (vim.fn.fnamemodify(path, ':p'):gsub('/+$', ''))
   if p == root then
     return '.' -- 프로젝트 루트 자체. 절대 경로로 적으면 이식되지 않는다
   end
@@ -933,6 +950,15 @@ local function nested_owner(root, rel)
   return nil
 end
 
+local function prune_expr()
+  local prune = {}
+  for d in tostring(cfg('prune_dirs',
+      '.git .svn .hg .tags node_modules __pycache__ .repo .ccache out')):gmatch('%S+') do
+    prune[#prune + 1] = "-name '" .. d .. "'"
+  end
+  return "\\( " .. table.concat(prune, ' -o ') .. " \\) -prune -o "
+end
+
 -- files of one entry, relative to root
 local function expand_entry(root, entry)
   local abs = entry.path:sub(1, 1) == '/' and entry.path
@@ -947,20 +973,69 @@ local function expand_entry(root, entry)
   local out = {}
   -- 파일은 전부 찾고 indexed() 로 걸른다: 무엇을 넣을지 정하는 곳이 하나여야
   -- '모든 파일' 모드와 허용목록 모드가 어긋나지 않는다.
-  local prune = {}
-  for d in tostring(cfg('prune_dirs',
-      '.git .svn .hg .tags node_modules __pycache__ .repo .ccache out')):gmatch('%S+') do
-    prune[#prune + 1] = "-name '" .. d .. "'"
-  end
-  local cmd = "find " .. vim.fn.shellescape(abs) ..
-      " \\( " .. table.concat(prune, ' -o ') .. " \\) -prune -o " ..
-      " -type f -print 2>/dev/null"
+  local cmd = 'find ' .. vim.fn.shellescape(abs) .. ' ' .. prune_expr() ..
+      ' -type f -print 2>/dev/null'
   for _, l in ipairs(vim.fn.systemlist(cmd)) do
     if l ~= '' and indexed(l) then
       out[#out + 1] = rel_to(root, l)
     end
   end
   return out, true
+end
+
+-- 디렉터리 항목 여러 개를 find 한 번으로 편다.
+--
+-- find 는 시작점을 여러 개 받는다. 항목마다 따로 부르면 그만큼 셸을 fork 하고,
+-- fork 비용은 부모(nvim)의 크기에 비례해 커진다. dir 항목 17개짜리 실제
+-- preset 에서 17번 부르면 118ms, 한 번에 부르면 26ms 였다 - 찾아낸 파일은
+-- 1992개로 똑같다.
+--
+-- 명령줄이 너무 길면 실행 자체가 안 되므로(ARG_MAX) 끊어서 부른다.
+local function expand_dirs(root, dirs)
+  local out = {}
+  if #dirs == 0 then
+    return out
+  end
+  local pe = prune_expr()
+  local i = 1
+  while i <= #dirs do
+    local args, len = {}, 0
+    while i <= #dirs and #args < 500 and len < 100000 do
+      local a = vim.fn.shellescape(dirs[i])
+      args[#args + 1] = a
+      len, i = len + #a + 1, i + 1
+    end
+    local cmd = 'find ' .. table.concat(args, ' ') .. ' ' .. pe ..
+        ' -type f -print 2>/dev/null'
+    for _, l in ipairs(vim.fn.systemlist(cmd)) do
+      if l ~= '' and indexed(l) then
+        out[#out + 1] = rel_to(root, l)
+      end
+    end
+  end
+  return out
+end
+
+-- preset 항목 전부를 편다. 디렉터리는 묶어서 한 번에 훑는다.
+local function expand_all(root, entries)
+  local out, dirs = {}, {}
+  for _, e in ipairs(entries) do
+    local abs = e.path:sub(1, 1) == '/' and e.path or (root .. '/' .. e.path)
+    local st = uv.fs_stat(abs)
+    -- preset 의 kind 는 적어 둔 값일 뿐이고, 실제로 무엇인지는 파일 시스템이
+    -- 답한다 - 디렉터리였던 것이 파일로 바뀌어 있을 수 있다
+    if st and st.type == 'directory' then
+      dirs[#dirs + 1] = abs
+    else
+      for _, f in ipairs((expand_entry(root, e))) do
+        out[#out + 1] = f
+      end
+    end
+  end
+  for _, f in ipairs(expand_dirs(root, dirs)) do
+    out[#out + 1] = f
+  end
+  return out
 end
 
 local function entries_of(root)
@@ -1009,22 +1084,20 @@ local function materialize(root)
   local pre = cfg('nested_presets', 0) ~= 0 and nested_prefixes(root) or {}
   local dropped = 0
   skipped = { big = 0, binary = 0, worst = nil }
-  for _, e in ipairs(entries) do
-    for _, f in ipairs((expand_entry(root, e))) do
-      if not seen[f] then
-        local nested = false
-        for _, q in ipairs(pre) do
-          if f:sub(1, #q) == q then
-            nested = true
-            break
-          end
+  for _, f in ipairs(expand_all(root, entries)) do
+    if not seen[f] then
+      local nested = false
+      for _, q in ipairs(pre) do
+        if f:sub(1, #q) == q then
+          nested = true
+          break
         end
-        if nested then
-          dropped = dropped + 1
-        else
-          seen[f] = true
-          files[#files + 1] = f
-        end
+      end
+      if nested then
+        dropped = dropped + 1
+      else
+        seen[f] = true
+        files[#files + 1] = f
       end
     end
   end
@@ -3619,10 +3692,13 @@ end, { desc = 'Rebuild the index for the current file list' })
 -- a preset is applied as soon as the session knows which project it is in
 -- as early as possible (the indexer may start on the first BufReadPost),
 -- and again once the session is up and the real project is known
+local booted -- 시작할 때 이미 펼쳐 둔 '<root>\0<preset>'
 pcall(function()
   local root = root_of(nil)
-  if active_preset(root) then
+  local name = active_preset(root)
+  if name then
     materialize(root)
+    booted = root .. '\0' .. name
   end
 end)
 
@@ -3631,9 +3707,20 @@ api.nvim_create_autocmd('VimEnter', {
   callback = function()
     vim.defer_fn(function()
       local root = cur_root()
-      if active_preset(root) then
-        materialize(root)
+      local name = active_preset(root)
+      local was = booted
+      booted = nil
+      if not name then
+        return
       end
+      -- 200ms 전에 같은 프로젝트, 같은 preset 으로 이미 펼쳤으면 결과가
+      -- 같다. 실제 SDK 트리에서 한 번이 150~250ms 라, 뜨자마자 그만큼
+      -- 멈칫하는 것이 그대로 보인다. 다른 프로젝트로 판명됐을 때만
+      -- 다시 만든다 - 그게 이 VimEnter 가 있는 이유다.
+      if was == root .. '\0' .. name then
+        return
+      end
+      materialize(root)
     end, 200)
   end,
 })
