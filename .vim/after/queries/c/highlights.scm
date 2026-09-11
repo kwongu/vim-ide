@@ -167,3 +167,66 @@
 ;; nvim-treesitter 는 이 둘을 평범한 @keyword 로 잡는데, SI 는 제어 키워드
 ;; (if/for/return...)와 같은 색으로 그린다.
 ["goto" "default"] @keyword.exception
+
+;; -- 함수 안에서 선언한 지역 변수 -------------------------------------------
+;; 파라미터와 같은 파랑으로 칠하려고 따로 뽑는다. 위의 @si.declaration 은
+;; 구조체 멤버와 파일 스코프 선언까지 함께 잡으므로 그것을 그대로 물들이면
+;; 범위가 너무 넓다. '함수 본문(compound_statement) 안' 이라는 조건을 붙인다.
+;; 뒤에 온 캡처가 이기므로 이 블록은 반드시 위 규칙들보다 뒤에 있어야 한다.
+;;
+;; 세 벌인 이유: int x;  /  int *p = NULL;  /  char buf[8] = {0} 처럼
+;; declarator 가 init_declarator·pointer_declarator·array_declarator 로
+;; 한두 겹 감싸이기 때문이다. 와일드카드 '_' 로 그 겹을 건너뛴다.
+(compound_statement
+  (declaration
+    declarator: (identifier) @si.declaration.local))
+
+(compound_statement
+  (declaration
+    declarator: (_ declarator: (identifier) @si.declaration.local)))
+
+(compound_statement
+  (declaration
+    declarator: (_ declarator: (_ declarator: (identifier) @si.declaration.local))))
+
+;; for (int i = 0; ...) 의 i 는 compound_statement 가 아니라 for_statement 밑이다
+(for_statement
+  initializer: (declaration
+    declarator: (identifier) @si.declaration.local))
+
+(for_statement
+  initializer: (declaration
+    declarator: (_ declarator: (identifier) @si.declaration.local)))
+
+;; 포인터/배열/함수포인터 파라미터도 파라미터다.
+;;   struct packet *p     -> parameter_declaration > pointer_declarator > identifier
+;;   char *argv[]         -> ... > array_declarator > pointer_declarator > identifier
+;;   int (*cb)(void)      -> ... > function_declarator > parenthesized_declarator
+;;                                 > pointer_declarator > identifier
+;; 위의 (parameter_declaration declarator: (identifier)) 는 겹이 없는 경우만
+;; 잡으므로, 와일드카드 '_' 로 한~세 겹을 건너뛴 벌을 따로 둔다.
+(parameter_declaration
+  declarator: (_ declarator: (identifier) @si.declaration.parameter))
+
+(parameter_declaration
+  declarator: (_ declarator: (_ declarator: (identifier) @si.declaration.parameter)))
+
+(parameter_declaration
+  declarator: (_ declarator: (_ declarator: (_ declarator:
+    (identifier) @si.declaration.parameter))))
+
+;; int (*cb)(void) : parenthesized_declarator 의 자식은 'declarator:' 필드가
+;; 아니라 이름 없는 자식이라 위의 와일드카드 벌이 닿지 않는다. 따로 적는다.
+(parameter_declaration
+  declarator: (function_declarator
+    declarator: (parenthesized_declarator
+      (pointer_declarator
+        declarator: (identifier) @si.declaration.parameter))))
+
+;; 지역변수로 선언한 함수 포인터도 같은 모양이다: int (*fn)(void) = NULL;
+(compound_statement
+  (declaration
+    declarator: (function_declarator
+      declarator: (parenthesized_declarator
+        (pointer_declarator
+          declarator: (identifier) @si.declaration.local)))))

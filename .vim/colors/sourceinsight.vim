@@ -128,9 +128,14 @@ else
   let s:c.macro    = s:c.keyword
   " #include / #define 은 초록 (#if/#ifdef/#endif 는 네이비 볼드로 둔다)
   let s:c.incdef   = ['#008000', 28,  'darkgreen']
+  " 파라미터 / 함수 안 지역변수 선언: 남색 (예약어와 같은 파랑 계열)
+  let s:c.decllocal = ['#000080', 18,  'darkblue']
 endif
 if !has_key(s:c, 'incdef')
   let s:c.incdef = s:c.preproc
+endif
+if !has_key(s:c, 'decllocal')
+  let s:c.decllocal = s:c.decl
 endif
 if !has_key(s:c, 'typeref')
   let s:c.typeref = s:c.ref
@@ -430,7 +435,13 @@ else
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   call s:hi('@si.declaration',           '',     '', 'underline')
   call s:hi('@si.declaration.function',  s:name_fg, s:name_bg, s:name_attr)
-  call s:hi('@si.declaration.parameter', '',     '', 'underline')
+  " 함수 파라미터와 함수 안에서 선언한 지역 변수는 파랑(남색).
+  " 선언한 자리와 그것을 쓰는 자리를 색으로 가르기 위한 것이라, 밑줄은
+  " 그대로 두고 색만 얹는다. 구조체 멤버와 파일 스코프 선언은 위
+  " @si.declaration 그대로 (본문색 + 밑줄) 둔다.
+  "   let g:sourceinsight_decl_local = '#0000ff'   " 더 밝은 파랑으로
+  call s:hi('@si.declaration.parameter', 'decllocal', '', 'underline')
+  call s:hi('@si.declaration.local',     'decllocal', '', 'underline')
   " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
   call s:hi('@si.declaration.label',     'label', '', 'bold,underline')

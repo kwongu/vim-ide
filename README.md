@@ -1280,6 +1280,39 @@ which is why both names in each row are bound by default.
 | `g:vimide_jump_back_key` | list of key names for back. Default `['<F17>', '<S-F5>', '<C-RightMouse>']`, `[]` disables |
 | `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F6>', '<S-RightMouse>']` |
 
+### Parameters and locals are blue
+
+Source Insight marks a declaration with an underline and leaves the colour
+alone, which this config followed. Told apart from a use that way, a
+declaration is easy to miss in a long function, so parameters and the
+variables a function declares in its own body are now navy as well - the
+same blue the reserved words use.
+
+`@si.declaration` already covered those identifiers, but it covers struct
+members and file-scope declarations too, and those should stay as they were.
+So the query pulls out the narrower cases by their position in the tree:
+`@si.declaration.parameter` for anything under a `parameter_declaration`,
+and a new `@si.declaration.local` for a `declaration` inside a
+`compound_statement` (plus the `for (int i = 0; ...)` initializer, which
+hangs off the `for_statement` instead).
+
+The awkward part is the declarator wrappers. `int x` is an identifier, but
+`int *p = NULL` is `init_declarator > pointer_declarator > identifier` and
+`int (*cb)(void)` is `function_declarator > parenthesized_declarator >
+pointer_declarator > identifier` - and that middle one is an *unnamed* child,
+so a `declarator:` wildcard chain walks right past it. Both the parameter and
+the local forms are therefore spelled out for the nesting depths that occur.
+Verified against a file holding each shape:
+
+| | |
+|---|---|
+| `p_ptr`, `p_plain`, `p_argv`, `p_cb`, `p_name` | `@si.declaration.parameter`, `#000080` |
+| `local_plain`, `local_init`, `local_ptr`, `local_buf`, `loop_i` | `@si.declaration.local`, `#000080` |
+| struct members, file-scope variables | unchanged |
+
+`g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
+colorscheme for a brighter blue.
+
 ## The symbol outline (nvim only)
 
 `<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is
