@@ -53,7 +53,8 @@
 --   g:sihl_index_budget 분당 global 프로세스 수 (기본 30, 0 이면 무제한)
 --   g:sihl_index_batch  한 번 칠할 때 시작할 배치 수 (기본 2)
 --   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
---   g:sihl_index_db     'near'(기본) 파일에서 가장 가까운 DB / 'root' 가장 바깥
+--   g:sihl_index_db     'chain'(기본) 현재 디렉터리 프로젝트부터 위로 /
+--                       'near' 하나만 / 'root' 가장 바깥만
 --   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1)
 --   g:sihl_index_ctags  0 이면 ctags 스냅숏은 보지 않는다 (기본 1)
 --   g:sihl_index_macro_navy  이 경로들에 정의된 매크로는 네이비 볼드
@@ -231,8 +232,11 @@ end
 -- 정할 수가 없으니 가까운 것부터 차례로 묻고, 하나라도 알면 찾은 것이다 -
 -- C-] 도 결국 그중 하나로 닿는다.
 --
---   let g:sihl_index_db = 'near'   " 가장 가까운 DB 하나만
+--   let g:sihl_index_db = 'near'   " 시작점의 DB 하나만
 --   let g:sihl_index_db = 'root'   " 가장 바깥 DB 하나만
+--
+-- 시작점은 '현재 디렉터리의 프로젝트'다 (projectfiles 의 anchor_cwd 와 같은
+-- 규칙). 그 아래에 있는 preset 은 쓰지 않는다.
 local chain_cache = {}
 local function roots_of(buf)
   local name = api.nvim_buf_get_name(buf)
@@ -251,18 +255,45 @@ local function roots_of(buf)
   end
   local mode = tostring(cfg('db', 'chain'))
   local out = {}
-  local d = dir
   local home = vim.env.HOME or '/'
-  while d and d ~= '/' and d ~= '' and #out < 4 do
-    if uv.fs_stat(d .. '/.tags/GTAGS') or uv.fs_stat(d .. '/GTAGS') then
-      out[#out + 1] = d
+
+  -- 출발점은 '지금 디렉터리의 프로젝트'다.
+  --
+  -- projectfiles 의 규칙(anchor_cwd)과 같다: 열고 있는 파일이 현재 디렉터리
+  -- 프로젝트 안에 있으면 그 프로젝트를 쓰고, 그 아래에 있는 preset 은 쓰지
+  -- 않는다. 예전에는 파일에서부터 위로 올라가며 가장 가까운 DB 를 먼저
+  -- 물었는데, 그러면 Android14_IVI_1.1.0 에서 일하는 중에도 그 밑의
+  -- kernel/common preset(파일 5개)이 먼저 답해 버렸다. preset 을 고르는
+  -- 곳과 색을 정하는 곳이 다른 프로젝트를 보고 있으면 안 된다.
+  local function walk_up(from)
+    local list = {}
+    local d = from
+    while d and d ~= '/' and d ~= '' and #list < 4 do
+      if uv.fs_stat(d .. '/.tags/GTAGS') or uv.fs_stat(d .. '/GTAGS') then
+        list[#list + 1] = d
+      end
+      if d == home then
+        break
+      end
+      local up = vim.fs.dirname(d)
+      if up == d then break end
+      d = up
     end
-    if d == home then
-      break
+    return list
+  end
+
+  local start = dir
+  if _G.projectfiles_root_of then
+    local okr, r = pcall(_G.projectfiles_root_of, dir .. '/x')
+    if okr and r and r ~= '' then
+      start = r
     end
-    local up = vim.fs.dirname(d)
-    if up == d then break end
-    d = up
+  end
+  out = walk_up(start)
+  -- 시작점 위에 DB 가 하나도 없으면(그 프로젝트에 아직 색인이 없는 경우)
+  -- 예전처럼 파일에서부터 올라가며 찾는다 - 아무 답도 못 하는 것보다 낫다.
+  if #out == 0 then
+    out = walk_up(dir)
   end
   if mode == 'near' and #out > 1 then
     out = { out[1] }

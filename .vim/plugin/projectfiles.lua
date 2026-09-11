@@ -281,6 +281,13 @@ local function root_of(path)
   return r
 end
 
+-- sihlindex.lua 가 같은 규칙으로 프로젝트를 고르게 내준다.
+-- (현재 디렉터리 기준 고정까지 포함 - anchor_cwd)
+function _G.projectfiles_root_of(path)
+  local ok, r = pcall(root_of, path)
+  return ok and r or nil
+end
+
 -- 지금 보고 있는 프로젝트.
 --
 -- 특수 버퍼 - NERDTree, telescope 프롬프트, quickfix - 에는 파일 이름이 없다.
