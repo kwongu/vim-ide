@@ -180,6 +180,7 @@ end
 
 local s = {
   cache = {},     -- root -> { key, found = {}, missing = {} }
+  snap_ok = {},   -- root -> 이 루트에서 ctags 스냅숏까지 봐도 되는가
   busy = false,
   want = {},      -- root -> { sym -> true }
   tokens = {}, timer = nil, proc = nil, watchdog = nil, killed = false,
@@ -428,9 +429,10 @@ end
 -- followic 이면 정렬된 파일을 이분 탐색하지 못하고 훑는다: 7MB 스냅숏에서
 -- 이름당 7.01ms 대 0.16ms, 44배 차이였다(찾는 개수는 똑같다).
 --   let g:sihl_index_ctags = 0   " ctags 스냅숏은 보지 않는다
-local function in_tags(syms)
+local function in_tags(syms, allow)
   local out = {}
-  if (tonumber(cfg('ctags', 1)) or 1) == 0 or #vim.fn.tagfiles() == 0 then
+  if not allow or (tonumber(cfg('ctags', 1)) or 1) == 0
+      or #vim.fn.tagfiles() == 0 then
     return out
   end
   local save = vim.o.tagcase
@@ -488,8 +490,14 @@ local function run_batch(root, syms, done)
   vim.list_extend(argv, { 'sh', '-c', script })
   local env = db_env(root) or {}
   env = vim.tbl_extend('force', env, { SIHL_G = g })
-  if (tonumber(cfg('ctags', 1)) or 1) ~= 0 and _G.autoindex_ctags_file
-      and vim.fn.executable('look') == 1 then
+  -- 스냅숏은 체인의 마지막 DB 에서만 본다.
+  --
+  -- 가까운 DB 단계에서 먼저 보면 거기서 '찾음'이 나와 버려 바깥 gtags 가
+  -- 주는 더 정확한 답(정의 파일 경로)을 못 본다. 실제로 MODULE_AUTHOR 가
+  -- 스냅숏의 엉뚱한 #define 으로 먼저 잡혀서, module.h 매크로인데 네이비가
+  -- 아니라 초록이 됐다.
+  if s.snap_ok[root] and (tonumber(cfg('ctags', 1)) or 1) ~= 0
+      and _G.autoindex_ctags_file and vim.fn.executable('look') == 1 then
     local ok, snap = pcall(_G.autoindex_ctags_file, root)
     if ok and snap and snap ~= '' and uv.fs_stat(snap) then
       env.SIHL_SNAP = snap
@@ -559,7 +567,7 @@ local function run_batch(root, syms, done)
             rest[#rest + 1] = sym
           end
         end
-        local tags = #rest > 0 and in_tags(rest) or {}
+        local tags = #rest > 0 and in_tags(rest, s.snap_ok[root]) or {}
         for _, sym in ipairs(syms) do
           local v = hit[sym] or tags[sym]
           if v then
@@ -824,6 +832,7 @@ repaint = function(win)
             local r = roots[extra]
             s.want[r] = s.want[r] or {}
             s.want[r][name] = true
+            s.snap_ok[r] = (extra == #roots)
             asked = true
           end
         end
@@ -904,6 +913,7 @@ end, { desc = '색인에 없는 심볼 검정 표시 켜고 끄기' })
 
 api.nvim_create_user_command('SiHlIndexClear', function()
   s.cache, s.want, root_cache, chain_cache = {}, {}, {}, {}
+  s.snap_ok = {}
   s.off, s.fails, prog_cache = nil, 0, nil
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
