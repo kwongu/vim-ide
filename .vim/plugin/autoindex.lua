@@ -1264,6 +1264,14 @@ local function ctags_file(root)
   return dbpath(root) .. '/tags'
 end
 
+-- sihlindex.lua 가 이 스냅숏을 직접 이분 탐색할 수 있게 경로를 내준다.
+-- 스냅숏이 커서 &tags 에서 빠진 프로젝트(여기서는 1747MB)에서는 vim 의
+-- taglist() 가 아예 답하지 못하므로, 색이 'C-] 로 갈 수 있다'와 어긋난다.
+function _G.autoindex_ctags_file(root)
+  local ok, p = pcall(ctags_file, root)
+  return ok and p or nil
+end
+
 -- true when the snapshot is older than g:autoindex_ctags_max_age days
 function ctags_stale(root)
   local days = cfg('ctags_max_age', 7)

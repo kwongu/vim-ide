@@ -136,10 +136,13 @@ local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
 --
 --   let g:sihl_index_macro_navy = ['include/linux/module%.h']   " 기본값
 --   let g:sihl_index_macro_navy = []                            " 전부 빨강
+-- 항목에 '/' 가 있으면 정의 파일의 경로로, 없으면 심볼 이름으로 본다.
+-- 이름 쪽은 색인을 타지 않는다 - THIS_MODULE 이 그래서 필요했다:
+-- include/linux/export.h 에 있는데 이 트리의 두 색인이 모두 모른다.
 local function navy_pats()
   local v = vim.g.sihl_index_macro_navy
   if v == nil then
-    return { 'include/linux/module%.h' }
+    return { 'include/linux/module%.h', 'THIS_MODULE' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}
@@ -152,11 +155,27 @@ local function macro_kind(path)
     return 'macro'
   end
   for _, pat in ipairs(navy_pats()) do
-    if path:find(pat) then
-      return 'macrokw'
+    if pat:find('/') then
+      local ok, hit = pcall(string.find, path, pat)
+      if ok and hit then
+        return 'macrokw'
+      end
     end
   end
   return 'macro'
+end
+
+-- 이름만으로 네이비로 정한 것인가 (색인을 묻지 않는다)
+local function navy_name(name)
+  for _, pat in ipairs(navy_pats()) do
+    if not pat:find('/') then
+      local ok, hit = pcall(string.find, name, pat)
+      if ok and hit then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 local s = {
@@ -449,13 +468,31 @@ local function run_batch(root, syms, done)
   --   thing  5 defs.h   struct thing { int m; };
   -- 이걸로 매크로인지 아닌지를 안다. treesitter 는 알 수가 없다 - 함수형
   -- 매크로 ADD(x, 2) 는 함수 호출과 구문이 똑같아서 초록 볼드로 나왔다.
+  -- gtags 가 못 찾으면 ctags 스냅숏을 'look' 으로 이분 탐색한다.
+  --
+  -- vim 의 taglist() 를 쓸 수 없는 프로젝트가 있다: 스냅숏이 커서(여기서는
+  -- 1747MB) autoindex 가 &tags 에 넣지 않기 때문이다. 그런데 파일은 정렬돼
+  -- 있으므로 look -b 로 바로 찾을 수 있다 - 1.7GB 에서 이름당 0.04~0.12초,
+  -- 한 셸 안에서 네 개를 잇달아 물으면 사실상 0초였다(페이지 캐시).
+  -- 이게 없으면 구조체 멤버(mbox_ch 같은)는 영영 검정이다: GNU Global 은
+  -- 멤버를 색인하지 않고, 이 프로젝트에는 taglist 가 볼 파일이 없다.
   local script = 'for s in ' .. table.concat(syms, ' ') ..
       '; do o=$("$SIHL_G" -d --result=ctags-x "$s" 2>/dev/null | head -1);' ..
+      ' if [ -z "$o" ] && [ -n "$SIHL_SNAP" ] && [ -r "$SIHL_SNAP" ]; then' ..
+      ' o=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$SIHL_SNAP" 2>/dev/null | head -1);' ..
+      ' [ -n "$o" ] && o="TAG\t$o"; fi;' ..
       ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; fi; done'
   local argv = nice_prefix()
   vim.list_extend(argv, { 'sh', '-c', script })
   local env = db_env(root) or {}
   env = vim.tbl_extend('force', env, { SIHL_G = g })
+  if (tonumber(cfg('ctags', 1)) or 1) ~= 0 and _G.autoindex_ctags_file
+      and vim.fn.executable('look') == 1 then
+    local ok, snap = pcall(_G.autoindex_ctags_file, root)
+    if ok and snap and snap ~= '' and uv.fs_stat(snap) then
+      env.SIHL_SNAP = snap
+    end
+  end
   dbg(('batch root=%s n=%d'):format(root, #syms))
   local ok, proc = pcall(vim.system, argv,
     { cwd = root, text = true, detach = true, env = env },
@@ -471,9 +508,17 @@ local function run_batch(root, syms, done)
         for line in res.stdout:gmatch('[^\n]+') do
           local name, rest = line:match('^([^\t]+)\t(.*)$')
           if name then
-            local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
-            src = src or rest
-            hit[name] = src:match('^%s*#%s*define') and macro_kind(path) or true
+            if rest:sub(1, 4) == 'TAG\t' then
+              -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 명령 ;" \t kind
+              local fields = vim.split(rest:sub(5), '\t', { plain = true })
+              local path = fields[2] or ''
+              local kind = fields[#fields] or ''
+              hit[name] = (kind:match('^d') and macro_kind(path)) or true
+            else
+              local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
+              src = src or rest
+              hit[name] = src:match('^%s*#%s*define') and macro_kind(path) or true
+            end
           end
         end
       elseif res and res.code ~= 0 then
@@ -735,6 +780,9 @@ repaint = function(win)
             and (is_member or not locals[name])
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
           local how, extra = verdict(name)
+          if navy_name(name) then
+            how, extra = 'found', 'macrokw'
+          end
           if how == 'missing' then
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
@@ -764,7 +812,7 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpFound', priority = prio,
             })
-          elseif how == 'ask' then
+          elseif how == 'ask' and not navy_name(name) then
             local r = roots[extra]
             s.want[r] = s.want[r] or {}
             s.want[r][name] = true
