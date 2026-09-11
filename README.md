@@ -1422,14 +1422,22 @@ Only the *missing* case is painted. Known and not-yet-asked both render
 exactly as before, so scrolling never flashes black and a pending answer
 costs nothing on screen.
 
-**Batching turned out to be possible, and the earlier note here saying it
-was not was wrong.** `global --result=ctags-x -d -e '^(a|b|c)$'` answers for
-every name at once, with the name in column 1. What had actually failed was
-a 512-byte pattern buffer: measured on the dev server, 511 bytes returns
-rc=0 and 512 returns rc=1 with `global: buffer overflow. strlimcpy(dest,
-'...', 512)` and empty output - and the pattern that produced the original
-"returns nothing" was 1009 bytes. Patterns are packed to 480 bytes now,
-about twenty names, and twenty names came back from one 498-byte call.
+**How the index is asked, and two wrong answers on the way there.**
+
+`global --result=ctags-x -d -e '^(a|b|c)$'` does work - the 512-byte pattern
+buffer is what had failed before (511 bytes rc=0, 512 bytes rc=1 with
+`global: buffer overflow. strlimcpy(dest, '...', 512)`, and the pattern
+behind the original "returns nothing" was 1009). But working is not the same
+as usable: an anchored alternation has no literal prefix, so `global` cannot
+use the btree and reads the whole database. On the dev server's 70MB GTAGS
+an eleven-name query sat at 98% CPU until a 60-second timeout killed it. The
+same eleven names, asked one at a time inside a single shell loop, take
+**0.16s** - 15ms each, an indexed seek. Four hundred times faster, and the
+process count, which is what a shared box actually feels, is still one.
+
+The second wrong answer: `global -d` exits 0 whether or not it finds
+anything - only the output differs. Judging by exit code marked every absent
+name as found, and the feature silently painted nothing at all.
 
 Four things the review caught, all of which would have painted the screen
 wrong:
@@ -1443,8 +1451,16 @@ wrong:
   the sharp case: nvim's own query calls it `@constant`, indistinguishable
   from a macro by capture alone, so the filter is by name against the
   enclosing function's declarations.
-- A failed `global` (non-zero exit) records nothing. Writing "absent" on
-  failure means one over-long pattern blacks out a file.
+- A failed `global` (non-zero exit) records nothing, and three failures in a
+  row stop the feature for the session with a notice. Writing "absent" on
+  failure blacks out a file; retrying forever is worse - `global` lives in
+  `~/.local/bin`, which only `~/.profile` puts on `PATH`, so a session
+  without it had `ionice` failing on its behalf with rc=127 on every repaint.
+  The binary is resolved through `exepath()` once now.
+- The watchdog sends `TERM` and `KILL` together, and `VimLeavePre` kills
+  synchronously. Scheduling the `KILL` 500ms later through `defer_fn` loses
+  it when nvim exits in between - one `global` was left running at 98% CPU
+  on the shared server that way.
 - A reindex drops only the `missing` half of the cache. Dropping all of it
   made every black mark vanish and slowly return after each `:w`.
 
@@ -1452,7 +1468,7 @@ wrong:
 |---|---|
 | `g:sihl_index = 0` | off (`:SiHlIndexToggle`, `:SiHlIndexClear`, `:SiHlIndexStatus`) |
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
-| `g:sihl_index_delay` / `_pad` / `_batch` / `_timeout` | 200ms, 20 lines, 2 batches, 5s watchdog |
+| `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
 | `g:sourceinsight_local_color` | a different green for the local uses, e.g. `'#7cb342'` |
 
