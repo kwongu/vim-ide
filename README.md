@@ -1152,6 +1152,24 @@ throws before it is reached. The list matches `buftype` as well as
 `filetype`, so `nofile` in it keeps every scratch window out - which is the
 right rule anyway.
 
+### Bold means "a function is called here"
+
+Every green thing used to be bold - type names, `struct` tags, `typedef`s,
+storage classes, qualifiers and calls alike - so on screen a `struct packet`
+and a `helper()` call carried the same weight and the call stopped standing
+out. Bold now belongs to calls alone; the rest of the green family is plain.
+
+| | |
+|---|---|
+| `@function`, `@function.call`, `@function.builtin` | green **bold** |
+| `@type`, `@type.builtin`, `@type.definition`, `@si.type.ref`, `Type`, `Typedef` | green, no bold |
+| `@keyword`, `@type.qualifier`, `@storageclass` | navy bold, unchanged - a different colour, so no confusion |
+
+`s:tp` is the new empty attribute those green entries use, next to `s:kw`,
+which the navy reserved words keep. Measured on real code: `helper(3)` and
+`printf(...)` resolve to `@function.call` green bold, while `struct packet`,
+`u32` and `int` come out `@si.type.ref` / `@type.builtin` green and plain.
+
 ### Getting back out
 
 Three things were broken here at once, and they hid each other.

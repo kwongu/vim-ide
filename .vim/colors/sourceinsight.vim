@@ -144,6 +144,12 @@ endif
 " 평범한 키워드의 볼드 여부는 배색마다 다르다: 화면 기준은 볼드,
 " SI 출고 기본값은 Keyword 에 볼드가 없다(제어 키워드에만 있다).
 let s:kw = s:variant ==# 'factory' ? '' : 'bold'
+" 초록 계열(타입 이름, 타입 참조, 저장 클래스/한정자)은 굵게 하지 않는다.
+"
+" 굵기는 '함수 호출'의 표시로만 남긴다. 초록이 전부 굵으면 그 신호가 묻혀서,
+" 화면에서 struct 이름과 함수 호출이 같은 무게로 읽혔다. 예약어(네이비)는
+" s:kw 그대로 굵게 둔다 - 색이 달라 섞이지 않는다.
+let s:tp = ''
 
 function! s:hi(group, fg, bg, attr) abort
   let l:cmd = 'highlight ' . a:group
@@ -239,10 +245,10 @@ call s:hi('Macro',         'macro',   '',          '')
 call s:hi('PreCondit',     'preproc', '',          '')
 " struct/typedef/enum 이름은 초록 볼드(심볼 참조 색). 'int'/'uint32_t' 처럼
 " 언어가 아는 타입은 키워드 색이 된다.
-call s:hi('Type',          'type',    '',          s:kw)
+call s:hi('Type',          'type',    '',          s:tp)
 call s:hi('StorageClass',  'keyword', '',          s:kw)
 call s:hi('Structure',     'keyword', '',          s:kw)
-call s:hi('Typedef',       'type',    '',          s:kw)
+call s:hi('Typedef',       'type',    '',          s:tp)
 call s:hi('Special',       'fg',      '',          '')
 call s:hi('SpecialChar',   'string',  'stringbg',  '')
 call s:hi('Delimiter',     'delim',   '',          '')
@@ -349,9 +355,9 @@ let s:ts = {
       \ 'keyword.directive':  ['preproc', s:kw],
       \ 'keyword.directive.define': ['incdef', ''],
       \ 'keyword.import':     ['incdef', ''],
-      \ 'type':               ['type',    s:kw],
-      \ 'type.builtin':       ['typeref', s:kw],
-      \ 'type.definition':    ['type',    s:kw],
+      \ 'type':               ['type',    s:tp],
+      \ 'type.builtin':       ['typeref', s:tp],
+      \ 'type.definition':    ['type',    s:tp],
       \ 'type.qualifier':     ['keyword', s:kw],
       \ 'storageclass':       ['keyword', s:kw],
       \ 'structure':          ['keyword', s:kw],
@@ -405,7 +411,7 @@ endfor
 " SI 는 선언을 색이 아니라 밑줄로 구분한다: 색은 본문과 같다.
 " 타입 이름을 '쓰는' 자리: uint32_t, enum tcc_asrc_drv_sync_mode_t 등
 " (정의하는 자리는 아래 @si.declaration.function 이 짙은 파랑으로 덮는다)
-call s:hi('@si.type.ref', 'typeref', '', s:kw)
+call s:hi('@si.type.ref', 'typeref', '', s:tp)
 
 " __iomem/__user/__init 같은 커널 주석 매크로 (after/queries 가 잡아 준다)
 call s:hi('@si.kernel.attr', 'number', '', '')
