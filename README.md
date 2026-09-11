@@ -1623,6 +1623,17 @@ for the file that defines it, adds that file to the preset, indexes just it,
 and repaints - the machinery `Ctrl+]` already used as its last resort, put on
 a key. `g:sihl_index_autoadd = 1` does it when the cursor rests on one.
 
+**The search prefers a definition to a mention.** The patterns were one set,
+and `struct foo;` satisfied them, so asking the kernel about
+`platform_device` returned headers whose only mention of it is that forward
+declaration. They are split now: a strong pass wants an opening brace on a
+`struct`/`union`/`enum`/`typedef`, a `#define`, or a function shape, and the
+old looser set runs only if the strong one finds nothing - a definition whose
+brace sits on the next line is still reachable that way, since grep works a
+line at a time. Measured on the kernel tree: strong returns
+`include/linux/platform_device.h` alone, weak returns the `mach-s3c` and
+`qcom` headers that started this.
+
 **A symbol the index already knows is never searched for.** Running the
 search anyway means grepping the whole tree and putting the result in the
 preset, and the result is not what you want: asked about `platform_device`,

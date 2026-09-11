@@ -2200,26 +2200,44 @@ local function rank_hits(lines, root, max)
   return out
 end
 
-local function def_patterns(sym)
-  return {
+-- 정의를 찾는 패턴을 두 단계로 나눈다.
+--
+-- 예전에는 한 벌이었고 'struct foo;' 도 받아들였다. 그래서 커널에서
+-- platform_device 를 찾으면 'struct platform_device;' 한 줄만 들어 있는
+-- 헤더들이 먼저 나왔다 - arch/arm/mach-s3c/cpu.h, drivers/clk/qcom/common.h,
+-- drivers/dma/dw/internal.h ... 정의가 아니라 언급이다. 그것들이 그대로
+-- preset 에 들어갔다.
+--
+-- strong 은 '여기서 정의된다'가 분명한 것만 잡는다: 여는 중괄호가 있는
+-- struct/union/enum/typedef, #define, 함수 모양. weak 는 예전 패턴이고,
+-- strong 이 하나도 못 찾았을 때만 쓴다 ('struct foo\n{' 처럼 중괄호가 다음
+-- 줄로 내려간 정의는 줄 단위 grep 으로는 strong 에 안 걸린다).
+local function def_patterns(sym, weak)
+  local strong = {
     "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*\\('",
     "-e '^#[[:space:]]*define[[:space:]]+" .. sym .. "[^A-Za-z0-9_]'",
-    -- 'struct foo {' has no separator left before the name once
-    -- '[[:space:]]' has eaten the space, so the middle part is optional
     "-e '^(typedef|struct|union|enum)[[:space:]]+([^;{]*[^A-Za-z0-9_])?" ..
-      sym .. "[^A-Za-z0-9_]*[;{]'",
-    "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*[=;[]'",
+      sym .. "[[:space:]]*\\{'",
   }
+  if not weak then
+    return strong
+  end
+  strong[#strong + 1] = "-e '^(typedef|struct|union|enum)[[:space:]]+([^;{]*[^A-Za-z0-9_])?"
+      .. sym .. "[^A-Za-z0-9_]*[;{]'"
+  strong[#strong + 1] = "-e '^[A-Za-z_].*[^A-Za-z0-9_]" .. sym .. "[[:space:]]*[=;[]'"
+  return strong
 end
 
 local function grep_defining(root, sym)
-  local pats = def_patterns(sym)
   local cmds = {}
-  if uv.fs_stat(root .. '/.git') then
-    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
+  for _, weak in ipairs({ false, true }) do
+    local pats = def_patterns(sym, weak)
+    if uv.fs_stat(root .. '/.git') then
+      cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
+    end
+    cmds[#cmds + 1] = "grep -rlE " .. table.concat(pats, ' ') ..
+        " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
   end
-  cmds[#cmds + 1] = "grep -rlE " .. table.concat(pats, ' ') ..
-      " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
   local max = tonumber(cfg('grep_max', 5)) or 5
   for _, c in ipairs(cmds) do
     local ok, lines = pcall(vim.fn.systemlist, { 'sh', '-c',
@@ -2238,14 +2256,17 @@ end
 -- Same search, off the main loop: 'git grep' over a kernel-sized tree takes
 -- well over a second, and nothing may block the editor for that.
 local function grep_defining_async(root, sym, cb)
-  local pats = def_patterns(sym)
   local max = tonumber(cfg('grep_max', 5)) or 5
   local cmds = {}
-  if uv.fs_stat(root .. '/.git') then
-    cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
+  -- strong 을 먼저 전부 시도하고, 그래도 없으면 weak 으로 내려간다
+  for _, weak in ipairs({ false, true }) do
+    local pats = def_patterns(sym, weak)
+    if uv.fs_stat(root .. '/.git') then
+      cmds[#cmds + 1] = 'git grep -lE ' .. table.concat(pats, ' ') .. ' -- ' .. GLOBS
+    end
+    cmds[#cmds + 1] = 'grep -rlE ' .. table.concat(pats, ' ') ..
+        " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
   end
-  cmds[#cmds + 1] = 'grep -rlE ' .. table.concat(pats, ' ') ..
-      " --include='*.c' --include='*.h' --include='*.cpp' --include='*.cc' ."
   local i = 0
   local function step()
     i = i + 1
