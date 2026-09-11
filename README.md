@@ -1430,6 +1430,15 @@ Tera Term cannot render italic at all, so there the colour is the whole
 signal. iTerm2 can. For the exact `#800080` rather than its 256-colour
 approximation, `let g:vimide_truecolor = 1`.
 
+**A macro the index confirms is red, wherever it appears.** Treesitter cannot
+tell `ADD(x, 2)` from a function call - the syntax is identical - so
+function-like macros came out green and bold like any other call, while
+`MAXLEN` beside them was red. The index can tell: `--result=ctags-x` returns
+the defining source line, and a macro's begins `#define`. Measured on a file
+holding every shape: `MAXLEN`, `VERSION_STR`, `ADD`, `LOG` and a bodyless
+`EMPTY_MACRO` all red, and only the two names the index does not know left
+black.
+
 Reading a function,
 the thing worth noticing is which names reach outside it - a local you can
 follow with your eye, a global you cannot. Purple `#800080` is another of
@@ -1437,13 +1446,19 @@ Source Insight's inks, shared with comments, which are never identifiers and
 are purple by the line rather than by the word; the italic separates them
 anyway and says "this is state from outside".
 
+It applies **wherever the name is used**, not only inside functions: in
+another global's initializer, in a struct initializer list, anywhere at file
+scope. Measured on a file with all of those - `static int *g_ptr = &g_a;`
+and `.p = &g_b` in a designated initializer both come out purple, alongside
+the references inside the function.
+
 The query is deliberately narrow. It matches declarations at file scope only,
 and never through a `function_declarator` - `int helper(int);` is a
 declaration too, and a wildcard would have painted every function name as a
-global variable. A local that shadows a global wins, because the local is
-what the code actually touches. Measured on a file with both: `g_cfg`,
-`g_shared`, `g_name` and `g_tab` purple, `arg` and `local_v` teal, and a
-`g_count` redeclared inside the function teal rather than purple.
+global variable. The declaration itself is left alone, since it is already
+navy bold. A local that shadows a global wins, because the local is what the
+code actually touches: a `g_count` redeclared inside a function comes out
+teal, not purple.
 
 Globals that arrive from a header are not marked. This pass only knows what
 the file in front of it declares, and from the file alone an `extern` name

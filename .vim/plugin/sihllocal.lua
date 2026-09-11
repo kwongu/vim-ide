@@ -176,34 +176,36 @@ local function paint(win)
   -- 따지면 한 줄을 칠할 때마다 스코프를 거슬러 올라가야 한다. 함수 하나를
   -- 한 번 훑어 이름 집합을 만들어 두는 쪽이 훨씬 싸고, 틀리는 경우는
   -- '같은 함수 안 다른 블록의 같은 이름' 뿐인데 그것도 점프는 된다.
-  local fns, seen = {}, {}
-  for _, node in q.ref:iter_captures(root, buf, lo, hi) do
-    local fn = enclosing_fn(node)
-    if fn and not seen[fn:id()] then
-      seen[fn:id()] = true
-      fns[#fns + 1] = fn
-    end
-  end
-  if #fns == 0 then
-    return
-  end
-
-  -- 이 파일이 파일 스코프에서 선언한 변수들. 함수 안에서 이 이름을 쓰면
-  -- 전역 변수를 건드리는 것이고, 그건 지역 변수와 눈에 띄게 달라야 한다.
-  -- 헤더에서 온 전역(extern)은 여기서 보이지 않는다 - 이 파일이 가진
-  -- 정보만으로 말할 수 있는 것만 말한다.
-  local globals = {}
+  -- 이 파일이 파일 스코프에서 선언한 변수들. 이 이름을 어디서 쓰든 -
+  -- 함수 안이든, 다른 전역의 초기값이든, 구조체 초기화 목록 안이든 -
+  -- 이 함수 밖의 상태를 건드리는 것이라 눈에 띄어야 한다.
+  --
+  -- 헤더에서 온 전역(extern)은 여기서 보이지 않는다. 이 파일만 봐서는
+  -- extern 이름이 변수인지 함수인지도 알 수 없다.
+  local globals, gdecl_at = {}, {}
   if q.glob then
     for _, node in q.glob:iter_captures(root, buf, 0, -1) do
+      local r1, c1, r2, c2 = node:range()
       local t = vim.treesitter.get_node_text(node, buf)
-      if t and t ~= '' then globals[t] = true end
+      if t and t ~= '' then
+        globals[t] = true
+        gdecl_at[r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2] = true
+      end
     end
   end
 
-  local prio = tonumber(vim.g.sihl_priority) or 200
-  for _, fn in ipairs(fns) do
-    local declared = {}
-    local decl_at = {}
+  -- 함수마다 '여기서 선언된 이름'을 한 번만 모아 둔다.
+  --
+  -- 함수 단위로 보는 이유: C 에서 블록마다 가리는 경우는 드물고, 블록까지
+  -- 따지면 한 줄을 칠할 때마다 스코프를 거슬러 올라가야 한다. 틀리는 경우는
+  -- '같은 함수 안 다른 블록의 같은 이름' 뿐인데 그것도 점프는 된다.
+  local fninfo = {}
+  local function info_of(fn)
+    local id = fn:id()
+    if fninfo[id] then
+      return fninfo[id]
+    end
+    local declared, decl_at = {}, {}
     local fs, _, fe, _ = fn:range()
     for _, node in q.decl:iter_captures(fn, buf, fs, fe + 1) do
       local r1, c1, r2, c2 = node:range()
@@ -213,28 +215,41 @@ local function paint(win)
         decl_at[r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2] = true
       end
     end
-    if next(declared) then
-      for _, node in q.ref:iter_captures(fn, buf, math.max(lo, fs), math.min(hi, fe + 1)) do
-        local r1, c1, r2, c2 = node:range()
-        if r1 >= lo and r1 < hi and r1 == r2 then
-          local name = vim.treesitter.get_node_text(node, buf)
-          -- 선언한 자리 자체는 이미 파랑이다 (item 1/2). 덮지 않는다.
-          local at = r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2
-          local hl
-          if declared[name] and not decl_at[at] then
+    fninfo[id] = { declared = declared, decl_at = decl_at }
+    return fninfo[id]
+  end
+
+  local prio = tonumber(vim.g.sihl_priority) or 200
+  local glob_on = (tonumber(vim.g.sihl_local_global) or 1) ~= 0
+  local done = {}
+  for _, node in q.ref:iter_captures(root, buf, lo, hi) do
+    local r1, c1, r2, c2 = node:range()
+    if r1 == r2 and r1 >= lo and r1 < hi then
+      local at = r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2
+      if not done[at] then
+        done[at] = true
+        local name = vim.treesitter.get_node_text(node, buf)
+        local fn = enclosing_fn(node)
+        local hl
+        if fn then
+          local i = info_of(fn)
+          -- 선언한 자리 자체는 이미 파랑이다 (파라미터/지역변수). 덮지 않는다.
+          if i.declared[name] and not i.decl_at[at] then
             hl = 'SiJumpLocal'
-          elseif globals[name] and not declared[name]
-              and (tonumber(vim.g.sihl_local_global) or 1) ~= 0 then
+          elseif glob_on and globals[name] and not i.declared[name]
+              and not gdecl_at[at] then
             -- 지역에 같은 이름이 있으면 그게 이긴다 (가리는 쪽이 실제로
             -- 쓰이는 것이므로)
             hl = 'SiGlobalRef'
           end
-          if hl then
-            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
-              end_row = r2, end_col = c2,
-              hl_group = hl, priority = prio,
-            })
-          end
+        elseif glob_on and globals[name] and not gdecl_at[at] then
+          hl = 'SiGlobalRef'
+        end
+        if hl then
+          pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+            end_row = r2, end_col = c2,
+            hl_group = hl, priority = prio,
+          })
         end
       end
     end

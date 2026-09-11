@@ -387,6 +387,9 @@ call s:hi('SiJumpLocal', 'jumplocal', '', '')
 call s:hi('SiJumpNone', 'fg', '', '')
 " 함수 안에서 쓰는 전역 변수 (sihllocal.lua)
 call s:hi('SiGlobalRef', 'globalref', '', 'italic')
+" 색인이 '#define' 으로 확인해 준 매크로 (sihlindex.lua). 상수 매크로가
+" 원래 쓰던 빨강과 같은 색이다 - 함수형 매크로도 같은 것으로 보여야 한다.
+call s:hi('SiMacroRef', 'number', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

@@ -306,8 +306,15 @@ local function run_batch(root, syms, done)
   -- 종료 코드로 판정하면 안 된다: global -d 는 못 찾아도 0 을 준다(빈
   -- 출력만 다르다). 그렇게 했더니 없는 이름까지 전부 '찾음'이 되어 아무것도
   -- 칠해지지 않았다. 출력이 있는지로 본다.
+  --
+  -- --result=ctags-x 는 정의가 적힌 '소스 줄'까지 준다:
+  --   ADD    4 defs.h   #define ADD(a, b) ((a) + (b))
+  --   thing  5 defs.h   struct thing { int m; };
+  -- 이걸로 매크로인지 아닌지를 안다. treesitter 는 알 수가 없다 - 함수형
+  -- 매크로 ADD(x, 2) 는 함수 호출과 구문이 똑같아서 초록 볼드로 나왔다.
   local script = 'for s in ' .. table.concat(syms, ' ') ..
-      '; do if [ -n "$("$SIHL_G" -d "$s" 2>/dev/null)" ]; then echo "$s"; fi; done'
+      '; do o=$("$SIHL_G" -d --result=ctags-x "$s" 2>/dev/null | head -1);' ..
+      ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; fi; done'
   local argv = nice_prefix()
   vim.list_extend(argv, { 'sh', '-c', script })
   local env = db_env(root) or {}
@@ -325,8 +332,11 @@ local function run_batch(root, syms, done)
       local hit = {}
       if res and res.code == 0 and res.stdout then
         for line in res.stdout:gmatch('[^\n]+') do
-          local name = line:match('^%s*(%S+)%s*$')
-          if name then hit[name] = true end
+          local name, rest = line:match('^([^\t]+)\t(.*)$')
+          if name then
+            local src = rest:match('^%S+%s+%d+%s+%S+%s+(.*)$') or rest
+            hit[name] = src:match('^%s*#%s*define') and 'macro' or true
+          end
         end
       elseif res and res.code ~= 0 then
         dbg(('batch failed rc=%s err=%s'):format(tostring(res.code),
@@ -353,7 +363,7 @@ local function run_batch(root, syms, done)
       if res and res.code == 0 then
         for _, sym in ipairs(syms) do
           if hit[sym] then
-            b.found[sym] = true
+            b.found[sym] = hit[sym]
           else
             b.missing[sym] = true
           end
@@ -531,11 +541,16 @@ repaint = function(win)
     end
   end
 
+  -- 한 자리에 캡처가 여러 개 붙을 수 있다(@function.call 과 @constant 가
+  -- 같은 이름에 함께 오는 식). 같은 자리를 두 번 칠하지 않는다.
+  local done = {}
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
     local cap = q.captures[id]
     if ASK_CAP[cap] and OK_NODE[node:type()] then
       local r1, c1, r2, c2 = node:range()
-      if r1 == r2 and r1 >= lo and r1 < hi and not decl_here[r1 .. ':' .. c1] then
+      if r1 == r2 and r1 >= lo and r1 < hi and not decl_here[r1 .. ':' .. c1]
+          and not done[r1 .. ':' .. c1] then
+        done[r1 .. ':' .. c1] = true
         local name = vim.treesitter.get_node_text(node, buf)
         if name and #name > 1 and not KEYWORD[name] and not locals[name]
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
@@ -543,6 +558,13 @@ repaint = function(win)
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpNone', priority = prio,
+            })
+          elseif b.found[name] == 'macro' then
+            -- 매크로는 찾았으면 빨강. 이름만 보고는 함수와 구분되지 않아서
+            -- ADD(x, 2) 가 함수 호출과 같은 초록 볼드로 나왔었다.
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiMacroRef', priority = prio,
             })
           elseif b.found[name] == nil then
             want = want or {}
