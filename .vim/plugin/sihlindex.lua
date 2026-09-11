@@ -614,7 +614,15 @@ repaint = function(win)
           and not done[r1 .. ':' .. c1] then
         done[r1 .. ':' .. c1] = true
         local name = vim.treesitter.get_node_text(node, buf)
-        if name and #name > 1 and not KEYWORD[name] and not locals[name]
+        -- 지역 변수 필터는 이름으로 거르므로 멤버에는 적용하면 안 된다.
+        -- '->' 뒤의 이름은 절대 지역 변수가 아닌데, 같은 이름의 지역 변수가
+        -- 그 파일 어딘가에 있으면 멤버까지 통째로 빠졌다. 실제로
+        -- tcc-snd-card.c 에는 'struct tcc_dai_info_t *dai_info;' 라는 지역이
+        -- 있고 'card_info->dai_info' 라는 멤버도 있어서, ctags 가 아는 그
+        -- 멤버가 검정으로 남았다.
+        local is_member = node:type() == 'field_identifier'
+        if name and #name > 1 and not KEYWORD[name]
+            and (is_member or not locals[name])
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
           if b.missing[name] then
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
