@@ -56,6 +56,8 @@
 --   g:sihl_index_db     'near'(기본) 파일에서 가장 가까운 DB / 'root' 가장 바깥
 --   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1)
 --   g:sihl_index_ctags  0 이면 ctags 스냅숏은 보지 않는다 (기본 1)
+--   g:sihl_index_macro_navy  이 경로들에 정의된 매크로는 네이비 볼드
+--                            (기본 { 'include/linux/module%.h' })
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -124,6 +126,38 @@ local CONST_CAP = { ['constant'] = true, ['constant.macro'] = true }
 -- 초록이 된다 - 그게 '점프되는 것만 초록' 이라는 규칙 그대로다.
 --   let g:sihl_index_members = 0   " 멤버는 묻지 않는다
 local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
+
+-- 어떤 헤더의 매크로는 '코드'가 아니라 '선언'이다.
+--
+-- include/linux/module.h 의 MODULE_LICENSE, module_init, EXPORT_SYMBOL 같은
+-- 것들은 화면에서 예약어처럼 읽힌다 - 무엇을 계산하는 자리가 아니라 무엇을
+-- 선언하는 자리라서다. 정의가 어느 파일에 있는지는 색인이 알려 주므로
+-- (ctags-x 의 세 번째 칼럼이 경로다) 경로로 고른다.
+--
+--   let g:sihl_index_macro_navy = ['include/linux/module%.h']   " 기본값
+--   let g:sihl_index_macro_navy = []                            " 전부 빨강
+local function navy_pats()
+  local v = vim.g.sihl_index_macro_navy
+  if v == nil then
+    return { 'include/linux/module%.h' }
+  end
+  if type(v) == 'string' then
+    return v ~= '' and { v } or {}
+  end
+  return type(v) == 'table' and v or {}
+end
+
+local function macro_kind(path)
+  if not path or path == '' then
+    return 'macro'
+  end
+  for _, pat in ipairs(navy_pats()) do
+    if path:find(pat) then
+      return 'macrokw'
+    end
+  end
+  return 'macro'
+end
 
 local s = {
   cache = {},     -- root -> { key, found = {}, missing = {} }
@@ -387,7 +421,7 @@ local function in_tags(syms)
       local t = vim.fn.taglist('^' .. sym .. '$')
       if t and #t > 0 then
         -- ctags 의 kind 'd' 는 #define 이다
-        out[sym] = (t[1].kind == 'd') and 'macro' or true
+        out[sym] = (t[1].kind == 'd') and macro_kind(t[1].filename) or true
       end
     end
   end)
@@ -437,8 +471,9 @@ local function run_batch(root, syms, done)
         for line in res.stdout:gmatch('[^\n]+') do
           local name, rest = line:match('^([^\t]+)\t(.*)$')
           if name then
-            local src = rest:match('^%S+%s+%d+%s+%S+%s+(.*)$') or rest
-            hit[name] = src:match('^%s*#%s*define') and 'macro' or true
+            local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
+            src = src or rest
+            hit[name] = src:match('^%s*#%s*define') and macro_kind(path) or true
           end
         end
       elseif res and res.code ~= 0 then
@@ -705,6 +740,12 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpNone', priority = prio,
             })
+          elseif how == 'found' and extra == 'macrokw' then
+            -- module.h 계열 매크로: 선언처럼 읽히므로 네이비 볼드
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiMacroKw', priority = prio,
+            })
           elseif how == 'found' and extra == 'macro' then
             -- 매크로는 찾았으면 빨강. 이름만 보고는 함수와 구분되지 않아서
             -- ADD(x, 2) 가 함수 호출과 같은 초록 볼드로 나왔었다.
@@ -831,7 +872,9 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
   local g = prog()
   for i, root in ipairs(roots) do
     local b = bucket(root)
-    local cached = b.found[sym] and ('찾음' .. (b.found[sym] == 'macro' and ' (매크로)' or ''))
+    local cached = b.found[sym] and ('찾음' .. (
+        b.found[sym] == 'macro' and ' (매크로)'
+        or b.found[sym] == 'macrokw' and ' (매크로/네이비)' or ''))
         or (b.missing[sym] and '없음' or '아직 안 물어봄')
     local live = '(global 없음)'
     if g then

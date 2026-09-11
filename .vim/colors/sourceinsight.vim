@@ -196,18 +196,19 @@ function! s:hi(group, fg, bg, attr) abort
     let l:cmd .= ' guibg=' . s:c[a:bg][0] . ' ctermbg=' . s:c[a:bg][1]
   endif
   let l:cmd .= ' gui=' . (a:attr ==# '' ? 'NONE' : a:attr)
-  " cterm 에도 italic 을 그대로 넘긴다.
+  " cterm 에서는 italic 을 뺀다 (기본값).
   "
-  " 예전에는 여기서 italic 을 지웠다. 이탤릭을 쓰는 그룹이 하나도 없을 때
-  " 넣어 둔 예방책이었는데, 전역 변수 참조(SiGlobalRef)가 생기면서 그것이
-  " 바로 문제가 됐다: termguicolors 가 꺼진 터미널 세션에서는 cterm 쪽만
-  " 쓰이므로 이탤릭이 아예 나오지 않았다.
+  " 이탤릭 폰트가 없는 터미널은 italic 을 반전(reverse)으로 그린다. 실제로
+  " 전역 변수 참조가 '보라 글자'가 아니라 '음영 덩어리'로 보인다는 보고가
+  " 왔다 - 글자색으로 읽히라고 준 색이 배경처럼 보이면 없느니만 못하다.
+  " gui 쪽(termguicolors 또는 GUI)에는 그대로 넘기므로, 이탤릭이 제대로
+  " 그려지는 환경에서는 기울어진다.
   "
-  " 이탤릭을 반전(reverse)으로 그리는 터미널이 있으면:
-  "   let g:sourceinsight_no_cterm_italic = 1
+  " 터미널이 이탤릭을 제대로 그린다면:
+  "   let g:sourceinsight_cterm_italic = 1
   let l:cattr = a:attr ==# '' ? 'NONE' : a:attr
-  if get(g:, 'sourceinsight_no_cterm_italic', 0)
-    let l:cattr = substitute(l:cattr, 'italic', 'NONE', 'g')
+  if !get(g:, 'sourceinsight_cterm_italic', 0)
+    let l:cattr = substitute(l:cattr, ',\?italic', '', 'g')
     let l:cattr = l:cattr ==# '' ? 'NONE' : l:cattr
   endif
   let l:cmd .= ' cterm=' . l:cattr
@@ -394,6 +395,10 @@ call s:hi('SiGlobalRef', 'globalref', '', 'italic')
 " 색인이 '#define' 으로 확인해 준 매크로 (sihlindex.lua). 상수 매크로가
 " 원래 쓰던 빨강과 같은 색이다 - 함수형 매크로도 같은 것으로 보여야 한다.
 call s:hi('SiMacroRef', 'number', '', '')
+" 선언처럼 읽히는 커널 매크로 (module.h 의 MODULE_LICENSE, module_init ...).
+" 코드가 아니라 선언을 적는 자리라 예약어와 같은 네이비 볼드로 둔다.
+"   let g:sihl_index_macro_navy = ['include/linux/module\.h', 'include/linux/init\.h']
+call s:hi('SiMacroKw', 'decl', '', 'bold')
 " 색인이 아는데 매크로가 아닌 상수(enum 요소). 기본색이 빨강이라 되돌린다.
 call s:hi('SiJumpFound', 'ref', '', '')
 
