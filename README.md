@@ -767,6 +767,17 @@ project only being known once the session is up.
 Sourcing the plugin in that project went **153 ms → 88 ms**, and the file it
 writes is byte-for-byte the same 1,452 lines.
 
+### Editing the list from netrw
+
+`:Explore`'s listing takes the same three keys - `+` to add the entry under
+the cursor or across a visual selection, `-` to remove, `=` to ask - and puts
+the red mark on entries that are in.
+
+The line is never parsed. netrw draws four different listing styles (thin,
+long, wide, tree) and each puts the name somewhere else, so the name comes
+from `netrw#Call('NetrwGetWord')`, which is netrw answering about its own
+buffer, and the directory from `b:netrw_curdir`.
+
 ### Editing the list from the buffer list
 
 `F6`'s BufExplorer takes the same three keys the trees do:
