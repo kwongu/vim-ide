@@ -181,6 +181,7 @@ end
 local s = {
   cache = {},     -- root -> { key, found = {}, missing = {} }
   snap_ok = {},   -- root -> 이 루트에서 ctags 스냅숏까지 봐도 되는가
+  snaps = {},     -- root -> 그때 볼 스냅숏 경로들 (체인 전체의 것)
   busy = false,
   want = {},      -- root -> { sym -> true }
   tokens = {}, timer = nil, proc = nil, watchdog = nil, killed = false,
@@ -480,11 +481,13 @@ local function run_batch(root, syms, done)
   -- 멤버를 색인하지 않고, 이 프로젝트에는 taglist 가 볼 파일이 없다.
   local script = 'for s in ' .. table.concat(syms, ' ') ..
       '; do o=$("$SIHL_G" -d --result=ctags-x "$s" 2>/dev/null | head -1);' ..
-      ' if [ -z "$o" ] && [ -n "$SIHL_SNAP" ] && [ -r "$SIHL_SNAP" ]; then' ..
-      ' a=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$SIHL_SNAP" 2>/dev/null | head -40);' ..
+      ' if [ -z "$o" ] && [ -n "$SIHL_SNAPS" ]; then' ..
+      ' for f in $SIHL_SNAPS; do [ -r "$f" ] || continue;' ..
+      ' a=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$f" 2>/dev/null | head -40);' ..
+      ' [ -z "$a" ] && continue;' ..
       ' o=$(printf \'%s\\n\' "$a" | grep -m1 "#define" );' ..
       ' [ -z "$o" ] && o=$(printf \'%s\\n\' "$a" | head -1);' ..
-      ' [ -n "$o" ] && o="TAG\t$o"; fi;' ..
+      ' o="TAG\t$o"; break; done; fi;' ..
       ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; fi; done'
   local argv = nice_prefix()
   vim.list_extend(argv, { 'sh', '-c', script })
@@ -497,10 +500,14 @@ local function run_batch(root, syms, done)
   -- 스냅숏의 엉뚱한 #define 으로 먼저 잡혀서, module.h 매크로인데 네이비가
   -- 아니라 초록이 됐다.
   if s.snap_ok[root] and (tonumber(cfg('ctags', 1)) or 1) ~= 0
-      and _G.autoindex_ctags_file and vim.fn.executable('look') == 1 then
-    local ok, snap = pcall(_G.autoindex_ctags_file, root)
-    if ok and snap and snap ~= '' and uv.fs_stat(snap) then
-      env.SIHL_SNAP = snap
+      and vim.fn.executable('look') == 1 then
+    -- 체인의 스냅숏을 전부 넘긴다. 스냅숏은 프로젝트마다 따로 있고, 찾는
+    -- 심볼이 어느 프로젝트 것인지는 모른다 - 실제로 구조체 멤버는
+    -- kernel/common 의 1.7GB 스냅숏에만 있는데 체인의 마지막 루트는 그
+    -- 바깥이라, 바깥 것만 보면 못 찾는다.
+    local list = s.snaps[root] or {}
+    if #list > 0 then
+      env.SIHL_SNAPS = table.concat(list, ' ')
     end
   end
   dbg(('batch root=%s n=%d'):format(root, #syms))
@@ -833,6 +840,18 @@ repaint = function(win)
             s.want[r] = s.want[r] or {}
             s.want[r][name] = true
             s.snap_ok[r] = (extra == #roots)
+            if s.snap_ok[r] and not s.snaps[r] then
+              local list = {}
+              for _, rr in ipairs(roots) do
+                if _G.autoindex_ctags_file then
+                  local okc, snap = pcall(_G.autoindex_ctags_file, rr)
+                  if okc and snap and snap ~= '' and uv.fs_stat(snap) then
+                    list[#list + 1] = snap
+                  end
+                end
+              end
+              s.snaps[r] = list
+            end
             asked = true
           end
         end
@@ -913,7 +932,7 @@ end, { desc = '색인에 없는 심볼 검정 표시 켜고 끄기' })
 
 api.nvim_create_user_command('SiHlIndexClear', function()
   s.cache, s.want, root_cache, chain_cache = {}, {}, {}, {}
-  s.snap_ok = {}
+  s.snap_ok, s.snaps = {}, {}
   s.off, s.fails, prog_cache = nil, 0, nil
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
