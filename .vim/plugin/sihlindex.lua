@@ -54,6 +54,7 @@
 --   g:sihl_index_batch  한 번 칠할 때 시작할 배치 수 (기본 2)
 --   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
 --   g:sihl_index_db     'near'(기본) 파일에서 가장 가까운 DB / 'root' 가장 바깥
+--   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1)
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -108,9 +109,19 @@ local ASK_CAP = {
   ['function.macro'] = true, ['constant'] = true, ['constant.macro'] = true,
   ['si.type.ref'] = true, ['type'] = true,
 }
-local OK_NODE = { identifier = true, type_identifier = true }
+local OK_NODE = { identifier = true, type_identifier = true,
+                  field_identifier = true }
 -- 기본색이 빨강인 캡처. 찾았는데 매크로가 아니면 초록으로 돌려놔야 한다.
 local CONST_CAP = { ['constant'] = true, ['constant.macro'] = true }
+-- 기본색이 본문색(검정)인 캡처: 구조체 멤버. 찾았으면 초록으로 올린다.
+--
+-- GNU Global 의 기본 파서는 멤버를 대부분 색인하지 않는다 - 실제 커널
+-- 인덱스에서 dai_link, num_links, codec_dai_name, runtime 은 전부 0 이고
+-- private_data 만 1 이었다(줄 하나짜리 포인터 멤버라 정의로 읽힌 것 같다).
+-- 그래서 대부분은 오늘과 같이 검정으로 남고, 색인이 진짜로 아는 멤버만
+-- 초록이 된다 - 그게 '점프되는 것만 초록' 이라는 규칙 그대로다.
+--   let g:sihl_index_members = 0   " 멤버는 묻지 않는다
+local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
 
 local s = {
   cache = {},     -- root -> { key, found = {}, missing = {} }
@@ -546,9 +557,10 @@ repaint = function(win)
   -- 한 자리에 캡처가 여러 개 붙을 수 있다(@function.call 과 @constant 가
   -- 같은 이름에 함께 오는 식). 같은 자리를 두 번 칠하지 않는다.
   local done = {}
+  local members_on = (tonumber(cfg('members', 1)) or 1) ~= 0
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
     local cap = q.captures[id]
-    if ASK_CAP[cap] and OK_NODE[node:type()] then
+    if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap])) and OK_NODE[node:type()] then
       local r1, c1, r2, c2 = node:range()
       if r1 == r2 and r1 >= lo and r1 < hi and not decl_here[r1 .. ':' .. c1]
           and not done[r1 .. ':' .. c1] then
@@ -568,13 +580,13 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroRef', priority = prio,
             })
-          elseif b.found[name] and CONST_CAP[cap] then
-            -- 찾았는데 매크로가 아니다 = enum 상수다.
+          elseif b.found[name] and (CONST_CAP[cap] or MEMBER_CAP[cap]) then
+            -- 찾았는데 매크로가 아니다 = enum 상수이거나 구조체 멤버다.
             --
-            -- nvim 기본 쿼리는 enum 상수와 상수 매크로를 똑같이 @constant
-            -- 로 잡아서 둘 다 빨강으로 나온다. 매크로만 빨강이어야 하므로,
-            -- 여기서는 '아무것도 안 칠하기'가 답이 아니다 - 빨강이 그대로
-            -- 남기 때문이다. 초록으로 되돌린다.
+            -- 둘 다 '아무것도 안 칠하기'로는 초록이 되지 않는다. enum 상수는
+            -- nvim 기본 쿼리가 상수 매크로와 똑같이 @constant 로 잡아 빨강
+            -- 으로 시작하고, 멤버는 @property 라 본문색(검정)으로 시작한다.
+            -- 초록으로 올려 준다.
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpFound', priority = prio,
