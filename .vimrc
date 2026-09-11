@@ -353,20 +353,30 @@ _G.rv_setup('aerial', {
   -- 아웃라인은 tagbar 시절부터 왼쪽에 있었다(g:tagbar_left=1). 그 자리를
   -- 그대로 쓴다 - 오른쪽은 RelationView 의 context 창이 쓰고 있다.
   layout = { default_direction = 'left', width = 40 },
-  -- 심볼이 있는 파일을 열면 aerial 이 알아서 뜬다.
+  -- 아웃라인은 F10 으로 켤 때만 연다.
   --
-  -- VimEnter 에서 :AerialOpen 을 부르는 방법도 써 봤는데, 그 시점에는
-  -- 버퍼도 treesitter 도 아직이라 창만 뜨고 비어 있었다. 이건 aerial 이
-  -- 심볼을 얻은 뒤에 열어 주므로 그 문제가 없다.
+  -- 예전에는 심볼이 있는 파일을 열면 알아서 떴다. 문제는 aerial 이
+  -- attach_mode = 'window' 라, '파일을 열 때'가 아니라 '편집 창에 들어갈
+  -- 때마다' 이 함수를 다시 묻는다는 것이다. 창을 나누고 새 창으로 포커스를
+  -- 옮기면 거기에도 또 떴고, F10 으로 닫아도 다음 창에 들어가는 순간 되살아
+  -- 났다. 끈 것이 꺼진 채로 있지 않으면 그건 토글이 아니다.
   --
-  -- 다만 neo-tree 가 떠 있으면 열지 않는다. 둘 다 왼쪽을 쓰기 때문에,
-  -- 트리를 열어 둔 채 다른 파일로 옮기면 aerial 이 끼어들어 트리를 밀어낸다
-  -- (F9 가 aerial 을 닫아도 다음 파일에서 다시 뜬다). 트리를 닫으면 다음에
-  -- 파일을 열 때 평소처럼 다시 뜬다.
+  -- 그래서 자동으로 여는 길을 아예 없앴다. 여는 것은 F10, <leader>o,
+  -- :AerialOpen 뿐이고 셋 다 사람이 누르는 것이다.
   --
-  -- true 를 주면 aerial 이 'is_ignored_buf 가 아니면 연다'로 바꿔 주므로
-  -- 함수로 줄 때도 그 검사를 그대로 이어 간다.
+  -- 예전처럼 알아서 열리게 하려면:
+  --   let g:vimide_outline_auto = 1
+  --
+  -- 그때 쓰던 검사는 그대로 남겨 둔다. neo-tree 가 떠 있으면 열지 않는다 -
+  -- 둘 다 왼쪽을 쓰기 때문에 aerial 이 끼어들어 트리를 밀어낸다. true 를
+  -- 주면 aerial 이 'is_ignored_buf 가 아니면 연다'로 바꿔 주므로, 함수로 줄
+  -- 때도 그 검사를 그대로 이어 간다.
+  -- 값은 부를 때마다 읽는다. setup 에서 한 번 읽어 굳혀 두면 나중에
+  -- :let 으로 켤 수 없고, 이 설정의 다른 옵션들과도 어긋난다.
   open_automatic = function(bufnr)
+    if (tonumber(vim.g.vimide_outline_auto) or 0) == 0 then
+      return false
+    end
     for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       local b = vim.api.nvim_win_get_buf(w)
       if vim.bo[b].filetype == 'neo-tree' then
@@ -1586,9 +1596,16 @@ let g:tagbar_file_size_limit = get(g:, 'tagbar_file_size_limit', 1024 * 1024)
 function! AutoLoadTagbar()
 	if get(g:, 'vimide_outline', 'aerial') ==# 'tagbar' || !exists(':AerialOpen')
 		exe 'Tagbar'
+		return
 	endif
-	" aerial 은 open_automatic 으로 스스로 뜬다 (위 setup 참고).
-	" 여기서 열면 VimEnter 시점이라 비어 있는 창만 생긴다.
+	" aerial 은 이제 스스로 뜨지 않는다 - F10 으로만 연다 (위 setup 참고).
+	" 시작할 때부터 열어 두고 싶으면 g:vimide_outline_startup = 1.
+	"
+	" VimEnter 시점에는 버퍼도 treesitter 도 아직이라 지금 열면 빈 창만
+	" 생긴다. 그래서 조금 미뤄서 연다.
+	if get(g:, 'vimide_outline_startup', 0)
+		call timer_start(200, { -> execute('silent! AerialOpen') })
+	endif
 endfunction
 autocmd VimEnter * call AutoLoadTagbar()
 

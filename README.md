@@ -63,7 +63,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs (`<leader>v`).
 
-* Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (`<leader>o`), built on treesitter so it needs no language server. Tagbar (F10) stays as it was.
+* Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (F10 or `<leader>o`, and only when you press it), built on treesitter so it needs no language server. `:Tagbar` stays as it was.
 
 * Automatic symbol index (nvim only): both indexes maintain themselves. `vim-gutentags` keeps the ctags `tags` file current and `~/.vim/plugin/autoindex.lua` does the same for GTAGS, so RelationView, `:Gtags` and `<leader>fs` are always in sync without pressing F2. **Starting nvim refreshes the index of the project in front of you in the background** - an incremental `gtags -i` when it exists (2s on a 69k-file kernel tree), a full build when it does not (26s there) - and saving a file updates that one file in milliseconds. `:GtagsIndex` rebuilds, `:GtagsIndexRefresh` updates incrementally, `:GtagsIndexUpdate` does the current file and `:GtagsIndexStatus` says what is running. **`Ctrl+]`, `:tag` and `g]` are answered from GTAGS** through nvim's `'tagfunc'`, so a jump works the moment a file is saved (8 ms on a 69k-file kernel tree) and needs no ctags file at all; when gtags has nothing to say, the normal tags-file lookup still runs, and an LSP client that sets its own `'tagfunc'` per buffer still wins there. Which files get indexed is decided in one place - `~/.local/bin/indexfiles.sh`: a project's own `.indexfiles`, else `git ls-files` (tracked and new files, honouring `.gitignore`), else `cscope.files` (what F2 writes), else a find over the source extensions. Drop an `.indexfiles` in a project root to index exactly the files you care about. `cscope.files` ranks below git on purpose: an F2 run that is interrupted leaves a partial list behind, and rebuilding from it drops every symbol outside it. For the same reason a rebuild that would cover less than half of what the current index covers asks first (`:GtagsIndex`) or is skipped (automatic), and every build reports how many files it indexed.
 * Where the index lives: `GTAGS`, `GRTAGS` and `GPATH` go into a hidden **`.tags/` directory in the project root**, so nothing visible is dropped into the source tree, and a database still sitting at a project root (what F2 used to write) is moved there the first time the project is opened. GNU global only looks inside such a directory when `GTAGSOBJDIR` names it, so `.vimrc` exports `GTAGSOBJDIR=.tags` once - one value that works in every project, in every subdirectory, and still finds an old root-level database. In a terminal: `eval "$(gtagsenv.sh)"`, or put `export GTAGSOBJDIR=.tags` in `~/.zshenv`. The directory is added to `.git/info/exclude` (local, never committed) so it stays out of `git status`. `let g:autoindex_dbdir = ''` puts the database back in the project root.
@@ -1154,19 +1154,34 @@ right rule anyway.
 
 ## The symbol outline (nvim only)
 
-`<F10>` and startup open **aerial**, on the left where tagbar used to sit.
-`:Tagbar` is still there for the files aerial cannot read - aerial's backends
-are treesitter, LSP, markdown and man, with no ctags fallback, so a language
+`<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is
+still there for the files aerial cannot read - aerial's backends are
+treesitter, LSP, markdown and man, with no ctags fallback, so a language
 without a parser shows nothing. `let g:vimide_outline = 'tagbar'` puts the
 old one back everywhere.
 
-It does not open while neo-tree is up. Both want the left column, so with
-the tree open, moving to another file had aerial elbow in and push the tree
-aside - `F9` closing aerial was not enough, because the next file brought it
-straight back. `open_automatic` takes a function, so it answers no while a
-`neo-tree` window is in the tab (and keeps aerial's own `is_ignored_buf`
-check, which the plain `true` form applies for you). Close the tree and the
-next file you open has the outline back.
+**Only `<F10>` opens it.** It used to appear by itself whenever you opened a
+file with symbols in it, which sounds convenient and was not: aerial runs
+with `attach_mode = 'window'`, so `open_automatic` is asked again every time
+you *enter an edit window*, not every time you open a file. Split the window
+and move down into the new one and a second outline appeared there. Press
+`<F10>` to close it and it came back the moment focus landed anywhere else.
+A switch that turns itself back on is not a switch. So the automatic path is
+gone: `<F10>`, `<leader>o` and `:AerialOpen` open it, and all three are
+things a person pressed.
+
+| | |
+|---|---|
+| `g:vimide_outline_auto = 1` | open by itself again, as before. Read when the decision is made, so `:let` works mid-session |
+| `g:vimide_outline_startup = 1` | open it at startup too (deferred 200 ms - at `VimEnter` neither the buffer nor treesitter is ready, and it would open empty) |
+
+The old automatic behaviour, kept intact behind that option, also refuses
+while neo-tree is up. Both want the left column, so with the tree open,
+moving to another file had aerial elbow in and push the tree aside - `F9`
+closing aerial was not enough, because the next file brought it straight
+back. `open_automatic` takes a function, so it answers no while a `neo-tree`
+window is in the tab (and keeps aerial's own `is_ignored_buf` check, which
+the plain `true` form applies for you).
 
 Two things make it behave like Source Insight's Symbol Window:
 
