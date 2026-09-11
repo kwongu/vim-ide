@@ -2169,6 +2169,14 @@ function _G.relationview_panel_win()
   return (s.win and api.nvim_win_is_valid(s.win)) and s.win or nil
 end
 
+-- sihlindex.lua 가 색과 점프가 같은 DB 를 보도록 쓰는 입구.
+-- root_for 는 콜백을 안에서 바로 부르므로 동기로 써도 된다.
+function _G.relationview_root_for(path)
+  local out
+  pcall(root_for, path, function(r) out = r end)
+  return out
+end
+
 function _G.relationview_ctx_win()
   return (s.ctx_win and api.nvim_win_is_valid(s.ctx_win)) and s.ctx_win or nil
 end

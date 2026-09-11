@@ -1411,6 +1411,63 @@ Measured on a file holding every local-declaration shape: 31 uses painted,
 and calls (`helper`, `printf`), struct members (`m`), file-scope variables
 (`g_global`) and the declarations themselves are all left alone.
 
+### Green means the index can take you there
+
+A struct, enum, typedef, function or macro reference keeps its green only
+while `global` can find a definition for that name. When it cannot, the name
+drops to body colour - because green is a promise that `Ctrl+]` will land
+somewhere, and a promise that fails is worse than no colour at all.
+
+Only the *missing* case is painted. Known and not-yet-asked both render
+exactly as before, so scrolling never flashes black and a pending answer
+costs nothing on screen.
+
+**Batching turned out to be possible, and the earlier note here saying it
+was not was wrong.** `global --result=ctags-x -d -e '^(a|b|c)$'` answers for
+every name at once, with the name in column 1. What had actually failed was
+a 512-byte pattern buffer: measured on the dev server, 511 bytes returns
+rc=0 and 512 returns rc=1 with `global: buffer overflow. strlimcpy(dest,
+'...', 512)` and empty output - and the pattern that produced the original
+"returns nothing" was 1009 bytes. Patterns are packed to 480 bytes now,
+about twenty names, and twenty names came back from one 498-byte call.
+
+Four things the review caught, all of which would have painted the screen
+wrong:
+
+- `static`, `const` and `volatile` carry `@si.type.ref`, the same capture as
+  a real type name, so without a node-type check every line of C would have
+  gone black. Only `identifier` and `type_identifier` nodes are asked.
+- Locals and parameters are never asked. GTAGS holds no locals, so the
+  answer would always be "absent" - which would black out the blue
+  declarations and the olive uses that were just added. An ALL-CAPS local is
+  the sharp case: nvim's own query calls it `@constant`, indistinguishable
+  from a macro by capture alone, so the filter is by name against the
+  enclosing function's declarations.
+- A failed `global` (non-zero exit) records nothing. Writing "absent" on
+  failure means one over-long pattern blacks out a file.
+- A reindex drops only the `missing` half of the cache. Dropping all of it
+  made every black mark vanish and slowly return after each `:w`.
+
+| | |
+|---|---|
+| `g:sihl_index = 0` | off (`:SiHlIndexToggle`, `:SiHlIndexClear`, `:SiHlIndexStatus`) |
+| `g:sihl_index_budget` | `global` processes per minute, default 30 |
+| `g:sihl_index_delay` / `_pad` / `_batch` / `_timeout` | 200ms, 20 lines, 2 batches, 5s watchdog |
+| `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
+| `g:sourceinsight_local_color` | a different green for the local uses, e.g. `'#7cb342'` |
+
+**On a preset index most of a kernel screen will be black, and that is the
+answer, not a fault.** A preset indexes a chosen subset - 1,452 files out of
+a QNX SDK - so `task_struct`, `WARN_ON` and `ENOMEM` genuinely are not in
+that database and `Ctrl+]` genuinely will not find them. Measured on a
+701-file preset: 25 of 42 symbols on one screen. Add the files (`\fa`,
+`:ProjectFilesReindex`) and they go green again; `g:sihl_index = 0` if you
+would rather not know.
+
+Verified end to end against a real GTAGS: `no_such_function` and
+`UNKNOWN_MACRO` painted black, `helper_add`, `render_point` and `struct
+point` left green, every local and parameter left to the olive pass.
+
 ## The symbol outline (nvim only)
 
 `<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is

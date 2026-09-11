@@ -146,6 +146,13 @@ endif
 if !has_key(s:c, 'jumplocal')
   let s:c.jumplocal = ['#6b8e23', 64,  'darkgreen']
 endif
+" 더 밝은/어두운 연두로 바꾸고 싶을 때:
+"   let g:sourceinsight_local_color = '#7cb342'   " 밝은 연두
+"   let g:sourceinsight_local_color = '#556b2f'   " 더 짙게
+if exists('g:sourceinsight_local_color')
+  let s:c.jumplocal = [g:sourceinsight_local_color,
+        \ get(g:, 'sourceinsight_local_cterm', 64), 'darkgreen']
+endif
 if !has_key(s:c, 'typeref')
   let s:c.typeref = s:c.ref
 endif
@@ -341,6 +348,9 @@ call s:hi('@si.inactive', 'linenr', '', '')
 
 " 지역 변수를 '여기서 선언된 것'으로 알아본 자리 (sihllocal.lua)
 call s:hi('SiJumpLocal', 'jumplocal', '', '')
+" 색인이 정의부를 모르는 심볼 (sihlindex.lua). 본문색으로 떨어뜨린다 -
+" 초록이 '점프할 수 있다'는 뜻이 되려면, 못 하는 것은 초록이 아니어야 한다.
+call s:hi('SiJumpNone', 'fg', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')
