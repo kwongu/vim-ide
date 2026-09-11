@@ -1213,26 +1213,61 @@ Actions* → `+`, click the side button to record it, Action = **Send Escape
 Sequence**, Text = `[15;2~` for back and `[17;2~` for forward (iTerm2 sends
 the ESC itself).
 
-**Tera Term** has no mouse-button binding at all, so it has to come from
-outside. AutoHotkey, scoped to Tera Term so the buttons keep working
-elsewhere:
+**Tera Term never sees those buttons at all.** Its mouse reporting in
+`vtwin.cpp` handles `IdLeftButton`, `IdMiddleButton`, `IdRightButton` and the
+wheel, and there is no `WM_XBUTTONDOWN` case anywhere - so no setting will
+make it forward them. It has to come from outside Tera Term. AutoHotkey,
+scoped so the buttons keep working in other apps:
 
 ```ahk
+; AutoHotkey v2 (the current default download)
+#HotIf WinActive("ahk_exe ttermpro.exe")
+XButton1::SendInput("{Esc}[15;2~")
+XButton2::SendInput("{Esc}[17;2~")
+#HotIf
+```
+
+```ahk
+; AutoHotkey v1 - v2 will not run this, and v1 will not run the above
 #IfWinActive ahk_exe ttermpro.exe
 XButton1::SendInput {Esc}[15;2~
 XButton2::SendInput {Esc}[17;2~
 #IfWinActive
 ```
 
-Or bind the buttons to `Ctrl+O` / `Ctrl+I` in the mouse vendor's own utility
-- simpler, and it works because those two are mapped everywhere too. The one
-cost is that `Ctrl+I` is `Tab`, so the forward button inserts a tab if you
-press it in insert mode; the escape-sequence route has no such overlap.
+Simpler and with one fewer thing to get wrong - send a plain key instead,
+since back and forward answer to `Ctrl+O` / `Ctrl+I` in all three windows:
+
+```ahk
+#HotIf WinActive("ahk_exe ttermpro.exe")     ; v2
+XButton1::SendInput("^o")
+XButton2::SendInput("^i")
+#HotIf
+```
+
+The mouse vendor's own utility can do the same binding with no AutoHotkey at
+all. The one cost is that `Ctrl+I` is `Tab`, so the forward button inserts a
+tab if you press it in insert mode; the escape-sequence route has no such
+overlap. If Tera Term runs elevated and AutoHotkey does not, Windows blocks
+the synthetic input - run both the same way.
+
+**`:JumpKeyTest`** says where the chain breaks. Run it, press the button
+once, and it prints the key nvim received and the raw bytes. Nothing at all
+means the button never reached nvim, which is a terminal/AutoHotkey problem,
+not a mapping one. Measured through a pty against this config:
+
+| sent | `TERM=xterm` | `TERM=vt100` |
+|---|---|---|
+| `ESC [15;2~` | `<F17>` | `<S-F5>` |
+| `ESC [17;2~` | `<F18>` | `<S-F6>` |
+| `Ctrl+O` | `<C-O>` | `<C-O>` |
+
+which is why both names in each row are bound by default.
 
 | | |
 |---|---|
 | `g:vimide_jump_back_key` | list of key names for back. Default `['<F17>', '<S-F5>']`, `[]` disables |
-| `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F7>']` |
+| `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F6>']` |
 
 ## The symbol outline (nvim only)
 

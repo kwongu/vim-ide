@@ -1696,15 +1696,17 @@ end
 -- 터미널 쪽에서 그 버튼이 특정 시퀀스를 보내도록 설정할 수 있으므로, 그것을
 -- 여기서 받는다. 기본값은 ESC[15;2~ / ESC[17;2~ 이고, 그 시퀀스를 nvim 이
 -- <F17>/<F18> 로 읽는지 <S-F5>/<S-F7> 로 읽는지는 버전과 terminfo 에 따라
--- 갈리므로 둘 다 걸어 둔다 (둘 중 하나만 오고, 나머지는 그냥 안 눌린다).
+-- 갈린다. TERM=xterm 이면 <F17>/<F18>, TERM=vt100 이면 <S-F5>/<S-F6> 로
+-- 들어오는 것을 pty 로 확인했다. 그래서 둘 다 걸어 둔다 - 하나만 오고
+-- 나머지는 그냥 안 눌린다.
 --
 --   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
---   let g:vimide_jump_forward_key = ['<F18>', '<S-F7>']
+--   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>']
 --   let g:vimide_jump_back_key    = []        " 이 대체 키를 쓰지 않는다
 local function alias_keys(which)
   local v = vim.g['vimide_jump_' .. which .. '_key']
   if v == nil then
-    return which == 'back' and { '<F17>', '<S-F5>' } or { '<F18>', '<S-F7>' }
+    return which == 'back' and { '<F17>', '<S-F5>' } or { '<F18>', '<S-F6>' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}

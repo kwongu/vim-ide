@@ -1119,8 +1119,9 @@ nnoremap <X2Mouse> <C-i>
 " iTerm2 도 Tera Term 도 그래서 <X1Mouse>/<X2Mouse> 를 만들어 주지 못한다.
 " 대신 터미널 쪽에서 그 버튼이 어떤 시퀀스를 보내도록 설정할 수 있으니,
 " 그 시퀀스를 여기서 받는다. 기본은 ESC[15;2~ / ESC[17;2~ 이고, nvim 이
-" 그것을 <F17>/<F18> 로 읽는지 <S-F5>/<S-F7> 로 읽는지는 terminfo 와 버전에
-" 따라 갈려서 둘 다 걸어 둔다 - 어차피 하나만 들어온다.
+" 그것을 어떤 이름으로 읽는지는 TERM 에 따라 갈린다. pty 로 확인한 결과
+" TERM=xterm 이면 <F17>/<F18>, TERM=vt100 이면 <S-F5>/<S-F6> 였다. 그래서
+" 둘 다 걸어 둔다 - 어차피 하나만 들어온다. :JumpKeyTest 로 확인할 수 있다.
 "
 "   iTerm2   Settings > Profiles > (프로필) > ... 이 아니라 Pointer 탭:
 "            'Mouse Button and Trackpad Gesture Actions' 에 버튼 4/5 를
@@ -1135,11 +1136,11 @@ nnoremap <X2Mouse> <C-i>
 "             묶어도 된다 - 패널과 context 창도 그 두 키를 받는다)
 "
 "   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
-"   let g:vimide_jump_forward_key = ['<F18>', '<S-F7>']
+"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>']
 "   let g:vimide_jump_back_key    = []     " 이 대체 키를 쓰지 않는다
 func! s:MapJumpAlias(which, rhs) abort
 	let l:v = get(g:, 'vimide_jump_' . a:which . '_key',
-				\ a:which ==# 'back' ? ['<F17>', '<S-F5>'] : ['<F18>', '<S-F7>'])
+				\ a:which ==# 'back' ? ['<F17>', '<S-F5>'] : ['<F18>', '<S-F6>'])
 	if type(l:v) == type('')
 		let l:v = empty(l:v) ? [] : [l:v]
 	endif
@@ -1149,6 +1150,27 @@ func! s:MapJumpAlias(which, rhs) abort
 endfunc
 call s:MapJumpAlias('back', '<C-o>')
 call s:MapJumpAlias('forward', '<C-i>')
+
+" :JumpKeyTest - 이 키가 여기까지 오기는 하는가
+"
+" 마우스 옆 버튼이 안 먹을 때, 터미널이 아무것도 안 보내는 것인지 보내는데
+" 키 이름이 다른 것인지 가려 준다. 실행하고 그 버튼(또는 키)을 한 번 누르면
+" nvim 이 받은 이름과 원시 바이트를 그대로 보여준다. 아무 반응이 없으면
+" 터미널이 그 버튼을 아예 안 보내고 있는 것이다 - 그때는 vim 을 고칠 일이
+" 아니라 터미널/AutoHotkey 쪽을 고쳐야 한다.
+func! s:JumpKeyTest() abort
+	echo '키(또는 마우스 버튼)를 한 번 누르세요... (아무 반응이 없으면 터미널이 안 보내는 것)'
+	if exists('*getcharstr') && exists('*keytrans')
+		let l:c = getcharstr()
+		redraw
+		echo printf('받은 키 = %s     원시 = %s', keytrans(l:c), strtrans(l:c))
+	else
+		let l:c = getchar()
+		redraw
+		echo printf('받은 키 = %s', type(l:c) == type(0) ? nr2char(l:c) : strtrans(l:c))
+	endif
+endfunc
+command! JumpKeyTest call s:JumpKeyTest()
 
 nmap <Leader>g <ESC>:Gtags<SPACE>
 nmap <Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>

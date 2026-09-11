@@ -115,13 +115,16 @@ else
   let s:c.reflocal = s:c.fg
   let s:c.delim    = s:c.fg
   " goto 레이블은 빨강 (SI 도 레이블만 빨강 볼드 밑줄로 그린다)
-  let s:c.label    = ['#ff5f5f', 203, 'red']
+  let s:c.label    = ['#ff0000', 196, 'red']
   let s:c.comment  = ['#800080', 90,  'darkmagenta']
-  " 상수 매크로/숫자: 굵어 보이지 않는 얇은 빨강. 어두운 빨강(#cc5555)은
-  " 획이 두껍게 읽히고, 새빨강(#ff0000)은 눈에 세다. 이 값은 흰 배경 대비
-  " 3.0:1 이라 본문보다 약하게 뜬다 - 더 진하게 원하면 #e06666(3.4:1),
-  " #cc5555(4.2:1) 로 올리면 된다.
-  let s:c.number   = ['#ff5f5f', 203, 'red']
+  " 상수 매크로/숫자/NULL, #ifdef 조건 이름, enum 값: 빨강.
+  "
+  " 한동안 옅은 빨강(#ff5f5f, 흰 배경 대비 3.0:1)을 썼다. 획이 얇아 보이라고
+  " 고른 값인데, 실제로는 본문보다 약하게 떠서 '빨강으로 표시된 것'이라는
+  " 신호가 죽었다. Source Insight 도 이 자리를 새빨강으로 그린다(이 파일
+  " 맨 위 색상표의 '숫자와 NULL 은 빨강 #ff0000'). 다시 덜 세게 하고 싶으면
+  " #e06666(3.4:1), #cc5555(4.2:1), #ff5f5f(3.0:1) 순으로 내리면 된다.
+  let s:c.number   = ['#ff0000', 196, 'red']
   let s:c.macro    = s:c.keyword
   " #include / #define 은 초록 (#if/#ifdef/#endif 는 네이비 볼드로 둔다)
   let s:c.incdef   = ['#008000', 28,  'darkgreen']
