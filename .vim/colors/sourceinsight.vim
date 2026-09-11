@@ -196,7 +196,21 @@ function! s:hi(group, fg, bg, attr) abort
     let l:cmd .= ' guibg=' . s:c[a:bg][0] . ' ctermbg=' . s:c[a:bg][1]
   endif
   let l:cmd .= ' gui=' . (a:attr ==# '' ? 'NONE' : a:attr)
-  let l:cmd .= ' cterm=' . (a:attr ==# '' ? 'NONE' : substitute(a:attr, 'italic', 'NONE', 'g'))
+  " cterm 에도 italic 을 그대로 넘긴다.
+  "
+  " 예전에는 여기서 italic 을 지웠다. 이탤릭을 쓰는 그룹이 하나도 없을 때
+  " 넣어 둔 예방책이었는데, 전역 변수 참조(SiGlobalRef)가 생기면서 그것이
+  " 바로 문제가 됐다: termguicolors 가 꺼진 터미널 세션에서는 cterm 쪽만
+  " 쓰이므로 이탤릭이 아예 나오지 않았다.
+  "
+  " 이탤릭을 반전(reverse)으로 그리는 터미널이 있으면:
+  "   let g:sourceinsight_no_cterm_italic = 1
+  let l:cattr = a:attr ==# '' ? 'NONE' : a:attr
+  if get(g:, 'sourceinsight_no_cterm_italic', 0)
+    let l:cattr = substitute(l:cattr, 'italic', 'NONE', 'g')
+    let l:cattr = l:cattr ==# '' ? 'NONE' : l:cattr
+  endif
+  let l:cmd .= ' cterm=' . l:cattr
   execute l:cmd
 endfunction
 

@@ -1416,7 +1416,21 @@ one function - is still a name you can jump to.
 | `g:sihl_local_global` | 0 turns off the purple globals below |
 | `g:sourceinsight_global_color` | a different purple, e.g. `'#6a1b9a'` |
 
-**A global used inside a function is purple and italic.** Reading a function,
+**A global used inside a function is purple and italic.**
+
+The italic needed a fix of its own first. `s:hi()` stripped `italic` out of
+the `cterm` attribute before writing it - a precaution from when no group
+used italic at all - and `termguicolors` is off unless `$COLORTERM` says
+truecolor or `g:vimide_truecolor = 1`, which over SSH it does not. So a
+terminal session got `cterm=NONE` and no slant whatever the colorscheme
+said. It passes through now; `g:sourceinsight_no_cterm_italic = 1` puts the
+old behaviour back for terminals that draw italic as reverse video.
+
+Tera Term cannot render italic at all, so there the colour is the whole
+signal. iTerm2 can. For the exact `#800080` rather than its 256-colour
+approximation, `let g:vimide_truecolor = 1`.
+
+Reading a function,
 the thing worth noticing is which names reach outside it - a local you can
 follow with your eye, a global you cannot. Purple `#800080` is another of
 Source Insight's inks, shared with comments, which are never identifiers and
