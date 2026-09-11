@@ -1333,6 +1333,25 @@ parameter is a value that came from outside, a local is one made here, and
 that is worth seeing without reading. It also lines up with the factory
 palette, where the underline belongs to parameters and labels only.
 
+Struct members and file-scope (global) variables are navy bold too, with the
+underline kept - a header is read to find out *what is declared here*, and
+in body colour the name sat at the same weight as its type.
+
+That one needed the same rule written twice. `.h` opens as **cpp**, and
+nvim-treesitter's cpp query begins `; inherits: c`, so the order is: c
+defaults → our `after/queries/c` → cpp defaults → our `after/queries/cpp`.
+Anything the cpp defaults also capture therefore beats our c rule. The
+symptom was a struct where `char *p` was navy bold and `int m` beside it
+stayed black, because the plain member is the only one cpp's
+`@variable.member` claims - and our `(field_declaration declarator:
+(field_identifier))` never fired anyway, since in this grammar a
+`field_identifier` directly under `field_declaration` carries no
+`declarator:` field name. Both halves are fixed: the rule is written without
+a field name, and repeated in the cpp query.
+
+(`let g:c_syntax_for_h = 1` makes `.h` open as C instead, if you would rather
+not have C++ rules near your C headers at all.)
+
 `g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
 colorscheme for a brighter blue.
 

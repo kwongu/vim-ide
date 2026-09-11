@@ -230,3 +230,14 @@
       declarator: (parenthesized_declarator
         (pointer_declarator
           declarator: (identifier) @si.declaration.local)))))
+
+;; 겹이 없는 구조체 멤버: int m;
+;;
+;; 위쪽의 (field_declaration declarator: (field_identifier)) 는 걸리지 않는다 -
+;; 이 문법에서 field_declaration 바로 밑의 field_identifier 에는 'declarator'
+;; 필드 이름이 붙지 않기 때문이다(char *p 처럼 pointer_declarator 를 한 겹
+;; 거칠 때만 붙는다). 그래서 필드 이름 없이 잡는다. 이게 없으면 int m; 만
+;; nvim 기본 쿼리의 @variable.member(검정)로 남아, 같은 구조체 안에서
+;; char *p 는 네이비 볼드인데 int m 은 검정인 엇갈림이 생긴다.
+(field_declaration
+  (field_identifier) @si.declaration)
