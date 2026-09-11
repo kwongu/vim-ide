@@ -439,7 +439,32 @@ _G.rv_setup('neo-tree', {
   git_status_async = true,
   -- 하위 디렉터리를 볼 때 worktree 전체가 아니라 그 경로만 묻는다
   git_status_scope_to_path = true,
-  window = { position = 'left', width = 32 },
+  -- NERDTree 손버릇을 그대로 쓰게 얹는다.
+  --
+  -- 파일 조작은 neo-tree 것을 그대로 둔다(a 생성, A 디렉터리, d 삭제,
+  -- r 이름변경, c 복사, m 이동, y/x/p 클립보드, u 실행취소). 그래서
+  -- 비어 있는 키에만 NERDTree 쪽을 넣었다. 'o' 만 예외인데, neo-tree 에서
+  -- 그건 도움말이고 도움말은 '?' 로도 열리기 때문에 잃는 것이 없다.
+  --
+  --   o  열기            O  이 아래를 전부 펼치기
+  --   X  이 아래를 접기   I  숨김 파일 토글 (neo-tree 의 H 도 그대로)
+  --   K  형제 중 처음     J  형제 중 마지막
+  --
+  -- NERDTree 의 x(부모 접기) p(부모로) C(루트 변경) P(루트로) u(상위
+  -- 디렉터리) 는 neo-tree 가 이미 다른 뜻으로 쓰고 있어 넣지 않았다.
+  -- 대신 C 접기, . 루트 지정, <BS> 상위로 가 같은 일을 한다.
+  window = {
+    position = 'left',
+    width = 32,
+    mappings = {
+      ['o'] = 'open',
+      ['O'] = 'expand_all_subnodes',
+      ['X'] = 'close_all_subnodes',
+      ['I'] = 'toggle_hidden',
+      ['K'] = function(state) _G.neotree_sibling(state, 'first') end,
+      ['J'] = function(state) _G.neotree_sibling(state, 'last') end,
+    },
+  },
   -- 파일을 열 때 이 창들은 고르지 않는다.
   --
   -- RelationView 의 context 창이 문제였다: buftype 은 nofile 인데

@@ -767,6 +767,34 @@ project only being known once the session is up.
 Sourcing the plugin in that project went **153 ms → 88 ms**, and the file it
 writes is byte-for-byte the same 1,452 lines.
 
+### NERDTree's keys inside neo-tree
+
+The file operations stay neo-tree's, because they are the reason to use it -
+`a` add, `A` directory, `d` delete, `r` rename, `c` copy, `m` move, `y`/`x`/`p`
+clipboard, `u` undo, `T` trash, `U` restore. NERDTree's keys went into the
+slots that were empty:
+
+| | |
+|---|---|
+| `o` | open |
+| `O` | expand everything under this node |
+| `X` | collapse everything under it |
+| `I` | toggle hidden files (`H` still does it too) |
+| `K` / `J` | first / last sibling |
+
+`o` is the one key that was not free: neo-tree had it on help, and help is
+also on `?`, so nothing was lost.
+
+`K` and `J` had no neo-tree command behind them, so they are twelve lines of
+Lua walking the node's parent for its child ids and focusing the first or
+last. Measured in a four-file directory: from `b2.c`, `J` lands on `d4.c` and
+`K` on `a1.c`.
+
+NERDTree's `x` (close parent), `p` (go to parent), `C` (change root), `P` (to
+root) and `u` (up a directory) are not mapped - neo-tree already uses all
+five for something else, four of them for file operations. `C` collapses,
+`.` sets the root and `<BS>` goes up.
+
 ### Editing the list from netrw
 
 `:Explore`'s listing takes the same three keys - `+` to add the entry under
