@@ -435,13 +435,17 @@ else
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   call s:hi('@si.declaration',           '',     '', 'underline')
   call s:hi('@si.declaration.function',  s:name_fg, s:name_bg, s:name_attr)
-  " 함수 파라미터와 함수 안에서 선언한 지역 변수는 파랑(남색).
-  " 선언한 자리와 그것을 쓰는 자리를 색으로 가르기 위한 것이라, 밑줄은
-  " 그대로 두고 색만 얹는다. 구조체 멤버와 파일 스코프 선언은 위
-  " @si.declaration 그대로 (본문색 + 밑줄) 둔다.
-  "   let g:sourceinsight_decl_local = '#0000ff'   " 더 밝은 파랑으로
-  call s:hi('@si.declaration.parameter', 'decllocal', '', 'underline')
-  call s:hi('@si.declaration.local',     'decllocal', '', 'underline')
+  " 함수 파라미터와 함수 안에서 선언한 지역 변수는 네이비 볼드.
+  "
+  " 밑줄은 파라미터에만 남긴다. 둘 다 네이비 볼드라 색으로는 구별되지
+  " 않는데, 파라미터는 '밖에서 들어온 값'이고 지역변수는 '여기서 만든 값'
+  " 이라 한눈에 갈라져야 한다. 밑줄 하나가 그 차이를 진다 - 출고 기본값
+  " (factory)에서 밑줄이 파라미터와 레이블에만 붙는 것과도 같아진다.
+  "
+  " 구조체 멤버와 파일 스코프 선언은 위 @si.declaration 그대로
+  " (본문색 + 밑줄) 둔다.
+  call s:hi('@si.declaration.parameter', 'decllocal', '', 'bold,underline')
+  call s:hi('@si.declaration.local',     'decllocal', '', 'bold')
   " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
   call s:hi('@si.declaration.label',     'label', '', 'bold,underline')

@@ -1306,9 +1306,14 @@ Verified against a file holding each shape:
 
 | | |
 |---|---|
-| `p_ptr`, `p_plain`, `p_argv`, `p_cb`, `p_name` | `@si.declaration.parameter`, `#000080` |
-| `local_plain`, `local_init`, `local_ptr`, `local_buf`, `loop_i` | `@si.declaration.local`, `#000080` |
+| `p_ptr`, `p_plain`, `p_argv`, `p_cb`, `p_name` | `@si.declaration.parameter` - navy bold, underlined |
+| `local_plain`, `local_init`, `local_ptr`, `local_buf`, `loop_i` | `@si.declaration.local` - navy bold, no underline |
 | struct members, file-scope variables | unchanged |
+
+The underline is what separates the two, since both are navy bold: a
+parameter is a value that came from outside, a local is one made here, and
+that is worth seeing without reading. It also lines up with the factory
+palette, where the underline belongs to parameters and labels only.
 
 `g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
 colorscheme for a brighter blue.
