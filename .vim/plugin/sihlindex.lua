@@ -53,6 +53,7 @@
 --   g:sihl_index_budget 분당 global 프로세스 수 (기본 30, 0 이면 무제한)
 --   g:sihl_index_batch  한 번 칠할 때 시작할 배치 수 (기본 2)
 --   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
+--   g:sihl_index_db     'near'(기본) 파일에서 가장 가까운 DB / 'root' 가장 바깥
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -138,6 +139,17 @@ local function bucket(root)
 end
 
 --------------------------------------------------------------------- 루트
+-- 어느 데이터베이스에 물을 것인가.
+--
+-- 파일에서 위로 올라가다 처음 만나는 GTAGS 를 쓴다. 바깥쪽(가장 상위)
+-- 데이터베이스가 아니다 - 그건 RelationView 의 경로 표시 기준이고, 여기서
+-- 필요한 것은 'C-] 이 실제로 닿는 곳'이다. 이 트리는 프로젝트 안에 프로젝트가
+-- 있어서 둘이 다르다: d5_qnx_hyp 의 GTAGS 는 kernel/common 파일을 39개만
+-- 담고, platform_get_drvdata 나 snd_soc_card_get_drvdata 는 거기 없다
+-- (kernel/common 자기 GTAGS 에는 있다). 바깥에 물었더니 점프가 멀쩡히 되는
+-- 심볼이 전부 검정이 됐다.
+--
+--   let g:sihl_index_db = 'root'   " 예전처럼 가장 바깥 DB 에 묻는다
 local root_cache = {}
 local function root_of(buf)
   local name = api.nvim_buf_get_name(buf)
@@ -149,7 +161,7 @@ local function root_of(buf)
     return root_cache[dir] or nil
   end
   local r
-  if _G.relationview_root_for then
+  if tostring(cfg('db', 'near')) == 'root' and _G.relationview_root_for then
     local ok, v = pcall(_G.relationview_root_for, name)
     if ok then r = v end
   end
