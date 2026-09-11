@@ -1492,7 +1492,9 @@ Inside a function the rule reads whole:
 | enum constant the index knows | green |
 | macro the index confirms | red |
 | anything the index cannot place | body colour |
-| struct members | body colour - gtags does not index them, so there is nothing to jump to |
+| struct members | green when the index has one, body colour otherwise - GNU Global's default parser records few of them |
+| `goto done` | green - it is a reference, like any other |
+| `done:` | red, bold, underlined - the place itself |
 
 Measured on a project built for it: `lib_send` green bold, `packet`, `mode`,
 `pkt_t` and `M_A` green, `LIMIT` and `WRAP` red, `missing_fn`,
@@ -1543,11 +1545,21 @@ wrong:
 | | |
 |---|---|
 | `g:sihl_index = 0` | off (`:SiHlIndexToggle`, `:SiHlIndexClear`, `:SiHlIndexStatus`) |
+| `:SiHlIndexWhy` | why *this* name is that colour: which database was asked, what the cache holds, what `global` says right now, and how many files the index list covers |
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
+
+**"It jumps, so why is it black?"** came up repeatedly, with a different
+answer each time: the outer database was being asked; a long-running session
+was holding a cache from before that was fixed (`:SiHlIndexClear`); or the
+defining file is simply outside the preset. `:SiHlIndexWhy` settles it in one
+command. A worked case: `snd_kcontrol` in `tcc-snd-card.c` came out black,
+and `include/sound/control.h`, where `struct snd_kcontrol` is defined, is not
+among the 414 files that project's preset indexes - `global -d` and
+`taglist()` both return nothing for it, so black was the truthful answer.
 
 **On a preset index most of a kernel screen will be black, and that is the
 answer, not a fault.** A preset indexes a chosen subset - 1,452 files out of

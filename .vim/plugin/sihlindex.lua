@@ -59,6 +59,7 @@
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
 --   :SiHlIndexToggle / :SiHlIndexClear / :SiHlIndexStatus
+--   :SiHlIndexWhy [심볼]  이 이름이 왜 그 색인지 (어느 DB, 캐시, 지금 물어본 결과)
 
 if vim.g.loaded_sihlindex then
   return
@@ -678,6 +679,51 @@ api.nvim_create_user_command('SiHlIndexClear', function()
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
 end, { desc = '색인 판정 캐시 비우기' })
+
+-- :SiHlIndexWhy - 커서 아래(또는 인자로 준) 이름이 왜 그 색인지 한 번에 본다.
+--
+-- '점프는 되는데 검정이다'는 신고가 반복됐는데, 원인이 매번 달랐다: 바깥
+-- DB 에 물어서, 세션이 옛 캐시를 들고 있어서, 정의 파일이 preset 밖이라
+-- 색인에 진짜로 없어서. 어느 쪽인지는 한 번 물어보면 끝나는 일이라
+-- 명령으로 만들어 둔다.
+api.nvim_create_user_command('SiHlIndexWhy', function(o)
+  local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
+  local buf = api.nvim_get_current_buf()
+  local root = root_of(buf)
+  local out = { ('심볼: %s'):format(sym) }
+  if not root then
+    out[#out + 1] = '이 파일 위에 GTAGS 가 없습니다 (색인되지 않은 트리)'
+    vim.notify(table.concat(out, '\n'), vim.log.levels.WARN)
+    return
+  end
+  out[#out + 1] = ('묻는 DB : %s'):format(vim.fn.fnamemodify(root, ':~'))
+  local b = bucket(root)
+  local cached = b.found[sym] and ('찾음' .. (b.found[sym] == 'macro' and ' (매크로)' or ''))
+      or (b.missing[sym] and '없음' or '아직 안 물어봄')
+  out[#out + 1] = ('캐시    : %s'):format(cached)
+  local g = prog()
+  if not g then
+    out[#out + 1] = 'global 을 찾지 못했습니다'
+  else
+    local argv = { g, '--result=ctags-x', '-d', sym }
+    local r = vim.system(argv, { cwd = root, text = true, env = db_env(root) }):wait(4000)
+    local line = r and r.stdout and r.stdout:match('[^\n]+')
+    out[#out + 1] = ('지금 물어보니: %s'):format(line or '(정의 없음)')
+  end
+  -- preset 모드면 '정의 파일이 목록 밖'인지까지 말해 준다
+  local list = root .. '/' .. (vim.g.gtags_objdir or '.tags') .. '/files'
+  local st = uv.fs_stat(list)
+  if st then
+    local n = 0
+    for _ in io.lines(list) do n = n + 1 end
+    out[#out + 1] = ('색인 목록: %d개 파일 (preset 모드 - 목록 밖 파일의 심볼은 '):format(n)
+        .. '색인에 없습니다. \\fa 로 파일을 넣고 :ProjectFilesReindex)'
+  end
+  if s.off then
+    out[#out + 1] = '중지됨: ' .. s.off
+  end
+  vim.notify(table.concat(out, '\n'))
+end, { nargs = '?', desc = '이 심볼이 왜 그 색인지 설명' })
 
 api.nvim_create_user_command('SiHlIndexStatus', function()
   local out = {}

@@ -284,7 +284,11 @@ call s:hi('Function',      'ref',     '',          'bold')
 call s:hi('Statement',     'control', '',          'bold')
 call s:hi('Conditional',   'control', '',          'bold')
 call s:hi('Repeat',        'control', '',          'bold')
-call s:hi('Label',         'label',   '',          'bold')
+" goto 문이 가리키는 레이블 이름: 초록. 'goto done' 의 done 은 어딘가로
+" 가는 참조이지 그 자리의 정의가 아니다 - 참조는 초록이라는 규칙 그대로다.
+" 볼드는 함수 호출의 표시로만 남겨 두었으므로 붙이지 않는다.
+" 정의하는 자리(done:)는 아래 @si.declaration.label 이 빨강 볼드 밑줄로 덮는다.
+call s:hi('Label',         'ref',     '',          '')
 call s:hi('Operator',      'ref',     '',          '')
 call s:hi('Keyword',       'keyword', '',          s:kw)
 call s:hi('Exception',     'control', '',          'bold')
@@ -447,7 +451,7 @@ let s:ts = {
       \ 'variable.member':    ['fg',      ''],
       \ 'property':           ['fg',      ''],
       \ 'field':              ['fg',      ''],
-      \ 'label':              ['label',   'bold'],
+      \ 'label':              ['ref',     ''],
       \ 'operator':           ['ref',     ''],
       \ 'punctuation':        ['fg',      ''],
       \ 'punctuation.bracket':['fg',      ''],
@@ -523,8 +527,10 @@ else
   call s:hi('@si.declaration.local',     'decllocal', '', 'bold')
   " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
-  " goto 레이블도 밑줄을 뺀다 - 빨강 볼드라 이미 다른 무엇과도 섞이지 않는다
-  call s:hi('@si.declaration.label',     'label', '', 'bold')
+  " goto 레이블을 '정의하는' 자리는 빨강 볼드 + 밑줄. 같은 이름을 goto 가
+  " 가리키는 자리는 초록(위 Label)이라, 둘이 색으로 먼저 갈린다. 밑줄은
+  " '여기가 그 자리다'를 한 번 더 못박는다 - SI 도 레이블만 이렇게 그린다.
+  call s:hi('@si.declaration.label',     'label', '', 'bold,underline')
 endif
 
 " LSP 의미 토큰도 같은 배색으로
