@@ -1475,9 +1475,28 @@ while `global` can find a definition for that name. When it cannot, the name
 drops to body colour - because green is a promise that `Ctrl+]` will land
 somewhere, and a promise that fails is worse than no colour at all.
 
-Only the *missing* case is painted. Known and not-yet-asked both render
-exactly as before, so scrolling never flashes black and a pending answer
-costs nothing on screen.
+Mostly only the *missing* case is painted - known and not-yet-asked render
+as before, so scrolling never flashes black and a pending answer costs
+nothing. The exception is a constant that turns out not to be a macro. nvim's
+own query gives an enum constant and an object-like `#define` the same
+`@constant`, so both start red; once the index says `M_A` is an enum and not
+a `#define`, leaving it alone would leave it red. Those are painted green
+back.
+
+Inside a function the rule reads whole:
+
+| | |
+|---|---|
+| function call the index knows | green, bold |
+| struct / union / enum / typedef the index knows | green |
+| enum constant the index knows | green |
+| macro the index confirms | red |
+| anything the index cannot place | body colour |
+| struct members | body colour - gtags does not index them, so there is nothing to jump to |
+
+Measured on a project built for it: `lib_send` green bold, `packet`, `mode`,
+`pkt_t` and `M_A` green, `LIMIT` and `WRAP` red, `missing_fn`,
+`MISSING_MACRO`, `id` and `name` black.
 
 **How the index is asked, and two wrong answers on the way there.**
 

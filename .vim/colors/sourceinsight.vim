@@ -390,6 +390,8 @@ call s:hi('SiGlobalRef', 'globalref', '', 'italic')
 " 색인이 '#define' 으로 확인해 준 매크로 (sihlindex.lua). 상수 매크로가
 " 원래 쓰던 빨강과 같은 색이다 - 함수형 매크로도 같은 것으로 보여야 한다.
 call s:hi('SiMacroRef', 'number', '', '')
+" 색인이 아는데 매크로가 아닌 상수(enum 요소). 기본색이 빨강이라 되돌린다.
+call s:hi('SiJumpFound', 'ref', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

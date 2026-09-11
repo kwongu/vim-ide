@@ -109,6 +109,8 @@ local ASK_CAP = {
   ['si.type.ref'] = true, ['type'] = true,
 }
 local OK_NODE = { identifier = true, type_identifier = true }
+-- 기본색이 빨강인 캡처. 찾았는데 매크로가 아니면 초록으로 돌려놔야 한다.
+local CONST_CAP = { ['constant'] = true, ['constant.macro'] = true }
 
 local s = {
   cache = {},     -- root -> { key, found = {}, missing = {} }
@@ -565,6 +567,17 @@ repaint = function(win)
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroRef', priority = prio,
+            })
+          elseif b.found[name] and CONST_CAP[cap] then
+            -- 찾았는데 매크로가 아니다 = enum 상수다.
+            --
+            -- nvim 기본 쿼리는 enum 상수와 상수 매크로를 똑같이 @constant
+            -- 로 잡아서 둘 다 빨강으로 나온다. 매크로만 빨강이어야 하므로,
+            -- 여기서는 '아무것도 안 칠하기'가 답이 아니다 - 빨강이 그대로
+            -- 남기 때문이다. 초록으로 되돌린다.
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiJumpFound', priority = prio,
             })
           elseif b.found[name] == nil then
             want = want or {}
