@@ -198,13 +198,14 @@ local function bucket(root)
   local b = s.cache[root]
   local key = dbkey(root)
   if not b then
-    b = { key = key, found = {}, missing = {} }
+    b = { key = key, found = {}, missing = {}, how = {} }
     s.cache[root] = b
   elseif b.key ~= key then
     -- 색인이 바뀌면 '없음'만 버린다. 재색인은 없던 것을 생기게 할 뿐이고,
     -- 있던 것이 사라지는 경우는 드물다. 전부 버리면 저장할 때마다 화면의
     -- 검정이 통째로 사라졌다 다시 나타난다.
     b.key, b.missing = key, {}
+    b.how = b.how or {}
   end
   return b
 end
@@ -521,12 +522,13 @@ local function run_batch(root, syms, done)
         s.watchdog = nil
       end
       local b = bucket(root)
-      local hit = {}
+      local hit, snap_hit = {}, {}
       if res and res.code == 0 and res.stdout then
         for line in res.stdout:gmatch('[^\n]+') do
           local name, rest = line:match('^([^\t]+)\t(.*)$')
           if name then
             if rest:sub(1, 4) == 'TAG\t' then
+              snap_hit[name] = true
               -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 검색패턴 ...
               --
               -- kind 필드로 판단하지 않는다. 이 설정은 --fields=+nS 라
@@ -580,6 +582,9 @@ local function run_batch(root, syms, done)
           local v = hit[sym] or tags[sym]
           if v then
             b.found[sym] = v
+            -- 어디가 답했는지 적어 둔다. :SiHlIndexWhy 가 'gtags 는 모르는데
+            -- 캐시는 찾았다고 한다'로 보이지 않으려면 이게 있어야 한다.
+            b.how[sym] = hit[sym] and (snap_hit[sym] and 'ctags' or 'gtags') or 'taglist'
           else
             b.missing[sym] = true
           end
@@ -1073,7 +1078,21 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
     end
     out[#out + 1] = ('DB %d: %s  [목록 %s]'):format(i, vim.fn.fnamemodify(root, ':~'),
       n > 0 and (n .. '개') or 'auto')
-    out[#out + 1] = ('     캐시=%s  지금=%s'):format(cached, live:sub(1, 70))
+    out[#out + 1] = ('     캐시=%s%s  gtags=%s'):format(cached,
+      b.how[sym] and (' (' .. b.how[sym] .. ')') or '', live:sub(1, 60))
+    -- ctags 스냅숏도 직접 물어본다. 여기를 빼먹어서 'gtags 는 모르는데
+    -- 캐시는 찾았다'는 모순된 화면이 나왔다 - 답한 것은 스냅숏이었다.
+    if _G.autoindex_ctags_file and vim.fn.executable('look') == 1 then
+      local okc, snap = pcall(_G.autoindex_ctags_file, root)
+      if okc and snap and snap ~= '' and uv.fs_stat(snap) then
+        local r2 = vim.system({ 'sh', '-c',
+          'LC_ALL=C look -b "$(printf \'%s\\t\' "$1")" "$2" 2>/dev/null | head -1',
+          '_', sym, snap }, { text = true }):wait(4000)
+        local hitline = r2 and r2.stdout and r2.stdout:match('[^\n]+')
+        out[#out + 1] = ('     ctags=%s'):format(
+          hitline and hitline:gsub('\t', ' '):sub(1, 60) or '(없음)')
+      end
+    end
   end
   if #vim.fn.tagfiles() > 0 then
     local save = vim.o.tagcase
