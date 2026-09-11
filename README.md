@@ -1377,6 +1377,40 @@ labels.
 `g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
 colorscheme for a brighter blue.
 
+### A local you can jump to is olive
+
+A reference to a variable the function declared itself - or to one of its
+parameters - is drawn in dark yellow-green (`#6b8e23`) when the declaration
+is actually there to jump to. Anything else keeps the body colour.
+
+The mechanism is treesitter and nothing else. **gtags does not index locals**
+- GTAGS holds global symbols, and a parameter or a block-scoped variable is
+never in it - so asking the index this question would be both slow and
+wrong. `sihllocal.lua` instead collects the declared names of every function
+overlapping the view and paints the uses that match. No subprocess is ever
+spawned, which matters on a shared box: this repo has lost a core for
+thirteen hours to an orphaned index process, and the cheapest way not to
+repeat that is to have nothing to orphan.
+
+Two properties are deliberate. Only the *found* case is painted, so a symbol
+whose declaration is absent renders exactly as it does today rather than
+flashing black - "not found is black" costs nothing because black is already
+what it was. And the scope is the function, not the block: C shadows inside
+a block rarely, resolving per block would mean walking scopes for every
+name, and the case it gets wrong - the same name declared in two blocks of
+one function - is still a name you can jump to.
+
+| | |
+|---|---|
+| `g:sihl_local = 0` | off (`:SiHlLocalToggle` at runtime) |
+| `g:sihl_local_delay` | ms of stillness before painting, default 120 |
+| `g:sihl_local_pad` | lines resolved above and below the screen, default 40 |
+| `g:sihl_local_max` | most lines examined in one pass, default 4000 |
+
+Measured on a file holding every local-declaration shape: 31 uses painted,
+and calls (`helper`, `printf`), struct members (`m`), file-scope variables
+(`g_global`) and the declarations themselves are all left alone.
+
 ## The symbol outline (nvim only)
 
 `<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is

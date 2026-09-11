@@ -141,6 +141,11 @@ endif
 if !has_key(s:c, 'decllocal')
   let s:c.decllocal = s:c.decl
 endif
+" 짙은 연두: 같은 함수 안에서 선언을 찾을 수 있는 지역 변수의 '쓰는 자리'
+" (sihllocal.lua). 초록(#008000)과 구분되어야 해서 한 단계 어둡고 누렇다.
+if !has_key(s:c, 'jumplocal')
+  let s:c.jumplocal = ['#6b8e23', 64,  'darkgreen']
+endif
 if !has_key(s:c, 'typeref')
   let s:c.typeref = s:c.ref
 endif
@@ -333,6 +338,9 @@ highlight! link LspReferenceWrite SiRefHighlight
 " '#if 0' 안의 죽은 코드: SI 의 'Inactive Code' 처럼 회색으로 눌러 둔다
 " (after/queries/c/highlights.scm 이 우선순위 105 로 잡아 준다)
 call s:hi('@si.inactive', 'linenr', '', '')
+
+" 지역 변수를 '여기서 선언된 것'으로 알아본 자리 (sihllocal.lua)
+call s:hi('SiJumpLocal', 'jumplocal', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')
