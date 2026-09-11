@@ -1700,13 +1700,21 @@ end
 -- 들어오는 것을 pty 로 확인했다. 그래서 둘 다 걸어 둔다 - 하나만 오고
 -- 나머지는 그냥 안 눌린다.
 --
---   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
---   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>']
+-- 여기에 마우스 조합도 같이 둔다. Tera Term 은 옆 버튼은 못 보내지만
+-- 수식키는 마우스 보고에 실어 보낸다(vtterm.c 의 MouseReport:
+-- modifier = Shift?4 | Alt?8 | Ctrl?16). 그래서 Ctrl/Shift + 우클릭은
+-- 윈도우 쪽에 아무것도 설치하지 않고 지금 그대로 쓸 수 있다. Ctrl+우클릭은
+-- vim 이 원래 <C-t>(태그 되돌리기)로 쓰는 자리이기도 하다.
+--
+--   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<C-RightMouse>']
+--   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<S-RightMouse>']
 --   let g:vimide_jump_back_key    = []        " 이 대체 키를 쓰지 않는다
 local function alias_keys(which)
   local v = vim.g['vimide_jump_' .. which .. '_key']
   if v == nil then
-    return which == 'back' and { '<F17>', '<S-F5>' } or { '<F18>', '<S-F6>' }
+    return which == 'back'
+        and { '<F17>', '<S-F5>', '<C-RightMouse>' }
+        or { '<F18>', '<S-F6>', '<S-RightMouse>' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}

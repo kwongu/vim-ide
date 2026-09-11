@@ -1135,12 +1135,19 @@ nnoremap <X2Mouse> <C-i>
 "            (마우스 제조사 유틸리티로 XButton1/2 를 Ctrl+O / Ctrl+I 에
 "             묶어도 된다 - 패널과 context 창도 그 두 키를 받는다)
 "
-"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
-"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>']
+" 마우스 조합도 같이 둔다. Tera Term 은 옆 버튼은 못 보내지만 수식키는
+" 마우스 보고에 실어 보낸다(vtterm.c 의 MouseReport 는 Shift=4, Alt=8,
+" Ctrl=16 을 버튼 바이트에 OR 한다). 그래서 Ctrl/Shift + 우클릭은 윈도우
+" 쪽에 아무것도 설치하지 않고 바로 쓸 수 있다 - Ctrl+우클릭은 vim 이 원래
+" <C-t>(태그 되돌리기)로 쓰는 자리이기도 해서 뜻도 맞는다.
+"
+"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<C-RightMouse>']
+"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<S-RightMouse>']
 "   let g:vimide_jump_back_key    = []     " 이 대체 키를 쓰지 않는다
 func! s:MapJumpAlias(which, rhs) abort
 	let l:v = get(g:, 'vimide_jump_' . a:which . '_key',
-				\ a:which ==# 'back' ? ['<F17>', '<S-F5>'] : ['<F18>', '<S-F6>'])
+				\ a:which ==# 'back' ? ['<F17>', '<S-F5>', '<C-RightMouse>']
+				\                   : ['<F18>', '<S-F6>', '<S-RightMouse>'])
 	if type(l:v) == type('')
 		let l:v = empty(l:v) ? [] : [l:v]
 	endif

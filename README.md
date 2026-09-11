@@ -1216,8 +1216,19 @@ the ESC itself).
 **Tera Term never sees those buttons at all.** Its mouse reporting in
 `vtwin.cpp` handles `IdLeftButton`, `IdMiddleButton`, `IdRightButton` and the
 wheel, and there is no `WM_XBUTTONDOWN` case anywhere - so no setting will
-make it forward them. It has to come from outside Tera Term. AutoHotkey,
-scoped so the buttons keep working in other apps:
+make it forward them.
+
+What it *does* send is modifiers: `MouseReport()` in `vtterm.c` ORs
+`Shift=4`, `Alt=8`, `Ctrl=16` into the button byte. So **`Ctrl` +
+right-click goes back and `Shift` + right-click goes forward**, in the edit
+window, the panel and the preview, with nothing installed on the Windows
+side. `Ctrl`+right-click is also where vim puts `<C-t>` by default, so the
+meaning matches. (If Tera Term's *Disable mouse tracking by Ctrl* option is
+on, Ctrl+click is swallowed before it is reported - use the Shift one, or
+turn that option off.)
+
+For the physical side buttons it has to come from outside Tera Term.
+AutoHotkey, scoped so the buttons keep working in other apps:
 
 ```ahk
 ; AutoHotkey v2 (the current default download)
@@ -1266,8 +1277,8 @@ which is why both names in each row are bound by default.
 
 | | |
 |---|---|
-| `g:vimide_jump_back_key` | list of key names for back. Default `['<F17>', '<S-F5>']`, `[]` disables |
-| `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F6>']` |
+| `g:vimide_jump_back_key` | list of key names for back. Default `['<F17>', '<S-F5>', '<C-RightMouse>']`, `[]` disables |
+| `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F6>', '<S-RightMouse>']` |
 
 ## The symbol outline (nvim only)
 
