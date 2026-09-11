@@ -1380,8 +1380,15 @@ colorscheme for a brighter blue.
 ### A local you can jump to is olive
 
 A reference to a variable the function declared itself - or to one of its
-parameters - is drawn in dark yellow-green (`#6b8e23`) when the declaration
-is actually there to jump to. Anything else keeps the body colour.
+parameters - is drawn in teal (`#008080`) when the declaration is actually
+there to jump to. Anything else keeps the body colour.
+
+The colour was not chosen so much as found: `#008080` is one of the seven
+inks in Source Insight's shipped palette, and this colorscheme was already
+using it as `reflocal`, its name for a *local symbol reference*. The first
+attempt used a dark yellow-green; SI had answered the question years ago.
+It sits clear of the green that means "a symbol you can look up" and the
+navy that means "declared here".
 
 The mechanism is treesitter and nothing else. **gtags does not index locals**
 - GTAGS holds global symbols, and a parameter or a block-scoped variable is
@@ -1470,7 +1477,7 @@ wrong:
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
-| `g:sourceinsight_local_color` | a different green for the local uses, e.g. `'#7cb342'` |
+| `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
 
 **On a preset index most of a kernel screen will be black, and that is the
 answer, not a fault.** A preset indexes a chosen subset - 1,452 files out of

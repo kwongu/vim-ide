@@ -141,17 +141,24 @@ endif
 if !has_key(s:c, 'decllocal')
   let s:c.decllocal = s:c.decl
 endif
-" 짙은 연두: 같은 함수 안에서 선언을 찾을 수 있는 지역 변수의 '쓰는 자리'
-" (sihllocal.lua). 초록(#008000)과 구분되어야 해서 한 단계 어둡고 누렇다.
-if !has_key(s:c, 'jumplocal')
-  let s:c.jumplocal = ['#6b8e23', 64,  'darkgreen']
-endif
-" 더 밝은/어두운 연두로 바꾸고 싶을 때:
+" 같은 함수 안에서 선언을 찾을 수 있는 지역 변수의 '쓰는 자리'
+" (sihllocal.lua) = 청록 #008080.
+"
+" 이 값은 고른 것이 아니라 원래 있던 것이다. SI 출고 팔레트의 일곱 색 중
+" 하나이고, 이 파일이 factory 변종에서 이미 s:c.reflocal - '지역 심볼 참조'
+" - 로 쓰고 있다(위 s:c.reflocal). 처음에는 짙은 연두 #6b8e23 을 썼는데,
+" 화면 기준 배색에서 지역 참조가 어떤 색이어야 하는지는 SI 자신이 이미
+" 답해 두고 있었다. 초록 #008000(심볼 참조)과도, 네이비 #000080(선언)과도
+" 섞이지 않는다.
+"
+"   let g:sourceinsight_local_color = '#6b8e23'   " 예전 짙은 연두
 "   let g:sourceinsight_local_color = '#7cb342'   " 밝은 연두
-"   let g:sourceinsight_local_color = '#556b2f'   " 더 짙게
+if !has_key(s:c, 'jumplocal')
+  let s:c.jumplocal = ['#008080', 30,  'darkcyan']
+endif
 if exists('g:sourceinsight_local_color')
   let s:c.jumplocal = [g:sourceinsight_local_color,
-        \ get(g:, 'sourceinsight_local_cterm', 64), 'darkgreen']
+        \ get(g:, 'sourceinsight_local_cterm', 30), 'darkcyan']
 endif
 if !has_key(s:c, 'typeref')
   let s:c.typeref = s:c.ref
