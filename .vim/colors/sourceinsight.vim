@@ -67,10 +67,14 @@ let s:c = {
 " 밑줄·옅은 배경으로 같은 '눈에 먼저 들어오는' 효과를 낸다.
 "
 "   g:sourceinsight_declaration_emphasis
-"     'bold'   (기본) 네이비 볼드 + 밑줄
+"     'bold'   (기본) 네이비 볼드
 "     'strong'        네이비 볼드 + 밑줄 + 옅은 회색 배경 (SI 의 큰 글자 +
 "                     그림자에 가장 가까운 효과)
 "     'off'           특별한 강조 없음
+"
+" 기본값에서 밑줄을 뺐다. 네이비 볼드만으로 이미 충분히 먼저 눈에 들어오고,
+" 함수 정의가 몰려 있는 화면에서는 밑줄이 줄마다 그어져 오히려 시끄러웠다.
+" 밑줄이 필요하면 'strong' 을 쓰면 된다 - 파라미터는 여전히 밑줄을 단다.
 let s:variant = get(g:, 'sourceinsight_palette', 'screen')
 let s:emph = get(g:, 'sourceinsight_declaration_emphasis', 'bold')
 if s:variant ==# 'factory'
@@ -424,7 +428,7 @@ call s:hi('@si.directive.cond', s:variant ==# 'factory' ? 'preproc' : 'number',
 " 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
 " 함수/구조체/enum/typedef 의 '정의된 이름' 강조 (위 g:..._emphasis)
 let s:name_attr = s:emph ==# 'off' ? '' :
-      \ (s:emph ==# 'strong' ? 'bold,underline' : 'bold,underline')
+      \ (s:emph ==# 'strong' ? 'bold,underline' : 'bold')
 let s:name_bg   = s:emph ==# 'strong' ? 'declbg' : ''
 let s:name_fg   = s:emph ==# 'off' ? '' : 'decl'
 

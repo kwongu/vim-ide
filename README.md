@@ -1352,6 +1352,21 @@ a field name, and repeated in the cpp query.
 (`let g:c_syntax_for_h = 1` makes `.h` open as C instead, if you would rather
 not have C++ rules near your C headers at all.)
 
+Where the underline ended up, once the colour was doing the work:
+
+| | underline |
+|---|---|
+| parameters | yes |
+| struct members, file-scope variables | yes |
+| function / struct / enum / typedef names being defined | no |
+| variables a function declares in its body | no |
+
+The definition names lost theirs with the default
+`g:sourceinsight_declaration_emphasis = 'bold'`, which now means navy bold
+and nothing else - navy bold already arrives first, and on a screen full of
+function definitions a rule under every one of them was just noise. `'strong'`
+still carries the underline, with the grey background.
+
 `g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
 colorscheme for a brighter blue.
 
