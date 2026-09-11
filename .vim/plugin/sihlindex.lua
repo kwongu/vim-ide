@@ -170,6 +170,36 @@ local function root_of(buf)
 end
 
 ------------------------------------------------------------------ 프로세스
+-- global 이 어디 있는지. ~/.local/bin 은 ~/.profile 에서 PATH 에 붙는데
+-- 비대화형 세션은 그것을 읽지 않는다. 절대 경로로 풀어 두지 않으면
+-- nice/ionice 가 대신 실패한다 ('ionice: failed to execute global').
+local prog_cache
+local function prog()
+  if prog_cache ~= nil then
+    return prog_cache or nil
+  end
+  local p
+  if _G.relationview_global_cmd then
+    local ok, v = pcall(_G.relationview_global_cmd)
+    if ok then p = v end
+  end
+  if not p and vim.fn.executable('global') == 1 then
+    p = 'global'
+  end
+  if not p then
+    local fb = vim.fn.expand('~/.local/bin/global')
+    if vim.fn.executable(fb) == 1 then
+      p = fb
+    end
+  end
+  if p and p ~= '' then
+    local abs = vim.fn.exepath(p)
+    p = (abs ~= '' and abs) or p
+  end
+  prog_cache = p or false
+  return p
+end
+
 local function nice_prefix()
   if cfg('nice', 1) == 0 or vim.fn.has('mac') == 1 then
     return {}
@@ -230,9 +260,15 @@ local function db_env(root)
 end
 
 local function run_batch(root, syms, done)
+  local g = prog()
+  if not g then
+    s.off = 'global 을 찾지 못했습니다'
+    done()
+    return
+  end
   local pat = '^(' .. table.concat(syms, '|') .. ')$'
   local argv = nice_prefix()
-  vim.list_extend(argv, { 'global', '--result=ctags-x', '-d', '-e', pat })
+  vim.list_extend(argv, { g, '--result=ctags-x', '-d', '-e', pat })
   dbg(('batch root=%s n=%d bytes=%d'):format(root, #syms, #pat))
   local ok, proc = pcall(vim.system, argv,
     { cwd = root, text = true, detach = true, env = db_env(root) },
@@ -252,6 +288,19 @@ local function run_batch(root, syms, done)
       elseif res and res.code ~= 0 then
         dbg(('batch failed rc=%s err=%s'):format(tostring(res.code),
           (res.stderr or ''):sub(1, 120)))
+        -- 실패는 '없음'으로 적지 않는다. 그러면 같은 이름을 다음 칠할 때
+        -- 또 묻게 되므로, 연달아 실패하면 이 세션에서는 그만둔다.
+        -- 예전에 여기서 무한히 재시도한 적이 있다(ionice 가 global 을 못
+        -- 찾아 rc=127 이 반복됐다).
+        s.fails = (s.fails or 0) + 1
+        if s.fails >= 3 then
+          s.off = ('global 이 계속 실패합니다 (rc=%s): %s'):format(
+            tostring(res.code), (res.stderr or ''):gsub('%s+$', ''):sub(1, 80))
+          vim.notify('SiHlIndex 중지 - ' .. s.off, vim.log.levels.WARN)
+        end
+      end
+      if res and res.code == 0 then
+        s.fails = 0
       end
       -- rc ~= 0 이면 '모른다'로 둔다. 실패를 '없음'으로 적으면 패턴이 한 번
       -- 길었던 것만으로 화면이 통째로 검정이 된다.
@@ -315,7 +364,7 @@ local function pack(root)
 end
 
 local function drain()
-  if s.busy then
+  if s.busy or s.off then
     return
   end
   local root = next(s.want)
@@ -511,6 +560,7 @@ end, { desc = '색인에 없는 심볼 검정 표시 켜고 끄기' })
 
 api.nvim_create_user_command('SiHlIndexClear', function()
   s.cache, s.want, root_cache = {}, {}, {}
+  s.off, s.fails, prog_cache = nil, 0, nil
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
 end, { desc = '색인 판정 캐시 비우기' })
@@ -523,6 +573,10 @@ api.nvim_create_user_command('SiHlIndexStatus', function()
     for _ in pairs(b.missing) do m = m + 1 end
     out[#out + 1] = ('%s  찾음 %d / 없음 %d'):format(vim.fn.fnamemodify(root, ':~'), f, m)
   end
-  out[#out + 1] = ('진행 중: %s'):format(s.busy and 'yes' or 'no')
+  out[#out + 1] = ('진행 중: %s   global: %s'):format(s.busy and 'yes' or 'no',
+    tostring(prog() or '(없음)'))
+  if s.off then
+    out[#out + 1] = '중지됨: ' .. s.off
+  end
   vim.notify(table.concat(out, '\n'))
 end, { desc = '색인 판정 현황' })

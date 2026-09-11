@@ -166,6 +166,11 @@ local function global_cmd()
   return nil
 end
 
+-- sihlindex.lua 도 같은 규칙으로 global 을 찾게 내준다
+function _G.relationview_global_cmd()
+  return global_cmd()
+end
+
 -- words that are never worth querying automatically
 local KEYWORDS = {}
 for w in ([[
