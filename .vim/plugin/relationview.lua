@@ -1689,6 +1689,29 @@ end
 -- panel window / rendering
 -- ---------------------------------------------------------------------------
 
+-- 마우스 앞/뒤 버튼을 못 보내는 터미널을 위한 대체 키.
+--
+-- xterm 의 마우스 보고는 버튼 1~5 까지고(4/5 는 휠), 앞/뒤 버튼은 그 밖이다.
+-- iTerm2 도 Tera Term 도 그래서 <X1Mouse>/<X2Mouse> 를 만들지 못한다. 대신
+-- 터미널 쪽에서 그 버튼이 특정 시퀀스를 보내도록 설정할 수 있으므로, 그것을
+-- 여기서 받는다. 기본값은 ESC[15;2~ / ESC[17;2~ 이고, 그 시퀀스를 nvim 이
+-- <F17>/<F18> 로 읽는지 <S-F5>/<S-F7> 로 읽는지는 버전과 terminfo 에 따라
+-- 갈리므로 둘 다 걸어 둔다 (둘 중 하나만 오고, 나머지는 그냥 안 눌린다).
+--
+--   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
+--   let g:vimide_jump_forward_key = ['<F18>', '<S-F7>']
+--   let g:vimide_jump_back_key    = []        " 이 대체 키를 쓰지 않는다
+local function alias_keys(which)
+  local v = vim.g['vimide_jump_' .. which .. '_key']
+  if v == nil then
+    return which == 'back' and { '<F17>', '<S-F5>' } or { '<F18>', '<S-F7>' }
+  end
+  if type(v) == 'string' then
+    return v ~= '' and { v } or {}
+  end
+  return type(v) == 'table' and v or {}
+end
+
 local function ensure_buf()
   if s.buf and api.nvim_buf_is_valid(s.buf) then
     return s.buf
@@ -1738,8 +1761,12 @@ local function ensure_buf()
   bmap('x', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
   -- the mouse side buttons act on the source window while the list has focus
-  bmap('<X1Mouse>', function() A.back() end, 'RelationView: back (<C-o>)')
-  bmap('<X2Mouse>', function() A.forward() end, 'RelationView: forward (<C-i>)')
+  for _, k in ipairs({ '<X1Mouse>', '<C-o>', unpack(alias_keys('back')) }) do
+    bmap(k, function() A.back() end, 'RelationView: back (<C-o>)')
+  end
+  for _, k in ipairs({ '<X2Mouse>', '<C-i>', unpack(alias_keys('forward')) }) do
+    bmap(k, function() A.forward() end, 'RelationView: forward (<C-i>)')
+  end
   bmap('q', function() A.close() end, 'RelationView: close')
   bmap('p', function() A.pin() end, 'RelationView: pin/unpin')
   bmap('r', function() A.refresh() end, 'RelationView: refresh')
@@ -2072,12 +2099,14 @@ local function ctx_buf()
   -- 뒤로는 <C-t> 와 <C-o> 둘 다 받는다. 편집 창에서 몸에 익은 쪽이 사람마다
   -- 다르고, 여기서 <C-o> 는 어차피 할 일이 없다(파일 버퍼가 아니라 점프
   -- 목록이 비어 있다) - 아무 일도 안 일어나는 키를 남겨 둘 이유가 없다.
-  for _, lhs in ipairs({ '<C-t>', '<C-o>' }) do
+  for _, lhs in ipairs({ '<C-t>', '<C-o>', unpack(alias_keys('back')) }) do
     vim.keymap.set('n', lhs, function() ctx_tag_back() end,
       { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
   end
-  vim.keymap.set('n', '<C-i>', function() ctx_tag_forward() end,
-    { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
+  for _, lhs in ipairs({ '<C-i>', unpack(alias_keys('forward')) }) do
+    vim.keymap.set('n', lhs, function() ctx_tag_forward() end,
+      { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
+  end
   -- double click follows the definition of the symbol under the mouse,
   -- exactly like <C-]> does here
   for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do

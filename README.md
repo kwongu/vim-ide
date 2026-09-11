@@ -1185,6 +1185,55 @@ Measured in a small C project, context-only mode, after `Ctrl+]` on a call:
 | preview `Ctrl+]` → `Ctrl+t` → `Ctrl+i` | definition → back → definition again |
 | panel jump → `Ctrl+t` | back to the exact line it left, tag stack 1 → 0 |
 
+### The mouse back/forward buttons
+
+They are mapped (`<X1Mouse>` / `<X2Mouse>`, in the edit window, the panel and
+the preview) and in most terminals they still do nothing, because **the
+terminal never sends them**. xterm's mouse report covers buttons 1-5, where
+4 and 5 are the wheel; the side buttons are outside it. iTerm2 and Tera Term
+both stop there, so nvim has nothing to turn into `<X1Mouse>`.
+
+Check before configuring anything - if this prints nothing when you click
+the side buttons, the terminal is the problem, not the mapping:
+
+```bash
+nvim -u NONE -c 'set mouse=a' -c 'nnoremap <X1Mouse> :echo "back OK"<CR>' -c 'nnoremap <X2Mouse> :echo "forward OK"<CR>'
+```
+
+The way through is to make the button send a *key* instead. Back and forward
+are therefore also on `Ctrl+o` / `Ctrl+i` everywhere (the panel and preview
+learned those here; the edit window always had them) and on a configurable
+alias pair, `<F17>`/`<F18>` plus `<S-F5>`/`<S-F7>` by default. Both names are
+bound because the same bytes - `ESC [15;2~` and `ESC [17;2~` - are read as a
+high function key by some builds and as a shifted one by others; only one
+ever arrives.
+
+**iTerm2** - Settings → Pointer → *Mouse Button and Trackpad Gesture
+Actions* → `+`, click the side button to record it, Action = **Send Escape
+Sequence**, Text = `[15;2~` for back and `[17;2~` for forward (iTerm2 sends
+the ESC itself).
+
+**Tera Term** has no mouse-button binding at all, so it has to come from
+outside. AutoHotkey, scoped to Tera Term so the buttons keep working
+elsewhere:
+
+```ahk
+#IfWinActive ahk_exe ttermpro.exe
+XButton1::SendInput {Esc}[15;2~
+XButton2::SendInput {Esc}[17;2~
+#IfWinActive
+```
+
+Or bind the buttons to `Ctrl+O` / `Ctrl+I` in the mouse vendor's own utility
+- simpler, and it works because those two are mapped everywhere too. The one
+cost is that `Ctrl+I` is `Tab`, so the forward button inserts a tab if you
+press it in insert mode; the escape-sequence route has no such overlap.
+
+| | |
+|---|---|
+| `g:vimide_jump_back_key` | list of key names for back. Default `['<F17>', '<S-F5>']`, `[]` disables |
+| `g:vimide_jump_forward_key` | same for forward. Default `['<F18>', '<S-F7>']` |
+
 ## The symbol outline (nvim only)
 
 `<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is

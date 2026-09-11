@@ -1113,6 +1113,43 @@ nnoremap <silent> <4-LeftMouse> :call <SID>RvMouseJump()<CR>
 nnoremap <X1Mouse> <C-o>
 nnoremap <X2Mouse> <C-i>
 
+" 터미널이 그 버튼을 아예 안 보낼 때.
+"
+" xterm 의 마우스 보고는 버튼 1~5 까지고(4/5 는 휠), 앞/뒤 버튼은 그 밖이다.
+" iTerm2 도 Tera Term 도 그래서 <X1Mouse>/<X2Mouse> 를 만들어 주지 못한다.
+" 대신 터미널 쪽에서 그 버튼이 어떤 시퀀스를 보내도록 설정할 수 있으니,
+" 그 시퀀스를 여기서 받는다. 기본은 ESC[15;2~ / ESC[17;2~ 이고, nvim 이
+" 그것을 <F17>/<F18> 로 읽는지 <S-F5>/<S-F7> 로 읽는지는 terminfo 와 버전에
+" 따라 갈려서 둘 다 걸어 둔다 - 어차피 하나만 들어온다.
+"
+"   iTerm2   Settings > Profiles > (프로필) > ... 이 아니라 Pointer 탭:
+"            'Mouse Button and Trackpad Gesture Actions' 에 버튼 4/5 를
+"            추가하고 Action = 'Send Escape Sequence',
+"            Text = '[15;2~' (뒤로) / '[17;2~' (앞으로)
+"   TeraTerm 마우스 버튼 바인딩 기능이 없다. AutoHotkey 로 보낸다:
+"              #IfWinActive ahk_exe ttermpro.exe
+"              XButton1::SendInput {Esc}[15;2~
+"              XButton2::SendInput {Esc}[17;2~
+"              #IfWinActive
+"            (마우스 제조사 유틸리티로 XButton1/2 를 Ctrl+O / Ctrl+I 에
+"             묶어도 된다 - 패널과 context 창도 그 두 키를 받는다)
+"
+"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>']
+"   let g:vimide_jump_forward_key = ['<F18>', '<S-F7>']
+"   let g:vimide_jump_back_key    = []     " 이 대체 키를 쓰지 않는다
+func! s:MapJumpAlias(which, rhs) abort
+	let l:v = get(g:, 'vimide_jump_' . a:which . '_key',
+				\ a:which ==# 'back' ? ['<F17>', '<S-F5>'] : ['<F18>', '<S-F7>'])
+	if type(l:v) == type('')
+		let l:v = empty(l:v) ? [] : [l:v]
+	endif
+	for l:k in l:v
+		execute 'nnoremap <silent> ' . l:k . ' ' . a:rhs
+	endfor
+endfunc
+call s:MapJumpAlias('back', '<C-o>')
+call s:MapJumpAlias('forward', '<C-i>')
+
 nmap <Leader>g <ESC>:Gtags<SPACE>
 nmap <Leader>e <plug>(quickr_cscope_egrep) <C-R>=expand("<cword>") <CR>
 nmap <Leader>f <plug>(quickr_cscope_files) <C-R>=expand("<cword>") <CR>
