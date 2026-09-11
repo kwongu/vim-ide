@@ -55,6 +55,7 @@
 --   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
 --   g:sihl_index_db     'near'(기본) 파일에서 가장 가까운 DB / 'root' 가장 바깥
 --   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1)
+--   g:sihl_index_ctags  0 이면 ctags 스냅숏은 보지 않는다 (기본 1)
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -309,6 +310,43 @@ end
 --
 -- 프로세스 수는 여전히 하나다 - 비싼 것은 global 호출이 아니라 fork 라서,
 -- 셸 하나 안에서 도는 것은 공용 서버에 티가 나지 않는다.
+-- gtags 가 모른다고 한 이름을 ctags 스냅숏에도 물어본다.
+--
+-- 둘은 서로 다른 파서다. GNU Global 의 기본 파서는 구조체 멤버와 일부
+-- 매크로·inline 을 정의로 기록하지 않는데, gutentags 가 만드는 ctags
+-- 스냅숏에는 들어 있다. 그리고 이 설정에서 C-] 는 그 스냅숏으로도 점프한다
+-- (&tags 가 걸려 있을 때). 그러니 gtags 만 보고 '없음'이라고 하면 점프가
+-- 멀쩡히 되는 이름이 검정이 된다 - 실제로 tcc-snd-card.c 한 파일에서
+-- 검정 22개 중 12개가 ctags 에는 있었다(num_rtd, kzalloc, of_node,
+-- snd_soc_dai_set_sysclk ...).
+--
+-- 'tagcase' 를 잠깐 match 로 바꾼다. 이 설정은 ignorecase 라 기본값
+-- followic 이면 정렬된 파일을 이분 탐색하지 못하고 훑는다: 7MB 스냅숏에서
+-- 이름당 7.01ms 대 0.16ms, 44배 차이였다(찾는 개수는 똑같다).
+--   let g:sihl_index_ctags = 0   " ctags 스냅숏은 보지 않는다
+local function in_tags(syms)
+  local out = {}
+  if (tonumber(cfg('ctags', 1)) or 1) == 0 or #vim.fn.tagfiles() == 0 then
+    return out
+  end
+  local save = vim.o.tagcase
+  vim.o.tagcase = 'match'
+  local ok = pcall(function()
+    for _, sym in ipairs(syms) do
+      local t = vim.fn.taglist('^' .. sym .. '$')
+      if t and #t > 0 then
+        -- ctags 의 kind 'd' 는 #define 이다
+        out[sym] = (t[1].kind == 'd') and 'macro' or true
+      end
+    end
+  end)
+  vim.o.tagcase = save
+  if not ok then
+    return {}
+  end
+  return out
+end
+
 local function run_batch(root, syms, done)
   local g = prog()
   if not g then
@@ -375,9 +413,18 @@ local function run_batch(root, syms, done)
       -- rc ~= 0 이면 '모른다'로 둔다. 실패를 '없음'으로 적으면 패턴이 한 번
       -- 길었던 것만으로 화면이 통째로 검정이 된다.
       if res and res.code == 0 then
+        -- gtags 가 못 찾은 것만 ctags 에 다시 물어본다
+        local rest = {}
         for _, sym in ipairs(syms) do
-          if hit[sym] then
-            b.found[sym] = hit[sym]
+          if not hit[sym] then
+            rest[#rest + 1] = sym
+          end
+        end
+        local tags = #rest > 0 and in_tags(rest) or {}
+        for _, sym in ipairs(syms) do
+          local v = hit[sym] or tags[sym]
+          if v then
+            b.found[sym] = v
           else
             b.missing[sym] = true
           end
@@ -709,6 +756,15 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
     local r = vim.system(argv, { cwd = root, text = true, env = db_env(root) }):wait(4000)
     local line = r and r.stdout and r.stdout:match('[^\n]+')
     out[#out + 1] = ('지금 물어보니: %s'):format(line or '(정의 없음)')
+  end
+  if #vim.fn.tagfiles() > 0 then
+    local save = vim.o.tagcase
+    vim.o.tagcase = 'match'
+    local t = vim.fn.taglist('^' .. sym .. '$')
+    vim.o.tagcase = save
+    out[#out + 1] = ('ctags   : %s'):format(
+      (t and #t > 0) and ((t[1].filename or '?') .. ' (kind=' .. (t[1].kind or '?') .. ')')
+        or '(없음)')
   end
   -- preset 모드면 '정의 파일이 목록 밖'인지까지 말해 준다
   local list = root .. '/' .. (vim.g.gtags_objdir or '.tags') .. '/files'
