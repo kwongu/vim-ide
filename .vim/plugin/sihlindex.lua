@@ -211,13 +211,31 @@ end
 
 local repaint  -- forward
 
+-- global 은 '<root>/GTAGS' 를 먼저 보고, 없으면 '<root>/$GTAGSOBJDIR/GTAGS'
+-- 를 본다. 이 설정은 .tags 를 쓰므로 GTAGSOBJDIR 을 넘겨 줘야 한다 -
+-- 비대화형 세션은 ~/.profile 을 읽지 않아 환경에 그 값이 없다. 실제로 이걸
+-- 빼먹었더니 개발서버에서 아무것도 칠해지지 않았다(전부 '모름'으로 남았다).
+local function db_env(root)
+  if _G.relationview_db_env then
+    local ok, e = pcall(_G.relationview_db_env)
+    if ok and e then
+      return e
+    end
+  end
+  if uv.fs_stat(root .. '/GTAGS') then
+    return nil
+  end
+  local d = vim.g.gtags_objdir or vim.env.GTAGSOBJDIR or '.tags'
+  return uv.fs_stat(root .. '/' .. d .. '/GTAGS') and { GTAGSOBJDIR = d } or nil
+end
+
 local function run_batch(root, syms, done)
   local pat = '^(' .. table.concat(syms, '|') .. ')$'
   local argv = nice_prefix()
   vim.list_extend(argv, { 'global', '--result=ctags-x', '-d', '-e', pat })
   dbg(('batch root=%s n=%d bytes=%d'):format(root, #syms, #pat))
   local ok, proc = pcall(vim.system, argv,
-    { cwd = root, text = true, detach = true },
+    { cwd = root, text = true, detach = true, env = db_env(root) },
     vim.schedule_wrap(function(res)
       s.proc = nil
       if s.watchdog then

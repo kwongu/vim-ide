@@ -440,6 +440,13 @@ local function db_env()
   return d and { GTAGSOBJDIR = d } or nil
 end
 
+-- sihlindex.lua 가 같은 환경으로 global 을 부르도록 내준다. 이걸 안 주면
+-- global 이 '<root>/GTAGS' 만 찾고 '<root>/.tags/GTAGS' 는 못 본다 -
+-- 비대화형 세션에서는 ~/.profile 이 안 읽혀 GTAGSOBJDIR 도 비어 있다.
+function _G.relationview_db_env()
+  return db_env()
+end
+
 -- nearest directory at or above `dir` that holds a database
 local function db_root(dir)
   local d, hidden = dir, db_dir()
