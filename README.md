@@ -767,6 +767,28 @@ project only being known once the session is up.
 Sourcing the plugin in that project went **153 ms → 88 ms**, and the file it
 writes is byte-for-byte the same 1,452 lines.
 
+### Editing the list from the buffer list
+
+`F6`'s BufExplorer takes the same three keys the trees do:
+
+| | |
+|---|---|
+| `+` | put the file on this line - or every line of a visual selection - into the index |
+| `-` | take it out |
+| `=` | say whether it is in, and which preset |
+
+A file that is in the list gets a red `●` at the end of its line, the same
+mark and the same judgement the trees use (`projectfiles_tree_flag`), so the
+three views never disagree. In auto mode nothing is marked, because
+everything is in.
+
+The point is that the file you want to index is usually the one you have
+open. Going back to the tree to find it again is doing the same work twice.
+The current buffer alone is already `\fp` to add and `\fx` to remove.
+
+The line is read by its buffer number, not by the name BufExplorer prints -
+that name is shortened, and two buffers can print the same one.
+
 ### Where presets live, and sharing them across machines
 
 A preset is JSON: a name and a list of project-relative paths. Nothing in it
