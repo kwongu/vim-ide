@@ -1476,6 +1476,7 @@ wrong:
 | `g:sihl_index = 0` | off (`:SiHlIndexToggle`, `:SiHlIndexClear`, `:SiHlIndexStatus`) |
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
+| `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
 
@@ -1487,9 +1488,27 @@ that database and `Ctrl+]` genuinely will not find them. Measured on a
 `:ProjectFilesReindex`) and they go green again; `g:sihl_index = 0` if you
 would rather not know.
 
-Verified end to end against a real GTAGS: `no_such_function` and
-`UNKNOWN_MACRO` painted black, `helper_add`, `render_point` and `struct
-point` left green, every local and parameter left to the olive pass.
+**Which database answers matters, and it is not the one the panel uses.**
+`platform_get_drvdata` and `snd_soc_card_get_drvdata` came out black while
+`Ctrl+]` found them without trouble: the module was asking `d5_qnx_hyp`'s
+GTAGS, which holds 39 files under `kernel/common` and knows neither, while
+`kernel/common`'s own GTAGS knows both. The outermost root is RelationView's
+rule - it decides what the panel answers from and what paths are measured
+against - but colour has to agree with where `Ctrl+]` actually lands, which
+is the nearest database above the file. `g:sihl_index_db = 'root'` restores
+the old choice.
+
+**Both passes run in the context window too**, on the same rules as the edit
+window - a preview that coloured its copy differently from the file would be
+worse than no colour. The preview is a scratch copy, so its buffer name
+cannot name a project; `_G.relationview_ctx_path()` says which file is on
+show and the root is taken from that.
+
+Verified end to end against a real GTAGS, in both windows: `no_such_function`,
+`UNKNOWN_MACRO` and `absent_helper_qqq` painted black, `helper_add`,
+`render_point`, `struct point`, `platform_get_drvdata` and
+`snd_soc_card_get_drvdata` left green, every local and parameter left to the
+teal pass.
 
 ## The symbol outline (nvim only)
 

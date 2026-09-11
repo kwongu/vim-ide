@@ -2189,6 +2189,12 @@ function _G.relationview_root_for(path)
   return out
 end
 
+-- 미리보기가 지금 보여 주는 '진짜 파일'의 경로. 미리보기 버퍼는 그 파일의
+-- 사본이라 이름으로는 알 수 없어서, 색칠 모듈들이 이걸 물어본다.
+function _G.relationview_ctx_path()
+  return s.ctx_file and s.ctx_file.path or nil
+end
+
 function _G.relationview_ctx_win()
   return (s.ctx_win and api.nvim_win_is_valid(s.ctx_win)) and s.ctx_win or nil
 end

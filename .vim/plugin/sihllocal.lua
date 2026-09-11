@@ -98,7 +98,14 @@ local function paint(win)
     return
   end
   local buf = api.nvim_win_get_buf(win)
-  if not api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= '' then
+  if not api.nvim_buf_is_valid(buf) then
+    return
+  end
+  -- 일반 파일 창과 RelationView 의 미리보기. 미리보기는 nofile 사본이지만
+  -- 내용은 그 파일 그대로라, 같은 색 규칙이 그대로 적용된다 - 편집 창과
+  -- 미리보기가 다른 색으로 보이면 그게 더 헷갈린다.
+  if vim.bo[buf].buftype ~= ''
+      and not api.nvim_buf_get_name(buf):match('RelationView%-Context$') then
     return
   end
   clear(buf)
@@ -212,6 +219,15 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinScrolled', 'TextChanged', 'InsertLe
     local ft = vim.bo.filetype
     if ft == 'c' or ft == 'cpp' then
       schedule()
+    end
+    -- 미리보기는 편집 창의 커서가 움직일 때 내용이 바뀐다. 그 창이 떠
+    -- 있으면 같이 다시 칠한다.
+    if _G.relationview_ctx_win then
+      local ok, cw = pcall(_G.relationview_ctx_win)
+      if ok and cw and api.nvim_win_is_valid(cw) then
+        vim.defer_fn(function() pcall(paint, cw) end,
+          (tonumber(cfg('delay', 120)) or 120) + 60)
+      end
     end
   end,
 })

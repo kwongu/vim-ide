@@ -153,6 +153,14 @@ end
 local root_cache = {}
 local function root_of(buf)
   local name = api.nvim_buf_get_name(buf)
+  -- 미리보기 버퍼는 파일의 사본이라 이름으로 루트를 못 찾는다. 지금 무엇을
+  -- 보여 주고 있는지 RelationView 에게 묻는다.
+  if name:match('RelationView%-Context$') and _G.relationview_ctx_path then
+    local ok, p = pcall(_G.relationview_ctx_path)
+    if ok and p and p ~= '' then
+      name = p
+    end
+  end
   if name == '' then
     return nil
   end
@@ -254,7 +262,9 @@ local function token_ok()
   return true
 end
 
-local repaint  -- forward
+local repaint, repaint_ctx  -- forward: 아래 drain() 이 둘 다 부른다.
+-- 이 저장소에서 '정의가 사용처보다 뒤에 있어 nil 전역이 되는' Lua 함정을
+-- 세 번 밟았다. 쓰는 곳보다 앞에 선언해 둔다.
 
 -- global 은 '<root>/GTAGS' 를 먼저 보고, 없으면 '<root>/$GTAGSOBJDIR/GTAGS'
 -- 를 본다. 이 설정은 .tags 를 쓰므로 GTAGSOBJDIR 을 넘겨 줘야 한다 -
@@ -423,6 +433,7 @@ local function drain()
     -- 거르면 '스크롤을 멈춘 화면에 표시가 안 뜨다가 키를 누르면 뜨는'
     -- 증상이 난다.
     pcall(repaint)
+    pcall(repaint_ctx)
     drain()
   end)
 end
@@ -457,10 +468,19 @@ local function local_names(buf, lang, lo, hi)
   return names
 end
 
-repaint = function()
-  local win = api.nvim_get_current_win()
+repaint = function(win)
+  win = win or api.nvim_get_current_win()
+  if not api.nvim_win_is_valid(win) then
+    return
+  end
   local buf = api.nvim_win_get_buf(win)
-  if not api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= '' then
+  if not api.nvim_buf_is_valid(buf) then
+    return
+  end
+  -- 일반 파일 창과 RelationView 미리보기. 편집 창과 미리보기가 서로 다른
+  -- 색으로 보이면 그게 더 헷갈린다.
+  if vim.bo[buf].buftype ~= ''
+      and not api.nvim_buf_get_name(buf):match('RelationView%-Context$') then
     return
   end
   local lang = vim.bo[buf].filetype
@@ -541,6 +561,17 @@ repaint = function()
   end
 end
 
+-- 미리보기 창이 떠 있으면 그쪽도 칠한다
+repaint_ctx = function()
+  if not _G.relationview_ctx_win then
+    return
+  end
+  local ok, cw = pcall(_G.relationview_ctx_win)
+  if ok and cw and api.nvim_win_is_valid(cw) then
+    pcall(repaint, cw)
+  end
+end
+
 local function schedule()
   if s.timer then
     pcall(function() s.timer:stop(); s.timer:close() end)
@@ -553,6 +584,7 @@ local function schedule()
       s.timer = nil
     end
     pcall(repaint)
+    pcall(repaint_ctx)
   end))
 end
 
