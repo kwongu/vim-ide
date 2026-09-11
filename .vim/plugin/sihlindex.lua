@@ -479,7 +479,9 @@ local function run_batch(root, syms, done)
   local script = 'for s in ' .. table.concat(syms, ' ') ..
       '; do o=$("$SIHL_G" -d --result=ctags-x "$s" 2>/dev/null | head -1);' ..
       ' if [ -z "$o" ] && [ -n "$SIHL_SNAP" ] && [ -r "$SIHL_SNAP" ]; then' ..
-      ' o=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$SIHL_SNAP" 2>/dev/null | head -1);' ..
+      ' a=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$SIHL_SNAP" 2>/dev/null | head -40);' ..
+      ' o=$(printf \'%s\\n\' "$a" | grep -m1 "#define" );' ..
+      ' [ -z "$o" ] && o=$(printf \'%s\\n\' "$a" | head -1);' ..
       ' [ -n "$o" ] && o="TAG\t$o"; fi;' ..
       ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; fi; done'
   local argv = nice_prefix()
@@ -509,11 +511,17 @@ local function run_batch(root, syms, done)
           local name, rest = line:match('^([^\t]+)\t(.*)$')
           if name then
             if rest:sub(1, 4) == 'TAG\t' then
-              -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 명령 ;" \t kind
+              -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 검색패턴 ...
+              --
+              -- kind 필드로 판단하지 않는다. 이 설정은 --fields=+nS 라
+              -- 마지막 필드가 kind 가 아니고(line:123 이 뒤에 온다), 게다가
+              -- look 은 정렬 순서로 첫 줄을 주므로 MODULE_LICENSE 의 경우
+              -- '#define' 이 아니라 그것을 '쓰는' 줄이 먼저 나왔다. 그래서
+              -- 셸에서 '#define' 이 들어간 줄을 먼저 고르고, 여기서는
+              -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
               local fields = vim.split(rest:sub(5), '\t', { plain = true })
               local path = fields[2] or ''
-              local kind = fields[#fields] or ''
-              hit[name] = (kind:match('^d') and macro_kind(path)) or true
+              hit[name] = (rest:find('#define', 1, true) and macro_kind(path)) or true
             else
               local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
               src = src or rest
