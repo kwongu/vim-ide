@@ -1002,7 +1002,10 @@ func! s:RvCtxJump() abort
 			" 패널이 닫혀 있으면 예전처럼 quickfix 로 보낸다. 거기서도
 			" 못 찾으면 그 심볼을 정의한 파일을 project files 에 넣고
 			" (색인까지) 한 번 더 찾는다.
-			if !luaeval('_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil or false')
+			" 패널도 미리보기도 없을 때만 여기로 온다. 예전에는 패널만
+			" 봐서, context only 모드(F3 의 시작 기본값)에서는 위 핸들러가
+			" 처리했는데도 이 줄이 한 번 더 quickfix 를 열었다.
+			if !luaeval('(_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil) or (_G.relationview_ctx_win ~= nil and _G.relationview_ctx_win() ~= nil) or false')
 						\ && exists(':Gtags') == 2
 						\ && luaeval('_G.relationview_has_db ~= nil and _G.relationview_has_db() or false')
 				let l:w = expand('<cword>')
@@ -1053,7 +1056,26 @@ nmap <C-\><C-]> :GtagsCursor<CR>
 " <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고
 " 포커스 이동, 패널이 없으면 tagfunc 로 편집창 점프). 예전 매핑은 남겨둔다:
 "nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
-nmap <C-t> <C-o><CR>
+" <C-t> : 태그 스택으로 되돌아간다. 비어 있으면 점프 목록으로 되돌아간다.
+"
+" 예전에는 'nmap <C-t> <C-o><CR>' 이었다. 뒤의 <CR> 은 되돌아간 자리에서
+" 한 줄을 더 내려 보내는 군더더기였고(늘 한 줄 어긋나 돌아왔다), 태그
+" 스택을 아예 쓰지 않으니 <C-]> 로 판 깊이를 되짚지도 못했다. 이제 심볼
+" 점프가 태그 스택을 제대로 쌓으므로(relationview.lua 의 push_tag,
+" projectfiles.lua 의 jump_to_symbol) 진짜 <C-t> 를 쓴다.
+func! s:JumpBack() abort
+	let l:st = gettagstack(win_getid())
+	if get(l:st, 'curidx', 1) > 1
+		try
+			execute "normal! \<C-t>"
+			return
+		catch
+		endtry
+	endif
+	" 태그 스택이 비었으면 점프 목록으로. 그것도 비었으면 아무 일도 없다.
+	execute "normal! \<C-o>"
+endfunc
+nnoremap <silent> <C-t> :call <SID>JumpBack()<CR>
 
 "------------------------------------------------------------------------------
 "- 마우스 더블클릭 = <C-]> (심볼 정의로 점프)

@@ -289,6 +289,7 @@ local s = {
   ctx_last = nil,     -- last location shown in the context window
   ctx_timer = nil,    -- context update debounce timer
   ctx_stack = {},     -- <C-]> jump stack of the context window (<C-t> pops)
+  ctx_fwd = {},       -- <C-t> 로 되돌린 것들 (<C-i> 가 다시 따라간다)
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
   ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
@@ -2050,7 +2051,7 @@ end
 -- list (and :tag, gf, ...) from hijacking this window: there is no file
 -- buffer here to jump into, so those commands always land in a real edit
 -- window. It also means the preview can never be edited by accident.
-local ctx_tag_jump, ctx_tag_back, ctx_enter_from
+local ctx_tag_jump, ctx_tag_back, ctx_tag_forward, ctx_enter_from
 
 local function ctx_buf()
   if s.ctx_ph and api.nvim_buf_is_valid(s.ctx_ph) then
@@ -2068,8 +2069,15 @@ local function ctx_buf()
   -- leak into a real file the user is editing
   vim.keymap.set('n', '<C-]>', function() ctx_tag_jump() end,
     { buffer = b, nowait = true, desc = 'RelationView context: goto definition' })
-  vim.keymap.set('n', '<C-t>', function() ctx_tag_back() end,
-    { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  -- 뒤로는 <C-t> 와 <C-o> 둘 다 받는다. 편집 창에서 몸에 익은 쪽이 사람마다
+  -- 다르고, 여기서 <C-o> 는 어차피 할 일이 없다(파일 버퍼가 아니라 점프
+  -- 목록이 비어 있다) - 아무 일도 안 일어나는 키를 남겨 둘 이유가 없다.
+  for _, lhs in ipairs({ '<C-t>', '<C-o>' }) do
+    vim.keymap.set('n', lhs, function() ctx_tag_back() end,
+      { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  end
+  vim.keymap.set('n', '<C-i>', function() ctx_tag_forward() end,
+    { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
   -- double click follows the definition of the symbol under the mouse,
   -- exactly like <C-]> does here
   for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do
@@ -2084,6 +2092,8 @@ local function ctx_buf()
   -- in the preview the back button walks the same stack as <C-t>
   vim.keymap.set('n', '<X1Mouse>', function() ctx_tag_back() end,
     { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  vim.keymap.set('n', '<X2Mouse>', function() ctx_tag_forward() end,
+    { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
   s.ctx_ph = b
   return b
 end
@@ -2272,6 +2282,8 @@ ctx_tag_jump = function()
   if not file then
     return
   end
+  -- 새로 따라가면 되돌릴 곳은 사라진다 - 점프 목록과 같은 규칙이다
+  s.ctx_fwd = {}
   local pos = api.nvim_win_get_cursor(s.ctx_win)
   local off = s.ctx_file.off or 0
 
@@ -2373,6 +2385,15 @@ ctx_tag_back = function()
     vim.notify('RelationView context: jump stack is empty')
     return
   end
+  -- 어디에서 되돌아왔는지 적어 둔다: <C-i> 가 여기로 다시 온다
+  if s.ctx_file then
+    local cur = api.nvim_win_get_cursor(s.ctx_win)
+    table.insert(s.ctx_fwd, {
+      back = prev,
+      to = { path = s.ctx_file.path, line = cur[1] + (s.ctx_file.off or 0),
+             col = cur[2] },
+    })
+  end
   s.ctx_last = nil
   -- no 'sym' here on purpose: the recorded line/column is the exact spot,
   -- re-locating the symbol could land back where we just came from
@@ -2391,6 +2412,23 @@ ctx_tag_back = function()
     end
     pcall(api.nvim_set_current_win, ow)
   end
+end
+
+-- <C-i>: <C-t> 로 되돌린 자리를 다시 따라간다 (편집 창의 점프 목록과 같은
+-- 짝을 context 창에도 준다 - 되돌리기만 있고 앞으로 가기가 없으면, 한 칸
+-- 잘못 되돌렸을 때 처음부터 다시 파고들어야 한다)
+ctx_tag_forward = function()
+  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+    return
+  end
+  local nxt = table.remove(s.ctx_fwd)
+  if not nxt then
+    vim.notify('RelationView context: 앞으로 갈 곳이 없습니다')
+    return
+  end
+  table.insert(s.ctx_stack, nxt.back)
+  s.ctx_last = nil
+  show_context(nxt.to)
 end
 
 -- C-] (and \\c) in an EDIT window: show the definition in the context
@@ -2456,7 +2494,14 @@ local function tag_loc(sym)
 end
 
 function A.ctx_jump_from_edit()
-  if not panel_visible() then
+  -- 패널이든 미리보기든, 우리 창이 하나라도 떠 있으면 우리가 처리한다.
+  --
+  -- 예전에는 패널만 봤다. F3 에 'context only' 모드가 생기고 그것이 시작
+  -- 기본값이 되면서, 가장 흔한 배치에서 이 함수가 첫 줄에 빠져나갔다 -
+  -- <C-]> 가 정의를 context view 에 띄우는 대신 편집 창을 옮기고 quickfix
+  -- 를 열었다. 아래 코드는 이미 ctx_visible() 로 두 경우를 갈라 쓰고 있으니
+  -- 여기서 막을 이유가 없다.
+  if not (panel_visible() or ctx_visible()) then
     return false -- nothing of ours is up: the caller falls back to :Gtags
   end
   local win = api.nvim_get_current_win()
@@ -4427,6 +4472,26 @@ pick_src_win = function()
   return nil
 end
 
+-- <C-t> 가 쓰는 태그 스택에 '여기서 떠났다'를 적는다.
+--
+-- 우리 점프는 :tag 가 아니라 nvim_win_set_buf 라 vim 이 스스로 쌓아 주지
+-- 않는다. 그래서 스택이 늘 비어 있었고, <C-t> 는 아무 데도 못 갔다
+-- (.vimrc 는 그것을 <C-o> 로 흉내 내고 있었는데, 그러면 점프 목록과 태그
+-- 스택이 뒤섞여 둘 다 어긋난다).
+local function push_tag(win, sym)
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  local ok, from = pcall(api.nvim_win_call, win, function()
+    return { vim.fn.bufnr('%'), vim.fn.line('.'), vim.fn.col('.'), 0 }
+  end)
+  if not ok or not from then
+    return
+  end
+  pcall(vim.fn.settagstack, win,
+    { items = { { tagname = sym or '?', from = from } } }, 'a')
+end
+
 -- jump the edit window to loc = {path, line, sym?, col?}: with `col` the
 -- position is taken as-is, otherwise the symbol is located on that line
 local function jump_to(loc, peek)
@@ -4440,6 +4505,7 @@ local function jump_to(loc, peek)
   api.nvim_win_call(win, function()
     pcall(vim.cmd, [[normal! m']])
   end)
+  push_tag(win, loc.sym)
   api.nvim_win_set_buf(win, buf)
   -- land exactly on the referenced symbol (re-located if the file drifted)
   local line, col

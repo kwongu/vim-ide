@@ -1152,6 +1152,39 @@ throws before it is reached. The list matches `buftype` as well as
 `filetype`, so `nofile` in it keeps every scratch window out - which is the
 right rule anyway.
 
+### Getting back out
+
+Three things were broken here at once, and they hid each other.
+
+**`Ctrl+]` skipped the context window whenever the panel was closed.**
+`ctx_jump_from_edit()` asked `panel_visible()` and gave up if the panel was
+not there. That was true when it was written; then `F3` grew a *context
+only* mode and that became the startup default, so in the most common layout
+the whole handler bailed on its first line - `Ctrl+]` moved the edit window
+and opened a quickfix list instead of showing the definition in the preview.
+It now asks whether *either* of our windows is up.
+
+**`Ctrl+t` never used the tag stack.** It was mapped `nmap <C-t> <C-o><CR>`,
+which walks the jumplist instead and then presses Enter, so it came back one
+line below where it left. And the reason it faked it is that the tag stack
+really was empty: these jumps go through `nvim_win_set_buf`, not `:tag`, so
+vim records nothing. Both halves are fixed - the jumps push a proper entry
+with `settagstack()`, and `Ctrl+t` pops it, falling back to `Ctrl+o` when
+the stack is empty. `Ctrl+o` / `Ctrl+i` keep doing what they always did.
+
+**The context window could go back but not forward.** `Ctrl+t` popped the
+preview's own stack and threw the entry away, so one key too many meant
+digging down from the top again. What it pops is now kept for `Ctrl+i`, and
+any new `Ctrl+]` clears it - the same rule the jumplist uses.
+
+Measured in a small C project, context-only mode, after `Ctrl+]` on a call:
+
+| | |
+|---|---|
+| edit window `Ctrl+]` | definition in the preview, focus there, edit window unmoved, no quickfix |
+| preview `Ctrl+]` → `Ctrl+t` → `Ctrl+i` | definition → back → definition again |
+| panel jump → `Ctrl+t` | back to the exact line it left, tag stack 1 → 0 |
+
 ## The symbol outline (nvim only)
 
 `<F10>` opens **aerial**, on the left where tagbar used to sit. `:Tagbar` is
@@ -1518,13 +1551,14 @@ to it, pinned), a parameter or a local variable goes to its declaration in
 the edit window, and an `#include` line opens that header there.
 In the context window a double click follows the definition of the symbol
 under the mouse - like `Ctrl+]` there - and on an `#include` line it opens
-that header in the context window (`Ctrl+t` or the mouse back button
-returns), while `Enter` takes the edit window to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
+that header in the context window (`Ctrl+t`, `Ctrl+o` or the mouse back
+button returns, `Ctrl+i` or the forward button follows it again), while
+`Enter` takes the edit window to the line under the cursor. Special windows (quickfix, NERDTree, tagbar)
 keep their own double-click behaviour.
 mouse button 4 / 5: back / forward, exactly like Ctrl+o / Ctrl+i (the
        panel's jumps land in the jumplist too, so they are undone the same
        way); from the panel they move the edit window, and in the context
-       window the back button walks that window's own stack
+       window they walk that window's own stack
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)

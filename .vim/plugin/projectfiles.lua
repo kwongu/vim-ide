@@ -2995,12 +2995,20 @@ local function jump_to_symbol(root, e)
   -- one by itself, and an 'm\'' after the switch would mark the file we just
   -- landed in instead
   pcall(vim.cmd, [[normal! m']])
+  -- 떠나는 자리는 창을 옮기기 전에 적어 둔다 - <C-t> 가 쓰는 태그 스택은
+  -- 점프 목록과 다른 것이고, 우리 점프는 :tag 가 아니라서 vim 이 스스로
+  -- 쌓아 주지 않는다
+  local from = { vim.fn.bufnr('%'), vim.fn.line('.'), vim.fn.col('.'), 0 }
   local ok = pcall(open_in_edit, root, e.path)
   if not ok then
     notify('편집할 창을 찾지 못했습니다: ' .. e.path, vim.log.levels.WARN)
     return
   end
   local win = api.nvim_get_current_win()
+  if vim.fn.getbufvar(from[1], '&buftype') == '' then
+    pcall(vim.fn.settagstack, win,
+      { items = { { tagname = e.name or '?', from = from } } }, 'a')
+  end
   local buf = api.nvim_win_get_buf(win)
   -- and the file can have changed since it was indexed
   local last = api.nvim_buf_line_count(buf)
