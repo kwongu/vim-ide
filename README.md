@@ -1581,12 +1581,25 @@ wrong:
 | | |
 |---|---|
 | `g:sihl_index = 0` | off (`:SiHlIndexToggle`, `:SiHlIndexClear`, `:SiHlIndexStatus`) |
+| `:SiHlIndexAdd` | find the file that defines this symbol, add it to the index, index it, repaint |
+| `g:sihl_index_autoadd = 1` | do that by itself when the cursor rests on a black symbol (off by default) |
 | `:SiHlIndexWhy` | why *this* name is that colour: which database was asked, what the cache holds, what `global` says right now, and how many files the index list covers |
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
+
+**Turning a black symbol green.** `:SiHlIndexAdd` on it searches the sources
+for the file that defines it, adds that file to the preset, indexes just it,
+and repaints - the machinery `Ctrl+]` already used as its last resort, put on
+a key. `g:sihl_index_autoadd = 1` does it when the cursor rests on one.
+
+Automatic is deliberately narrow: the symbol under the cursor, one at a time,
+no sooner than `g:sihl_index_autoadd_gap` seconds apart, and never the same
+name twice. Doing it for every black name on screen would be dozens of
+whole-tree searches per screen, each over a second on a kernel tree, on a box
+with sixty cores and eight hundred other people.
 
 **"It jumps, so why is it black?"** came up repeatedly, with a different
 answer each time: the outer database was being asked; a long-running session

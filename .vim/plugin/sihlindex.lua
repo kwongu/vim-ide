@@ -63,6 +63,7 @@
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
 --   :SiHlIndexToggle / :SiHlIndexClear / :SiHlIndexStatus
 --   :SiHlIndexWhy [심볼]  이 이름이 왜 그 색인지 (어느 DB, 캐시, 지금 물어본 결과)
+--   :SiHlIndexAdd [심볼]  이 심볼을 정의한 파일을 찾아 색인에 넣는다
 
 if vim.g.loaded_sihlindex then
   return
@@ -944,6 +945,104 @@ end, { desc = '색인 판정 캐시 비우기' })
 -- DB 에 물어서, 세션이 옛 캐시를 들고 있어서, 정의 파일이 preset 밖이라
 -- 색인에 진짜로 없어서. 어느 쪽인지는 한 번 물어보면 끝나는 일이라
 -- 명령으로 만들어 둔다.
+-- 검정으로 나온 심볼의 '정의가 있는 파일'을 찾아 색인에 넣는다.
+--
+-- projectfiles 에 이미 있는 기구를 부른다: 소스를 훑어 그 심볼을 정의한
+-- 파일을 찾고, preset 에 넣고, 그 파일만 색인한 뒤 재색인한다.
+--
+-- 자동으로 하되 '커서가 멈춘 그 심볼 하나'만 한다. 화면에 보이는 검정을
+-- 전부 자동으로 처리하면 한 화면에 수십 번의 소스 전체 검색이 된다 -
+-- 커널 트리에서 한 번이 1초를 훌쩍 넘고, 이건 60코어를 840명이 쓰는
+-- 서버다. 한 번에 하나, 최소 간격을 두고, 같은 심볼은 다시 시도하지 않는다.
+--
+--   let g:sihl_index_autoadd = 1     커서가 멈추면 자동으로 (기본 0)
+--   let g:sihl_index_autoadd_gap = 5 최소 간격 초 (기본 5)
+--   :SiHlIndexAdd [심볼]             지금 이 심볼로 직접
+local function forget(name)
+  for _, b in pairs(s.cache) do
+    b.missing[name] = nil
+    b.found[name] = nil
+  end
+end
+
+local adding = false
+local last_add = 0
+local tried = {}
+
+local function add_for(sym, quiet)
+  if adding or not sym or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
+    return
+  end
+  if not _G.projectfiles_add_for_symbol_async then
+    if not quiet then
+      vim.notify('projectfiles 가 없습니다', vim.log.levels.WARN)
+    end
+    return
+  end
+  adding = true
+  last_add = os.time()
+  tried[sym] = true
+  if not quiet then
+    vim.notify(("'%s' 를 정의한 파일을 찾는 중..."):format(sym))
+  end
+  local ok = pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
+    adding = false
+    if n and n > 0 then
+      forget(sym)
+      vim.schedule(function()
+        pcall(repaint)
+        pcall(repaint_ctx)
+      end)
+    elseif not quiet then
+      vim.notify(("'%s' 를 정의한 파일을 찾지 못했습니다"):format(sym),
+        vim.log.levels.WARN)
+    end
+  end)
+  if not ok then
+    adding = false
+  end
+end
+
+api.nvim_create_user_command('SiHlIndexAdd', function(o)
+  add_for(o.args ~= '' and o.args or vim.fn.expand('<cword>'), false)
+end, { nargs = '?', desc = '이 심볼을 정의한 파일을 색인에 넣는다' })
+
+-- 자동: 커서가 검정 심볼 위에서 멈췄을 때만
+api.nvim_create_autocmd('CursorHold', {
+  group = group,
+  callback = function()
+    if (tonumber(cfg('autoadd', 0)) or 0) == 0 or adding then
+      return
+    end
+    local gap = tonumber(cfg('autoadd_gap', 5)) or 5
+    if os.time() - last_add < gap then
+      return
+    end
+    local ft = vim.bo.filetype
+    if ft ~= 'c' and ft ~= 'cpp' then
+      return
+    end
+    local sym = vim.fn.expand('<cword>')
+    if not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') or KEYWORD[sym] or tried[sym] then
+      return
+    end
+    -- 정말 '없음'으로 판정된 것만
+    local miss = false
+    for _, r in ipairs(roots_of(api.nvim_get_current_buf())) do
+      local b = bucket(r)
+      if b.found[sym] then
+        return
+      end
+      if b.missing[sym] then
+        miss = true
+      end
+    end
+    if miss then
+      add_for(sym, true)
+    end
+  end,
+})
+
 api.nvim_create_user_command('SiHlIndexWhy', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
   local buf = api.nvim_get_current_buf()
