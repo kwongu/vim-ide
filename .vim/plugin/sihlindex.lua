@@ -52,6 +52,7 @@
 --   g:sihl_index_pad    화면 위아래로 더 볼 줄 수 (기본 20)
 --   g:sihl_index_budget 분당 global 프로세스 수 (기본 30, 0 이면 무제한)
 --   g:sihl_index_batch  한 번 칠할 때 시작할 배치 수 (기본 2)
+--   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -68,7 +69,6 @@ end
 local api = vim.api
 local uv = vim.uv or vim.loop
 local NS = api.nvim_create_namespace('sihl_index')
-local PAT_MAX = 480
 
 local function cfg(name, default)
   local v = vim.g['sihl_index' .. (name == '' and '' or '_' .. name)]
@@ -214,12 +214,15 @@ local function nice_prefix()
   return out
 end
 
+-- 프로세스 그룹째 죽인다. TERM 뒤에 KILL 을 '미뤄서' 보내면 안 된다 -
+-- nvim 이 그 사이에 끝나면 미룬 것이 사라지고 global 이 살아남는다. 실제로
+-- 개발서버에서 98% CPU 로 도는 global 하나가 그렇게 남았다. 둘 다 지금
+-- 보낸다. detach = true 라 자식이 세션 리더이므로 pgid == pid 다.
 local function kill_group(pid)
   if not pid then return end
-  pcall(vim.fn.system, { 'kill', '-TERM', '-' .. tostring(pid) })
-  vim.defer_fn(function()
-    pcall(vim.fn.system, { 'kill', '-KILL', '-' .. tostring(pid) })
-  end, 500)
+  local g = '-' .. tostring(pid)
+  pcall(vim.fn.system, { 'kill', '-TERM', g })
+  pcall(vim.fn.system, { 'kill', '-KILL', g })
 end
 
 local function token_ok()
@@ -259,6 +262,17 @@ local function db_env(root)
   return uv.fs_stat(root .. '/' .. d .. '/GTAGS') and { GTAGSOBJDIR = d } or nil
 end
 
+-- 한 프로세스 안에서 이름을 하나씩 묻는다.
+--
+-- 처음에는 정규식 하나로 묶어 물었다 - global -d -e '^(a|b|c)$'. 문법은
+-- 되는데 실제 데이터베이스에서 쓸 수가 없다: 앵커된 alternation 에는 리터럴
+-- 접두사가 없어서 global 이 색인을 타지 못하고 DB 를 통째로 훑는다.
+-- 개발서버의 70MB GTAGS 에서 이름 11개짜리 질의가 60초 타임아웃까지 98%
+-- CPU 로 돌았다. 같은 11개를 셸 반복문 안에서 단건으로 물으면 0.16초다
+-- (건당 15ms, btree 탐색). 400배 차이라 고민할 여지가 없다.
+--
+-- 프로세스 수는 여전히 하나다 - 비싼 것은 global 호출이 아니라 fork 라서,
+-- 셸 하나 안에서 도는 것은 공용 서버에 티가 나지 않는다.
 local function run_batch(root, syms, done)
   local g = prog()
   if not g then
@@ -266,12 +280,19 @@ local function run_batch(root, syms, done)
     done()
     return
   end
-  local pat = '^(' .. table.concat(syms, '|') .. ')$'
+  -- 이름은 이미 ^[A-Za-z_][A-Za-z0-9_]*$ 로 걸러져 있어 셸에 그대로 둔다
+  -- 종료 코드로 판정하면 안 된다: global -d 는 못 찾아도 0 을 준다(빈
+  -- 출력만 다르다). 그렇게 했더니 없는 이름까지 전부 '찾음'이 되어 아무것도
+  -- 칠해지지 않았다. 출력이 있는지로 본다.
+  local script = 'for s in ' .. table.concat(syms, ' ') ..
+      '; do if [ -n "$("$SIHL_G" -d "$s" 2>/dev/null)" ]; then echo "$s"; fi; done'
   local argv = nice_prefix()
-  vim.list_extend(argv, { g, '--result=ctags-x', '-d', '-e', pat })
-  dbg(('batch root=%s n=%d bytes=%d'):format(root, #syms, #pat))
+  vim.list_extend(argv, { 'sh', '-c', script })
+  local env = db_env(root) or {}
+  env = vim.tbl_extend('force', env, { SIHL_G = g })
+  dbg(('batch root=%s n=%d'):format(root, #syms))
   local ok, proc = pcall(vim.system, argv,
-    { cwd = root, text = true, detach = true, env = db_env(root) },
+    { cwd = root, text = true, detach = true, env = env },
     vim.schedule_wrap(function(res)
       s.proc = nil
       if s.watchdog then
@@ -282,7 +303,7 @@ local function run_batch(root, syms, done)
       local hit = {}
       if res and res.code == 0 and res.stdout then
         for line in res.stdout:gmatch('[^\n]+') do
-          local name = line:match('^(%S+)')
+          local name = line:match('^%s*(%S+)%s*$')
           if name then hit[name] = true end
         end
       elseif res and res.code ~= 0 then
@@ -301,6 +322,9 @@ local function run_batch(root, syms, done)
       end
       if res and res.code == 0 then
         s.fails = 0
+        local nf = 0
+        for _ in pairs(hit) do nf = nf + 1 end
+        dbg(('batch ok n=%d found=%d'):format(#syms, nf))
       end
       -- rc ~= 0 이면 '모른다'로 둔다. 실패를 '없음'으로 적으면 패턴이 한 번
       -- 길었던 것만으로 화면이 통째로 검정이 된다.
@@ -343,17 +367,14 @@ local function pack(root)
     return nil
   end
   local b = bucket(root)
-  local out, len = {}, 2
+  local out = {}
+  local cap = tonumber(cfg('names', 40)) or 40
   for sym in pairs(want) do
     if b.found[sym] == nil and b.missing[sym] == nil then
-      if len + #sym + 1 > PAT_MAX then
-        break
-      end
       out[#out + 1] = sym
-      len = len + #sym + 1
     end
     want[sym] = nil
-    if #out >= 20 then
+    if #out >= cap then
       break
     end
   end
@@ -535,7 +556,9 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinScrolled', 'CursorHold',
   end,
 })
 
-api.nvim_create_autocmd('VimLeavePre', {
+-- nvim 이 끝날 때 남은 것을 반드시 죽인다. 여기서 미루면(defer) 그 콜백이
+-- 실행되기 전에 nvim 이 사라져 global 이 그대로 남는다.
+api.nvim_create_autocmd({ 'VimLeavePre', 'VimSuspend' }, {
   group = group,
   callback = function()
     if s.proc then
