@@ -156,6 +156,19 @@ endif
 if !has_key(s:c, 'jumplocal')
   let s:c.jumplocal = ['#008080', 30,  'darkcyan']
 endif
+" 전역 변수를 함수 안에서 쓰는 자리 (sihllocal.lua) = 보라 이탤릭.
+"
+" 보라 #800080 은 SI 팔레트의 색이고 주석이 쓰는 색이기도 한데, 주석은
+" 식별자가 아니라 한 줄 통째로 보라라서 섞이지 않는다. 이탤릭이 한 번 더
+" 갈라 준다 - '이건 이 함수 밖의 상태다'를 기울기로 읽는다.
+"   let g:sourceinsight_global_color = '#6a1b9a'
+if !has_key(s:c, 'globalref')
+  let s:c.globalref = ['#800080', 90,  'darkmagenta']
+endif
+if exists('g:sourceinsight_global_color')
+  let s:c.globalref = [g:sourceinsight_global_color,
+        \ get(g:, 'sourceinsight_global_cterm', 90), 'darkmagenta']
+endif
 if exists('g:sourceinsight_local_color')
   let s:c.jumplocal = [g:sourceinsight_local_color,
         \ get(g:, 'sourceinsight_local_cterm', 30), 'darkcyan']
@@ -358,6 +371,8 @@ call s:hi('SiJumpLocal', 'jumplocal', '', '')
 " 색인이 정의부를 모르는 심볼 (sihlindex.lua). 본문색으로 떨어뜨린다 -
 " 초록이 '점프할 수 있다'는 뜻이 되려면, 못 하는 것은 초록이 아니어야 한다.
 call s:hi('SiJumpNone', 'fg', '', '')
+" 함수 안에서 쓰는 전역 변수 (sihllocal.lua)
+call s:hi('SiGlobalRef', 'globalref', '', 'italic')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

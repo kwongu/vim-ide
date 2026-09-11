@@ -24,9 +24,12 @@
 --   g:sihl_local_delay  커서가 멈춘 뒤 몇 ms 만에 칠할지 (기본 120)
 --   g:sihl_local_pad    화면 위아래로 더 볼 줄 수 (기본 40)
 --   g:sihl_local_max    한 번에 훑을 최대 줄 수 (기본 4000)
+--   g:sihl_local_global 0 이면 전역 변수 표시를 하지 않는다 (기본 1)
 --   :SiHlLocalToggle    실행 중에 켜고 끄기
 --
--- 색은 컬러스킴의 SiJumpLocal (짙은 연두 #6b8e23).
+-- 색은 컬러스킴이 준다: SiJumpLocal(지역, 청록), SiGlobalRef(전역, 보라
+-- 이탤릭). 전역은 이 파일이 파일 스코프에서 선언한 것만 안다 - 헤더에서
+-- 온 extern 변수는 이 파일만 봐서는 변수인지 함수인지도 알 수 없다.
 
 if vim.g.loaded_sihllocal then
   return
@@ -64,12 +67,36 @@ local DECL_SRC = [[
 ]]
 local REF_SRC = '((identifier) @r)'
 
+-- 파일 스코프(전역) 변수의 '선언'. 함수 선언은 일부러 빼 둔다 -
+-- 'int helper(int);' 도 declaration 이지만 declarator 가 function_declarator
+-- 라, 와일드카드로 잡으면 함수 이름까지 전역 변수로 물들인다.
+local GLOBAL_SRC = [[
+  (translation_unit (declaration declarator: (identifier) @g))
+  (translation_unit (declaration declarator: (init_declarator
+    declarator: (identifier) @g)))
+  (translation_unit (declaration declarator: (pointer_declarator
+    declarator: (identifier) @g)))
+  (translation_unit (declaration declarator: (array_declarator
+    declarator: (identifier) @g)))
+  (translation_unit (declaration declarator: (init_declarator
+    declarator: (pointer_declarator declarator: (identifier) @g))))
+  (translation_unit (declaration declarator: (init_declarator
+    declarator: (array_declarator declarator: (identifier) @g))))
+  (preproc_ifdef (declaration declarator: (identifier) @g))
+  (preproc_ifdef (declaration declarator: (init_declarator
+    declarator: (identifier) @g)))
+  (preproc_ifdef (declaration declarator: (pointer_declarator
+    declarator: (identifier) @g)))
+]]
+
 local qcache = {}
 local function queries(lang)
   if qcache[lang] == nil then
     local okd, d = pcall(vim.treesitter.query.parse, lang, DECL_SRC)
     local okr, r = pcall(vim.treesitter.query.parse, lang, REF_SRC)
-    qcache[lang] = (okd and okr) and { decl = d, ref = r } or false
+    local okg, g = pcall(vim.treesitter.query.parse, lang, GLOBAL_SRC)
+    qcache[lang] = (okd and okr) and { decl = d, ref = r, glob = okg and g or nil }
+        or false
   end
   return qcache[lang] or nil
 end
@@ -161,6 +188,18 @@ local function paint(win)
     return
   end
 
+  -- 이 파일이 파일 스코프에서 선언한 변수들. 함수 안에서 이 이름을 쓰면
+  -- 전역 변수를 건드리는 것이고, 그건 지역 변수와 눈에 띄게 달라야 한다.
+  -- 헤더에서 온 전역(extern)은 여기서 보이지 않는다 - 이 파일이 가진
+  -- 정보만으로 말할 수 있는 것만 말한다.
+  local globals = {}
+  if q.glob then
+    for _, node in q.glob:iter_captures(root, buf, 0, -1) do
+      local t = vim.treesitter.get_node_text(node, buf)
+      if t and t ~= '' then globals[t] = true end
+    end
+  end
+
   local prio = tonumber(vim.g.sihl_priority) or 200
   for _, fn in ipairs(fns) do
     local declared = {}
@@ -180,10 +219,20 @@ local function paint(win)
         if r1 >= lo and r1 < hi and r1 == r2 then
           local name = vim.treesitter.get_node_text(node, buf)
           -- 선언한 자리 자체는 이미 파랑이다 (item 1/2). 덮지 않는다.
-          if declared[name] and not decl_at[r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2] then
+          local at = r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2
+          local hl
+          if declared[name] and not decl_at[at] then
+            hl = 'SiJumpLocal'
+          elseif globals[name] and not declared[name]
+              and (tonumber(vim.g.sihl_local_global) or 1) ~= 0 then
+            -- 지역에 같은 이름이 있으면 그게 이긴다 (가리는 쪽이 실제로
+            -- 쓰이는 것이므로)
+            hl = 'SiGlobalRef'
+          end
+          if hl then
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
-              hl_group = 'SiJumpLocal', priority = prio,
+              hl_group = hl, priority = prio,
             })
           end
         end

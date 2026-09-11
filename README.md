@@ -1413,6 +1413,27 @@ one function - is still a name you can jump to.
 | `g:sihl_local_delay` | ms of stillness before painting, default 120 |
 | `g:sihl_local_pad` | lines resolved above and below the screen, default 40 |
 | `g:sihl_local_max` | most lines examined in one pass, default 4000 |
+| `g:sihl_local_global` | 0 turns off the purple globals below |
+| `g:sourceinsight_global_color` | a different purple, e.g. `'#6a1b9a'` |
+
+**A global used inside a function is purple and italic.** Reading a function,
+the thing worth noticing is which names reach outside it - a local you can
+follow with your eye, a global you cannot. Purple `#800080` is another of
+Source Insight's inks, shared with comments, which are never identifiers and
+are purple by the line rather than by the word; the italic separates them
+anyway and says "this is state from outside".
+
+The query is deliberately narrow. It matches declarations at file scope only,
+and never through a `function_declarator` - `int helper(int);` is a
+declaration too, and a wildcard would have painted every function name as a
+global variable. A local that shadows a global wins, because the local is
+what the code actually touches. Measured on a file with both: `g_cfg`,
+`g_shared`, `g_name` and `g_tab` purple, `arg` and `local_v` teal, and a
+`g_count` redeclared inside the function teal rather than purple.
+
+Globals that arrive from a header are not marked. This pass only knows what
+the file in front of it declares, and from the file alone an `extern` name
+cannot even be told apart from a function.
 
 Measured on a file holding every local-declaration shape: 31 uses painted,
 and calls (`helper`, `printf`), struct members (`m`), file-scope variables
