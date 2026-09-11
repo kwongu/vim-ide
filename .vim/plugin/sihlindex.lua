@@ -165,6 +165,57 @@ end
 -- 심볼이 전부 검정이 됐다.
 --
 --   let g:sihl_index_db = 'root'   " 예전처럼 가장 바깥 DB 에 묻는다
+-- 파일 위쪽의 데이터베이스를 가까운 것부터 전부 모은다.
+--
+-- 하나만 보면 안 된다. 이 트리에는 Android14_IVI_1.1.0 아래에
+-- kernel/common 이 자기 색인을 또 갖고 있는데, 그 색인 목록은 5개 파일뿐
+-- 이라 device_create 를 모른다 - 바깥 색인(435 파일)은 안다. 반대로
+-- d5_qnx_hyp 에서는 바깥이 39개만 담고 안쪽이 다 안다. 어느 쪽이 맞다고
+-- 정할 수가 없으니 가까운 것부터 차례로 묻고, 하나라도 알면 찾은 것이다 -
+-- C-] 도 결국 그중 하나로 닿는다.
+--
+--   let g:sihl_index_db = 'near'   " 가장 가까운 DB 하나만
+--   let g:sihl_index_db = 'root'   " 가장 바깥 DB 하나만
+local chain_cache = {}
+local function roots_of(buf)
+  local name = api.nvim_buf_get_name(buf)
+  if name:match('RelationView%-Context$') and _G.relationview_ctx_path then
+    local ok, pth = pcall(_G.relationview_ctx_path)
+    if ok and pth and pth ~= '' then
+      name = pth
+    end
+  end
+  if name == '' then
+    return {}
+  end
+  local dir = vim.fs.dirname(name)
+  if chain_cache[dir] then
+    return chain_cache[dir]
+  end
+  local mode = tostring(cfg('db', 'chain'))
+  local out = {}
+  local d = dir
+  local home = vim.env.HOME or '/'
+  while d and d ~= '/' and d ~= '' and #out < 4 do
+    if uv.fs_stat(d .. '/.tags/GTAGS') or uv.fs_stat(d .. '/GTAGS') then
+      out[#out + 1] = d
+    end
+    if d == home then
+      break
+    end
+    local up = vim.fs.dirname(d)
+    if up == d then break end
+    d = up
+  end
+  if mode == 'near' and #out > 1 then
+    out = { out[1] }
+  elseif mode == 'root' and #out > 1 then
+    out = { out[#out] }
+  end
+  chain_cache[dir] = out
+  return out
+end
+
 local root_cache = {}
 local function root_of(buf)
   local name = api.nvim_buf_get_name(buf)
@@ -562,8 +613,8 @@ repaint = function(win)
   if cfg('', 1) == 0 then
     return
   end
-  local root = root_of(buf)
-  if not root then
+  local roots = roots_of(buf)
+  if #roots == 0 then
     return
   end
   local info = vim.fn.getwininfo(win)[1]
@@ -588,10 +639,33 @@ repaint = function(win)
     return
   end
   local locals = local_names(buf, lang, lo, hi)
-  local b = bucket(root)
+  local buckets = {}
+  for i, r in ipairs(roots) do
+    buckets[i] = bucket(r)
+  end
   local prio = tonumber(vim.g.sihl_priority) or 200
-  local want = s.want[root]
   local decl_here = {}
+
+  -- 체인 전체를 보고 판정한다.
+  --   하나라도 알면        -> 찾음 (그 종류를 쓴다)
+  --   전부 '없음'이면      -> 검정
+  --   아직 안 물어본 DB 가 있으면 -> 그 DB 에 물어본다 (칠하지 않는다)
+  local function verdict(name)
+    local unasked
+    for i, bk in ipairs(buckets) do
+      local v = bk.found[name]
+      if v then
+        return 'found', v
+      end
+      if bk.missing[name] == nil and not unasked then
+        unasked = i
+      end
+    end
+    if unasked then
+      return 'ask', unasked
+    end
+    return 'missing'
+  end
 
   -- 선언하는 자리는 건드리지 않는다: 파랑(item 1/2)을 덮으면 안 된다
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
@@ -606,6 +680,7 @@ repaint = function(win)
   -- 같은 이름에 함께 오는 식). 같은 자리를 두 번 칠하지 않는다.
   local done = {}
   local members_on = (tonumber(cfg('members', 1)) or 1) ~= 0
+  local asked = false
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
     local cap = q.captures[id]
     if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap])) and OK_NODE[node:type()] then
@@ -624,19 +699,20 @@ repaint = function(win)
         if name and #name > 1 and not KEYWORD[name]
             and (is_member or not locals[name])
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
-          if b.missing[name] then
+          local how, extra = verdict(name)
+          if how == 'missing' then
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpNone', priority = prio,
             })
-          elseif b.found[name] == 'macro' then
+          elseif how == 'found' and extra == 'macro' then
             -- 매크로는 찾았으면 빨강. 이름만 보고는 함수와 구분되지 않아서
             -- ADD(x, 2) 가 함수 호출과 같은 초록 볼드로 나왔었다.
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroRef', priority = prio,
             })
-          elseif b.found[name] and (CONST_CAP[cap] or MEMBER_CAP[cap]) then
+          elseif how == 'found' and (CONST_CAP[cap] or MEMBER_CAP[cap]) then
             -- 찾았는데 매크로가 아니다 = enum 상수이거나 구조체 멤버다.
             --
             -- 둘 다 '아무것도 안 칠하기'로는 초록이 되지 않는다. enum 상수는
@@ -647,16 +723,17 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpFound', priority = prio,
             })
-          elseif b.found[name] == nil then
-            want = want or {}
-            want[name] = true
+          elseif how == 'ask' then
+            local r = roots[extra]
+            s.want[r] = s.want[r] or {}
+            s.want[r][name] = true
+            asked = true
           end
         end
       end
     end
   end
-  if want and next(want) then
-    s.want[root] = want
+  if asked then
     local n = tonumber(cfg('batch', 2)) or 2
     for _ = 1, n do
       drain()
@@ -729,7 +806,7 @@ api.nvim_create_user_command('SiHlIndexToggle', function()
 end, { desc = '색인에 없는 심볼 검정 표시 켜고 끄기' })
 
 api.nvim_create_user_command('SiHlIndexClear', function()
-  s.cache, s.want, root_cache = {}, {}, {}
+  s.cache, s.want, root_cache, chain_cache = {}, {}, {}, {}
   s.off, s.fails, prog_cache = nil, 0, nil
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
@@ -744,26 +821,32 @@ end, { desc = '색인 판정 캐시 비우기' })
 api.nvim_create_user_command('SiHlIndexWhy', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
   local buf = api.nvim_get_current_buf()
-  local root = root_of(buf)
+  local roots = roots_of(buf)
   local out = { ('심볼: %s'):format(sym) }
-  if not root then
+  if #roots == 0 then
     out[#out + 1] = '이 파일 위에 GTAGS 가 없습니다 (색인되지 않은 트리)'
     vim.notify(table.concat(out, '\n'), vim.log.levels.WARN)
     return
   end
-  out[#out + 1] = ('묻는 DB : %s'):format(vim.fn.fnamemodify(root, ':~'))
-  local b = bucket(root)
-  local cached = b.found[sym] and ('찾음' .. (b.found[sym] == 'macro' and ' (매크로)' or ''))
-      or (b.missing[sym] and '없음' or '아직 안 물어봄')
-  out[#out + 1] = ('캐시    : %s'):format(cached)
   local g = prog()
-  if not g then
-    out[#out + 1] = 'global 을 찾지 못했습니다'
-  else
-    local argv = { g, '--result=ctags-x', '-d', sym }
-    local r = vim.system(argv, { cwd = root, text = true, env = db_env(root) }):wait(4000)
-    local line = r and r.stdout and r.stdout:match('[^\n]+')
-    out[#out + 1] = ('지금 물어보니: %s'):format(line or '(정의 없음)')
+  for i, root in ipairs(roots) do
+    local b = bucket(root)
+    local cached = b.found[sym] and ('찾음' .. (b.found[sym] == 'macro' and ' (매크로)' or ''))
+        or (b.missing[sym] and '없음' or '아직 안 물어봄')
+    local live = '(global 없음)'
+    if g then
+      local r = vim.system({ g, '--result=ctags-x', '-d', sym },
+        { cwd = root, text = true, env = db_env(root) }):wait(4000)
+      live = (r and r.stdout and r.stdout:match('[^\n]+')) or '(정의 없음)'
+    end
+    local list = root .. '/' .. (vim.g.gtags_objdir or '.tags') .. '/files'
+    local n = 0
+    if uv.fs_stat(list) then
+      for _ in io.lines(list) do n = n + 1 end
+    end
+    out[#out + 1] = ('DB %d: %s  [목록 %s]'):format(i, vim.fn.fnamemodify(root, ':~'),
+      n > 0 and (n .. '개') or 'auto')
+    out[#out + 1] = ('     캐시=%s  지금=%s'):format(cached, live:sub(1, 70))
   end
   if #vim.fn.tagfiles() > 0 then
     local save = vim.o.tagcase
@@ -774,15 +857,8 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
       (t and #t > 0) and ((t[1].filename or '?') .. ' (kind=' .. (t[1].kind or '?') .. ')')
         or '(없음)')
   end
-  -- preset 모드면 '정의 파일이 목록 밖'인지까지 말해 준다
-  local list = root .. '/' .. (vim.g.gtags_objdir or '.tags') .. '/files'
-  local st = uv.fs_stat(list)
-  if st then
-    local n = 0
-    for _ in io.lines(list) do n = n + 1 end
-    out[#out + 1] = ('색인 목록: %d개 파일 (preset 모드 - 목록 밖 파일의 심볼은 '):format(n)
-        .. '색인에 없습니다. \\fa 로 파일을 넣고 :ProjectFilesReindex)'
-  end
+  out[#out + 1] = 'preset 모드면 목록 밖 파일의 심볼은 색인에 없습니다'
+      .. ' (\\fa 로 넣고 :ProjectFilesReindex)'
   if s.off then
     out[#out + 1] = '중지됨: ' .. s.off
   end
