@@ -1438,18 +1438,21 @@ one function - is still a name you can jump to.
 | `g:sihl_local_global` | 0 turns off the purple globals below |
 | `g:sourceinsight_global_color` | a different purple, e.g. `'#6a1b9a'` |
 
-**A global used inside a function is purple and italic.**
+**A global used inside a function is purple**, and italic where the terminal
+can draw it.
 
-The italic needed a fix of its own first. `s:hi()` stripped `italic` out of
-the `cterm` attribute before writing it - a precaution from when no group
-used italic at all - and `termguicolors` is off unless `$COLORTERM` says
-truecolor or `g:vimide_truecolor = 1`, which over SSH it does not. So a
-terminal session got `cterm=NONE` and no slant whatever the colorscheme
-said. It passes through now; `g:sourceinsight_no_cterm_italic = 1` puts the
-old behaviour back for terminals that draw italic as reverse video.
+**The italic is off by default, and that took two passes to get right.** A
+terminal with no italic face draws it as reverse video, so the colour meant
+to be read as letters arrived as a purple block. Stripping it from `cterm`
+was not enough: the same nvim on the server is reached from iTerm2 and from
+Tera Term, and if that session has `termguicolors` on it is the `gui`
+attribute that applies - so Tera Term went back to a block while iTerm2 was
+fine. The terminal changes per connection and nvim does not, so neither side
+can be the default.
 
-Tera Term cannot render italic at all, so there the colour is the whole
-signal. iTerm2 can. For the exact `#800080` rather than its 256-colour
+`let g:sourceinsight_italic = 1` turns it on where it renders - iTerm2, a
+GUI - and `g:sourceinsight_cterm_italic` still controls the terminal
+attribute alone. For the exact `#800080` rather than its 256-colour
 approximation, `let g:vimide_truecolor = 1`.
 
 **A macro the index confirms is red, wherever it appears.** Treesitter cannot

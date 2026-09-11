@@ -195,22 +195,30 @@ function! s:hi(group, fg, bg, attr) abort
   if a:bg !=# ''
     let l:cmd .= ' guibg=' . s:c[a:bg][0] . ' ctermbg=' . s:c[a:bg][1]
   endif
-  let l:cmd .= ' gui=' . (a:attr ==# '' ? 'NONE' : a:attr)
-  " cterm 에서는 italic 을 뺀다 (기본값).
+  " 이탤릭은 기본으로 쓰지 않는다 - gui 도, cterm 도.
   "
-  " 이탤릭 폰트가 없는 터미널은 italic 을 반전(reverse)으로 그린다. 실제로
-  " 전역 변수 참조가 '보라 글자'가 아니라 '음영 덩어리'로 보인다는 보고가
-  " 왔다 - 글자색으로 읽히라고 준 색이 배경처럼 보이면 없느니만 못하다.
-  " gui 쪽(termguicolors 또는 GUI)에는 그대로 넘기므로, 이탤릭이 제대로
-  " 그려지는 환경에서는 기울어진다.
+  " 이탤릭 폰트가 없는 터미널은 italic 을 반전(reverse)으로 그린다. 전역
+  " 변수 참조가 '보라 글자'가 아니라 '보라 음영 덩어리'로 보인다는 보고가
+  " 두 번 왔다. 처음에는 cterm 에서만 뺐는데, 같은 nvim 을 iTerm2 와
+  " Tera Term 양쪽에서 붙어 쓰기 때문에 그것으로는 부족했다: 그 세션에
+  " termguicolors 가 켜져 있으면 적용되는 것은 gui 쪽이고, Tera Term 은
+  " 이탤릭 글꼴이 없어 또 음영이 된다. 터미널은 접속할 때마다 달라지는데
+  " nvim 은 서버에서 하나로 돌기 때문에, 어느 한쪽에 맞춰 둘 수가 없다.
   "
-  " 터미널이 이탤릭을 제대로 그린다면:
-  "   let g:sourceinsight_cterm_italic = 1
-  let l:cattr = a:attr ==# '' ? 'NONE' : a:attr
-  if !get(g:, 'sourceinsight_cterm_italic', 0)
+  " 그래서 기본은 '어디서나 보라 글자'다. 이탤릭이 제대로 그려지는 환경
+  " (iTerm2, GUI)에서만 켠다:
+  "   let g:sourceinsight_italic = 1
+  let l:gattr = a:attr ==# '' ? 'NONE' : a:attr
+  let l:cattr = l:gattr
+  if !get(g:, 'sourceinsight_italic', 0)
+    let l:gattr = substitute(l:gattr, ',\?italic', '', 'g')
+    let l:gattr = l:gattr ==# '' ? 'NONE' : l:gattr
+  endif
+  if !get(g:, 'sourceinsight_cterm_italic', get(g:, 'sourceinsight_italic', 0))
     let l:cattr = substitute(l:cattr, ',\?italic', '', 'g')
     let l:cattr = l:cattr ==# '' ? 'NONE' : l:cattr
   endif
+  let l:cmd .= ' gui=' . l:gattr
   let l:cmd .= ' cterm=' . l:cattr
   execute l:cmd
 endfunction
