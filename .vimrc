@@ -1845,7 +1845,7 @@ let g:relationview_cycle = ['both', 'off']             " 통째로 켜고 끄기
 " context view 는 패널 안이 아니라 편집 창 오른쪽에 따로 띄운다
 "   -> RelationView 는 아래 전체 폭, ContextView 는 오른쪽 세로 한 칸
 let g:relationview_context_position = 'right'
-let g:relationview_context_width = 80
+let g:relationview_context_width = 90
 " 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
 let g:relationview_width = 80
 let g:relationview_context_height = 40
