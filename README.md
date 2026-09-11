@@ -1623,6 +1623,15 @@ for the file that defines it, adds that file to the preset, indexes just it,
 and repaints - the machinery `Ctrl+]` already used as its last resort, put on
 a key. `g:sihl_index_autoadd = 1` does it when the cursor rests on one.
 
+**A symbol the index already knows is never searched for.** Running the
+search anyway means grepping the whole tree and putting the result in the
+preset, and the result is not what you want: asked about `platform_device`,
+which the database already placed in `include/linux/platform_device.h`, the
+grep returned seven headers that merely say `struct platform_device;` -
+`arch/arm/mach-s3c/cpu.h`, `drivers/clk/qcom/common.h`,
+`drivers/dma/dw/internal.h` and the like - and every one of them went into
+the preset. Forward declarations are mentions, not definitions.
+
 Automatic is deliberately narrow: the symbol under the cursor, one at a time,
 no sooner than `g:sihl_index_autoadd_gap` seconds apart, and never the same
 name twice. Doing it for every black name on screen would be dozens of

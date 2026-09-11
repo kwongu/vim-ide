@@ -974,8 +974,35 @@ local adding = false
 local last_add = 0
 local tried = {}
 
+-- 이 심볼을 이미 어느 색인이 알고 있나
+local function already(sym)
+  for _, r in ipairs(roots_of(api.nvim_get_current_buf())) do
+    local b = bucket(r)
+    if b.found[sym] then
+      return r, b.how[sym]
+    end
+  end
+  return nil
+end
+
 local function add_for(sym, quiet)
   if adding or not sym or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
+    return
+  end
+  -- 이미 찾아지는 심볼이면 아무것도 하지 않는다.
+  --
+  -- 찾아지는데도 검색을 돌리면 소스 전체를 훑고, 그 결과가 preset 에
+  -- 들어간다. platform_device 로 실제로 그렇게 됐다: DB 가 이미
+  -- include/linux/platform_device.h 를 알고 있는데도 검색이 돌아
+  -- 'struct platform_device;' 라고만 적힌 전방 선언 헤더 5개
+  -- (arch/arm/mach-s3c/cpu.h, drivers/clk/qcom/common.h ...)가 색인 목록에
+  -- 들어갔다. 정의가 아니라 언급일 뿐인 파일들이다.
+  local r, how = already(sym)
+  if r then
+    if not quiet then
+      vim.notify(("'%s' 는 이미 색인에 있습니다 (%s, %s) - 추가하지 않습니다")
+        :format(sym, vim.fn.fnamemodify(r, ':~'), how or '?'))
+    end
     return
   end
   if not _G.projectfiles_add_for_symbol_async then
