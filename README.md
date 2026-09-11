@@ -1352,20 +1352,27 @@ a field name, and repeated in the cpp query.
 (`let g:c_syntax_for_h = 1` makes `.h` open as C instead, if you would rather
 not have C++ rules near your C headers at all.)
 
-Where the underline ended up, once the colour was doing the work:
+**The underline is down to one job: function parameters.** Everything a
+declaration used to be marked with is now carried by navy bold, and the one
+place bold cannot help is a parameter sitting next to the locals below it -
+same colour, same weight, and only their position in the function tells them
+apart. Every other declaration is already distinguished by where it is, so a
+rule under each one read as noise rather than emphasis.
 
 | | underline |
 |---|---|
-| parameters | yes |
-| struct members, file-scope variables | yes |
+| **parameters** | **yes** |
+| struct members, file-scope variables | no |
 | function / struct / enum / typedef names being defined | no |
 | variables a function declares in its body | no |
+| goto labels | no - red bold already separates them |
 
-The definition names lost theirs with the default
+The definition names lost theirs through the default
 `g:sourceinsight_declaration_emphasis = 'bold'`, which now means navy bold
-and nothing else - navy bold already arrives first, and on a screen full of
-function definitions a rule under every one of them was just noise. `'strong'`
-still carries the underline, with the grey background.
+and nothing else; `'strong'` still carries the underline, with the grey
+background. The `'factory'` palette is untouched - it reproduces Source
+Insight's shipped stylesheet, where the underline belongs to parameters and
+labels.
 
 `g:sourceinsight_decl_local` is not read yet; edit `s:c.decllocal` in the
 colorscheme for a brighter blue.

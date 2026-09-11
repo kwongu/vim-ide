@@ -445,12 +445,11 @@ else
   " 본문색에 밑줄만 (화면에서 그렇게 보인다)
   " 구조체 멤버와 파일 스코프(전역) 변수 선언도 네이비 볼드.
   "
-  " 파라미터·지역변수와 같은 취급이다: 헤더를 읽을 때 눈이 찾는 것은
-  " '여기서 무엇이 선언되었나'인데, 본문색 + 밑줄만으로는 타입과 이름이
-  " 같은 무게로 읽혀 이름이 떠오르지 않았다. 밑줄은 그대로 둔다 - 함수 안
-  " 지역변수만 밑줄을 뺐고(거기서는 선언과 사용이 같은 화면에 촘촘히
-  " 섞인다), 헤더에서는 밑줄이 방해가 되지 않는다.
-  call s:hi('@si.declaration',           'decllocal', '', 'bold,underline')
+  " 밑줄은 여기서도 뺐다. 밑줄이 남는 곳은 함수 파라미터 하나뿐이다 -
+  " 파라미터는 바로 옆 지역변수와 같은 네이비 볼드라 밑줄 말고는 갈라
+  " 놓을 것이 없지만, 그 밖의 선언은 자리만으로 이미 구분된다. 선언마다
+  " 밑줄이 그어지면 강조가 아니라 소음이 된다.
+  call s:hi('@si.declaration',           'decllocal', '', 'bold')
   call s:hi('@si.declaration.function',  s:name_fg, s:name_bg, s:name_attr)
   " 함수 파라미터와 함수 안에서 선언한 지역 변수는 네이비 볼드.
   "
@@ -465,7 +464,8 @@ else
   call s:hi('@si.declaration.local',     'decllocal', '', 'bold')
   " enum 요소는 네이비 볼드 (상수 매크로의 옅은 빨강과 구분된다)
   call s:hi('@si.declaration.enumconst', 'decl', '', 'bold')
-  call s:hi('@si.declaration.label',     'label', '', 'bold,underline')
+  " goto 레이블도 밑줄을 뺀다 - 빨강 볼드라 이미 다른 무엇과도 섞이지 않는다
+  call s:hi('@si.declaration.label',     'label', '', 'bold')
 endif
 
 " LSP 의미 토큰도 같은 배색으로
