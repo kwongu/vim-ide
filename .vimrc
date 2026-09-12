@@ -450,13 +450,91 @@ nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 "   let g:vimide_neotree_git_max_mb = 2 " 이 크기를 넘으면 자동으로 끈다
 " ------------------------------------
 
-" 이 트리에서는 git 표시를 끈다. 위 2)의 자동 판정(.git/index 크기)에
-" 맡기지 않고 아예 꺼 둔다 - tsnd SDK 의 .git/index 는 8.4MB 라 어차피
-" 매번 꺼지면서 알림만 한 번씩 나왔다.
-let g:vimide_neotree_git = 0
+" Nerd Font 글자를 못 그리는 터미널에서는 ASCII 로 바꾼다.
+"
+" neo-tree 아이콘과 색인 표시가 iTerm2 에서는 멀쩡한데 Tera Term 에서는
+" 아이콘이 아예 안 보이고 표시가 펑퍼짐했다. 두 가지가 겹쳤다:
+"   * 아이콘은 Nerd Font 의 사용자 영역 글자다. 그 글꼴이 없는 터미널은
+"     그릴 것이 없어 빈칸이 된다.
+"   * 색인 표시로 쓰던 '●'(U+25CF)는 East Asian Ambiguous Width 글자다.
+"     nvim 은 한 칸으로 세는데(ambiwidth=single) CJK 글꼴을 쓰는 터미널은
+"     두 칸으로 그린다. 그 어긋남이 '펑퍼짐'으로 보인다.
+"
+" 구별은 TERM 으로 한다. 실측: 사용자의 서버 세션 6개가 모두
+" TERM=xterm-color 였다 - Tera Term 이 자기를 그렇게 알린다(iTerm2 는
+" xterm-256color). 어림짐작이므로 언제든 직접 정할 수 있다.
+"   let g:vimide_ascii_icons = 1   " 늘 ASCII 로
+"   let g:vimide_ascii_icons = 0   " 늘 Nerd Font 로
+if !exists('g:vimide_ascii_icons')
+    let g:vimide_ascii_icons = ($TERM ==# 'xterm-color')
+endif
+if g:vimide_ascii_icons
+    " '*' 와 '.' 은 어느 터미널에서나 한 칸이다
+    let g:projectfiles_tree_mark_file = '*'
+    let g:projectfiles_tree_mark_dir  = '.'
+endif
+
+" git 표시를 켠다.
+"
+" 껐던 이유는 '전체 git status 가 수 초씩 걸린다'였는데, 다시 재 보니
+" 그렇지 않았다 (kernel/common, .git/index 8.4MB):
+"   git status --porcelain        0.15초
+"   untracked 만 (ls-files -o)    0.12초
+" 위 1)의 git_status_scope_to_path 가 이미 켜져 있어 보고 있는 경로만
+" 묻는 것도 그대로다. 크기로 자동으로 끄는 판정(.git/index > 2MB)은 이
+" repo 를 끄게 되므로, 여기서 명시적으로 켠다.
+"
+" 켜면 git 이 모르는 파일 이름이 주황(#ff8700)으로 뜬다 - NeoTreeGitUntracked.
+" 껐을 때는 트리가 애초에 그 사실을 모르므로 아무 색도 나오지 않는다.
+"   let g:vimide_neotree_git = 0   " 다시 끄기 (주황도 같이 사라진다)
+let g:vimide_neotree_git = 1
+
+" 그 주황에서 이탤릭만 뺀다.
+"
+" neo-tree 의 기본값은 주황 + 이탤릭인데, 이탤릭 글꼴이 없는 터미널은
+" 이탤릭을 '반전'으로 그린다. Tera Term 에서 보라색이 음영으로 보였던 것과
+" 같은 문제다(그때도 같은 이유로 껐다). 색은 그대로 두고 기울임만 뺀다.
+"   let g:vimide_neotree_italic = 1   " 이탤릭도 그대로 두기
+function! s:NeoTreeGitColors() abort
+    if get(g:, 'vimide_neotree_italic', 0)
+        return
+    endif
+    for l:g in ['NeoTreeGitUntracked', 'NeoTreeGitConflict']
+        if hlexists(l:g)
+            execute 'highlight' l:g 'cterm=NONE gui=NONE'
+        endif
+    endfor
+endfunction
+augroup VimIdeNeoTreeGitColors
+    autocmd!
+    autocmd ColorScheme,VimEnter * call <SID>NeoTreeGitColors()
+    autocmd FileType neo-tree call <SID>NeoTreeGitColors()
+augroup END
 
 lua << EOF
+-- Nerd Font 글자를 못 그리는 터미널이면 ASCII 로. provider 를 아무 일도
+-- 하지 않는 함수로 두면 nvim-web-devicons 를 타지 않고 default 로 떨어진다
+-- (neo-tree 의 icon 컴포넌트는 provider 의 반환값이 nil 이면 그대로 둔다).
+local ascii_icons = (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
+
 _G.rv_setup('neo-tree', {
+  default_component_configs = ascii_icons and {
+    indent = { expander_collapsed = '+', expander_expanded = '-' },
+    icon = {
+      folder_closed = '+', folder_open = '-',
+      folder_empty = ' ', folder_empty_open = ' ',
+      selected = '>', default = ' ',
+      provider = function() end,
+    },
+    modified = { symbol = '[+] ' },
+    git_status = {
+      symbols = {
+        added = 'A', modified = 'M', deleted = 'D', renamed = 'R',
+        untracked = '?', ignored = 'i', unstaged = 'u',
+        staged = 's', conflict = 'C',
+      },
+    },
+  } or nil,
   close_if_last_window = true,
   enable_git_status = true,
   enable_diagnostics = false,
