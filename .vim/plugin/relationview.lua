@@ -4180,44 +4180,52 @@ function _G.relationview_member_known(buf, line, col, cb)
   if not ty or not ty.name then
     return false
   end
-  local root = db_root(vim.fs.dirname(vim.fn.fnamemodify(fname, ':p')))
-  if not root then
-    return false
-  end
-  local key = root .. '\0' .. tostring(gtags_mtime(root)) .. '\0'
-      .. ty.name .. '\0' .. table.concat(fields, '.')
-  local v = mk_cache[key]
-  if v ~= nil then
-    return v
-  end
-  if mk_wait[key] then
-    if cb then
-      table.insert(mk_wait[key], cb)
-    end
-    return nil
-  end
-  mk_wait[key] = cb and { cb } or {}
-  local function settle(ok)
-    if mk_cache[key] ~= nil then
+  -- 루트는 <C-]> 와 똑같은 규칙으로 고른다. 파일에서부터 가장 가까운 DB 를
+  -- 쓰면 하위 preset 이 먼저 답해서, 색과 점프가 서로 다른 프로젝트를 보게
+  -- 된다. root_for() 는 거의 언제나 그 자리에서 답한다.
+  local answer
+  root_for(fname, function(root)
+    if not root then
+      answer = false
       return
     end
-    mk_cache[key] = ok
-    local list = mk_wait[key]
-    mk_wait[key] = nil
-    for _, f in ipairs(list or {}) do
-      pcall(f, ok)
+    local key = root .. '\0' .. tostring(gtags_mtime(root)) .. '\0'
+        .. ty.name .. '\0' .. table.concat(fields, '.')
+    local v = mk_cache[key]
+    if v ~= nil then
+      answer = v   -- 이미 아는 답이다 (cb 는 부르지 않는다)
+      return
     end
-  end
-  -- 답이 영영 안 오는 경우(색인이 없거나 global 이 죽거나)에도 '대기'로
-  -- 남겨 두지 않는다. 남겨 두면 그 이름은 이 세션에서 다시는 안 묻는다.
-  vim.defer_fn(function() settle(false) end, 8000)
-  local okr = pcall(resolve_chain, nil, root, ty, fields, 1, function(res)
-    settle(not not (res and res.member and res.def and res.def.path))
+    if mk_wait[key] then
+      if cb then
+        table.insert(mk_wait[key], cb)
+      end
+      return
+    end
+    mk_wait[key] = cb and { cb } or {}
+    local function settle(ok)
+      if mk_cache[key] ~= nil then
+        return
+      end
+      mk_cache[key] = ok
+      local list = mk_wait[key]
+      mk_wait[key] = nil
+      for _, f in ipairs(list or {}) do
+        pcall(f, ok)
+      end
+    end
+    -- 답이 영영 안 오는 경우(색인이 없거나 global 이 죽거나)에도 '대기'로
+    -- 남겨 두지 않는다. 남겨 두면 그 이름은 이 세션에서 다시는 안 묻는다.
+    vim.defer_fn(function() settle(false) end, 8000)
+    local okr = pcall(resolve_chain, nil, root, ty, fields, 1, function(res)
+      settle(not not (res and res.member and res.def and res.def.path))
+    end)
+    if not okr then
+      settle(false)
+    end
+    answer = mk_cache[key]
   end)
-  if not okr then
-    settle(false)
-  end
-  return mk_cache[key]
+  return answer
 end
 
 local function finish_type(gen, sym, root, opts)
