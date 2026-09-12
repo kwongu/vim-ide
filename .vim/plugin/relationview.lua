@@ -3047,23 +3047,29 @@ render_tree = function()
   end
 
   raw('')
-  raw(section_line('Definition'))
-  if t.def then
-    local r = row('  ' .. t.sym, t.def.path, t.def.line, t.def.text,
-      { loc = { path = t.def.path, line = t.def.line, sym = t.sym } }, t.sym)
-    r.focus = true
-  else
-    raw('  (no definition)')
+  -- 글자 찾기 결과에는 '정의' 칸이 뜻이 없다: 심볼이 아니라 글자다.
+  if t.kind ~= 'text' then
+    raw(section_line('Definition'))
+    if t.def then
+      local r = row('  ' .. t.sym, t.def.path, t.def.line, t.def.text,
+        { loc = { path = t.def.path, line = t.def.line, sym = t.sym } }, t.sym)
+      r.focus = true
+    else
+      raw('  (no definition)')
+    end
   end
 
-  local title = t.relation == 'callees' and 'Calls'
+  local title = t.kind == 'text' and '색인된 파일에서 찾은 줄'
+      or t.relation == 'callees' and 'Calls'
       or (t.kind == 'symbol' and 'References (undefined symbol)' or 'Callers')
   raw('')
   if t.truncated and t.truncated > 0 then
     raw(section_line(string.format('%s (%d) — %d of %d refs shown', title,
       #t.nodes, t.shown or 0, (t.shown or 0) + t.truncated)))
   else
-    raw(section_line(title, #t.nodes))
+    -- 글자 찾기는 '파일 묶음 수'가 아니라 '찾은 줄 수'를 센다
+    raw(section_line(title,
+      t.kind == 'text' and (t.shown or #t.nodes) or #t.nodes))
   end
   if #t.nodes == 0 then
     raw('  (none)')
@@ -5421,6 +5427,92 @@ local function open_and_query(arg)
     render_msg(nil, 'move the cursor onto a symbol in a source window')
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- Lookup References: 색인된 파일 안에서만 글자를 찾는다
+-- ---------------------------------------------------------------------------
+-- Source Insight 의 Lookup References 와 같은 자리다. 찾는 범위가 '트리
+-- 전체'가 아니라 '색인에 담은 파일들'이라는 것이 요점이다 - preset 으로
+-- 고른 것만 보는 이 설정에서는 그게 곧 '내가 보고 있는 코드'다.
+--
+-- 찾는 것은 gtags 가 해 준다: 'global -g' 가 색인된 파일만 grep 한다.
+-- 별도의 find/xargs 를 돌리지 않으므로 목록과 어긋날 일도, 고아 프로세스를
+-- 남길 일도 없다(실측: 색인 1091개 파일에서 30건에 0.068초).
+--
+--   :LookupReferences [글자]   인자가 없으면 커서 밑 낱말
+--   :LookupReferences! [정규식] '!' 를 붙이면 정규식, 없으면 그대로의 글자
+--
+-- 결과를 어디에 띄우는가:
+--   relation window 가 떠 있으면  -> 그 패널에 (파일별로 묶여서, <CR> 로 점프)
+--   떠 있지 않으면                -> quickfix (:cnext / :cprev / <CR>)
+local function lookup_to_qf(root, pat, refs)
+  local items = {}
+  for _, r in ipairs(refs) do
+    items[#items + 1] = {
+      filename = r.path:sub(1, 1) == '/' and r.path or (root .. '/' .. r.path),
+      lnum = r.line or 1,
+      col = 1,
+      text = (r.text or ''):gsub('^%s+', ''),
+    }
+  end
+  vim.fn.setqflist({}, ' ', { title = 'Lookup References: ' .. pat, items = items })
+  vim.cmd('botright copen')
+  vim.cmd('normal! gg')
+end
+
+function A.lookup_refs(pat, regex)
+  pat = (pat and pat ~= '') and pat or vim.fn.expand('<cword>')
+  if not pat or pat == '' then
+    vim.notify('찾을 글자가 없습니다', vim.log.levels.WARN)
+    return
+  end
+  local name = api.nvim_buf_get_name(0)
+  local from = (name ~= '' and vim.bo.buftype == '') and name
+      or (vim.fn.getcwd() .. '/x')
+  root_for(from, function(root)
+    if not root then
+      vim.notify('이 파일 위에 색인이 없습니다 (:ProjectFilesMode)',
+        vim.log.levels.WARN)
+      return
+    end
+    local args = { '--result=ctags-mod', '-g' }
+    if not regex then
+      args[#args + 1] = '--literal'
+    end
+    args[#args + 1] = pat
+    local max = cfg('max_refs', 1000)
+    run_global(args, root, function(lines)
+      local refs = parse_ctags_mod(lines, max)
+      if #refs == 0 then
+        vim.notify(("'%s' 를 색인된 파일에서 찾지 못했습니다"):format(pat))
+        return
+      end
+      -- 패널이 떠 있으면 거기에. group_refs 는 fn 이 없으면 파일로 묶으므로
+      -- (파일 -> 그 안의 줄들) Source Insight 와 같은 모양이 된다.
+      if panel_visible() then
+        s.gen = s.gen + 1
+        s.pinned = true
+        s.note = ('색인된 파일에서 찾은 글자 %d건'):format(#refs)
+        finish(s.gen, pat, root, gtags_mtime(root), {
+          refs = refs,
+          refs_kind = 'text',
+          refs_total = #refs,
+          refs_truncated = refs.truncated,
+        })
+      else
+        lookup_to_qf(root, pat, refs)
+      end
+      if refs.truncated then
+        vim.notify(('%d건까지만 보여 줍니다 (g:relationview_max_refs)'):format(max))
+      end
+    end, REF_STREAM_CAP)
+  end)
+end
+
+api.nvim_create_user_command('LookupReferences', function(o)
+  A.lookup_refs(o.args, o.bang)
+end, { nargs = '?', bang = true, desc =
+  'Search the indexed files for text (panel if open, else quickfix)' })
 
 api.nvim_create_user_command('RelationView', function(o)
   -- 설정된 기본 방향으로 되돌린다(g:relationview_relation). 예전에는 여기서

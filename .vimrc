@@ -2036,6 +2036,12 @@ nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
 nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
+" Source Insight 의 Lookup References: 색인된 파일 '안에서만' 글자를 찾는다.
+" relation window 가 떠 있으면 거기에 파일별로 묶어서, 아니면 quickfix 로.
+"   \fr        커서 밑 낱말        :LookupReferences [글자]
+"   \fF        직접 입력           :LookupReferences! 는 정규식
+nnoremap <silent> <leader>fr :LookupReferences<CR>
+nnoremap <leader>fF :LookupReferences<Space>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
 " 같은 것을 <F7> 로도 연다 - 펑션키는 아래 F1..F12 블록에서 한꺼번에 맵한다.
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>

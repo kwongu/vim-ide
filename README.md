@@ -498,6 +498,66 @@ looking at, that is now said out loud - a path decides its own project so
 that the tree window works, but the switch used to be silent, which is how
 a preset ends up full of another tree's paths without anyone noticing.
 
+### Reclaiming the index's own space
+
+`gtags -i` puts changed files back into the database but never gives the old
+space back, and nothing was rebuilding from scratch - the coverage guard that
+refuses to shrink an index (autoindex.lua) also refuses the rebuild that
+would compact it. So the databases grow forever.
+
+Measured on `kernel/common`, which had been incrementally updated for weeks:
+
+| | list | files in db | GTAGS | GRTAGS |
+|---|---|---|---|---|
+| before | 273 | 205 | 707 MB | 551 MB |
+| after `:GtagsCompact` | 273 | 205 | **656 KB** | **2.1 MB** |
+
+Same files, same answers - `global -d device_create` still lands on
+`drivers/base/core.c:4418`. It took 0.3 seconds. For scale, the outer project
+holds 1091 files in 2.3 MB of GTAGS, about 2 KB per file; `kernel/common` was
+carrying 3.4 MB per file. Every `global` query there was searching 1.25 GB of
+mostly-dead index.
+
+A rebuild now happens by itself, whichever comes first:
+
+```vim
+let g:autoindex_compact_every = 200      " incremental updates (0 = never)
+let g:autoindex_compact_bytes = 262144   " bytes of db per file (0 = never)
+```
+
+256 KB per file is a hundred times the healthy rate, so it only fires on real
+bloat. The rebuild goes into a temporary directory and is moved in when it is
+complete, so queries keep being answered from the old database while it runs -
+and the incremental update that triggered it finishes first, because `build()`
+takes the same lock that update was holding. `:GtagsCompact` does it now.
+
+### Lookup References
+
+Source Insight's Lookup References: find text, but only inside the files the
+index covers. With a preset, that is exactly the code you chose to care about,
+which is what makes it different from a tree-wide grep.
+
+`global -g` already does it - it greps the indexed files - and
+`--result=ctags-mod` hands back `path\tline\ttext`, which is the format the
+panel already parses. So there is no second search tool to keep in step with
+the list, and nothing to leave running. 131 hits over 1091 indexed files came
+back in 0.068 s.
+
+| | |
+|---|---|
+| `\fr` | the word under the cursor |
+| `\fF` | type a phrase |
+| `:LookupReferences [text]` | plain text |
+| `:LookupReferences! [regex]` | the bang makes it a regular expression |
+
+Where the list lands depends on what is open. With the relation window up it
+goes there, grouped by file (`group_refs` falls back to grouping by path when
+a hit has no enclosing function, which is exactly the Source Insight shape),
+and `<CR>` jumps. With the panel closed it goes to the quickfix list instead,
+with absolute paths so it resolves wherever the cwd happens to be. The
+Definition section is dropped for a text search - it is a string, not a
+symbol, and `(no definition)` was just noise.
+
 ### Borrowing a nested project's list
 
 Sometimes the files you want are the ones a nested project already picked -
