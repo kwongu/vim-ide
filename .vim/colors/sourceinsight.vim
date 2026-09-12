@@ -414,6 +414,10 @@ call s:hi('SiJumpFound', 'ref', '', '')
 " 본문에서 로그 줄만 튀어 정작 읽어야 할 코드를 가린다.
 "   let g:sihl_index_log_macros = []   " 전부 예전처럼 빨강
 call s:hi('SiLogMacro', 'ref', '', 'bold')
+" enum 요소를 쓰는 자리 (sihlindex.lua). 매크로와 같은 빨강이다 - 둘 다
+" '이름이 붙은 상수'이고, 코드에서 하는 일이 같다. 선언하는 자리는
+" @si.declaration.enumconst 라 네이비 볼드 그대로다.
+call s:hi('SiEnumRef', 'number', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

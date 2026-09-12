@@ -207,6 +207,30 @@ local function is_log_macro(name, src)
   return false
 end
 
+-- enum 요소를 '쓰는' 자리인가.
+--
+-- 정의 줄이 이름으로 시작하고 그 뒤가 비었거나 ',' 이거나 '= 값' 이면
+-- enum 요소다. 색인이 주는 줄은 이런 모양이다:
+--   COMP_DISABLE            =  0,
+--   BF_BYPASS,
+-- 전역 변수는 'int G = 5;' 처럼 타입이 앞에 오고 ';' 로 끝나며, 매크로는
+-- '#define ...' 으로 시작하므로 둘 다 여기 걸리지 않는다. 선언하는 자리는
+-- 애초에 칠하지 않는다(@si.declaration.enumconst 가 decl_here 로 빠진다).
+local function is_enum_const(name, src)
+  if not src or src == '' or not name or name == '' then
+    return false
+  end
+  local rest = src:match('^' .. name:gsub('%W', '%%%0') .. '%s*(.*)$')
+  if not rest then
+    return false
+  end
+  rest = rest:gsub('/%*.*$', ''):gsub('//.*$', ''):gsub('%s+$', '')
+  if rest == '' or rest == ',' then
+    return true
+  end
+  return rest:sub(1, 1) == '=' and not rest:find(';', 1, true)
+end
+
 local function macro_kind(path, name, src)
   if is_log_macro(name, src) then
     return 'logmacro'
@@ -550,7 +574,9 @@ local function in_tags(syms, allow)
       if t and #t > 0 then
         -- ctags 의 kind 'd' 는 #define 이다
         out[sym] = (t[1].kind == 'd')
-            and macro_kind(t[1].filename, sym, t[1].cmd) or true
+                and macro_kind(t[1].filename, sym, t[1].cmd)
+            or (t[1].kind == 'e' and 'enum')
+            or true
       end
     end
   end)
@@ -644,13 +670,18 @@ local function run_batch(root, syms, done)
               -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
               local fields = vim.split(rest:sub(5), '\t', { plain = true })
               local path = fields[2] or ''
+              -- 검색 패턴('/^...$/')이 정의가 적힌 소스 줄이다
+              local pat = (fields[3] or ''):match('^/%^?(.-)%$?/$') or ''
               hit[name] = (rest:find('#define', 1, true)
-                  and macro_kind(path, name, rest)) or true
+                    and macro_kind(path, name, rest))
+                  or (is_enum_const(name, (pat:gsub('^%s+', ''))) and 'enum')
+                  or true
             else
               local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
               src = src or rest
               hit[name] = src:match('^%s*#%s*define')
-                  and macro_kind(path, name, src) or true
+                  and macro_kind(path, name, src)
+                  or (is_enum_const(name, src) and 'enum' or true)
             end
           end
         end
@@ -959,6 +990,13 @@ repaint = function(win)
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroRef', priority = prio,
+            })
+          elseif how == 'found' and extra == 'enum' then
+            -- enum 요소를 쓰는 자리: 빨강. 선언하는 자리는 위 decl_here 가
+            -- 이미 빼 두었으므로 여기는 '역참조'뿐이다.
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiEnumRef', priority = prio,
             })
           elseif how == 'found' and (extra == 'member'
               or CONST_CAP[cap] or MEMBER_CAP[cap]) then

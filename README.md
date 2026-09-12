@@ -1624,9 +1624,26 @@ Mostly only the *missing* case is painted - known and not-yet-asked render
 as before, so scrolling never flashes black and a pending answer costs
 nothing. The exception is a constant that turns out not to be a macro. nvim's
 own query gives an enum constant and an object-like `#define` the same
-`@constant`, so both start red; once the index says `M_A` is an enum and not
-a `#define`, leaving it alone would leave it red. Those are painted green
-back.
+`@constant`, so both start red; the index is what tells them apart, by the
+source line it hands back with the definition.
+
+Enum constants *stay* red - they were briefly painted green back, on the
+reading that green means "the index can jump here", which is true of them.
+Red is the better answer: a named constant is a named constant, and an
+enum member and an object-like `#define` do the same job at the point of
+use. What the index decides is which of the two a name is, not what colour
+constants get. A constant the index cannot place still drops to body colour,
+so red keeps meaning "I know what this is".
+
+Telling an enum member from everything else needs no new query - the
+definition line already came back with the lookup. An enum member's line
+begins with its own name and then stops, or carries `,`, or `= value`:
+`COMP_DISABLE	= 0,`, `BF_BYPASS,`, `PCM_RUN,`. A global puts a type in
+front and a `;` behind (`int G_FLAG = 5;`), and a macro starts `#define`.
+Checked against 15 lines taken from the real index - 7 enum members, 8 that
+must not be red (two macros, a struct member, a function, a typedef close,
+two globals) - the rule separates them all. Definition sites are untouched
+either way: `@si.declaration.enumconst` is skipped before any of this.
 
 Inside a function the rule reads whole:
 
@@ -1634,7 +1651,7 @@ Inside a function the rule reads whole:
 |---|---|
 | function call the index knows | green, bold |
 | struct / union / enum / typedef the index knows | green |
-| enum constant the index knows | green |
+| enum constant the index knows, used | red |
 | macro the index confirms | red |
 | anything the index cannot place | body colour |
 | struct members | green when the index has one, body colour otherwise - GNU Global's default parser records few of them |
@@ -1642,7 +1659,7 @@ Inside a function the rule reads whole:
 | `done:` | red, bold, underlined - the place itself |
 
 Measured on a project built for it: `lib_send` green bold, `packet`, `mode`,
-`pkt_t` and `M_A` green, `LIMIT` and `WRAP` red, `missing_fn`,
+`pkt_t` green, `M_A`, `LIMIT` and `WRAP` red, `missing_fn`,
 `MISSING_MACRO`, `id` and `name` black.
 
 **How the index is asked, and two wrong answers on the way there.**
