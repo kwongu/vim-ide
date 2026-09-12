@@ -422,6 +422,10 @@ call s:hi('SiEnumRef', 'number', '', '')
 " 함수 호출이라 초록이다. 빨강은 상수 매크로 몫으로 남긴다. 로그 매크로는
 " 이것의 부분집합이고 볼드까지 붙는다(SiLogMacro).
 call s:hi('SiFnMacro', 'ref', '', '')
+" EXPORT_SYMBOL(sym) 의 sym (sihlindex.lua). 내보내는 대상은 언제나 이
+" 파일이 정의한 함수나 변수라서, 함수 호출과 같은 초록 볼드로 둔다.
+"   let g:sihl_index_export_macros = []   " 이 규칙을 끈다
+call s:hi('SiExportSym', 'ref', '', 'bold')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')

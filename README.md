@@ -1641,6 +1641,26 @@ Bold still means *a real function*: a function call keeps treesitter's green
 bold, a macro call gets plain green. Log macros are the exception, green and
 bold, because they were asked for that way.
 
+The definition alone does not settle it, though. `#define MIX(a,b)` is
+function-like, but `MIX` written without parentheses is a reference, not a
+call, and reads like a constant - so it goes red. Treesitter answers that
+exactly: green needs the node to be the `function` field of a
+`call_expression`. `MIX(p, 2)` is; `MIX` on its own is not.
+
+`EXPORT_SYMBOL` and its family are navy by *name*, not by path. Path does not
+work here: from the outer root this tree's index finds `EXPORT_SYMBOL` in
+`kernel/common/include/asm-generic/export.h`, and from `kernel/common` it
+finds it nowhere at all - `include/linux/export.h` is in neither list. A
+colour that depends on which directory you opened is not a colour. The
+pattern is an unanchored `find`, so the one entry `EXPORT_SYMBOL` covers
+`_GPL`, `_NS` and `_NS_GPL` too; in the indexed files that is 872 + 165 + 5
+occurrences.
+
+What it exports is green bold. The name inside `EXPORT_SYMBOL(sym)` is always
+something this file defines - that is what exporting means - so it is painted
+without asking the index at all. nvim's query calls it `@variable` and leaves
+it body-coloured, which reads as "unknown" when it is the opposite.
+
 Order matters more than the rules do. Navy-by-path is tested first, then the
 log vocabulary, then function-like shape. It has to be that way round:
 `MODULE_INFO(tag, info)` in `include/linux/module.h` ends in `_info`, so the
@@ -1673,6 +1693,8 @@ Inside a function the rule reads whole:
 |---|---|
 | function call the index knows | green, bold |
 | macro called like a function (`#define NAME(`) | green |
+| the same macro named without calling it | red - it is a reference, not a call |
+| `EXPORT_SYMBOL(sym)` | navy bold; `sym` green bold |
 | struct / union / enum / typedef the index knows | green |
 | enum constant the index knows, used | red |
 | macro the index confirms | red |

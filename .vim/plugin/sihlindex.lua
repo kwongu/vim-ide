@@ -147,10 +147,20 @@ local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
 -- 항목에 '/' 가 있으면 정의 파일의 경로로, 없으면 심볼 이름으로 본다.
 -- 이름 쪽은 색인을 타지 않는다 - THIS_MODULE 이 그래서 필요했다:
 -- include/linux/export.h 에 있는데 이 트리의 두 색인이 모두 모른다.
+--
+-- EXPORT_SYMBOL 도 경로가 아니라 이름으로 잡는다. 경로로는 못 잡는다:
+-- 이 트리에서 바깥 루트는 그것을 include/linux/export.h 가 아니라
+-- kernel/common/include/asm-generic/export.h 에서 찾고, kernel/common 을
+-- 루트로 열면 아예 못 찾는다(그 헤더가 어느 목록에도 없다). 어느 쪽에서
+-- 일하느냐에 따라 색이 달라지면 안 된다.
+--
+-- 패턴은 string.find 라 앵커가 없으므로 'EXPORT_SYMBOL' 하나가
+-- EXPORT_SYMBOL_GPL / _NS / _NS_GPL 까지 함께 덮는다 - 색인된 파일에서
+-- 실제로 쓰인 횟수는 GPL 872, 맨 것 165, NS 계열 5 이다.
 local function navy_pats()
   local v = vim.g.sihl_index_macro_navy
   if v == nil then
-    return { 'include/linux/module%.h', 'THIS_MODULE' }
+    return { 'include/linux/module%.h', 'THIS_MODULE', 'EXPORT_SYMBOL' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}
@@ -239,6 +249,64 @@ local function is_enum_const(name, src)
   -- '=' 이어야 한다. 'FOO == 1' 은 값을 주는 자리가 아니라 비교하는 자리다.
   return rest:sub(1, 1) == '=' and rest:sub(2, 2) ~= '='
       and not rest:find(';', 1, true)
+end
+
+-- 이 자리가 '부르는' 자리인가: call_expression 의 function 자리.
+--
+-- 정의만 봐서는 모자란다. '#define MIX(a,b)' 는 함수형이지만 MIX 를 괄호
+-- 없이 이름으로만 쓰면 그건 호출이 아니라 참조다 - 그때는 상수 매크로와
+-- 같은 빨강이 맞다. treesitter 로 정확히 갈린다: MIX(p,2) 는 부모가
+-- call_expression 이고 그 function 자리가 이 노드다.
+local function is_called(node)
+  local p = node:parent()
+  if not p or p:type() ~= 'call_expression' then
+    return false
+  end
+  local f = p:field('function')[1]
+  return f ~= nil and f:id() == node:id()
+end
+
+-- EXPORT_SYMBOL(sym) 의 sym 자리인가.
+--
+-- 그 자리에 오는 이름은 언제나 이 파일이 정의한 함수나 변수다 - 내보내는
+-- 대상이니까. 그래서 색인을 묻지 않고 함수 호출과 같은 초록 볼드로 둔다.
+-- 기본 쿼리는 그 자리를 @variable 로 잡아 본문색(검정)으로 두고 있었다.
+--   let g:sihl_index_export_macros = []   " 이 규칙을 끈다
+local function export_pats()
+  local v = vim.g.sihl_index_export_macros
+  if v == nil then
+    return { 'EXPORT_SYMBOL' }
+  end
+  if type(v) == 'string' then
+    return v ~= '' and { v } or {}
+  end
+  return type(v) == 'table' and v or {}
+end
+
+local function export_arg(node, buf)
+  local p = node:parent()
+  if not p or p:type() ~= 'argument_list' then
+    return false
+  end
+  local call = p:parent()
+  if not call or call:type() ~= 'call_expression' then
+    return false
+  end
+  local f = call:field('function')[1]
+  if not f then
+    return false
+  end
+  local okn, nm = pcall(vim.treesitter.get_node_text, f, buf)
+  if not okn or type(nm) ~= 'string' then
+    return false
+  end
+  for _, pat in ipairs(export_pats()) do
+    local ok, hit = pcall(string.find, nm, pat)
+    if ok and hit then
+      return true
+    end
+  end
+  return false
 end
 
 local function macro_kind(path, name, src)
@@ -953,7 +1021,9 @@ repaint = function(win)
   local asked = false
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
     local cap = q.captures[id]
-    if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap])) and OK_NODE[node:type()] then
+    local exp = OK_NODE[node:type()] and export_arg(node, buf) or false
+    if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap]) or exp)
+        and OK_NODE[node:type()] then
       local r1, c1, r2, c2 = node:range()
       if r1 == r2 and r1 >= lo and r1 < hi and not decl_here[r1 .. ':' .. c1]
           and not done[r1 .. ':' .. c1] then
@@ -966,7 +1036,14 @@ repaint = function(win)
         -- 있고 'card_info->dai_info' 라는 멤버도 있어서, ctags 가 아는 그
         -- 멤버가 검정으로 남았다.
         local is_member = node:type() == 'field_identifier'
-        if name and #name > 1 and not KEYWORD[name]
+        if exp then
+          -- EXPORT_SYMBOL(sym): 내보내는 그 이름. 같은 이름의 지역 변수가
+          -- 있어도 이건 지역이 아니므로 아래 필터보다 먼저 칠한다.
+          pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+            end_row = r2, end_col = c2,
+            hl_group = 'SiExportSym', priority = prio,
+          })
+        elseif name and #name > 1 and not KEYWORD[name]
             and (is_member or not locals[name])
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
           local how, extra = verdict(name)
@@ -1002,10 +1079,12 @@ repaint = function(win)
               hl_group = 'SiMacroKw', priority = prio,
             })
           elseif how == 'found' and extra == 'fnmacro' then
-            -- 함수처럼 부르는 매크로: 호출로 읽히므로 초록
+            -- 함수형 매크로라도 '부르는' 자리에서만 초록이다. 괄호 없이
+            -- 이름으로만 쓰면 그건 참조라 상수 매크로와 같은 빨강.
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
-              hl_group = 'SiFnMacro', priority = prio,
+              hl_group = is_called(node) and 'SiFnMacro' or 'SiMacroRef',
+              priority = prio,
             })
           elseif how == 'found' and extra == 'logmacro' then
             -- 로그 매크로: 읽을 때 함수 호출이므로 호출과 같은 초록 볼드
