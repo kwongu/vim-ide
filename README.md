@@ -781,9 +781,20 @@ slots that were empty:
 | `X` | collapse everything under it |
 | `I` | toggle hidden files (`H` still does it too) |
 | `K` / `J` | first / last sibling |
+| `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
 
 `o` is the one key that was not free: neo-tree had it on help, and help is
 also on `?`, so nothing was lost.
+
+`/` was not free either - neo-tree puts its fuzzy finder there. The fuzzy
+finder is a fine thing, but `/` is muscle memory for *search*, and a tree you
+cannot search is a tree you scroll. Setting the key to `"none"` makes
+neo-tree skip it entirely (`ui/renderer.lua`, `skip_this_mapping`) so vim's
+own `/` comes back, along with `n` and `N`, which neo-tree never mapped.
+`"noop"` would not do: that is a mapping that does nothing, which still eats
+the key. The fuzzy finder moved to `F`, and `D` (fuzzy find a directory),
+`f` (filter on submit) and `#` (fuzzy sort) are untouched. The same swap is
+applied to the `document_symbols` source, which had `/` on its filter.
 
 `K` and `J` had no neo-tree command behind them, so they are twelve lines of
 Lua walking the node's parent for its child ids and focusing the first or

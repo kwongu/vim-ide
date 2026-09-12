@@ -516,6 +516,24 @@ _G.rv_setup('neo-tree', {
         directory = with_mark(nd.renderers.directory),
       }
     end)(),
+    -- '/' 는 NERDTree 처럼 vim 의 검색이다.
+    --
+    -- neo-tree 는 '/' 에 fuzzy finder 를 달아 둔다. 이름 조각을 치면 목록이
+    -- 줄어드는 방식이라 편할 때도 있지만, 손이 기억하는 '/' 는 그냥 검색이다
+    -- - 치고, n 으로 다음, N 으로 이전. 'none' 으로 두면 neo-tree 가 그 키에
+    -- 버퍼 맵을 아예 걸지 않아서(ui/renderer.lua 의 skip_this_mapping) vim 의
+    -- '/' 가 그대로 살아난다. 'noop' 은 안 된다 - 그건 '아무 일도 안 하는
+    -- 맵'이라 오히려 '/' 를 먹는다.
+    --
+    -- fuzzy finder 를 잃지는 않는다: 비어 있던 F 로 옮겼다.
+    --   /  검색 (n / N 으로 다음 / 이전)   F  fuzzy finder
+    --   D  디렉터리 fuzzy finder           f  이름으로 거르기 (그대로)
+    window = {
+      mappings = {
+        ['/'] = 'none',
+        ['F'] = 'fuzzy_finder',
+      },
+    },
     hijack_netrw_behavior = 'disabled',
     use_libuv_file_watcher = false,
     follow_current_file = { enabled = true },
@@ -537,6 +555,15 @@ _G.rv_setup('neo-tree', {
       visible = true,
       hide_dotfiles = true,
       hide_gitignored = false,
+    },
+  },
+  -- document_symbols 도 '/' 를 거르기로 쓴다. 같은 이유로 되돌린다.
+  document_symbols = {
+    window = {
+      mappings = {
+        ['/'] = 'none',
+        ['F'] = 'filter',
+      },
     },
   },
 })
