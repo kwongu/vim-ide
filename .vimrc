@@ -1938,7 +1938,15 @@ endif
 "   오른쪽 절반을 차지한다(g:relationview_context_width, 0 = 절반).
 let g:relationview_position = 'bottom'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
-let g:relationview_auto_open = 1
+"
+" 0 으로 둔다: vim 을 켜면 아무것도 열지 않고, F3 을 눌러야 열린다.
+" 예전에는 context(미리보기)가 켜진 채로 시작했다.
+"
+" 닫힌 상태에서 F3 을 처음 누르면 순서의 첫 칸인 'both'(패널+미리보기)가
+" 열린다. 예전처럼 미리보기부터 보고 싶으면 순서를 바꾸면 된다:
+"   let g:relationview_cycle = ['context', 'both', 'relation', 'off']
+"   let g:relationview_cycle = ['context', 'off']   " 미리보기만 켜고 끄기
+let g:relationview_auto_open = 0
 let g:relationview_height = 16
 " 경로는 프로젝트 루트 기준의 전체 상대 경로로.
 "   'root' (기본) 이 트리를 질의한 GTAGS 루트 기준 - 어느 디렉터리에서
