@@ -1988,6 +1988,20 @@ let g:relationview_unpin_delay = 2000
 "   같은 목록을 쓴다.
 " 프로젝트에 지정된 preset 이 없을 때 쓸 기본값:
 "   let g:projectfiles_preset = 'kernel-audio'
+"
+" 하위에서 만든 목록을 SDK 루트 목록으로 자동으로 가져온다.
+"
+" SDK 루트에서 fuzzy find 를 걸면 멈추다시피 느리다. 그래서 실제로는
+" kernel/common 같은 하위에서 목록을 만들게 되는데, 그렇게 담은 항목은
+" '그 루트 기준' 상대 경로로 적힌다 - SDK 루트에서 보면 그 경로가 없으니
+" 색인에서 통째로 빠진다. 실측(tsnd SDK): 두 루트가 같은 preset 을 나눠
+" 쓰는데 루트의 .tags/files 는 6줄, kernel/common 것은 257줄이었다.
+" :ProjectFilesAbsorb 가 그 목록을 이 루트 기준으로 바꿔 '없던 것만'
+" 더한다(빼지 않는다). 이 줄은 그것을 프로젝트를 처음 열 때 자동으로 한다.
+"   let g:projectfiles_absorb = 0        " 알림만 하고 :ProjectFilesAbsorb 로
+"   let g:projectfiles_absorb_hint = 0   " 알림도 끄기
+"   let g:projectfiles_absorb_whole = 1  " 목록이 없는(auto) 하위도 통째로
+let g:projectfiles_absorb = 1
 " ------------------------------------
 nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
 nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>

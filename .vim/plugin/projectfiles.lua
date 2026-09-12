@@ -1859,8 +1859,17 @@ end
 --
 -- 가져오는 것은 하위 프로젝트의 '색인 목록'(.tags/files)이다 - 그게 그
 -- 프로젝트가 실제로 색인하는 것이고, 파일 하나하나로 들어오므로 상위에서
--- 다시 펼칠 때 설정 차이로 달라지지 않는다. auto 모드라 목록 파일이 없는
--- 하위 프로젝트는 디렉터리 하나로 들어온다(그 트리 전체가 대상이라는 뜻).
+-- 다시 펼칠 때 설정 차이로 달라지지 않는다.
+--
+-- 목록 파일이 없는 하위는 가져오지 않는다. 예전에는 'auto 모드니까 그 트리
+-- 전체'로 읽고 디렉터리 하나를 담았는데, 두 가지가 겹쳐 위험했다:
+--   * 빈 '.tags' 디렉터리만 남은 자리가 있다(중단된 실행이 남긴 껍데기).
+--     GTAGS 도 preset 도 files 도 없는데 auto 모드로 읽혔다.
+--   * 그 한 줄이 트리 전체로 펼쳐진다. 실측: tsnd SDK 에서
+--     maincore/bootable/bootloader/u-boot 의 빈 껍데기 하나 때문에 목록이
+--     6개에서 19,581개가 됐다(gtags 19,200 파일, 10.3초).
+-- 진짜로 트리 전체를 원하면 :ProjectFilesAdd 로 그 디렉터리를 담으면 된다.
+--   let g:projectfiles_absorb_whole = 1   " 예전처럼 auto 모드 하위도 통째로
 --
 -- 자동으로 하지 않는다: preset 은 사람이 고른 것이고, 시작할 때 말없이
 -- 수백 개를 밀어 넣는 것은 좋지 않다. 가져올 것이 있으면 한 번 알려 준다.
@@ -1880,8 +1889,9 @@ local function nested_lists(root)
           item.files[#item.files + 1] = pre .. f
         end
       end
-    else
-      -- auto 모드인 하위 프로젝트: 그 트리 전체
+    elseif cfg('absorb_whole', 0) ~= 0
+        and uv.fs_stat(nroot .. '/' .. d .. '/GTAGS') then
+      -- auto 모드인 하위 프로젝트: 그 트리 전체 (GTAGS 가 있어야 진짜다)
       item.whole = true
     end
     if item.whole or #item.files > 0 then

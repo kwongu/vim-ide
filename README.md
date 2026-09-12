@@ -507,25 +507,37 @@ the current root, so `child/.tags/files` holding `src/b.c` becomes
 `child/src/b.c` here.
 
 What comes across is the nested project's *index list*, file by file, so
-re-expanding it here cannot change what it contains. A nested project in
-auto mode has no list, so it comes across as one directory entry - that
-tree, whole.
+re-expanding it here cannot change what it contains.
 
-It is not automatic. A preset is a hand-picked thing and pushing a few
-hundred entries into one at startup without asking is how presets get
-wrecked. When there is something to take, it says so once:
+A nested project with no list used to come across as one directory entry -
+"that tree, whole". That is now off by default, because of what it did on
+the tsnd SDK. `maincore/bootable/bootloader/u-boot/.tags` was an empty
+directory - no `GTAGS`, no `preset`, no `files`, the shell of an aborted
+run - and an empty `.tags` reads exactly like auto mode. That one entry
+expanded to the whole u-boot tree: the list went from 6 files to **19,581**,
+and gtags indexed 19,200 of them. With it skipped, the same absorb takes 257
+files from `kernel/common` and the list is 263. If you do want a whole
+nested tree, `:ProjectFilesAdd` on that directory says so out loud.
 
-```
-하위 프로젝트 2곳이 골라 둔 파일 3개를 이 프로젝트 목록으로 가져올 수 있습니다
-(:ProjectFilesAbsorb)
-```
+Why this matters more than it sounds: the SDK root and `kernel/common`
+*share one preset by name*, and a preset holds paths relative to a root. Of
+its 102 entries, 98 began `drivers/`, `sound/` or `include/` - written while
+working inside `kernel/common` - and 4 began `kernel/` or `maincore/`.
+So the root materialised 6 files and `kernel/common` materialised 257, out
+of the same list. Absorbing rebases the 257 onto the root, and both roots
+keep working: each materialises the entries that exist under it.
 
 Running it twice is a no-op - entries already present are skipped.
 
 ```vim
 let g:projectfiles_absorb = 1        " do it when a project is first opened
 let g:projectfiles_absorb_hint = 0   " not even the notice
+let g:projectfiles_absorb_whole = 1  " take listless nested trees too
 ```
+
+`.vimrc` turns `absorb` on. Fuzzy find at SDK level is slow enough to be
+unusable, so the list gets built in a subdirectory where it is fast - and
+then it has to reach the root by itself, or it never does.
 
 ### none, auto, or a preset
 
