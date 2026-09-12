@@ -1018,7 +1018,20 @@ let g:quickr_cscope_use_qf_g = 1
 nmap <Leader><Leader>g <plug>(quickr_cscope_global)
 nmap <Leader><Leader>s <plug>(quickr_cscope_symbols)
 "nmap <Leader><Leader>c <plug>(quickr_cscope_callers)
-nmap <Leader><Leader>c :Gtags -r <C-R>=expand("<cword>") <CR><CR>
+" \\c : 커서 밑 심볼을 부르는 곳(call reference)을 찾는다. 찾은 것을
+" 목록에서 훑는 동안 본문에도 남게 F4 와 같은 색을 함께 입힌다 -
+" :LookupReferences 와 같은 자리(_G.vimide_mark_text)를 쓴다.
+function! s:MarkAndCallRefs() abort
+    let l:w = expand('<cword>')
+    if empty(l:w)
+        return
+    endif
+    if has('nvim') && exists('*luaeval')
+        silent! call luaeval('_G.vimide_mark_text ~= nil and _G.vimide_mark_text(_A) or 0', l:w)
+    endif
+    execute 'Gtags -r ' . l:w
+endfunction
+nnoremap <silent> <Leader><Leader>c :call <SID>MarkAndCallRefs()<CR>
 nmap <Leader><Leader>f <plug>(quickr_cscope_files)
 nmap <Leader><Leader>i <plug>(quickr_cscope_includes)
 nmap <Leader><Leader>d <plug>(quickr_cscope_functions)
@@ -1480,7 +1493,15 @@ set matchpairs+=<:>
 
 " Make it the default:
 "let g:mwDefaultHighlightingPalette = 'mypalette'
-let g:mwDefaultHighlightingPalette = 'maximum'
+" F4 색은 ~/.vim/markpalette.vim 에서 온다 (왜 직접 만들었는지는 그 파일에).
+" 여기서 읽어야 한다 - vim-mark 은 plugin 이 읽힐 때(.vimrc 가 끝난 뒤)
+" 이 변수를 보기 때문이다. 이 줄을 지우면 아래 'maximum' 으로 돌아간다.
+if filereadable(expand('$HOME/.vim/markpalette.vim'))
+    source $HOME/.vim/markpalette.vim
+else
+    let g:mwDefaultHighlightingPalette = 'maximum'
+endif
+"let g:mwDefaultHighlightingPalette = 'maximum'
 "let g:mwDefaultHighlightingPalette = 'extended'
 "let g:mwDefaultHighlightingNum = 3
 
@@ -2117,9 +2138,9 @@ function! s:LookupVisualMark() abort
     if empty(l:t)
         return
     endif
-    if l:have
-        silent! call mark#DoMark(v:count, mark#GetVisualSelectionAsLiteralPattern())
-    endif
+    " 색은 여기서 입히지 않는다. :LookupReferences 가 실제로 찾을 때 한 번만
+    " 칠한다(relationview.lua 의 _G.vimide_mark_text) - vim-mark 은 같은 글자에
+    " 두 번 부르면 '지우기'라서, 두 군데서 칠하면 서로를 지운다.
     " 명령행을 띄우고 거기서 멈춘다 - 엔터는 사용자가 친다
     call feedkeys(':LookupReferences ' . l:t, 'n')
 endfunction

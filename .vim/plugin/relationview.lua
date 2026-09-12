@@ -5445,6 +5445,31 @@ end
 -- 결과를 어디에 띄우는가:
 --   relation window 가 떠 있으면  -> 그 패널에 (파일별로 묶여서, <CR> 로 점프)
 --   떠 있지 않으면                -> quickfix (:cnext / :cprev / <CR>)
+-- F4(vim-mark)와 같은 색을 임의의 글자에 입힌다.
+--
+-- vim-mark 은 같은 글자에 두 번 부르면 '지운다'(토글). 그래서 칠하는 곳은
+-- 한 군데여야 한다 - 찾기 경로마다 따로 칠하면 서로를 지운다. 그 한 군데가
+-- 여기다: 찾는 일을 실제로 하는 자리에서만 칠한다.
+--
+-- 이스케이프는 vim-mark 의 s:EscapeText 와 같은 규칙이다
+-- (autoload/mark.vim:56-58). 그 함수는 script-local 이라 부를 수 없어서
+-- 같은 것을 여기 적는다. 어긋나면 색칠된 것과 찾은 것이 달라진다.
+--
+-- autoload 함수는 한 번 불러 보기 전에는 exists('*mark#DoMark') 가 0 이라
+-- '있는지 묻고 부르기'가 통하지 않는다. 그냥 불러 보고 없으면 넘어간다.
+--   let g:vimide_lookup_mark = 0   " 찾아도 색은 입히지 않기
+function _G.vimide_mark_text(text)
+  if type(text) ~= 'string' or text == '' then
+    return false
+  end
+  if (tonumber(vim.g.vimide_lookup_mark) or 1) == 0 then
+    return false
+  end
+  local pat = (vim.fn.escape(text, '\\^$.*[~'):gsub('\n', '\\n'))
+  local ok = pcall(vim.fn['mark#DoMark'], 0, pat)
+  return ok
+end
+
 local function lookup_to_qf(root, pat, refs)
   local items = {}
   for _, r in ipairs(refs) do
@@ -5487,6 +5512,10 @@ function A.lookup_refs(pat, regex)
         vim.notify(("'%s' 를 색인된 파일에서 찾지 못했습니다"):format(pat))
         return
       end
+      -- 찾은 것이 있을 때만 칠한다. 목록을 훑는 동안 '무엇을 찾고 있었는지'가
+      -- 본문에도 남아 눈이 덜 헤맨다. 색은 F4 와 같은 체계라 F4 나 \m 으로
+      -- 지울 수 있고, 여러 번 찾으면 MarkWord1, 2, 3 … 으로 돌아간다.
+      pcall(_G.vimide_mark_text, pat)
       -- 패널이 떠 있으면 거기에. group_refs 는 fn 이 없으면 파일로 묶으므로
       -- (파일 -> 그 안의 줄들) Source Insight 와 같은 모양이 된다.
       if panel_visible() then
