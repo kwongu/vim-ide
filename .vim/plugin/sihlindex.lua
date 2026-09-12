@@ -157,10 +157,15 @@ local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
 -- 패턴은 string.find 라 앵커가 없으므로 'EXPORT_SYMBOL' 하나가
 -- EXPORT_SYMBOL_GPL / _NS / _NS_GPL 까지 함께 덮는다 - 색인된 파일에서
 -- 실제로 쓰인 횟수는 GPL 872, 맨 것 165, NS 계열 5 이다.
+-- module_platform_driver 도 같은 이유로 이름 쪽이다. 경로로 잡으면
+-- include/linux/platform_device.h 전체가 네이비가 되는데, 거기에는
+-- platform_get_drvdata 처럼 평범한 접근자 매크로도 함께 산다.
+-- 여기도 앵커가 없어 module_platform_driver_probe 까지 함께 덮는다.
 local function navy_pats()
   local v = vim.g.sihl_index_macro_navy
   if v == nil then
-    return { 'include/linux/module%.h', 'THIS_MODULE', 'EXPORT_SYMBOL' }
+    return { 'include/linux/module%.h', 'THIS_MODULE', 'EXPORT_SYMBOL',
+      'module_platform_driver' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}

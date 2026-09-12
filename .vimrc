@@ -394,6 +394,24 @@ _G.rv_setup('aerial', {
   attach_mode = 'window',
   close_on_select = false,
   show_guides = true,
+  -- h / l 은 커서를 움직이는 키다.
+  --
+  -- aerial 은 그 둘에 트리 접기/펴기를 달아 둔다. 그래서 아웃라인 안에서는
+  -- 위아래로는 움직이는데 좌우로는 못 움직였다 - h 를 누르면 커서가 왼쪽으로
+  -- 가는 대신 그 항목이 접혔다.
+  --
+  -- 잃는 것은 없다: 접기/펴기는 o(토글), za/zo/zc 가 그대로 한다. 재귀
+  -- 버전도 O 와 zA/zO/zC 에 남아 있다. H 와 L 은 건드리지 않았다 - vim 에서
+  -- 그건 좌우가 아니라 화면 맨 위/맨 아래다. 그것까지 돌려받고 싶으면
+  -- 아래에 ['H'] = false, ['L'] = false 를 더하면 된다.
+  --
+  -- false 를 주면 aerial 이 그 키에 맵을 아예 만들지 않는다
+  -- (keymap_util.lua 의 'if rhs then'). keymaps 는 깊게 병합되므로 나머지
+  -- 기본 키는 그대로다.
+  keymaps = {
+    ['h'] = false,
+    ['l'] = false,
+  },
 })
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>

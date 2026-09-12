@@ -1656,6 +1656,13 @@ pattern is an unanchored `find`, so the one entry `EXPORT_SYMBOL` covers
 `_GPL`, `_NS` and `_NS_GPL` too; in the indexed files that is 872 + 165 + 5
 occurrences.
 
+`module_platform_driver` joins them for the same reason, and by name for a
+second one: its header, `include/linux/platform_device.h`, also holds
+`platform_get_drvdata` and friends, which are ordinary accessors and should
+stay green. A path pattern cannot separate the two; a name pattern can. It
+covers `module_platform_driver_probe` as well, and there are 16 uses of it
+across the indexed files.
+
 What it exports is green bold. The name inside `EXPORT_SYMBOL(sym)` is always
 something this file defines - that is what exporting means - so it is painted
 without asking the index at all. nvim's query calls it `@variable` and leaves
@@ -1695,6 +1702,7 @@ Inside a function the rule reads whole:
 | macro called like a function (`#define NAME(`) | green |
 | the same macro named without calling it | red - it is a reference, not a call |
 | `EXPORT_SYMBOL(sym)` | navy bold; `sym` green bold |
+| `module_platform_driver(...)` | navy bold - a declaration, not a call |
 | struct / union / enum / typedef the index knows | green |
 | enum constant the index knows, used | red |
 | macro the index confirms | red |
@@ -1853,6 +1861,18 @@ things a person pressed.
 |---|---|
 | `g:vimide_outline_auto = 1` | open by itself again, as before. Read when the decision is made, so `:let` works mid-session |
 | `g:vimide_outline_startup = 1` | open it at startup too (deferred 200 ms - at `VimEnter` neither the buffer nor treesitter is ready, and it would open empty) |
+
+`h` and `l` move the cursor in there, which sounds like it should not need
+saying. Aerial ships them as collapse and expand, so inside the outline you
+could go up and down but not sideways - press `h` and instead of the cursor
+moving left, the symbol under it folded shut. They are handed back
+(`keymaps = { ['h'] = false, ['l'] = false }`; a `false` makes aerial skip
+the mapping, and the table merges deeply so nothing else changes). Folding
+loses nothing: `o` toggles, `za`/`zo`/`zc` do the same, and the recursive
+forms stay on `O` and `zA`/`zO`/`zC`. `H` and `L` are left alone - in vim
+those are not sideways, they are top and bottom of the screen; add
+`['H'] = false, ['L'] = false` to take them back too. Measured in the
+outline: `virtcol` 1, `5l` to 6, `2h` to 4, and `j` still steps a line.
 
 The old automatic behaviour, kept intact behind that option, also refuses
 while neo-tree is up. Both want the left column, so with the tree open,
