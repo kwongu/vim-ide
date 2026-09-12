@@ -3513,6 +3513,42 @@ local function anon_body(node)
   return nil
 end
 
+-- 이 타입이 대답하는 모든 이름: 구조체 태그와, 감싸고 있는
+-- 'typedef struct tag { ... } alias_t;' 의 별칭들.
+--
+-- gtags 는 그런 타입을 닫는 줄('} tsnd_t;')에 적고 별칭으로 찾는다. 그런데
+-- 본문(field_declaration_list)을 들고 있는 노드는 struct_specifier 이고 그
+-- 이름은 '태그'다. 태그만 비교하면 맞는 노드를 버리고 멤버를 하나도 못
+-- 돌려준다 - 이 코드베이스는 대부분 그 꼴이라(tsnd_t, param_stream_t,
+-- arpc_msg_hdr_t ...) 'tsnd->psplay' 가 아무 데도 닿지 못했다.
+local function type_names(node, source)
+  local out = {}
+  local nn = node:field('name')[1]
+  if nn then
+    out[ntext(nn, source)] = true
+  end
+  local p = node:parent()
+  if p and p:type() == 'type_definition' then
+    -- 'typedef struct x { } a, *pa;' : 별칭이 포인터 선언자 안에 들어가기도
+    -- 한다. 선언자 쪽 가지에서 type_identifier 를 모은다.
+    local function walk(n)
+      if n:type() == 'type_identifier' then
+        out[ntext(n, source)] = true
+        return
+      end
+      for c in n:iter_children() do
+        walk(c)
+      end
+    end
+    for c in p:iter_children() do
+      if c ~= node then
+        walk(c)
+      end
+    end
+  end
+  return out
+end
+
 local function members_of(path, line, want)
   local st = uv.fs_stat(path)
   local info = vim.fn.getbufinfo(path)[1]
@@ -3530,20 +3566,17 @@ local function members_of(path, line, want)
   local node = find_type_node(root, line)
   if node and want then
     -- the file may have drifted since the last F2: if the type sitting on
-    -- that line is a different one, look the wanted name up instead
-    local nn = node:field('name')[1]
-    local got = nn and ntext(nn, source) or nil
-    if got and got ~= want then
+    -- that line is a different one, look the wanted name up instead.
+    -- 태그든 typedef 별칭이든 하나만 맞으면 이 노드가 맞다.
+    local names = type_names(node, source)
+    if next(names) and not names[want] then
       local alt
       local function walk(n)
         if alt then
           return
         end
-        if TYPE_NODES[n:type()] then
-          local x = n:field('name')[1]
-          if x and ntext(x, source) == want then
-            alt = n
-          end
+        if TYPE_NODES[n:type()] and type_names(n, source)[want] then
+          alt = n
         end
         for c in n:iter_children() do
           walk(c)
@@ -4112,6 +4145,79 @@ member_jump = function(buf, line, col, cb, retried)
     end)
   end)
   return true
+end
+
+-- sihlindex 가 '이 멤버를 초록으로 칠해도 되는가' 를 물을 때 쓰는 문.
+--
+-- 이름으로 색인에 물어봐야 소용이 없다: GNU Global 의 기본 파서는 구조체
+-- 멤버를 색인하지 않는다 (이 트리의 tsnd.h 에서 멤버 158개를 뽑아 물었더니
+-- 'global -d' 가 아는 것은 0개였다). 그래서 <C-]> 와 똑같은 길을 쓴다 -
+-- 베이스 변수의 타입을 풀고, 그 타입의 멤버 목록에 그 이름이 있는지 본다.
+-- 화면 하나에 타입은 몇 개뿐이고 타입 정의도 멤버 목록도 캐시되므로,
+-- 멤버가 몇 개든 색인 질의는 '타입 수'만큼만 는다.
+--
+--   true   그 타입에 그 멤버가 있다 (= <C-]> 로 갈 수 있다)
+--   false  없다, 또는 베이스의 타입을 풀 수 없다
+--   nil    아직 모른다. 알아본 뒤 cb(true|false) 를 부른다.
+local mk_cache = {}   -- key -> true|false
+local mk_wait = {}    -- key -> { cb, ... }
+
+function _G.relationview_member_cache_clear()
+  mk_cache, mk_wait = {}, {}
+end
+
+function _G.relationview_member_known(buf, line, col, cb)
+  local okc, base, fields = pcall(cursor_field, buf, line, col)
+  if not okc or not base or not fields or #fields == 0 then
+    return false
+  end
+  local fname = api.nvim_buf_get_name(buf)
+  if fname == '' then
+    return false
+  end
+  local okd, decl = pcall(local_decl, buf, line, base)
+  local ty = (okd and decl) and type_from_text(decl.text) or nil
+  if not ty or not ty.name then
+    return false
+  end
+  local root = db_root(vim.fs.dirname(vim.fn.fnamemodify(fname, ':p')))
+  if not root then
+    return false
+  end
+  local key = root .. '\0' .. tostring(gtags_mtime(root)) .. '\0'
+      .. ty.name .. '\0' .. table.concat(fields, '.')
+  local v = mk_cache[key]
+  if v ~= nil then
+    return v
+  end
+  if mk_wait[key] then
+    if cb then
+      table.insert(mk_wait[key], cb)
+    end
+    return nil
+  end
+  mk_wait[key] = cb and { cb } or {}
+  local function settle(ok)
+    if mk_cache[key] ~= nil then
+      return
+    end
+    mk_cache[key] = ok
+    local list = mk_wait[key]
+    mk_wait[key] = nil
+    for _, f in ipairs(list or {}) do
+      pcall(f, ok)
+    end
+  end
+  -- 답이 영영 안 오는 경우(색인이 없거나 global 이 죽거나)에도 '대기'로
+  -- 남겨 두지 않는다. 남겨 두면 그 이름은 이 세션에서 다시는 안 묻는다.
+  vim.defer_fn(function() settle(false) end, 8000)
+  local okr = pcall(resolve_chain, nil, root, ty, fields, 1, function(res)
+    settle(not not (res and res.member and res.def and res.def.path))
+  end)
+  if not okr then
+    settle(false)
+  end
+  return mk_cache[key]
 end
 
 local function finish_type(gen, sym, root, opts)

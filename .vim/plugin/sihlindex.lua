@@ -55,10 +55,16 @@
 --   g:sihl_index_names  한 번에 물을 이름 수 (기본 40)
 --   g:sihl_index_db     'chain'(기본) 현재 디렉터리 프로젝트부터 위로 /
 --                       'near' 하나만 / 'root' 가장 바깥만
---   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1)
+--   g:sihl_index_members 0 이면 구조체 멤버는 묻지 않는다 (기본 1).
+--                        멤버는 이름이 아니라 베이스 변수의 타입을 풀어서
+--                        판정한다 - GNU Global 이 멤버를 색인하지 않아서다
 --   g:sihl_index_ctags  0 이면 ctags 스냅숏은 보지 않는다 (기본 1)
 --   g:sihl_index_macro_navy  이 경로들에 정의된 매크로는 네이비 볼드
 --                            (기본 { 'include/linux/module%.h' })
+--   g:sihl_index_log_macros  로그 매크로 이름 패턴. 여기 걸리는 '함수형'
+--                            매크로는 빨강이 아니라 초록 볼드로 둔다
+--                            (ape_dbg, arpc_info, DIRAC_TRACE_ERR ...).
+--                            [] 로 두면 예전처럼 전부 빨강
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
@@ -152,7 +158,59 @@ local function navy_pats()
   return type(v) == 'table' and v or {}
 end
 
-local function macro_kind(path)
+-- 로그 매크로는 빨강이 아니라 초록 볼드다.
+--
+-- 'ape_dbg("...")' 는 읽을 때 함수 호출이다. 매크로라는 이유로 빨강이 되면
+-- 본문에서 로그 줄만 눈에 튀어 정작 읽어야 할 코드를 가린다. 이 프로젝트의
+-- #define 706개 중 110개가 로그 매크로였다(ape_dbg/ape_info/ape_err,
+-- arpc_*_dbg, alsa_*, ak4601_*, DIRAC_TRACE_* ...).
+--
+-- 이름만으로는 부족했다. TCC_ENABLE_DIRAC_TRACE_DBG 나 DEBUG_INFO 는
+-- '#define X (1 << 0)' 꼴의 스위치지 로그가 아니다. 그래서 두 가지를 모두
+-- 본다: 이름이 로그 어휘이고, #define 이 '함수형'일 것
+-- (이름 바로 뒤에 '(' 이 붙는다). 이 트리에서 오탐 4개가 전부 걸러졌다.
+--
+--   let g:sihl_index_log_macros = []                  " 전부 예전처럼 빨강
+--   let g:sihl_index_log_macros = ['^my_trace']       " 내 것만
+-- 이름은 소문자로 낮춰 비교하므로 _DBG 든 _dbg 든 같다. lua 패턴이다.
+local function log_pats()
+  local v = vim.g.sihl_index_log_macros
+  if v == nil then
+    return { '_dbg$', '_debug$', '_info$', '_err$', '_error$', '_warn$',
+      '_warning$', '_log$', '_trace$', '_print$', '_printf$', '_msg$',
+      '_verbose$', '_notice$', '_fatal$', '_assert$',
+      '^pr_', '^dev_dbg', '^dev_err', '^dev_info', '^dev_warn', '^dev_printk',
+      '^printk$', '^alog', '^log_', '^dbg_', '^trace_' }
+  end
+  if type(v) == 'string' then
+    return v ~= '' and { v } or {}
+  end
+  return type(v) == 'table' and v or {}
+end
+
+-- 이 #define 이 로그 매크로인가. src 는 색인이 준 '정의가 적힌 소스 줄'이다.
+local function is_log_macro(name, src)
+  if not name or name == '' then
+    return false
+  end
+  -- 함수형이어야 한다: '#define ape_dbg(' - 스위치 상수는 여기서 빠진다
+  if not src or not src:find('#%s*define%s+' .. name:gsub('%W', '%%%0') .. '%(') then
+    return false
+  end
+  local low = name:lower()
+  for _, pat in ipairs(log_pats()) do
+    local ok, hit = pcall(string.find, low, pat)
+    if ok and hit then
+      return true
+    end
+  end
+  return false
+end
+
+local function macro_kind(path, name, src)
+  if is_log_macro(name, src) then
+    return 'logmacro'
+  end
   if not path or path == '' then
     return 'macro'
   end
@@ -417,6 +475,21 @@ local function token_ok()
 end
 
 local repaint, repaint_ctx  -- forward: 아래 drain() 이 둘 다 부른다.
+
+-- 멤버 판정은 이름마다 따로 돌아온다. 돌아올 때마다 칠하면 화면 하나에
+-- 스무 번을 칠하게 되므로 한 번으로 묶는다.
+local redraw_pending = false
+local function redraw_soon()
+  if redraw_pending then
+    return
+  end
+  redraw_pending = true
+  vim.defer_fn(function()
+    redraw_pending = false
+    pcall(repaint)
+    pcall(repaint_ctx)
+  end, 60)
+end
 -- 이 저장소에서 '정의가 사용처보다 뒤에 있어 nil 전역이 되는' Lua 함정을
 -- 세 번 밟았다. 쓰는 곳보다 앞에 선언해 둔다.
 
@@ -476,7 +549,8 @@ local function in_tags(syms, allow)
       local t = vim.fn.taglist('^' .. sym .. '$')
       if t and #t > 0 then
         -- ctags 의 kind 'd' 는 #define 이다
-        out[sym] = (t[1].kind == 'd') and macro_kind(t[1].filename) or true
+        out[sym] = (t[1].kind == 'd')
+            and macro_kind(t[1].filename, sym, t[1].cmd) or true
       end
     end
   end)
@@ -570,11 +644,13 @@ local function run_batch(root, syms, done)
               -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
               local fields = vim.split(rest:sub(5), '\t', { plain = true })
               local path = fields[2] or ''
-              hit[name] = (rest:find('#define', 1, true) and macro_kind(path)) or true
+              hit[name] = (rest:find('#define', 1, true)
+                  and macro_kind(path, name, rest)) or true
             else
               local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
               src = src or rest
-              hit[name] = src:match('^%s*#%s*define') and macro_kind(path) or true
+              hit[name] = src:match('^%s*#%s*define')
+                  and macro_kind(path, name, src) or true
             end
           end
         end
@@ -843,6 +919,23 @@ repaint = function(win)
           if navy_name(name) then
             how, extra = 'found', 'macrokw'
           end
+          -- 멤버는 이름으로 물어서는 답이 안 나온다: GNU Global 의 기본
+          -- 파서가 구조체 멤버를 색인하지 않기 때문이다(tsnd.h 의 멤버
+          -- 158개를 물었더니 'global -d' 가 아는 것은 0개였다). 그래서
+          -- <C-]> 가 쓰는 길을 그대로 쓴다 - 베이스 변수의 타입을 풀어서
+          -- 그 타입이 이 멤버를 가졌는지 본다. 갈 수 있으면 초록이다.
+          if is_member and members_on and how ~= 'found'
+              and _G.relationview_member_known then
+            local okm, known = pcall(_G.relationview_member_known, buf,
+              r1 + 1, c1, redraw_soon)
+            if okm and known == true then
+              how, extra = 'found', 'member'
+            elseif okm and known == nil and how ~= 'ask' then
+              -- 답을 기다리는 중이다. 검정으로 칠했다가 초록으로 되돌리면
+              -- 화면이 깜빡이므로, 답이 올 때까지는 손대지 않는다.
+              how = 'wait'
+            end
+          end
           if how == 'missing' then
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
@@ -854,6 +947,12 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroKw', priority = prio,
             })
+          elseif how == 'found' and extra == 'logmacro' then
+            -- 로그 매크로: 읽을 때 함수 호출이므로 호출과 같은 초록 볼드
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiLogMacro', priority = prio,
+            })
           elseif how == 'found' and extra == 'macro' then
             -- 매크로는 찾았으면 빨강. 이름만 보고는 함수와 구분되지 않아서
             -- ADD(x, 2) 가 함수 호출과 같은 초록 볼드로 나왔었다.
@@ -861,7 +960,8 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroRef', priority = prio,
             })
-          elseif how == 'found' and (CONST_CAP[cap] or MEMBER_CAP[cap]) then
+          elseif how == 'found' and (extra == 'member'
+              or CONST_CAP[cap] or MEMBER_CAP[cap]) then
             -- 찾았는데 매크로가 아니다 = enum 상수이거나 구조체 멤버다.
             --
             -- 둘 다 '아무것도 안 칠하기'로는 초록이 되지 않는다. enum 상수는
@@ -971,6 +1071,10 @@ api.nvim_create_user_command('SiHlIndexClear', function()
   s.cache, s.want, root_cache, chain_cache = {}, {}, {}, {}
   s.snap_ok, s.snaps = {}, {}
   s.off, s.fails, prog_cache = nil, 0, nil
+  -- 멤버 판정은 relationview 쪽 캐시에 들어 있다
+  if _G.relationview_member_cache_clear then
+    pcall(_G.relationview_member_cache_clear)
+  end
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
   schedule()
 end, { desc = '색인 판정 캐시 비우기' })
@@ -1150,6 +1254,17 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
         out[#out + 1] = ('     ctags=%s'):format(
           hitline and hitline:gsub('\t', ' '):sub(1, 60) or '(없음)')
       end
+    end
+  end
+  -- 멤버는 이름이 아니라 '베이스 변수의 타입'으로 푼다. 커서가 멤버 위에
+  -- 있으면 그 길의 결과도 같이 보여 준다 - 안 그러면 'gtags 도 ctags 도
+  -- 모른다는데 왜 초록이냐'로 읽힌다.
+  if _G.relationview_member_known then
+    local pos = api.nvim_win_get_cursor(0)
+    local okm, known = pcall(_G.relationview_member_known, buf, pos[1], pos[2])
+    if okm and known ~= false then
+      out[#out + 1] = ('멤버    : %s (베이스 변수의 타입으로 푼 결과)'):format(
+        known == true and '찾음' or '알아보는 중 - 잠시 뒤 다시 물어보세요')
     end
   end
   if #vim.fn.tagfiles() > 0 then

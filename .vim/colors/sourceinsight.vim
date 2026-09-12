@@ -409,6 +409,11 @@ call s:hi('SiMacroRef', 'number', '', '')
 call s:hi('SiMacroKw', 'decl', '', 'bold')
 " 색인이 아는데 매크로가 아닌 상수(enum 요소). 기본색이 빨강이라 되돌린다.
 call s:hi('SiJumpFound', 'ref', '', '')
+" 로그 매크로 (ape_dbg, arpc_info, DIRAC_TRACE_ERR ...). 매크로지만 읽을 때는
+" 함수 호출이라 @function.call 과 같은 초록 볼드로 둔다 - 빨강으로 두면
+" 본문에서 로그 줄만 튀어 정작 읽어야 할 코드를 가린다.
+"   let g:sihl_index_log_macros = []   " 전부 예전처럼 빨강
+call s:hi('SiLogMacro', 'ref', '', 'bold')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')
