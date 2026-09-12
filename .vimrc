@@ -2049,8 +2049,32 @@ nnoremap <leader>fF :LookupReferences<Space>
 "   <C-/>  터미널이 확장 키 규약(kitty keyboard / CSI-u)을 쓸 때 nvim 이
 "          따로 알아보는 형태. iTerm2 가 그쪽이다.
 " 둘 다 비어 있던 키라 부딪히는 것은 없다. 어느 쪽이 오든 같은 자리로 간다.
-nnoremap <C-_> :LookupReferences<Space>
-nnoremap <C-/> :LookupReferences<Space>
+"
+" 누르면 찾을 거리를 미리 채워 주고, 엔터는 사용자가 친다 - 치기 전에
+" 고칠 수 있어야 하기 때문이다.
+"   normal  커서 밑 낱말 (<C-R><C-W> 가 명령행에 넣어 준다)
+"   visual  고른 영역의 글자
+"
+" 고른 영역이 여러 줄이면 공백 하나로 이어 붙인다. 줄바꿈이 든 글자는
+" 어차피 한 줄에서 찾히지 않으므로, 그대로 보여 주고 사용자가 다듬게 둔다.
+" '> 의 열은 linewise(V) 에서 아주 큰 수가 오는데, vim 의 문자열 자르기가
+" 그걸 '줄 끝'으로 받아 주므로 따로 손대지 않는다.
+function! s:LookupVisual() abort
+    let [l:l1, l:c1] = getpos("'<")[1:2]
+    let [l:l2, l:c2] = getpos("'>")[1:2]
+    let l:lines = getline(l:l1, l:l2)
+    if empty(l:lines)
+        return ''
+    endif
+    let l:lines[-1] = l:lines[-1][: l:c2 - 1]
+    let l:lines[0] = l:lines[0][l:c1 - 1 :]
+    return substitute(join(l:lines, ' '), '^\s\+\|\s\+$', '', 'g')
+endfunction
+
+nnoremap <C-_> :LookupReferences <C-R><C-W>
+nnoremap <C-/> :LookupReferences <C-R><C-W>
+xnoremap <C-_> :<C-u>LookupReferences <C-R>=<SID>LookupVisual()<CR>
+xnoremap <C-/> :<C-u>LookupReferences <C-R>=<SID>LookupVisual()<CR>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
 " 같은 것을 <F7> 로도 연다 - 펑션키는 아래 F1..F12 블록에서 한꺼번에 맵한다.
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
