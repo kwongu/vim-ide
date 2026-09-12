@@ -863,6 +863,58 @@ function refresh(root, why, force)
     end
   end
 
+  -- 증분 갱신은 자리를 되돌려주지 않는다.
+  --
+  -- 'gtags -i' 는 바뀐 파일만 다시 넣지만 빠진 자리를 회수하지는 않는다.
+  -- 실측(2026-09-12, kernel/common): 목록 273개 / DB 가 담은 것 205개인데
+  -- GTAGS 707MB + GRTAGS 551MB 였다. 같은 목록으로 처음부터 다시 만들면
+  -- 0.18초에 GTAGS 656KB + GRTAGS 2.1MB - 1,100배와 260배다. 답은 똑같다.
+  -- 그동안 'global' 은 질의마다 그 1.25GB 를 뒤지고 있었다.
+  --
+  -- 그래서 가끔 통째로 다시 만든다. 둘 중 먼저 걸리는 쪽으로:
+  --   * 증분 갱신을 g:autoindex_compact_every 번 했을 때 (기본 200)
+  --   * DB 가 파일당 g:autoindex_compact_bytes 를 넘었을 때 (기본 256KB.
+  --     정상은 파일당 2KB 안팎이다 - 루트 프로젝트가 1091 파일에 2.3MB)
+  -- 전체 빌드는 임시 디렉터리에 만들고 다 되면 옮기므로, 만드는 동안에도
+  -- 질의는 예전 DB 로 계속 답한다.
+  --   let g:autoindex_compact_every = 0   " 횟수로는 다시 만들지 않기
+  --   let g:autoindex_compact_bytes = 0   " 크기로는 다시 만들지 않기
+  --   :GtagsCompact                       " 지금 한 번
+  local function compact_file(r)
+    return dbpath(r) .. '/compact'
+  end
+
+  local function compact_count(r)
+    local ok, l = pcall(vim.fn.readfile, compact_file(r), '', 1)
+    return (ok and l and tonumber(l[1])) or 0
+  end
+
+  local function compact_bump(r, reset)
+    local n = reset and 0 or (compact_count(r) + 1)
+    pcall(vim.fn.writefile, { tostring(n) }, compact_file(r))
+    return n
+  end
+
+  -- 지금 다시 만들 때가 되었는가. 이유를 돌려준다(없으면 nil).
+  local function compact_due(r, nfiles)
+    local every = tonumber(cfg('compact_every', 200)) or 200
+    if every > 0 and compact_count(r) >= every then
+      return ('증분 갱신 %d회'):format(compact_count(r))
+    end
+    local per = tonumber(cfg('compact_bytes', 256 * 1024)) or 256 * 1024
+    if per > 0 and nfiles and nfiles > 0 then
+      local tot = 0
+      for _, f in ipairs({ 'GTAGS', 'GRTAGS' }) do
+        local st = uv.fs_stat(dbpath(r) .. '/' .. f)
+        tot = tot + ((st and st.size) or 0)
+      end
+      if tot > per * nfiles then
+        return ('DB %dMB / 파일 %d개'):format(math.floor(tot / 1048576), nfiles)
+      end
+    end
+    return nil
+  end
+
   local function run_incremental(n)
     -- 셸 없이. 고아가 된 gtags 11개가 전부 이 자리에서 나왔다.
     -- 증분 갱신에 30분(spawn 의 기본값)은 너무 관대하다. 목록이 정해져
@@ -882,12 +934,28 @@ function refresh(root, why, force)
             done(short .. ' 색인 갱신 실패: ' ..
               ((o.stderr or ''):match('^[^\n]*') or ('rc=' .. tostring(o.code))),
               vim.log.levels.WARN)
-          elseif secs > 3 then
-            -- small projects finish before anyone notices; stay quiet there
-            done(string.format('%s 색인 갱신 완료 (%d files, %.1fs%s)', short, n,
-              secs, why and (', ' .. why) or ''))
           else
-            done(nil)
+            compact_bump(root)
+            local due = compact_due(root, n)
+            if due then
+              -- 자리를 회수한다. done() 을 먼저 불러 이 갱신을 끝내고,
+              -- 전체 빌드는 그 다음 차례에 새로 시작한다(build 는 스스로
+              -- 락을 잡는다 - 지금 잡고 있는 것을 놓기 전에 부르면 '다른
+              -- nvim 이 색인 중'으로 스스로를 막는다).
+              done(nil)
+              vim.schedule(function()
+                compact_bump(root, true)
+                build(root, '자리 되찾기 (' .. due .. ')', {})
+              end)
+              return
+            end
+            if secs > 3 then
+              -- small projects finish before anyone notices; stay quiet there
+              done(string.format('%s 색인 갱신 완료 (%d files, %.1fs%s)', short,
+                n, secs, why and (', ' .. why) or ''))
+            else
+              done(nil)
+            end
           end
         end)
       end)
@@ -1644,6 +1712,24 @@ api.nvim_create_user_command('GtagsIndex', function()
     build(root or marker_root(dir) or dir, 'manual', { confirm = true })
   end)
 end, { desc = 'Rebuild the GTAGS index of this project in the background' })
+
+-- 지금 통째로 다시 만든다 (자리 되찾기).
+--
+-- 증분 갱신은 빠진 자리를 회수하지 않아서 DB 가 계속 부푼다. 평소에는
+-- refresh() 가 알아서 때를 보지만(g:autoindex_compact_every / _bytes),
+-- 눈에 띄게 느려졌을 때 직접 부를 수 있게 둔다. :GtagsIndex 와 달리
+-- 파일 수가 줄었는지 묻지 않는다 - 목록은 그대로 두고 DB 만 다시 만드는
+-- 것이 이 명령의 뜻이라서다.
+api.nvim_create_user_command('GtagsCompact', function()
+  local path = api.nvim_buf_get_name(0)
+  local dir = path ~= '' and vim.fs.dirname(vim.fn.fnamemodify(path, ':p'))
+      or vim.fn.getcwd()
+  gtags_root(dir, function(root)
+    root = root or marker_root(dir) or dir
+    pcall(vim.fn.delete, dbpath(root) .. '/compact')
+    build(root, '자리 되찾기 (수동)', {})
+  end)
+end, { desc = 'Rebuild this project index from scratch to reclaim space' })
 
 api.nvim_create_user_command('GtagsIndexUpdate', function()
   local path = api.nvim_buf_get_name(0)
