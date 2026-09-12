@@ -109,6 +109,26 @@ local function act(buf, a, b, fn, label)
   end, 120)
 end
 
+-- 고른 줄 범위. 세 가지 비주얼 모드를 모두 본다.
+--
+-- 예전에는 'v' 와 'V' 만 봤다. <C-v>(블록 선택)는 mode() 가 \22 를 주므로
+-- 그 검사에 걸리지 않았고, 여러 줄을 골라 놓고 + 를 눌러도 커서 줄 하나만
+-- 처리됐다 - 조용히. NERDTree 쪽은 '<,'> 마크를 써서 셋 다 되는데 여기만
+-- 아니었다.
+local function visual_range()
+  local m = vim.fn.mode()
+  if m == 'v' or m == 'V' or m == '\22' then
+    return vim.fn.line('v'), vim.fn.line('.'), true
+  end
+  local l = vim.fn.line('.')
+  return l, l, false
+end
+
+local function leave_visual()
+  api.nvim_feedkeys(
+    api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+end
+
 local function attach(buf)
   if not on() then
     return
@@ -117,24 +137,22 @@ local function attach(buf)
     pcall(vim.keymap.set, { 'n', 'x' }, lhs, rhs,
       { buffer = buf, nowait = true, silent = true, desc = desc })
   end
-  bmap('+', function()
-    local m = vim.fn.mode()
-    local a, b = vim.fn.line('.'), vim.fn.line('.')
-    if m == 'v' or m == 'V' then
-      a, b = vim.fn.line('v'), vim.fn.line('.')
-      api.nvim_feedkeys(api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+  -- 목록을 고치는 일은 파일을 쓰고 재색인까지 부른다. 비주얼 모드 안에서
+  -- 그대로 하지 않고, 먼저 모드를 빠져나온 뒤 다음 차례에 한다 - neo-tree
+  -- 쪽이 쓰는 모양과 같다.
+  local function ranged(fn, label)
+    return function()
+      local a, b, vis = visual_range()
+      if vis then
+        leave_visual()
+      end
+      vim.schedule(function() act(buf, a, b, fn(), label) end)
     end
-    act(buf, a, b, _G.projectfiles_add, '추가')
-  end, '색인 목록에 추가')
-  bmap('-', function()
-    local m = vim.fn.mode()
-    local a, b = vim.fn.line('.'), vim.fn.line('.')
-    if m == 'v' or m == 'V' then
-      a, b = vim.fn.line('v'), vim.fn.line('.')
-      api.nvim_feedkeys(api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
-    end
-    act(buf, a, b, _G.projectfiles_remove, '제거')
-  end, '색인 목록에서 제거')
+  end
+  bmap('+', ranged(function() return _G.projectfiles_add end, '추가'),
+    '색인 목록에 추가')
+  bmap('-', ranged(function() return _G.projectfiles_remove end, '제거'),
+    '색인 목록에서 제거')
   bmap('=', function()
     local p = path_at(buf, vim.fn.line('.'))
     if not p then

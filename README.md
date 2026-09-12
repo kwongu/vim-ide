@@ -637,7 +637,14 @@ there too. What neo-tree does not have yet is the marks; those need a
 custom renderer component, and this added only the four operations.
 
 Select lines with `v`, `V` or `<C-v>` and `+` / `-` act on the whole
-range. That is one commit, not one per line: adding a path rewrites the
+range - though `<C-v>` only started working in the F6 buffer list and in
+netrw once the check stopped reading `mode() == 'v' or mode() == 'V'`.
+Blockwise visual answers `mode()` with a literal CTRL-V (`"\22"`), which
+matched neither, so the range quietly collapsed to the cursor line: you
+selected six buffers, pressed `+`, and one went in. Measured over a
+four-line selection, the old check returned `4..4` for `<C-v>` where `v` and
+`V` both returned `1..4`. NERDTree was never affected - it reads the `'<`
+and `'>` marks, which all three modes set. That is one commit, not one per line: adding a path rewrites the
 preset, re-expands the list (a `find` per directory entry) and reindexes,
 so doing it fifty times over would be fifty of those. A six-line range
 takes 79 ms where the same six done one at a time take 200 ms, and it

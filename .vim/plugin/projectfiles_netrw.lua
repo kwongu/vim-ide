@@ -126,12 +126,22 @@ local function mark(win)
   end
 end
 
+-- 고른 줄 범위. 세 가지 비주얼 모드를 모두 본다 - <C-v>(블록 선택)는
+-- mode() 가 \22 를 주므로 'v'/'V' 만 보던 예전 검사에 걸리지 않았고,
+-- 여러 줄을 골라 놓고 눌러도 커서 줄 하나만 조용히 처리됐다.
+local function visual_range()
+  local m = vim.fn.mode()
+  if m == 'v' or m == 'V' or m == '\22' then
+    return vim.fn.line('v'), vim.fn.line('.'), true
+  end
+  local l = vim.fn.line('.')
+  return l, l, false
+end
+
 local function act(fn, label)
   local win = api.nvim_get_current_win()
-  local m = vim.fn.mode()
-  local a, b = vim.fn.line('.'), vim.fn.line('.')
-  if m == 'v' or m == 'V' then
-    a, b = vim.fn.line('v'), vim.fn.line('.')
+  local a, b, vis = visual_range()
+  if vis then
     api.nvim_feedkeys(api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
   end
   local paths = paths_in_range(win, a, b)
