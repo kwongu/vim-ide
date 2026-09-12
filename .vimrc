@@ -998,6 +998,40 @@ let g:airline_section_warning = ''
 let g:airline_symbols.notexists = ''
 autocmd BufDelete * call airline#extensions#tabline#buflist#invalidate()
 
+" Nerd Font 가 없는 터미널(Tera Term)에서는 airline 의 powerline 글자를 끈다.
+" 위쪽 g:vimide_ascii_icons 판정을 그대로 쓴다. 앞의 설정은 건드리지 않고
+" 여기서 되돌리기만 하므로, iTerm2 쪽 모양은 지금 그대로다.
+"
+" airline 은 g:airline_powerline_fonts 를 VimEnter 의 bootstrap 에서 읽으므로
+" 플러그인이 이미 로드된 뒤인 여기서 바꿔도 늦지 않다.
+if g:vimide_ascii_icons
+    let g:airline_powerline_fonts = 0
+    " 삼각형 구분자()를 없앤다. 빈 문자열이면 airline 이 아무것도 안 그린다
+    let g:airline_left_sep  = ''
+    let g:airline_right_sep = ''
+    let g:airline_left_alt_sep  = '|'
+    let g:airline_right_alt_sep = '|'
+    let g:airline#extensions#tabline#left_sep      = ''
+    let g:airline#extensions#tabline#right_sep     = ''
+    let g:airline#extensions#tabline#left_alt_sep  = '|'
+    let g:airline#extensions#tabline#right_alt_sep = '|'
+    " 기본값은 branch=U+2387, dirty=U+26A1 처럼 폭이 애매한 글자들이라
+    " 전부 ASCII 로 못 박는다
+    let g:airline_symbols.branch     = 'b'
+    let g:airline_symbols.readonly   = 'RO'
+    let g:airline_symbols.linenr     = 'L'
+    let g:airline_symbols.maxlinenr  = ''
+    let g:airline_symbols.colnr      = ':'
+    let g:airline_symbols.dirty      = '*'
+    let g:airline_symbols.notexists  = '?'
+    let g:airline_symbols.modified   = '+'
+    let g:airline_symbols.paste      = 'PASTE'
+    let g:airline_symbols.spell      = 'SPELL'
+    let g:airline_symbols.whitespace = '!'
+    let g:airline_symbols.crypt      = 'cr'
+    let g:airline_symbols.ellipsis   = '...'
+endif
+
 "==============================================================================
 " Set Supertab
 "==============================================================================
