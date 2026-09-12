@@ -2073,8 +2073,44 @@ endfunction
 
 nnoremap <C-_> :LookupReferences <C-R><C-W>
 nnoremap <C-/> :LookupReferences <C-R><C-W>
-xnoremap <C-_> :<C-u>LookupReferences <C-R>=<SID>LookupVisual()<CR>
-xnoremap <C-/> :<C-u>LookupReferences <C-R>=<SID>LookupVisual()<CR>
+" visual 에서는 고른 글자에 F4 와 같은 색도 입힌다.
+"
+" 찾은 것을 목록에서 훑는 동안 '무엇을 찾고 있었는지'가 본문에도 남아
+" 있어야 눈이 덜 헤맨다. F4 가 하는 일(<Plug>MarkSet)과 같은 호출이다:
+" mark#DoMark(v:count, mark#GetVisualSelectionAsLiteralPattern()).
+"
+" 색을 입힌 글자와 찾는 글자는 같은 곳에서 얻는다 - mark#GetVisualSelection()
+" 하나만 쓴다. 그 함수는 gvy 로 얻으면서 " 레지스터와 'clipboard' 를 스스로
+" 저장했다 되돌린다(autoload/mark.vim:81). vim-mark 이 없으면 마크는
+" 건너뛰고 마크 마크만으로 찾는다.
+"
+" 여러 줄을 골랐으면 찾을 때는 줄바꿈을 공백으로 바꾼다 - 한 줄에서 찾는
+" 것이라 줄바꿈이 든 글자는 어차피 안 맞는다. 색은 고른 그대로 입는다.
+" autoload 함수는 한 번 불러 보기 전에는 exists('*mark#...') 가 0 이다.
+" 그래서 '있는지 묻고 부르는' 대신 불러 보고 없으면 받는다 - 부르는 순간
+" autoload/mark.vim 이 읽히므로, 깔려 있으면 이때 해결된다.
+function! s:LookupVisualMark() abort
+    let l:have = 1
+    try
+        let l:raw = mark#GetVisualSelection()
+    catch /E117/
+        let l:have = 0
+        let l:raw = s:LookupVisual()
+    endtry
+    let l:t = substitute(substitute(l:raw, '[\r\n]\+', ' ', 'g'),
+                \ '^\s\+\|\s\+$', '', 'g')
+    if empty(l:t)
+        return
+    endif
+    if l:have
+        silent! call mark#DoMark(v:count, mark#GetVisualSelectionAsLiteralPattern())
+    endif
+    " 명령행을 띄우고 거기서 멈춘다 - 엔터는 사용자가 친다
+    call feedkeys(':LookupReferences ' . l:t, 'n')
+endfunction
+
+xnoremap <silent> <C-_> :<C-u>call <SID>LookupVisualMark()<CR>
+xnoremap <silent> <C-/> :<C-u>call <SID>LookupVisualMark()<CR>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
 " 같은 것을 <F7> 로도 연다 - 펑션키는 아래 F1..F12 블록에서 한꺼번에 맵한다.
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
