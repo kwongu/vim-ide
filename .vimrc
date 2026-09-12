@@ -2042,6 +2042,15 @@ nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 "   \fF        직접 입력           :LookupReferences! 는 정규식
 nnoremap <silent> <leader>fr :LookupReferences<CR>
 nnoremap <leader>fF :LookupReferences<Space>
+" Ctrl+/ 로도 바로 입력할 수 있게. 두 가지를 다 건다 - 터미널마다 이 키를
+" 보내는 방법이 다르기 때문이다.
+"   <C-_>  0x1F 한 바이트. 예전부터 터미널이 Ctrl+/ 로 보내던 것이고
+"          Tera Term 을 포함해 대부분이 이걸 보낸다.
+"   <C-/>  터미널이 확장 키 규약(kitty keyboard / CSI-u)을 쓸 때 nvim 이
+"          따로 알아보는 형태. iTerm2 가 그쪽이다.
+" 둘 다 비어 있던 키라 부딪히는 것은 없다. 어느 쪽이 오든 같은 자리로 간다.
+nnoremap <C-_> :LookupReferences<Space>
+nnoremap <C-/> :LookupReferences<Space>
 nnoremap <silent> <leader>fs :ProjectSymbols<CR>
 " 같은 것을 <F7> 로도 연다 - 펑션키는 아래 F1..F12 블록에서 한꺼번에 맵한다.
 nnoremap <silent> <leader>fw :execute 'ProjectSymbols' expand('<cword>')<CR>
