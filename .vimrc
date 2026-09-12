@@ -472,6 +472,8 @@ if g:vimide_ascii_icons
     " '*' 와 '.' 은 어느 터미널에서나 한 칸이다
     let g:projectfiles_tree_mark_file = '*'
     let g:projectfiles_tree_mark_dir  = '.'
+    " 창 구분선 기본값도 U+2502 다. '|' 는 어느 터미널에서나 한 칸
+    let &fillchars = 'vert:|,fold:-,eob:~'
 endif
 
 " git 표시를 켠다.
@@ -519,7 +521,12 @@ local ascii_icons = (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
 
 _G.rv_setup('neo-tree', {
   default_component_configs = ascii_icons and {
-    indent = { expander_collapsed = '+', expander_expanded = '-' },
+    -- U+2502 세로줄은 East Asian Ambiguous 라 CJK 글꼴 터미널이 두 칸으로
+    -- 그린다. 들여쓰기 안내선까지 ASCII 로 내려야 줄이 안 밀린다
+    indent = {
+      expander_collapsed = '+', expander_expanded = '-',
+      indent_marker = '|', last_indent_marker = '+',
+    },
     icon = {
       folder_closed = '+', folder_open = '-',
       folder_empty = ' ', folder_empty_open = ' ',
