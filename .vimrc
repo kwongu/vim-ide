@@ -528,10 +528,21 @@ _G.rv_setup('neo-tree', {
     -- fuzzy finder 를 잃지는 않는다: 비어 있던 F 로 옮겼다.
     --   /  검색 (n / N 으로 다음 / 이전)   F  fuzzy finder
     --   D  디렉터리 fuzzy finder           f  이름으로 거르기 (그대로)
+    -- F 로 찾은 목록은 화면에 남는다 (keep_filter_on_submit).
+    --
+    -- 기본값은 반대다: 팝업에서 <CR> 을 누르면 고른 파일을 열면서 목록을
+    -- 곧바로 지운다. 그러면 찾은 것들을 '가지고 할 수 있는 일'이 없다 -
+    -- 마우스로 다른 줄을 누르는 순간 팝업이 닫히며 목록도 같이 사라졌고,
+    -- 여러 개를 골라 색인에 넣는 것은 아예 불가능했다.
+    --
+    -- 목록을 남기면 그 뒤는 평소의 트리와 똑같다:
+    --   <CR> / 더블클릭  EDIT 창에 연다
+    --   V 로 영역 잡고 + / -   그 파일들을 색인 목록에 넣고 뺀다
+    --   <C-x>            목록을 풀고 원래 트리로
     window = {
       mappings = {
         ['/'] = 'none',
-        ['F'] = 'fuzzy_finder',
+        ['F'] = { 'fuzzy_finder', config = { keep_filter_on_submit = true } },
       },
     },
     hijack_netrw_behavior = 'disabled',

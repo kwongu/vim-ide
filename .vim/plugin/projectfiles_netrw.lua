@@ -29,9 +29,25 @@ local function on()
   return v == nil or (tonumber(v) or 1) ~= 0
 end
 
+-- netrw 의 배너(맨 위 '"' 로 시작하는 안내 줄)인가.
+--
+-- 이걸 걸러야 한다. 배너의 '"   Sorted by      name' 줄에서
+-- NetrwGetWord 를 부르면 netrw 가 던지면서 명령행에
+--   Press "S" to edit sorting sequence
+-- 를 찍는다. 아래 mark() 는 줄마다 그걸 부르므로, CursorHold 마다 그
+-- 메시지가 명령행을 덮어썼다 - '/' 로 찾은 결과도, 이 플러그인이 내는
+-- '색인 추가: N개' 도 그 밑에 깔렸다.
+local function is_banner(buf, lnum)
+  local l = api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1]
+  return l == nil or l:sub(1, 1) == '"'
+end
+
 -- 커서 줄의 항목 이름. netrw 는 목록 모양(thin/long/wide/tree)에 따라 줄이
 -- 전혀 달라서 직접 파싱하지 않는다 - netrw 자신에게 묻는다.
 local function word_at(win, lnum)
+  if is_banner(api.nvim_win_get_buf(win), lnum) then
+    return nil
+  end
   local save = api.nvim_win_get_cursor(win)
   api.nvim_win_set_cursor(win, { lnum, 0 })
   local ok, w = pcall(vim.fn['netrw#Call'], 'NetrwGetWord')
@@ -71,13 +87,32 @@ local function paths_in_range(win, a, b)
   return out
 end
 
+-- 표시는 '보이는 만큼'만 얹는다.
+--
+-- 줄마다 NetrwGetWord 를 부르는데, 그건 커서를 옮겼다 되돌리는 일이다.
+-- 파일이 수천 개인 디렉터리에서 CursorHold 마다 전부 도는 것은 그냥 낭비다
+-- (게다가 화면 밖은 아무도 안 본다). 위아래로 한 화면씩 더 본다.
+local function view(win)
+  local buf = api.nvim_win_get_buf(win)
+  local last = api.nvim_buf_line_count(buf)
+  local ok, info = pcall(vim.fn.getwininfo, win)
+  if not ok or not info or not info[1] then
+    return 1, math.min(last, 200)
+  end
+  local h = info[1].height or 40
+  local top = math.max(1, (info[1].topline or 1) - h)
+  local bot = math.min(last, (info[1].botline or last) + h)
+  return top, bot
+end
+
 local function mark(win)
   local buf = api.nvim_win_get_buf(win)
   pcall(api.nvim_buf_clear_namespace, buf, NS, 0, -1)
   if not on() or not _G.projectfiles_tree_flag then
     return
   end
-  for l = 1, api.nvim_buf_line_count(buf) do
+  local lo, hi = view(win)
+  for l = lo, hi do
     local p = path_at(win, l)
     if p then
       local ok, flag = pcall(_G.projectfiles_tree_flag, p)
@@ -153,8 +188,9 @@ api.nvim_create_autocmd('FileType', {
     attach(a.buf)
   end,
 })
--- netrw 는 같은 버퍼를 다시 그리므로 들어올 때마다 표시를 새로 얹는다
-api.nvim_create_autocmd({ 'BufWinEnter', 'CursorHold' }, {
+-- netrw 는 같은 버퍼를 다시 그리므로 들어올 때마다 표시를 새로 얹는다.
+-- 화면에 보이는 만큼만 얹으므로 스크롤도 계기가 된다.
+api.nvim_create_autocmd({ 'BufWinEnter', 'CursorHold', 'WinScrolled' }, {
   group = group,
   callback = function(a)
     if vim.bo[a.buf].filetype == 'netrw' then

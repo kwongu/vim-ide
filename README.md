@@ -796,6 +796,45 @@ the key. The fuzzy finder moved to `F`, and `D` (fuzzy find a directory),
 `f` (filter on submit) and `#` (fuzzy sort) are untouched. The same swap is
 applied to the `document_symbols` source, which had `/` on its filter.
 
+### What `F` finds, stays found
+
+By default neo-tree throws the result list away the moment you press `<CR>`:
+it opens the highlighted file and resets the search. That leaves nothing to
+work *with* - clicking another row closed the popup and took the list with
+it, and picking several files to index was not possible at all. `F` now
+carries `keep_filter_on_submit`, so the matches stay on screen and the tree
+behaves like any other tree:
+
+| | |
+|---|---|
+| `<CR>` / double-click | open that file in the EDIT window |
+| `V` over rows, then `+` / `-` | add / remove them all from the index |
+| `+` / `-` on one row | that one file (or directory) |
+| `<C-x>` | drop the filter, back to the whole tree |
+
+One wrinkle worth knowing about. A result list shows the matching files *and*
+the directories they live in, up to the project root - the directories are
+scaffolding, not results. A `V` down the whole list used to hand all of them
+over, and the top row is the project root, so one keystroke would have pulled
+the entire tree into the index. While a search is active, a **range** now
+takes only the files; a single `+` on a directory row still means that
+directory, because there you did point at it. Measured on a four-file
+project filtered to `alpha`: `V`+`+` over all five rows hands over
+`inc/alpha.h, src/alpha.c` and nothing else.
+
+### netrw's `/`
+
+netrw never mapped `/` - vim's own search has always worked there. What did
+not work was reading the screen while it did: the index marks are drawn by
+asking netrw itself for the name on each line, and on the banner's
+`"   Sorted by      name` row that call throws *and* makes netrw print
+`Press "S" to edit sorting sequence` over the command line. Every `CursorHold`
+redrew the marks, so that message sat on top of the search echo, and on top
+of this plugin's own `색인 추가: N개`. Banner rows are skipped now, and the
+marks are drawn only for the lines actually on screen (plus a screen above
+and below) instead of walking a directory of thousands, cursor-moving once
+per entry.
+
 `K` and `J` had no neo-tree command behind them, so they are twelve lines of
 Lua walking the node's parent for its child ids and focusing the first or
 last. Measured in a four-file directory: from `b2.c`, `J` lands on `d4.c` and

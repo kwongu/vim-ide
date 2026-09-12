@@ -72,18 +72,43 @@ local function path_at(state, lnum)
   return p
 end
 
+-- 검색 결과 목록에서 범위를 잡을 때, 디렉터리 줄은 '결과'가 아니다.
+--
+-- F 로 찾으면 트리는 맞은 파일들과 '그 파일이 들어 있는 디렉터리'를 함께
+-- 보여 준다. 디렉터리는 어디에 있는지 알려 주는 뼈대일 뿐 찾은 것이 아닌데,
+-- V 로 목록을 통째로 훑으면 그것들까지 들어온다 - 맨 윗줄은 프로젝트
+-- 루트라서, 색인에 담는 순간 트리 전체가 들어간다.
+--
+-- 그래서 검색 중에 '범위'로 고를 때는 파일만 담는다. 한 줄에서 누르는 것은
+-- 그대로 둔다 - 그건 그 디렉터리를 담겠다고 콕 집은 것이다.
+local function searching(st)
+  local sp = st and st.search_pattern
+  return type(sp) == 'string' and sp ~= ''
+end
+
+local function is_dir(st, lnum)
+  local ok, node = pcall(function()
+    return st.tree:get_node(lnum)
+  end)
+  return ok and node and node.type == 'directory' or false
+end
+
 -- 범위의 줄들이 가리키는 경로. 같은 경로가 여러 줄에 걸쳐도 한 번만.
 local function paths_in(first, last)
   local st = tree_state()
   if not st then
     return {}
   end
+  local lo, hi = math.min(first, last), math.max(first, last)
+  local files_only = (hi > lo) and searching(st)
   local out, seen = {}, {}
-  for l = math.min(first, last), math.max(first, last) do
-    local p = path_at(st, l)
-    if p and not seen[p] then
-      seen[p] = true
-      out[#out + 1] = p
+  for l = lo, hi do
+    if not (files_only and is_dir(st, l)) then
+      local p = path_at(st, l)
+      if p and not seen[p] then
+        seen[p] = true
+        out[#out + 1] = p
+      end
     end
   end
   return out
