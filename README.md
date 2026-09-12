@@ -645,6 +645,18 @@ reports once - `추가 3개 (항목 0 -> 3)` - instead of once per line. The
 tree root line is skipped if the selection catches it, since indexing the
 root would make the preset the whole project.
 
+The line *above* the root was the one nobody checked. NERDTree's third line
+is `.. (up a dir)`, and `getPath()` answers it with the parent directory -
+outside this tree entirely. `drop_root` could not catch that, because the
+parent is not the root of anything it knows; worse, `tree_apply` takes the
+project to commit to from the first path in the list, and with `..` first
+that is a different project. So `V G +` down the whole tree used to hand
+over the project's parent as well. The tree is the only place that knows
+where its own root is, so the rule lives there now: a path must be the root
+or under it, and in a *range* the root itself drops out too. Measured on a
+nine-node tree, `V G +` hands over exactly the nine nodes under the root and
+says `색인 추가: 9개`; `+` alone on the root row still means the root.
+
 One thing they all share is *which* project they act on, and that used to
 depend on the window you were standing in. `cur_root()` looked at the
 current buffer's name and, finding none, went straight to the cwd - and a

@@ -14,6 +14,10 @@
 " 처리한다. 항목마다 목록을 다시 펼치고 재색인하지 않고 끝에 한 번만 하므로,
 " 수십 줄을 골라도 한 번의 재색인으로 끝난다.
 "
+" 범위는 트리 루트 '아래'만 담는다: '.. (up a dir)' 줄은 이 트리 바깥이고
+" 루트 줄은 트리 전체라, 목록을 통째로 훑을 때 함께 넘어가면 곤란하다.
+" 한 줄에서 콕 집어 누르는 것은 루트든 상위든 그대로 담는다.
+"
 " 노드 옆의 표시 (preset 모드에서만; auto 모드는 전부 대상이라 표시하지 않는다)
 "   [●]  이 파일이 색인에 있다
 "   [·]  이 디렉터리 아래에 색인된 파일이 있다
@@ -94,11 +98,27 @@ endfunction
 " NERDTree 는 줄마다 노드가 하나다. b:NERDTree.ui.getPath(줄번호) 가 그 줄의
 " 경로를 주고, 헤더나 빈 줄에서는 빈 값을 준다 - 커서를 옮겨 다니지 않아도
 " 범위를 그대로 경로 목록으로 바꿀 수 있다.
+"
+" 범위에서는 트리의 '뼈대' 줄을 빼고 그 아래만 담는다.
+"
+" NERDTree 의 맨 위 세 줄은 노드가 아니라 안내다: 도움말 줄, 빈 줄, 그리고
+" '.. (up a dir)'. 그런데 getPath() 는 '..' 줄에 부모 디렉터리의 경로를
+" 준다 - 즉 이 트리 바깥이다. 그 다음 줄은 트리 루트다. 그래서 V G + 처럼
+" 목록을 통째로 훑으면 프로젝트의 '부모 디렉터리'와 루트가 함께 넘어가서,
+" 한 번에 트리 바깥까지 색인에 들어갔다 (실측으로 확인).
+"
+" 규칙은 두 줄이다:
+"   * 이 트리 밖은 언제나 아니다 - '..' 는 한 줄에서 눌러도 담지 않는다.
+"     그건 '위로 간다'는 줄이지 노드가 아니다.
+"   * 루트 줄은 범위에서만 뺀다. 한 줄에서 콕 집어 누른 것은 그 뜻이 맞다.
+" neo-tree 쪽도 같은 모양이다 (검색 결과 목록의 디렉터리 줄).
 function! s:RangePaths(first, last) abort
     let l:paths = []
     if !exists('b:NERDTree')
         return l:paths
     endif
+    let l:root = substitute(b:NERDTree.root.path.str(), '/\+$', '', '')
+    let l:multi = a:last > a:first
     for l:ln in range(a:first, a:last)
         let l:p = {}
         try
@@ -106,9 +126,19 @@ function! s:RangePaths(first, last) abort
         catch
             continue
         endtry
-        if !empty(l:p)
-            call add(l:paths, l:p.str())
+        if empty(l:p)
+            continue
         endif
+        let l:s = substitute(l:p.str(), '/\+$', '', '')
+        " 이 트리 밖은 언제나 아니다 ('.. (up a dir)' 가 부모를 준다).
+        if l:s !=# l:root && strpart(l:s, 0, len(l:root) + 1) !=# l:root . '/'
+            continue
+        endif
+        " 루트 줄은 범위에서만 뺀다 - 한 줄에서 누른 것은 그 뜻이 맞다.
+        if l:multi && l:s ==# l:root
+            continue
+        endif
+        call add(l:paths, l:s)
     endfor
     return l:paths
 endfunction
@@ -121,6 +151,7 @@ function! ProjectFilesTreeAddRange(first, last) abort
     endif
     call luaeval('_G.projectfiles_add(_A)', l:paths)
     call s:Rerender()
+    echo printf('색인 추가: %d개', len(l:paths))
 endfunction
 
 function! ProjectFilesTreeRemoveRange(first, last) abort
@@ -131,6 +162,7 @@ function! ProjectFilesTreeRemoveRange(first, last) abort
     endif
     call luaeval('_G.projectfiles_remove(_A)', l:paths)
     call s:Rerender()
+    echo printf('색인 제거: %d개', len(l:paths))
 endfunction
 
 function! ProjectFilesTreeInfo(...) abort
