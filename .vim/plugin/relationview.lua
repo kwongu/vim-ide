@@ -5486,9 +5486,19 @@ local function lookup_to_qf(root, pat, refs)
 end
 
 function A.lookup_refs(pat, regex)
-  pat = (pat and pat ~= '') and pat or vim.fn.expand('<cword>')
   if not pat or pat == '' then
-    vim.notify('찾을 글자가 없습니다', vim.log.levels.WARN)
+    -- 인자가 없으면 커서 밑 낱말. 단 '커서가 진짜 그 낱말 위에 있을 때'만
+    -- 이다 - <cword> 는 빈칸 위에서 그 줄의 다음 낱말을 집어 오므로,
+    -- 들여쓰기 위에서 \fr 을 누르면 가리키지도 않은 것을 찾게 된다.
+    local line = api.nvim_get_current_line()
+    local col = api.nvim_win_get_cursor(0)[2]
+    local ch = vim.fn.matchstr(line, '\\%' .. (col + 1) .. 'c.')
+    pat = (ch ~= '' and vim.fn.match(ch, '\\k') >= 0)
+        and vim.fn.expand('<cword>') or ''
+  end
+  if not pat or pat == '' then
+    vim.notify('찾을 글자가 없습니다 (커서를 심볼 위에 두거나 :LookupReferences 로 치세요)',
+      vim.log.levels.WARN)
     return
   end
   local name = api.nvim_buf_get_name(0)

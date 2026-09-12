@@ -2107,8 +2107,19 @@ function! s:LookupVisual() abort
     return substitute(join(l:lines, ' '), '^\s\+\|\s\+$', '', 'g')
 endfunction
 
-nnoremap <C-_> :LookupReferences <C-R><C-W>
-nnoremap <C-/> :LookupReferences <C-R><C-W>
+" 커서가 심볼 글자 위에 있을 때만 채운다.
+"
+" <cword> 는 빈칸 위에서 '그 줄의 다음 낱말'을 집어 온다 - 들여쓰기 탭
+" 위에서 누르면 return 이 채워졌다. 가리키지도 않은 것을 찾게 되니 지우고
+" 다시 쳐야 한다. '{' 같은 글자 위에서는 '{' 가 그대로 들어왔다.
+" 그런 자리에서는 빈 채로 띄우고 직접 치게 둔다.
+function! s:LookupCword() abort
+    let l:ch = matchstr(getline('.'), '\%' . col('.') . 'c.')
+    return (l:ch =~# '\k') ? expand('<cword>') : ''
+endfunction
+
+nnoremap <C-_> :LookupReferences <C-R>=<SID>LookupCword()<CR>
+nnoremap <C-/> :LookupReferences <C-R>=<SID>LookupCword()<CR>
 " visual 에서는 고른 글자에 F4 와 같은 색도 입힌다.
 "
 " 찾은 것을 목록에서 훑는 동안 '무엇을 찾고 있었는지'가 본문에도 남아
