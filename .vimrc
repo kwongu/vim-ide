@@ -449,6 +449,12 @@ nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 "   let g:vimide_neotree_git = 0        " 항상 끄기
 "   let g:vimide_neotree_git_max_mb = 2 " 이 크기를 넘으면 자동으로 끈다
 " ------------------------------------
+
+" 이 트리에서는 git 표시를 끈다. 위 2)의 자동 판정(.git/index 크기)에
+" 맡기지 않고 아예 꺼 둔다 - tsnd SDK 의 .git/index 는 8.4MB 라 어차피
+" 매번 꺼지면서 알림만 한 번씩 나왔다.
+let g:vimide_neotree_git = 0
+
 lua << EOF
 _G.rv_setup('neo-tree', {
   close_if_last_window = true,
@@ -781,6 +787,15 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 "   let g:autoindex_startup_ctags = 0 " 시작 시 ctags 갱신만 끄기
 "   let g:autoindex_notify = 0        " 알림 끄기
 " ------------------------------------
+
+" 색인은 가장 바깥 프로젝트 하나만 본다.
+"
+" 'chain'(기본)은 현재 디렉터리 프로젝트부터 위로 올라가며 차례로 묻는다.
+" 이 트리는 바깥 루트와 kernel/common 이 preset 하나를 나눠 쓰므로, 바깥만
+" 보는 편이 답이 한 곳에서만 나와 헷갈리지 않는다.
+"   let g:sihl_index_db = 'chain'   " 기본: 현재 디렉터리부터 위로
+"   let g:sihl_index_db = 'near'    " 가장 가까운 것 하나만
+let g:sihl_index_db = 'root'
 
 " Find files using Telescope command-line sugar.
 nnoremap <leader>fi <cmd>Telescope git_commits<cr>
