@@ -920,22 +920,56 @@ end
 --   let g:projectfiles_nested_presets = 1 " preset 항목도 걸른다 (기본 0)
 local nested_cache = {}
 
-local function nested_prefixes(root)
-  local depth = tonumber(cfg('nested_depth', 6)) or 6
-  if depth <= 0 then
-    return {}
+-- 하위 프로젝트 목록은 디스크에도 적어 둔다.
+--
+-- 이걸 구하는 것은 프로젝트 전체를 훑는 find 다. tsnd 트리에서 3.15초
+-- 걸렸고, 이 파일의 예전 주석은 Android SDK(디렉터리 14만 개)에서 콜드로
+-- 몇 분이라고 적고 있다. 메모리 캐시는 TTL 이 2초라 세션 사이는 물론이고
+-- 사실상 매번 다시 걷는다.
+--
+-- '.tags/nested' 는 그 답을 그대로 담는다. 루트 디렉터리보다 새 것이면
+-- 그대로 쓴다 - 하위 프로젝트가 생기거나 없어지면 루트의 mtime 이 바뀌므로
+-- 그때는 다시 걷는다. :ProjectFilesReindex 나 DirChanged 로도 버려진다.
+local function nested_file(root)
+  return root .. '/' .. (dbdir() or '.tags') .. '/nested'
+end
+
+local function nested_read(root)
+  local f = nested_file(root)
+  local st, rs = uv.fs_stat(f), uv.fs_stat(root)
+  if not st or not rs or st.mtime.sec < rs.mtime.sec then
+    return nil
   end
+  local ok, lines = pcall(vim.fn.readfile, f)
+  if not ok then
+    return nil
+  end
+  local out = {}
+  for _, l in ipairs(lines) do
+    if l ~= '' then
+      out[#out + 1] = l
+    end
+  end
+  return out
+end
+
+local function nested_save(root, list)
+  local f = nested_file(root)
+  pcall(vim.fn.mkdir, vim.fs.dirname(f), 'p')
+  pcall(vim.fn.writefile, list, f)
+end
+
+local function nested_cmd(root, depth)
   local d = dbdir() or '.tags'
-  local now = uv.now()
-  local c = nested_cache[root]
-  if c and c.depth == depth and (now - c.at) < 2000 then
-    return c.list
-  end
-  local cmd = ('find %s -mindepth 2 -maxdepth %d -type d -name %s -prune -print 2>/dev/null')
+  return ('find %s -mindepth 2 -maxdepth %d -type d -name %s -prune -print 2>/dev/null')
       :format(vim.fn.shellescape(root), depth + 1, vim.fn.shellescape(d))
-  local list = {}
+end
+
+local function nested_parse(root, lines)
+  local d = dbdir() or '.tags'
   local tail = '/' .. d
-  for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
+  local list = {}
+  for _, l in ipairs(lines or {}) do
     if l:sub(-#tail) == tail then
       local dir = l:sub(1, #l - #tail)
       if dir:sub(1, #root + 1) == root .. '/' then
@@ -943,8 +977,65 @@ local function nested_prefixes(root)
       end
     end
   end
-  nested_cache[root] = { at = now, depth = depth, list = list }
   return list
+end
+
+local function nested_prefixes(root)
+  local depth = tonumber(cfg('nested_depth', 6)) or 6
+  if depth <= 0 then
+    return {}
+  end
+  local now = uv.now()
+  local c = nested_cache[root]
+  if c and c.depth == depth and (now - c.at) < 2000 then
+    return c.list
+  end
+  local disk = nested_read(root)
+  if disk then
+    nested_cache[root] = { at = now, depth = depth, list = disk }
+    return disk
+  end
+  local list = nested_parse(root,
+    vim.fn.systemlist({ 'sh', '-c', nested_cmd(root, depth) }))
+  nested_cache[root] = { at = now, depth = depth, list = list }
+  nested_save(root, list)
+  return list
+end
+
+-- 같은 것을 메인 루프를 잡지 않고 구한다. 시작할 때(absorb)는 아무도 그
+-- 반환값을 기다리지 않으므로 이쪽을 쓴다.
+local function nested_prefixes_async(root, cb)
+  local depth = tonumber(cfg('nested_depth', 6)) or 6
+  if depth <= 0 then
+    cb({})
+    return
+  end
+  local now = uv.now()
+  local c = nested_cache[root]
+  if c and c.depth == depth and (now - c.at) < 2000 then
+    cb(c.list)
+    return
+  end
+  local disk = nested_read(root)
+  if disk then
+    nested_cache[root] = { at = now, depth = depth, list = disk }
+    cb(disk)
+    return
+  end
+  local ok = pcall(vim.system, { 'sh', '-c', nested_cmd(root, depth) },
+    { text = true }, vim.schedule_wrap(function(res)
+      local lines = {}
+      for l in ((res and res.stdout) or ''):gmatch('[^\n]+') do
+        lines[#lines + 1] = l
+      end
+      local list = nested_parse(root, lines)
+      nested_cache[root] = { at = uv.now(), depth = depth, list = list }
+      nested_save(root, list)
+      cb(list)
+    end))
+  if not ok then
+    cb({})
+  end
 end
 
 -- 이 상대 경로가 하위 프로젝트 안인가 (그렇다면 그 프로젝트의 상대 접두어)
@@ -1996,15 +2087,24 @@ local function absorb_hint(root)
   end
 end
 
--- 시작할 때 한 번, 가져올 것이 있는지 알려 준다
+-- 시작할 때 한 번, 가져올 것이 있는지 알려 준다.
+--
+-- 하위 프로젝트 목록을 먼저 '자식 프로세스로' 구해 둔다. absorb_hint 는
+-- 그 목록을 동기로 구하는데(nested_prefixes), 그게 프로젝트 전체를 훑는
+-- find 라 시작 직후 메인 루프를 3초 넘게 잡았다. 여기서 미리 채워 두면
+-- absorb_hint 가 도는 시점에는 캐시에서 바로 나온다 - 아무도 이 반환값을
+-- 기다리지 않으므로 비동기로 해도 잃는 것이 없다.
 api.nvim_create_autocmd('VimEnter', {
   group = group,
   callback = function()
     vim.defer_fn(function()
       local ok, root = pcall(cur_root)
-      if ok and root then
-        pcall(absorb_hint, root)
+      if not (ok and root) then
+        return
       end
+      nested_prefixes_async(root, function()
+        pcall(absorb_hint, root)
+      end)
     end, 900)
   end,
 })
@@ -3610,6 +3710,13 @@ end, { nargs = '?', complete = 'dir',
 -- 모드를 지금 다시 고른다. 시작할 때 뜨는 것과 같은 다이얼로그다.
 api.nvim_create_user_command('ProjectFilesAbsorb', function()
   local root = cur_root()
+  -- 손으로 부른 것은 늘 새로 본다. 하위에 프로젝트를 '방금' 만들었으면
+  -- 루트의 mtime 은 그대로라 디스크 캐시가 그것을 놓친다 - 그 경우가
+  -- 바로 이 명령을 치는 이유다.
+  if root then
+    nested_cache[root] = nil
+    pcall(vim.fn.delete, nested_file(root))
+  end
   absorb_nested(root, false)
 end, { desc = "Pull nested projects' index lists into this project's preset" })
 

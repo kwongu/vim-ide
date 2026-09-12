@@ -161,11 +161,19 @@ local MEMBER_CAP = { ['property'] = true, ['variable.member'] = true }
 -- include/linux/platform_device.h 전체가 네이비가 되는데, 거기에는
 -- platform_get_drvdata 처럼 평범한 접근자 매크로도 함께 산다.
 -- 여기도 앵커가 없어 module_platform_driver_probe 까지 함께 덮는다.
+-- 기본값 표는 한 번만 만든다.
+--
+-- navy_pats() 와 log_pats() 는 칠하는 루프 안에서 심볼마다 불린다
+-- (navy_name 이 1055행과 1126행에서). 부를 때마다 표를 새로 만들면 화면
+-- 하나에 수백 개의 표가 생겼다 버려진다. g: 를 건드리지 않은 평소에는
+-- 같은 표를 그대로 돌려준다 - 값을 준 경우만 그때그때 만든다(드물다).
+local NAVY_DEFAULT = { 'include/linux/module%.h', 'THIS_MODULE',
+  'EXPORT_SYMBOL', 'module_platform_driver' }
+
 local function navy_pats()
   local v = vim.g.sihl_index_macro_navy
   if v == nil then
-    return { 'include/linux/module%.h', 'THIS_MODULE', 'EXPORT_SYMBOL',
-      'module_platform_driver' }
+    return NAVY_DEFAULT
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}
@@ -188,14 +196,16 @@ end
 --   let g:sihl_index_log_macros = []                  " 전부 예전처럼 빨강
 --   let g:sihl_index_log_macros = ['^my_trace']       " 내 것만
 -- 이름은 소문자로 낮춰 비교하므로 _DBG 든 _dbg 든 같다. lua 패턴이다.
+local LOG_DEFAULT = { '_dbg$', '_debug$', '_info$', '_err$', '_error$',
+  '_warn$', '_warning$', '_log$', '_trace$', '_print$', '_printf$', '_msg$',
+  '_verbose$', '_notice$', '_fatal$', '_assert$',
+  '^pr_', '^dev_dbg', '^dev_err', '^dev_info', '^dev_warn', '^dev_printk',
+  '^printk$', '^alog', '^log_', '^dbg_', '^trace_' }
+
 local function log_pats()
   local v = vim.g.sihl_index_log_macros
   if v == nil then
-    return { '_dbg$', '_debug$', '_info$', '_err$', '_error$', '_warn$',
-      '_warning$', '_log$', '_trace$', '_print$', '_printf$', '_msg$',
-      '_verbose$', '_notice$', '_fatal$', '_assert$',
-      '^pr_', '^dev_dbg', '^dev_err', '^dev_info', '^dev_warn', '^dev_printk',
-      '^printk$', '^alog', '^log_', '^dbg_', '^trace_' }
+    return LOG_DEFAULT
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}
@@ -277,10 +287,12 @@ end
 -- 대상이니까. 그래서 색인을 묻지 않고 함수 호출과 같은 초록 볼드로 둔다.
 -- 기본 쿼리는 그 자리를 @variable 로 잡아 본문색(검정)으로 두고 있었다.
 --   let g:sihl_index_export_macros = []   " 이 규칙을 끈다
+local EXPORT_DEFAULT = { 'EXPORT_SYMBOL' }
+
 local function export_pats()
   local v = vim.g.sihl_index_export_macros
   if v == nil then
-    return { 'EXPORT_SYMBOL' }
+    return EXPORT_DEFAULT
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}

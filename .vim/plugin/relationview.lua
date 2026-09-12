@@ -4161,14 +4161,76 @@ end
 --   nil    아직 모른다. 알아본 뒤 cb(true|false) 를 부른다.
 local mk_cache = {}   -- key -> true|false
 local mk_wait = {}    -- key -> { cb, ... }
+-- 자리 -> 그 자리를 풀어 둔 캐시 키. buf 별로, changedtick 이 바뀌면 버린다.
+--
+-- 예전에는 cursor_field 와 local_decl 을 먼저 돌리고 '그 다음에' 캐시를
+-- 봤다. 답이 캐시에 있어도 AST 를 두 번 걷고 있었다는 뜻이다 - 화면에
+-- 멤버가 수십 개면 다시 칠할 때마다 수십 번씩. 버퍼가 안 바뀌었으면 같은
+-- 자리는 늘 같은 타입/필드로 풀리므로, 자리를 키로 그 결과만 기억한다.
+local mk_pos = {}     -- buf -> { tick = , ['line:col'] = key | false }
 
 function _G.relationview_member_cache_clear()
-  mk_cache, mk_wait = {}, {}
+  mk_cache, mk_wait, mk_pos = {}, {}, {}
+end
+
+-- 키 하나에 대한 답. 있으면 그 자리에서, 없으면 알아본 뒤 cb 를 부른다.
+local function mk_answer(key, root, ty, fields, cb)
+  local v = mk_cache[key]
+  if v ~= nil then
+    return v   -- 이미 아는 답이다 (cb 는 부르지 않는다)
+  end
+  if mk_wait[key] then
+    if cb then
+      table.insert(mk_wait[key], cb)
+    end
+    return nil
+  end
+  mk_wait[key] = cb and { cb } or {}
+  local function settle(ok)
+    if mk_cache[key] ~= nil then
+      return
+    end
+    mk_cache[key] = ok
+    local list = mk_wait[key]
+    mk_wait[key] = nil
+    for _, f in ipairs(list or {}) do
+      pcall(f, ok)
+    end
+  end
+  -- 답이 영영 안 오는 경우(색인이 없거나 global 이 죽거나)에도 '대기'로
+  -- 남겨 두지 않는다. 남겨 두면 그 이름은 이 세션에서 다시는 안 묻는다.
+  vim.defer_fn(function() settle(false) end, 8000)
+  local okr = pcall(resolve_chain, nil, root, ty, fields, 1, function(res)
+    settle(not not (res and res.member and res.def and res.def.path))
+  end)
+  if not okr then
+    settle(false)
+  end
+  return mk_cache[key]
 end
 
 function _G.relationview_member_known(buf, line, col, cb)
+  local okt, tick = pcall(api.nvim_buf_get_changedtick, buf)
+  if not okt then
+    return false
+  end
+  local pc = mk_pos[buf]
+  if not pc or pc.tick ~= tick then
+    pc = { tick = tick }
+    mk_pos[buf] = pc
+  end
+  local pkey = line .. ':' .. col
+  local memo = pc[pkey]
+  if memo == false then
+    return false        -- 이 자리는 풀리지 않는다고 이미 확인했다
+  end
+  if memo then
+    return mk_answer(memo.key, memo.root, memo.ty, memo.fields, cb)
+  end
+
   local okc, base, fields = pcall(cursor_field, buf, line, col)
   if not okc or not base or not fields or #fields == 0 then
+    pc[pkey] = false
     return false
   end
   local fname = api.nvim_buf_get_name(buf)
@@ -4178,6 +4240,7 @@ function _G.relationview_member_known(buf, line, col, cb)
   local okd, decl = pcall(local_decl, buf, line, base)
   local ty = (okd and decl) and type_from_text(decl.text) or nil
   if not ty or not ty.name then
+    pc[pkey] = false
     return false
   end
   -- 루트는 <C-]> 와 똑같은 규칙으로 고른다. 파일에서부터 가장 가까운 DB 를
@@ -4186,44 +4249,14 @@ function _G.relationview_member_known(buf, line, col, cb)
   local answer
   root_for(fname, function(root)
     if not root then
+      pc[pkey] = false
       answer = false
       return
     end
     local key = root .. '\0' .. tostring(gtags_mtime(root)) .. '\0'
         .. ty.name .. '\0' .. table.concat(fields, '.')
-    local v = mk_cache[key]
-    if v ~= nil then
-      answer = v   -- 이미 아는 답이다 (cb 는 부르지 않는다)
-      return
-    end
-    if mk_wait[key] then
-      if cb then
-        table.insert(mk_wait[key], cb)
-      end
-      return
-    end
-    mk_wait[key] = cb and { cb } or {}
-    local function settle(ok)
-      if mk_cache[key] ~= nil then
-        return
-      end
-      mk_cache[key] = ok
-      local list = mk_wait[key]
-      mk_wait[key] = nil
-      for _, f in ipairs(list or {}) do
-        pcall(f, ok)
-      end
-    end
-    -- 답이 영영 안 오는 경우(색인이 없거나 global 이 죽거나)에도 '대기'로
-    -- 남겨 두지 않는다. 남겨 두면 그 이름은 이 세션에서 다시는 안 묻는다.
-    vim.defer_fn(function() settle(false) end, 8000)
-    local okr = pcall(resolve_chain, nil, root, ty, fields, 1, function(res)
-      settle(not not (res and res.member and res.def and res.def.path))
-    end)
-    if not okr then
-      settle(false)
-    end
-    answer = mk_cache[key]
+    pc[pkey] = { key = key, root = root, ty = ty, fields = fields }
+    answer = mk_answer(key, root, ty, fields, cb)
   end)
   return answer
 end
