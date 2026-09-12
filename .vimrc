@@ -1506,6 +1506,48 @@ endif
 "let g:mwDefaultHighlightingNum = 3
 
 "==============================================================================
+"==============================================================================
+"= 바깥에서 바뀐 파일을 알아채기
+"==============================================================================
+" 'autoread' 는 '물어보지 않고 다시 읽는다'는 뜻일 뿐, vim 이 스스로 파일을
+" 들여다본다는 뜻이 아니다. :e 나 셸 명령처럼 뭔가 계기가 있을 때만 확인한다.
+" 그래서 bazel 빌드나 git 이 파일을 바꿔 놓아도 버퍼는 옛 내용 그대로 앉아
+" 있었다. 실측(개발서버):
+"   파일을 열고 바깥에서 바꿈 -> 3초 뒤에도 버퍼는 옛 내용
+"   :checktime 을 치면        -> 그때 새 내용
+" autoread 는 켜져 있었고(기본값), checktime 을 부르는 것이 아무 데도 없었다.
+"
+" 커서가 멈출 때와 창으로 돌아올 때 확인한다. updatetime 이 100ms 라
+" CursorHold 가 자주 오므로 1초에 한 번으로 묶는다 - checktime 은 열려 있는
+" 버퍼마다 stat 한 번이라 싸지만, 초당 열 번씩 할 일은 아니다.
+" 특수 창(터미널, 패널 …)은 건드리지 않는다.
+"   let g:vimide_autocheck = 0   " 이 확인을 끄기
+let s:last_check = 0
+function! s:CheckTimeThrottled() abort
+    if get(g:, 'vimide_autocheck', 1) == 0 || &buftype !=# '' || bufname('%') ==# ''
+        return
+    endif
+    let l:now = localtime()
+    if l:now - s:last_check < 1
+        return
+    endif
+    let s:last_check = l:now
+    silent! checktime
+endfunction
+
+augroup VimIdeAutoCheck
+    autocmd!
+    autocmd FocusGained,BufEnter,CursorHold,CursorHoldI *
+                \ call <SID>CheckTimeThrottled()
+    " 실제로 다시 읽었을 때만 알려 준다. 조용히 바뀌면 '내가 방금 본 것과
+    " 다른 파일'을 보고 있게 되는데, 그게 제일 헷갈린다.
+    autocmd FileChangedShellPost *
+                \ echohl WarningMsg
+                \ | echo '바깥에서 바뀌어 다시 읽었습니다: ' . expand('<afile>:t')
+                \ . '   (]c / [c 로 바뀐 곳, \v 로 전체 diff)'
+                \ | echohl None
+augroup END
+
 "= vim-signify
 "==============================================================================
 
