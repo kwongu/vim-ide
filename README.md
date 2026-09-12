@@ -1627,6 +1627,28 @@ own query gives an enum constant and an object-like `#define` the same
 `@constant`, so both start red; the index is what tells them apart, by the
 source line it hands back with the definition.
 
+A macro you *call* is green, and only an object-like one stays red. At the
+point of use `MIX(a, b)` is a call; `LIMIT` is a constant. The index hands
+back the definition line with the answer, and that line settles it: `(`
+immediately after the name, or not. `#define LIMIT (5)` keeps its parens and
+stays red, because the separator between name and value breaks the match.
+Checked over every `#define` in the 441 files this tree's index covers -
+6,340 lines, 1,385 function-like, 4,954 object-like - the rule disagrees
+with "what character follows the name" exactly zero times. It moves roughly
+429 of the 447 function-like macros in the indexed set from red to green.
+
+Bold still means *a real function*: a function call keeps treesitter's green
+bold, a macro call gets plain green. Log macros are the exception, green and
+bold, because they were asked for that way.
+
+Order matters more than the rules do. Navy-by-path is tested first, then the
+log vocabulary, then function-like shape. It has to be that way round:
+`MODULE_INFO(tag, info)` in `include/linux/module.h` ends in `_info`, so the
+log vocabulary claims it, and it is function-like, so the new rule claims it
+too - but it is a declaration site and belongs in navy. Nothing in this tree
+shows it (neither database indexes `module.h`), which is exactly why the
+order was worth fixing before it could.
+
 Enum constants *stay* red - they were briefly painted green back, on the
 reading that green means "the index can jump here", which is true of them.
 Red is the better answer: a named constant is a named constant, and an
@@ -1650,6 +1672,7 @@ Inside a function the rule reads whole:
 | | |
 |---|---|
 | function call the index knows | green, bold |
+| macro called like a function (`#define NAME(`) | green |
 | struct / union / enum / typedef the index knows | green |
 | enum constant the index knows, used | red |
 | macro the index confirms | red |

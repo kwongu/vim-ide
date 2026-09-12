@@ -188,13 +188,21 @@ local function log_pats()
   return type(v) == 'table' and v or {}
 end
 
--- 이 #define 이 로그 매크로인가. src 는 색인이 준 '정의가 적힌 소스 줄'이다.
-local function is_log_macro(name, src)
-  if not name or name == '' then
+-- 함수처럼 부르는 매크로인가: '#define NAME(' - 이름 바로 뒤에 '(' 이 붙는다.
+-- src 는 색인이 준 '정의가 적힌 소스 줄'이다.
+--
+-- 이게 상수 매크로와 갈리는 자리다. '#define LIMIT (5)' 는 값에 괄호가
+-- 있어도 이름과 '(' 사이가 떨어져 있어 여기 걸리지 않는다.
+local function is_fn_macro(name, src)
+  if not name or name == '' or not src then
     return false
   end
-  -- 함수형이어야 한다: '#define ape_dbg(' - 스위치 상수는 여기서 빠진다
-  if not src or not src:find('#%s*define%s+' .. name:gsub('%W', '%%%0') .. '%(') then
+  return src:find('#%s*define%s+' .. name:gsub('%W', '%%%0') .. '%(') ~= nil
+end
+
+-- 이 #define 이 로그 매크로인가.
+local function is_log_macro(name, src)
+  if not is_fn_macro(name, src) then
     return false
   end
   local low = name:lower()
@@ -228,23 +236,31 @@ local function is_enum_const(name, src)
   if rest == '' or rest == ',' then
     return true
   end
-  return rest:sub(1, 1) == '=' and not rest:find(';', 1, true)
+  -- '=' 이어야 한다. 'FOO == 1' 은 값을 주는 자리가 아니라 비교하는 자리다.
+  return rest:sub(1, 1) == '=' and rest:sub(2, 2) ~= '='
+      and not rest:find(';', 1, true)
 end
 
 local function macro_kind(path, name, src)
-  if is_log_macro(name, src) then
-    return 'logmacro'
-  end
-  if not path or path == '' then
-    return 'macro'
-  end
+  -- 경로로 정한 네이비가 먼저다. 이름 어휘보다도 먼저여야 한다:
+  -- include/linux/module.h 의 MODULE_INFO(tag, info) 는 이름이 '_info' 로
+  -- 끝나 로그 어휘에 걸리는데, 그건 로그가 아니라 선언하는 자리다.
+  -- (이 트리의 색인은 module.h 를 담고 있지 않아 지금은 화면에 안 나오지만,
+  --  담기는 순간 초록 볼드가 됐을 것이다.)
   for _, pat in ipairs(navy_pats()) do
-    if pat:find('/') then
+    if pat:find('/') and path and path ~= '' then
       local ok, hit = pcall(string.find, path, pat)
       if ok and hit then
         return 'macrokw'
       end
     end
+  end
+  if is_log_macro(name, src) then
+    return 'logmacro'
+  end
+  -- 함수처럼 부르는 매크로는 읽을 때 함수 호출이다: 빨강은 상수 매크로 몫.
+  if is_fn_macro(name, src) then
+    return 'fnmacro'
   end
   return 'macro'
 end
@@ -670,15 +686,22 @@ local function run_batch(root, syms, done)
               -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
               local fields = vim.split(rest:sub(5), '\t', { plain = true })
               local path = fields[2] or ''
-              -- 검색 패턴('/^...$/')이 정의가 적힌 소스 줄이다
-              local pat = (fields[3] or ''):match('^/%^?(.-)%$?/$') or ''
+              -- 검색 패턴이 정의가 적힌 소스 줄이다. --fields=+nS 로 만든
+              -- 스냅숏은 그 필드를 '/^...$/;"' 로 끝내므로, 닫는 '/' 뒤에
+              -- 무엇이 오든 받아 준다. 예전 패턴은 '/' 로 끝나야만 맞아서
+              -- 여기서 늘 빈 문자열이 나왔고, 스냅숏 쪽 enum 판정이 죽어
+              -- 있었다.
+              local f3 = fields[3] or ''
+              local pat = f3:match('^/%^?(.-)%$?/') or ''
               hit[name] = (rest:find('#define', 1, true)
                     and macro_kind(path, name, rest))
                   or (is_enum_const(name, (pat:gsub('^%s+', ''))) and 'enum')
                   or true
             else
               local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
-              src = src or rest
+              -- 파싱이 어긋나도 path 를 nil 로 넘기지 않는다. 넘기면 경로로
+              -- 정하는 네이비 규칙이 조용히 빠져 초록이 된다.
+              src, path = src or rest, path or ''
               hit[name] = src:match('^%s*#%s*define')
                   and macro_kind(path, name, src)
                   or (is_enum_const(name, src) and 'enum' or true)
@@ -977,6 +1000,12 @@ repaint = function(win)
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiMacroKw', priority = prio,
+            })
+          elseif how == 'found' and extra == 'fnmacro' then
+            -- 함수처럼 부르는 매크로: 호출로 읽히므로 초록
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiFnMacro', priority = prio,
             })
           elseif how == 'found' and extra == 'logmacro' then
             -- 로그 매크로: 읽을 때 함수 호출이므로 호출과 같은 초록 볼드

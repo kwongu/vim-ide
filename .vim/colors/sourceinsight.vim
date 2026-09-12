@@ -418,6 +418,10 @@ call s:hi('SiLogMacro', 'ref', '', 'bold')
 " '이름이 붙은 상수'이고, 코드에서 하는 일이 같다. 선언하는 자리는
 " @si.declaration.enumconst 라 네이비 볼드 그대로다.
 call s:hi('SiEnumRef', 'number', '', '')
+" 함수처럼 부르는 매크로 (sihlindex.lua). '#define NAME(' 꼴이면 읽을 때는
+" 함수 호출이라 초록이다. 빨강은 상수 매크로 몫으로 남긴다. 로그 매크로는
+" 이것의 부분집합이고 볼드까지 붙는다(SiLogMacro).
+call s:hi('SiFnMacro', 'ref', '', '')
 
 call s:hi('DiagnosticError', 'err',     '', '')
 call s:hi('DiagnosticWarn',  'warn',    '', '')
