@@ -2185,7 +2185,7 @@ local function ctx_buf()
   vim.bo[b].modifiable = false
   -- the maps live on this buffer forever: it is ours, so they can never
   -- leak into a real file the user is editing
-  vim.keymap.set('n', '<C-]>', function() ctx_tag_jump() end,
+  vim.keymap.set('n', '<C-]>', function() ctx_tag_jump(false) end,
     { buffer = b, nowait = true, desc = 'RelationView context: goto definition' })
   -- 뒤로는 <C-t> 와 <C-o> 둘 다 받는다. 편집 창에서 몸에 익은 쪽이 사람마다
   -- 다르고, 여기서 <C-o> 는 어차피 할 일이 없다(파일 버퍼가 아니라 점프
@@ -2201,7 +2201,7 @@ local function ctx_buf()
   -- double click follows the definition of the symbol under the mouse,
   -- exactly like <C-]> does here
   for _, lhs in ipairs({ '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>' }) do
-    vim.keymap.set('n', lhs, function() ctx_tag_jump() end,
+    vim.keymap.set('n', lhs, function() ctx_tag_jump(true) end,
       { buffer = b, nowait = true,
         desc = 'RelationView context: goto definition (double click)' })
   end
@@ -2277,6 +2277,19 @@ end
 local function big_visible()
   return s.big_win ~= nil and api.nvim_win_is_valid(s.big_win)
       and api.nvim_win_get_tabpage(s.big_win) == api.nvim_get_current_tabpage()
+end
+
+-- <C-]> / <C-t> / <CR> 은 미리보기 버퍼에 걸린 키라, 작은 미리보기와
+-- 세로 전체 미리보기 어느 쪽에서든 눌린다. 지금 있는 창을 돌려준다.
+local function ctx_action_win()
+  local w = api.nvim_get_current_win()
+  if ctx_visible() and w == s.ctx_win then
+    return w
+  end
+  if big_visible() and w == s.big_win then
+    return w
+  end
+  return nil
 end
 
 -- 오른쪽 열을 셋으로 나누는 배치인가.
@@ -2911,15 +2924,24 @@ end
 
 -- <C-]> / <C-t> inside the context window: follow definitions and come back
 -- WITHOUT touching the source windows or the relation tree
-ctx_tag_jump = function()
-  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+ctx_tag_jump = function(from_mouse)
+  -- 작은 미리보기와 세로 전체 미리보기는 같은 버퍼를 보므로 이 키가
+  -- 둘 다에서 눌린다. 지금 있는 쪽에서 움직인다.
+  local cw = ctx_action_win()
+  if not cw then
     return
   end
-  -- a double click reports where the mouse is; the keyboard path is a no-op
-  local m = vim.fn.getmousepos()
-  if m and m.winid == s.ctx_win and m.line and m.line > 0 then
-    pcall(api.nvim_win_set_cursor, s.ctx_win,
-      { m.line, math.max(0, (m.column or 1) - 1) })
+  -- 더블클릭은 '마우스가 있는 곳'을 따라가야 한다. 그런데 getmousepos() 는
+  -- 부른 방법과 상관없이 '마지막으로 알려진' 마우스 자리를 돌려준다. 그래서
+  -- 키보드로 <C-]> 를 눌러도 그 값이 남아 있으면 커서를 마우스가 놓인 줄로
+  -- 옮겨 버렸다 - 미리보기를 한 번 클릭한 뒤로는 <C-]> 가 커서가 아니라
+  -- 마우스 자리의 심볼로 뛰었다. 마우스로 부른 경우에만 보정한다.
+  if from_mouse then
+    local m = vim.fn.getmousepos()
+    if m and m.winid == cw and m.line and m.line > 0 then
+      pcall(api.nvim_win_set_cursor, cw,
+        { m.line, math.max(0, (m.column or 1) - 1) })
+    end
   end
   local file = s.ctx_file and s.ctx_file.path or nil
   if not file then
@@ -2927,11 +2949,11 @@ ctx_tag_jump = function()
   end
   -- 새로 따라가면 되돌릴 곳은 사라진다 - 점프 목록과 같은 규칙이다
   s.ctx_fwd = {}
-  local pos = api.nvim_win_get_cursor(s.ctx_win)
+  local pos = api.nvim_win_get_cursor(cw)
   local off = s.ctx_file.off or 0
 
   -- '#include "foo.h"' is about a file: follow it here, like a symbol
-  local inc = include_at(api.nvim_win_get_buf(s.ctx_win), pos[1])
+  local inc = include_at(api.nvim_win_get_buf(cw), pos[1])
   if inc then
     root_for(file, function(root)
       local path = resolve_include(inc, file, root)
@@ -2971,7 +2993,7 @@ ctx_tag_jump = function()
       vim.defer_fn(function()
         if ctx_visible() then
           local off2 = (s.ctx_file and s.ctx_file.off) or 0
-          flash_symbol(api.nvim_win_get_buf(s.ctx_win), loc.line - off2, loc.sym)
+          flash_symbol(api.nvim_win_get_buf(cw), loc.line - off2, loc.sym)
         end
       end, 60)
     end)
@@ -2989,7 +3011,7 @@ ctx_tag_jump = function()
       vim.defer_fn(function()
         if ctx_visible() then
           local off2 = (s.ctx_file and s.ctx_file.off) or 0
-          flash_symbol(api.nvim_win_get_buf(s.ctx_win), d.line - off2, sym)
+          flash_symbol(api.nvim_win_get_buf(cw), d.line - off2, sym)
         end
       end, 60)
       return
@@ -3020,7 +3042,10 @@ ctx_tag_jump = function()
 end
 
 ctx_tag_back = function()
-  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+  -- 작은 미리보기와 세로 전체 미리보기는 같은 버퍼를 보므로 이 키가
+  -- 둘 다에서 눌린다. 지금 있는 쪽에서 움직인다.
+  local cw = ctx_action_win()
+  if not cw then
     return
   end
   local prev = table.remove(s.ctx_stack)
@@ -3030,7 +3055,7 @@ ctx_tag_back = function()
   end
   -- 어디에서 되돌아왔는지 적어 둔다: <C-i> 가 여기로 다시 온다
   if s.ctx_file then
-    local cur = api.nvim_win_get_cursor(s.ctx_win)
+    local cur = api.nvim_win_get_cursor(cw)
     table.insert(s.ctx_fwd, {
       back = prev,
       to = { path = s.ctx_file.path, line = cur[1] + (s.ctx_file.off or 0),
@@ -3061,7 +3086,10 @@ end
 -- 짝을 context 창에도 준다 - 되돌리기만 있고 앞으로 가기가 없으면, 한 칸
 -- 잘못 되돌렸을 때 처음부터 다시 파고들어야 한다)
 ctx_tag_forward = function()
-  if not ctx_visible() or api.nvim_get_current_win() ~= s.ctx_win then
+  -- 작은 미리보기와 세로 전체 미리보기는 같은 버퍼를 보므로 이 키가
+  -- 둘 다에서 눌린다. 지금 있는 쪽에서 움직인다.
+  local cw = ctx_action_win()
+  if not cw then
     return
   end
   local nxt = table.remove(s.ctx_fwd)
