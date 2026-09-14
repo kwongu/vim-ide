@@ -444,6 +444,10 @@ local update_context
 local ensure_tree
 local want_tree
 local tree_visible
+-- 트리가 펼쳐 보여줄 파일을 고르는 두 함수. ensure_tree 가 이것들을 쓰는데
+-- 정의는 그보다 아래라서 이름만 먼저 잡아 둔다.
+local follow_file
+local reveal_ok
 -- context 만 켠 모드에서 커서를 따라간다. 실제 함수는 파일 아래쪽에 있고
 -- 여기서 이름만 잡아 둔다 - CursorHold 훅이 그보다 위에서 등록되기 때문에,
 -- 여기에 선언이 없으면 훅 안의 이름이 전역(nil)으로 잡혀 아무 일도 하지
@@ -2545,6 +2549,55 @@ end
 -- nvim_win_call 로 감싸면 안 된다: neo-tree 의 navigate 는 비동기라서
 -- 콜백이 도는 시점에는 win_call 이 이미 끝나 '현재 창'이 돌아와 있다.
 -- 그래서 창을 실제로 옮겨 놓고(set_current_win) 부른 뒤 되돌린다.
+-- neo-tree 에서 파일을 고르면 EDIT 창에 띄운다.
+--
+-- position='current' 인 트리는 open_file 이 get_appropriate_window 를 타지
+-- 않고 곧장 '지금 창'에 :edit 를 한다 (utils/init.lua 의
+-- `if state.current_position ~= "current"` 갈래). 그 '지금 창'이 트리 창
+-- 자신이라, 고른 파일이 트리 자리에 열리면서 트리가 사라진다.
+--
+-- neo-tree 가 그 직전에 FILE_OPEN_REQUESTED 를 쏘고, 핸들러가
+-- { handled = true } 를 주면 자기 처리를 멈춘다. 그 자리를 쓴다.
+-- 우리 트리(winid 가 s.tree_win)일 때만 가로채므로 왼쪽 트리는 그대로다.
+local open_hook_done = false
+local function install_open_hook()
+  if open_hook_done then
+    return
+  end
+  local ok, ev = pcall(require, 'neo-tree.events')
+  if not ok then
+    return
+  end
+  open_hook_done = true
+  pcall(ev.subscribe, {
+    event = ev.FILE_OPEN_REQUESTED or 'file_open_requested',
+    id = 'relationview_open_in_edit',
+    handler = function(args)
+      if not (args and args.state and args.path) then
+        return
+      end
+      if not (s.tree_win and args.state.winid == s.tree_win) then
+        return
+      end
+      -- split/vsplit/tabnew 는 사용자가 일부러 고른 것이니 건드리지 않는다
+      if args.open_cmd and args.open_cmd ~= 'edit' then
+        return
+      end
+      local target = pick_src_win()
+      if not (target and api.nvim_win_is_valid(target)) then
+        return
+      end
+      api.nvim_set_current_win(target)
+      if not pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(args.path)) then
+        return
+      end
+      -- 우리가 열었으니 트리가 그 파일을 다시 펼치려 들 필요가 없다
+      s.tree_last = args.path
+      return { handled = true }
+    end,
+  })
+end
+
 ensure_tree = function()
   if tree_visible() then
     return s.tree_win
@@ -2594,6 +2647,7 @@ ensure_tree = function()
     return nil
   end
   s.tree_win = win
+  install_open_hook()
   -- neo-tree 의 action='show' 는 '원래 창'으로 포커스를 되돌려 주는데, 그
   -- 되돌리기가 navigate 콜백 안에서 비동기로 일어난다. 우리는 상태를 찾게
   -- 하려고 트리 창을 먼저 잡아 놓은 참이라, neo-tree 가 보기엔 '원래 창'이
@@ -2610,12 +2664,22 @@ ensure_tree = function()
   -- action='show' 도 결국 navigate 에 콜백을 넘겨 '원래 창'으로 돌아가는데,
   -- 그 '원래 창'이 (상태를 찾게 하려고 우리가 미리 잡아 둔) 트리 창 자신이라
   -- 포커스가 트리에 남는다. 콜백을 우리가 쥐면 제자리로 보낼 수 있다.
+  -- 트리를 여는 그 순간에도 지금 편집 중인 파일까지 펼쳐 준다. 이걸 안
+  -- 하면 파일을 열어 둔 채 t 를 눌렀을 때 뿌리 목록만 덩그러니 나온다.
+  local dir = tree_dir()
+  local reveal = follow_file()
+  if reveal and not reveal_ok(dir, reveal) then
+    reveal = nil
+  end
+  if reveal then
+    s.tree_last = reveal
+  end
   local ok, err = pcall(function()
     local mgr = require('neo-tree.sources.manager')
     local st = mgr.get_state('filesystem', nil, win)
     st.current_position = 'current'
     st._no_focus = true
-    mgr.navigate(st, tree_dir(), nil, back, false)
+    mgr.navigate(st, dir, reveal, back, false)
   end)
   back()
   vim.schedule(back)
@@ -2650,28 +2714,54 @@ end
 -- position='current' 상태는 '지금 포커스된 창'으로 찾으므로(command/init.lua
 -- 의 requested_position == 'current' 갈래) 상태를 직접 집어 navigate 를
 -- 부른다. 그래야 포커스를 옮겼다 되돌리는 곡예를 안 해도 된다.
-local function tree_follow_now()
-  if not tree_visible() or cfg('tree_follow', 1) == 0 then
-    return
+-- 지금 편집 중인 파일. 트리가 펼쳐 보여줄 대상이다.
+-- 우리 창(패널/미리보기/트리)에 있거나 진짜 파일이 아니면 nil.
+follow_file = function()
+  if cfg('tree_follow', 1) == 0 then
+    return nil
   end
   local win = api.nvim_get_current_win()
   if win == s.tree_win or win == s.win or win == s.ctx_win or win == s.big_win then
-    return
+    -- 우리 창 안이면 편집 창을 대신 본다 (트리를 여는 순간이 그렇다)
+    win = pick_src_win()
+  end
+  if not (win and api.nvim_win_is_valid(win)) then
+    return nil
   end
   local buf = api.nvim_win_get_buf(win)
   if vim.bo[buf].buftype ~= '' then
-    return
+    return nil
   end
   local file = api.nvim_buf_get_name(buf)
   if file == '' or vim.fn.filereadable(file) ~= 1 then
+    return nil
+  end
+  return file, win
+end
+
+-- 그 파일이 이 트리의 뿌리 안에 있는가. 밖이면 neo-tree 가
+-- 'File not in cwd. Change cwd to ...?' 를 물어보므로 아예 넘기지 않는다.
+reveal_ok = function(root, file)
+  if cfg('tree_follow_cwd', 0) ~= 0 then
+    return true
+  end
+  local ok_u, ntutils = pcall(require, 'neo-tree.utils')
+  if not ok_u then
+    return false
+  end
+  return root ~= nil and root ~= '' and ntutils.is_subpath(root, file)
+end
+
+local function tree_follow_now()
+  if not tree_visible() then
     return
   end
-  if s.tree_last == file then
+  local file, win = follow_file()
+  if not file or s.tree_last == file then
     return
   end
   local ok_m, mgr = pcall(require, 'neo-tree.sources.manager')
-  local ok_u, ntutils = pcall(require, 'neo-tree.utils')
-  if not (ok_m and ok_u) then
+  if not ok_m then
     return
   end
   local st = mgr.get_state('filesystem', nil, s.tree_win)
@@ -2680,13 +2770,11 @@ local function tree_follow_now()
   end
   local root = st.path
   local force_cwd = cfg('tree_follow_cwd', 0) ~= 0
-  if not force_cwd then
-    if not (root and root ~= '' and ntutils.is_subpath(root, file)) then
-      return
-    end
+  if not reveal_ok(root, file) then
+    return
   end
   s.tree_last = file
-  local prev = win
+  local prev = win or api.nvim_get_current_win()
   st.current_position = 'current'
   pcall(function()
     mgr.navigate(st, force_cwd and vim.fn.fnamemodify(file, ':h') or root, file,
