@@ -342,6 +342,9 @@ call s:hi('RvName',         'fg',      '',           '')
 " 파일 경로만 눈에 띄게 한다 - vim 이 경로에 쓰는 Directory 와 같은 남색이고,
 " relationview.lua 도 원래 RvLoc 를 Directory 에 link 해 두었다.
 call s:hi('RvLoc',          'keyword', '',           '')
+" 목록의 '파일이름 (파일경로)' 에서 이름 쪽. 경로는 RvDim 회색이라
+" 이름만 파랗게 떠 보인다.
+call s:hi('RvFile',         'keyword', '',           '')
 call s:hi('RvDim',          'linenr',  '',           '')
 call s:hi('RvTree',         'linenr',  '',           '')
 call s:hi('RvHint',         'linenr',  '',           '')

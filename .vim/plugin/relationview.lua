@@ -403,6 +403,8 @@ local function set_highlights()
     RvMarker = { link = 'Special' },
     RvName = { link = 'Function' },
     RvLoc = { link = 'Directory' },
+    -- 목록의 파일 이름. 경로(RvDim, 회색)와 갈라 보이게 파랑이다.
+    RvFile = { link = 'Directory' },
     RvDim = { link = 'Comment' },
     RvTree = { link = 'Comment' },
     -- pale sky blue disappears on a white background: on a light theme the
@@ -1823,6 +1825,11 @@ local function ensure_buf()
       " the source column may be off (g:relationview_show_text = 0), so the
       " path can be followed by the '│' separator or by end of line
       syntax match RvLoc      /\S\+:\d\+\ze\s*\%(│\|$\)/
+      " 파일 칸의 '파일이름' 만 파랗게. 뒤의 ':줄' 과 '(경로)' 는 그대로 둔다.
+      " '/' 를 빼 두어서 path 스타일에서도 마지막 조각(= 이름)만 잡힌다.
+      " 나중에 정의한 match 가 같은 자리에서 이기므로 RvLoc 아래에 둔다.
+      syntax match RvFile     /[^ ()\/]\+\ze:\d\+ (/
+      syntax match RvFile     /[^ ()\/]\+\ze:\d\+\s*\%(│\|$\)/
       " '(x2)', '(util.h)' and the notes are dim: they are not symbols
       syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++\? more.*\|([^ )]\+\.[^ )]\+)/
     ]])
