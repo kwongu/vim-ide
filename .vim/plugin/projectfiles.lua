@@ -3236,7 +3236,7 @@ local function pick_symbol(prefill)
       end)
   end
   t.pickers.new({}, {
-    prompt_title = ('Symbols %d  <CR> jump  <F3> relation'):format(#syms),
+    prompt_title = ('Symbols %d  <CR> jump  <F12> relation'):format(#syms),
     default_text = prefill,
     finder = t.finders.new_table({
       results = syms,
@@ -3271,7 +3271,7 @@ local function pick_symbol(prefill)
           end)
         end
       end
-      map({ 'i', 'n' }, '<F3>', to_relation)
+      map({ 'i', 'n' }, '<F12>', to_relation)
       map({ 'i', 'n' }, '<C-g>', to_relation)
       return true
     end,

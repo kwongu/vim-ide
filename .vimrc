@@ -2683,10 +2683,42 @@ endfunc
 func! NERDTreeOnlyRight()
 	let g:NERDTreeWinPos="right"
 	:NERDTreeToggle
+	call VimIdeBalanceSoon()
 endfunc
 
 " F9: neo-tree on the left (tagbar 도 왼쪽이라 함께 열면 좁아서 닫는다).
 " 예전 NERDTree 왼쪽 창이 필요하면 :call NERDTreeOnlyLeft() 로 그대로 쓸 수 있다.
+" 옆 창(F3 RelationView, F9 neo-tree, F10 aerial, F11 tagbar ...)을 켜고 끄면
+" EDIT 창이 한쪽만 좁아진다. 새 창이 제 자리를 '이웃 하나'에서 통째로
+" 가져가기 때문이다. 실측(220칸, EDIT 2분할):
+"   F3 켬  -> EDIT 110 / 23     (85칸짜리 열이 한쪽에서만 나왔다)
+"   F10 켬 -> EDIT 26 / 66
+" 그래서 토글한 뒤에 'wincmd =' 로 EDIT 을 고르게 편다. 옆 창들은
+" winfixwidth/winfixheight 라 이 명령이 건드리지 않는다 - 실측으로 위
+" 두 경우가 66/67 과 46/46 이 되고 옆 창 크기는 그대로였다.
+"
+"   let g:vimide_balance_on_toggle = 0   " 끄면 예전처럼 그대로 둔다
+if !exists('g:vimide_balance_on_toggle')
+    let g:vimide_balance_on_toggle = 1
+endif
+function! VimIdeBalance(...) abort
+    if !get(g:, 'vimide_balance_on_toggle', 1)
+        return
+    endif
+    wincmd =
+endfunction
+" neo-tree 와 aerial 은 창을 비동기로 만든다. 다 앉은 뒤에 편다.
+function! VimIdeBalanceSoon() abort
+    if !get(g:, 'vimide_balance_on_toggle', 1)
+        return
+    endif
+    if exists('*timer_start')
+        call timer_start(80, function('VimIdeBalance'))
+    else
+        call VimIdeBalance()
+    endif
+endfunction
+
 func! NeoTreeOnlyLeft()
 	:TagbarClose
 	" 예전 방식(g:vimide_outline_global = 0)에서만 아웃라인을 닫는다.
@@ -2697,14 +2729,17 @@ func! NeoTreeOnlyLeft()
 		:AerialClose
 	endif
 	:Neotree toggle left
+	call VimIdeBalanceSoon()
 endfunc
 func! NeoTreeOnlyRight()
 	:Neotree toggle right
+	call VimIdeBalanceSoon()
 endfunc
 
 func! NERDTreeOnly()
 	:TagbarClose
 	:NERDTreeToggle
+	call VimIdeBalanceSoon()
 endfunc
 
 " F10 의 심볼 아웃라인. 기본은 aerial 이다.
@@ -2738,6 +2773,7 @@ func! TagbarOnly()
 	:NERDTreeClose
 	:Neotree close
 	call s:OutlineToggle()
+	call VimIdeBalanceSoon()
 endfunc
 
 func! NERDTree_and_Tagbar_Toggle()
@@ -2787,7 +2823,11 @@ map <F10> :call TagbarOnly()<CR>
 map <F11> :call NERDTreeOnlyRight()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
-map <F12> :call Deltags()<CR>
+" <F12> 는 이제 RelationView 를 켜고 끈다(예전 <F3>). relationview.lua 가
+" 건다 - 여기서 F12 를 다시 잡으면 그쪽이 덮인다.
+" Deltags 는 명령으로 그대로 쓸 수 있다:  :call Deltags()
+" 다른 키에 걸고 싶으면 아래 줄을 살려서 키만 바꾸면 된다.
+"map <F12> :call Deltags()<CR>
 map ,pa :set paste<CR>		"paste
 map ,np :set nopaste<CR>	"nopaste
 

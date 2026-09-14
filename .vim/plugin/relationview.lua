@@ -423,6 +423,19 @@ local function set_highlights()
 end
 set_highlights()
 
+-- 옆 창을 켜고 끄면 EDIT 이 한쪽만 좁아진다(실측: F3 켜니 EDIT 110/23).
+-- 레이아웃이 앉은 뒤 'wincmd =' 로 고르게 편다. 패널/미리보기/트리는
+-- winfixwidth·winfixheight 라 이 명령이 건드리지 않고 EDIT 만 나뉜다
+-- (실측: 66/67 이 되고 옆 창 크기는 그대로).
+local function balance_edits()
+  if (tonumber(vim.g.vimide_balance_on_toggle) or 1) == 0 then
+    return
+  end
+  vim.schedule(function()
+    pcall(vim.cmd, 'wincmd =')
+  end)
+end
+
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
@@ -2647,6 +2660,8 @@ ensure_tree = function()
     return nil
   end
   s.tree_win = win
+  s.tree_making = true
+  vim.defer_fn(function() s.tree_making = false end, 1500)
   install_open_hook()
   -- neo-tree 의 action='show' 는 '원래 창'으로 포커스를 되돌려 주는데, 그
   -- 되돌리기가 navigate 콜백 안에서 비동기로 일어난다. 우리는 상태를 찾게
@@ -2808,6 +2823,34 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
     tree_follow_soon()
   end,
   desc = 'RelationView: the column tree follows the edited file',
+})
+
+-- 트리 자리에 neo-tree 가 아닌 것이 들어앉으면 그 창을 치운다.
+--
+-- ':Neotree close' 는 위치를 가리지 않고 모든 트리를 닫는데, F10(TagbarOnly)
+-- 과 F9 가 왼쪽 트리를 치우려고 그것을 부른다. position='current' 인 우리
+-- 트리는 그때 창이 닫히는 게 아니라 버퍼만 빠져서, 오른쪽 열에 빈 창이
+-- 85x11 로 남았다(실측). 열에 빈 칸을 남기느니 그 창을 닫는다.
+api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
+  group = group,
+  callback = function()
+    local w = s.tree_win
+    if not (w and api.nvim_win_is_valid(w)) or s.tree_making then
+      return
+    end
+    local b = api.nvim_win_get_buf(w)
+    if vim.bo[b].filetype == 'neo-tree' then
+      return
+    end
+    s.tree_win = nil
+    s.tree_last = nil
+    vim.schedule(function()
+      if api.nvim_win_is_valid(w) then
+        pcall(api.nvim_win_close, w, false)
+      end
+    end)
+  end,
+  desc = 'RelationView: drop the column tree window when its tree is gone',
 })
 
 local function close_big()
@@ -5684,6 +5727,7 @@ function A.toggle_tree()
         vim.log.levels.WARN)
     end
   end
+  balance_edits()
 end
 
 -- 세로 전체 미리보기(두 번째 context)를 켜고 끈다
@@ -6355,6 +6399,7 @@ ctx_follow = ctx_follow_impl
 api.nvim_create_user_command('RelationViewCycle', function()
   local m = next_mode()
   apply_mode(m)
+  balance_edits()
   vim.notify('RelationView: ' .. MODE_LABEL[m])
 end, { desc = 'Cycle the layout (g:relationview_cycle sets the order)' })
 
@@ -6366,6 +6411,7 @@ api.nvim_create_user_command('RelationViewMode', function(o)
     return
   end
   apply_mode(m)
+  balance_edits()
   vim.notify('RelationView: ' .. MODE_LABEL[m])
 end, {
   nargs = 1,
@@ -6677,8 +6723,15 @@ function _G.relationview_open_include()
   return true
 end
 
-if vim.fn.maparg('<F3>', 'n') == '' then
-  vim.keymap.set('n', '<F3>', '<Cmd>RelationViewCycle<CR>',
+-- 켜고 끄는 키. 예전에는 <F3> 이었다.
+--   let g:relationview_key = '<F3>'   " 되돌리려면
+--   let g:relationview_key = ''       " 아예 안 걸려면
+local rv_key = vim.g.relationview_key
+if rv_key == nil then
+  rv_key = '<F12>'
+end
+if rv_key ~= '' and vim.fn.maparg(rv_key, 'n') == '' then
+  vim.keymap.set('n', rv_key, '<Cmd>RelationViewCycle<CR>',
     { desc = 'RelationView: relation+context -> relation -> context -> off' })
 end
 
