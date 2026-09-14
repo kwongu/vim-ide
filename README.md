@@ -2311,6 +2311,50 @@ Note for nvim: cscope support was removed in nvim 0.9+, so the
 equivalent `:Gtags` queries in nvim (`<leader><leader>d` opens the relation
 window). Plain vim keeps the original cscope behavior.
 
+## Session restore (nvim only)
+
+`:qa` 로 닫을 때의 작업 상태 - 창 분할, 각 창의 파일과 커서, 열려 있던 옆 창 -
+를 적어 두고 다음에 그대로 다시 연다. 저장은 자동, 되살리기는 물어봤을 때만.
+
+    nvim               지금까지와 똑같이 기본 상태로 연다 (아무것도 안 바뀐다)
+    nvim +Restore      지난번 :qa 자리로 연다
+    nvim +Restore x.c  지난번 자리로 열고 x.c 를 EDIT 창에 띄운다
+
+    :Restore / :VimIdeRestore   지금 nvim 안에서 되살린다
+    :VimIdeSessionSave          지금 배치를 바로 적는다
+    :VimIdeSessionWhere         이 프로젝트의 세션 파일 자리
+
+세션은 디렉터리가 아니라 **프로젝트 루트**마다 하나다. 같은 SDK 를 하위
+디렉터리에서 열어도 같은 세션을 찾는다. 파일은
+`~/.local/state/nvim/vim-ide/sessions/` 아래에 세션과 그 짝(`...x.vim`) 두
+개로 놓이고 직전 것은 `.bak` 로 한 벌 남는다. 소스 트리 밖이라 커널
+저장소의 `git status` 에 뜨지 않고 `.tags/` 의 preset/색인 데이터와 섞이지도
+않는다. `nvim -S <그 경로>` 로 열어도 옆 창까지 따라온다.
+
+되살리는 것: 창 배치와 크기, 각 창의 파일과 커서, 폴드, 버퍼 목록, 탭, 그리고
+'무엇이 떠 있었나' (RelationView both/relation/context, 그 열의 neo-tree,
+세로 전체 context, 왼쪽 neo-tree, aerial, tagbar, NERDTree, quickfix 창).
+
+되살리지 않는 것: telescope 뜬창, 터미널 버퍼, quickfix 의 **목록**(색인을
+다시 만들면 줄 번호가 어긋나 오히려 위험하다 - 창만 빈 채로 연다),
+RelationView 의 점프 스택과 pin 상태(다시 질의하는 편이 낫다).
+
+패널 버퍼는 nofile 스크래치라 그냥 `:mksession` 을 찍으면
+`enew | file RelationView` 로 적힌다. 그대로 되살리면 프로젝트 안을 가리키는
+'쓸 수 있는 빈 파일 버퍼'가 생기고 `:wa` 한 번에 RelationView 라는 파일이
+진짜로 만들어진다. 그래서 저장 직전에 패널을 먼저 닫고 찍는다 - 실측으로
+세션 파일의 enew 줄 수는 0 이다.
+
+| 변수 | 기본값 | |
+|---|---|---|
+| `g:vimide_session` | `1` | `0` 이면 기능 전체를 끈다 - 명령도 안 만들고 저장도 안 한다 |
+| `g:vimide_session_save` | `1` | `0` 이면 저장만 끈다. `:Restore` 와 `:VimIdeSessionSave` 는 그대로 |
+| `g:vimide_session_cd` | `1` | `0` 이면 되살릴 때 저장 당시 디렉터리로 옮기지 않는다 |
+| `g:vimide_session_dir` | `stdpath('state').'/vim-ide/sessions'` | 세션 파일 자리 |
+
+vim(개발 서버)은 `plugin/*.lua` 를 읽지 않으므로 이 기능은 nvim 에만 있다.
+`.vimrc` 는 한 줄도 건드리지 않았다.
+
 ## How to make gtags for multi directory
 
 To make gtags for multi directory, use `mktags.sh` command below. <br/>

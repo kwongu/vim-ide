@@ -6550,6 +6550,19 @@ api.nvim_create_user_command('RelationViewToggle', function()
   end
 end, { desc = 'Toggle the relation window (F3 cycles instead)' })
 
+-- 세션 저장이 '지금 무엇이 떠 있나'를 물어보는 입구. 상태를 따로 들고 있지
+-- 않고 current_mode() 와 똑같이 화면에서 읽는다 - 손으로 창을 닫았어도 맞다.
+function _G.relationview_state()
+  return {
+    mode     = current_mode(),        -- both / relation / context / off
+    tree     = tree_visible(),
+    tree_win = tree_visible() and s.tree_win or nil,
+    big      = big_visible(),
+    tree_off = s.tree_off and true or false,
+    sym      = s.sym,
+  }
+end
+
 -- One key for "next item in whatever list is in front of me": the relation
 -- list when the panel holds one, the quickfix list otherwise.
 local function step_or_qf(dir)
