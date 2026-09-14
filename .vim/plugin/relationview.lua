@@ -2839,12 +2839,20 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
   desc = 'RelationView: the column tree follows the edited file',
 })
 
--- 트리 자리에 neo-tree 가 아닌 것이 들어앉으면 그 창을 치운다.
+-- 오른쪽 열의 트리는 RelationView 가 따로 관리한다.
 --
--- ':Neotree close' 는 위치를 가리지 않고 모든 트리를 닫는데, F10(TagbarOnly)
--- 과 F9 가 왼쪽 트리를 치우려고 그것을 부른다. position='current' 인 우리
--- 트리는 그때 창이 닫히는 게 아니라 버퍼만 빠져서, 오른쪽 열에 빈 창이
--- 85x11 로 남았다(실측). 열에 빈 칸을 남기느니 그 창을 닫는다.
+-- ':Neotree close' 는 위치를 가리지 않고 그 탭의 모든 트리를 닫는다.
+-- F9(NeoTreeOnlyLeft)와 F10(TagbarOnly)이 '왼쪽 트리를 치우려고' 그것을
+-- 부르는데, 그 바람에 오른쪽 열의 우리 트리까지 같이 꺼졌다.
+-- position='current' 인 우리 트리는 창이 닫히는 게 아니라 버퍼만 빠져서
+-- 오른쪽 열에 빈 창으로 남는다(실측 85x11).
+--
+-- 그래서 트리 자리에 neo-tree 가 아닌 것이 들어앉으면, 빈 창을 치우고
+-- '사용자가 t 로 끈 것이 아니라면' 다시 세운다. 이렇게 하면 누가 어떤
+-- 경로로 닫든 이 트리는 RelationView 의 것으로 남는다.
+--
+-- 사용자가 직접 끈 것(s.tree_off)은 되살리지 않는다 - 끈 것이 꺼진 채로
+-- 있지 않으면 그건 토글이 아니다.
 api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
   group = group,
   callback = function()
@@ -2862,9 +2870,12 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
       if api.nvim_win_is_valid(w) then
         pcall(api.nvim_win_close, w, false)
       end
+      if want_tree() and (panel_visible() or ctx_visible()) then
+        ensure_tree()
+      end
     end)
   end,
-  desc = 'RelationView: drop the column tree window when its tree is gone',
+  desc = 'RelationView: keep the column tree ours, whoever closed it',
 })
 
 local function close_big()

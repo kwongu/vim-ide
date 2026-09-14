@@ -2756,6 +2756,54 @@ func! NeoTreeOnlyRight()
 	call VimIdeBalanceSoon()
 endfunc
 
+" NERDTree 에서 파일을 열면 '직전에 포커스가 있던 EDIT 창'에 연다.
+"
+" 왜 필요한가: NERDTree 의 Opener._firstUsableWindow() 는 이름 그대로
+" '첫 번째' 보통 창을 집는다 (lib/nerdtree/opener.vim:52). 'p'(previous)
+" 로 바꿔도 _previousWindow() 가 winnr('#') 를 쓰다가, 그 창이 옆 창이면
+" _isWindowUsable() 에서 걸러져 다시 _firstUsableWindow() 로 떨어진다.
+" 그래서 '여는 키'만 우리 콜백으로 바꾼다.
+"
+" KeyMap.Invoke 는 FileNode -> DirNode -> Node -> Bookmark -> all 순으로
+" 찾는다 (lib/nerdtree/key_map.vim). <CR> 은 기본이 'all' 로만 걸려 있어
+" FileNode 로 새로 걸면 그보다 먼저 잡히고, 'o' 는 FileNode 가 이미 있어
+" override 가 필요하다.
+"
+" 쪼개기/탭(s i t T gi gs)은 사용자가 일부러 고른 것이라 건드리지 않는다.
+"
+"   let g:vimide_nerdtree_last_edit = 0   " 끄면 예전 동작
+function! VimIdeNERDTreeOpen(node) abort
+    let l:win = vimide#qf#Win()
+    if l:win <= 0
+        " 편집 창을 못 찾으면 NERDTree 가 늘 하던 대로 맡긴다
+        call a:node.activate({'reuse': 'all', 'where': 'p'})
+        return
+    endif
+    let l:path = a:node.path.str()
+    call win_gotoid(l:win)
+    execute 'edit ' . fnameescape(l:path)
+endfunction
+
+function! s:NERDTreeOpenKeys() abort
+    if !get(g:, 'vimide_nerdtree_last_edit', 1) || !exists('*NERDTreeAddKeyMap')
+        return
+    endif
+    for l:k in [get(g:, 'NERDTreeMapCustomOpen', '<CR>'),
+                \ get(g:, 'NERDTreeMapActivateNode', 'o')]
+        call NERDTreeAddKeyMap({
+            \ 'key': l:k,
+            \ 'scope': 'FileNode',
+            \ 'callback': 'VimIdeNERDTreeOpen',
+            \ 'override': 1,
+            \ 'quickhelpText': 'open in the last focused EDIT window' })
+    endfor
+endfunction
+
+augroup VimIdeNERDTreeOpenInEdit
+    autocmd!
+    autocmd VimEnter * call <SID>NERDTreeOpenKeys()
+augroup END
+
 func! NERDTreeOnly()
 	:TagbarClose
 	:NERDTreeToggle
