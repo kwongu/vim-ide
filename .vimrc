@@ -2133,7 +2133,7 @@ endif
 " g:relationview_position   'bottom' (default) or 'right'
 "   'bottom' 이면 화면 아래에 가로로 붙고, context view 는 그 안에서
 "   오른쪽 절반을 차지한다(g:relationview_context_width, 0 = 절반).
-let g:relationview_position = 'bottom'
+let g:relationview_position = 'right'
 " g:relationview_auto_open  1: open the panel on startup (default 1)
 "
 " 0 으로 둔다: vim 을 켜면 아무것도 열지 않고, F3 을 눌러야 열린다.
@@ -2162,7 +2162,7 @@ let g:relationview_cycle = ['both', 'off']             " 통째로 켜고 끄기
 let g:relationview_context_position = 'right'
 let g:relationview_context_width = 90
 " 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
-let g:relationview_width = 80
+let g:relationview_width = 90
 let g:relationview_context_height = 40
 " 리스트에 소스 코드 열까지 보여준다(심볼 | 파일경로 | 그 줄의 내용).
 " 패널이 화면 아래 전체 폭을 쓰므로 세 열이 들어간다.
@@ -2173,7 +2173,7 @@ let g:relationview_show_text = 1
 "   'callees' 무엇을 부르나만, 확장 가능한 트리로
 " 'both' 의 Calls 목록은 점프는 되지만 펼쳐지지는 않는다. 펼치려면 d 를
 " 눌러 그 방향을 트리로 바꾼다(<Leader><Leader>d 로 바로 갈 수도 있다).
-let g:relationview_relation = 'both'
+let g:relationview_relation = 'callers'
 " 'both' 의 두 번째 목록에 보여 줄 최대 줄 수
 let g:relationview_max_extra = 40
 " struct/union/enum 을 고르면 멤버를 전부 나열할지. 커널 구조체는 멤버가
