@@ -2215,9 +2215,9 @@ let g:relationview_cycle = ['both', 'off']             " 통째로 켜고 끄기
 " context view 는 패널 안이 아니라 편집 창 오른쪽에 따로 띄운다
 "   -> RelationView 는 아래 전체 폭, ContextView 는 오른쪽 세로 한 칸
 let g:relationview_context_position = 'right'
-let g:relationview_context_width = 85
+let g:relationview_context_width = 80
 " 아래 둘은 'right' 배치에서만 쓰인다(되돌릴 때를 위해 남겨둔다)
-let g:relationview_width = 85
+let g:relationview_width = 80
 let g:relationview_context_height = 60
 " 리스트에 소스 코드 열까지 보여준다(심볼 | 파일경로 | 그 줄의 내용).
 " 패널이 화면 아래 전체 폭을 쓰므로 세 열이 들어간다.
@@ -2741,6 +2741,7 @@ endfunction
 
 func! NeoTreeOnlyLeft()
 	:TagbarClose
+	:AerialClose
 	" 예전 방식(g:vimide_outline_global = 0)에서만 아웃라인을 닫는다.
 	" 그때는 aerial 이 '지금 창'을 쪼개며 왼쪽 트리를 밀어냈다.
 	" 지금 기본인 global+edge 는 맨 왼쪽에 따로 서기 때문에 밀어내지 않는다
