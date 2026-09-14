@@ -430,6 +430,7 @@ local update_context
 -- 아래라서 이름만 먼저 잡아 둔다 (없으면 전역 nil 로 잡힌다).
 local ensure_tree
 local want_tree
+local tree_visible
 -- context 만 켠 모드에서 커서를 따라간다. 실제 함수는 파일 아래쪽에 있고
 -- 여기서 이름만 잡아 둔다 - CursorHold 훅이 그보다 위에서 등록되기 때문에,
 -- 여기에 선언이 없으면 훅 안의 이름이 전역(nil)으로 잡혀 아무 일도 하지
@@ -2256,6 +2257,46 @@ local function right_stack()
   return cfg('position', 'bottom') == 'right' and cfg('right_stack', 1) ~= 0
 end
 
+-- 오른쪽 열에 창을 하나 더 끼울 때 나머지 창의 높이를 지킨다.
+--
+-- 'winfixheight' 는 '이 창을 고정한다'가 아니라 '줄은 다른 데서 가져와라'
+-- 이다. 그래서 켜 둔 채로 쪼개면 엉뚱한 창이 납작해진다. 실측:
+--   패널이 아닌 열을 가로로 쪼갰더니   panel 16 -> 3
+--   패널을 쪼갰더니                    neo-tree 11 -> 1
+-- 게다가 우리는 noautocmd 로 쪼개므로 restore_geom 의 WinNew 도 돌지 않는다.
+--
+-- 그래서 쪼개는 창만 잠시 winfixheight 를 끄고, 끝난 뒤 나머지 창의 높이를
+-- 재어 둔 값으로 되돌린다.
+local function split_keeping(target, cmd)
+  if not (target and api.nvim_win_is_valid(target)) then
+    return nil
+  end
+  local keep_panel, keep_tree
+  if panel_visible() and s.win ~= target then
+    keep_panel = api.nvim_win_get_height(s.win)
+  end
+  if tree_visible() and s.tree_win ~= target then
+    keep_tree = api.nvim_win_get_height(s.tree_win)
+  end
+  local fixed = vim.wo[target].winfixheight
+  pcall(function() vim.wo[target].winfixheight = false end)
+  local made
+  api.nvim_win_call(target, function()
+    vim.cmd(cmd)
+    made = api.nvim_get_current_win()
+  end)
+  if api.nvim_win_is_valid(target) then
+    pcall(function() vim.wo[target].winfixheight = fixed end)
+  end
+  if keep_tree and tree_visible() then
+    pcall(api.nvim_win_set_height, s.tree_win, keep_tree)
+  end
+  if keep_panel and panel_visible() then
+    pcall(api.nvim_win_set_height, s.win, keep_panel)
+  end
+  return made
+end
+
 -- copy `path` into the preview buffer (once per file version) and return the
 -- offset between the file's line numbers and the buffer's
 local MAX_CTX_LINES = 50000
@@ -2326,42 +2367,61 @@ ensure_ctx = function()
     -- preview gets the full height of the edit area.
     -- the project files view owns the top of the right column: put the
     -- preview under it instead of splitting the edit window again
-    local host = pick_src_win()
-    if not (host and api.nvim_win_is_valid(host)) then
-      return nil
-    end
-    -- measure before the split: afterwards `host` is already halved
-    local host_w = api.nvim_win_get_width(host)
-    api.nvim_win_call(host, function()
-      vim.cmd('noautocmd ' ..
-        (where == 'right' and 'rightbelow' or 'leftabove') .. ' vertical split')
-      local w = cfg('context_width', 0)
-      if w <= 0 then
-        w = math.max(40, math.floor(vim.o.columns / 3))
+    -- 오른쪽 열 맨 위에 트리가 이미 서 있으면, 편집 창을 다시 쪼개면 안 된다
+    -- - 그러면 트리 옆에 세 번째 열이 생긴다(실측: ctx 를 c 로 껐다 켜면
+    -- col=65 에 64x30 이 따로 생겼다). 그 트리 아래에 붙인다.
+    if tree_visible() then
+      -- 지금은 트리가 이 열을 통째로 쓰고 있다. 트리에게 제 높이를 남기고
+      -- 나머지를 미리보기에 준다 (context_height 가 그보다 작으면 그 값).
+      local avail = api.nvim_win_get_height(s.tree_win)
+      local tree_h = math.max(3, tonumber(cfg('tree_height', 12)) or 12)
+      tree_h = math.min(tree_h, math.max(3, math.floor(avail / 2)))
+      local h = avail - tree_h
+      local want = tonumber(cfg('context_height', 25)) or 25
+      if want > 0 and want < h then
+        h = want
       end
-      -- never leave the file you are editing thinner than the preview
-      w = math.min(w, math.max(20, math.floor(host_w / 2)))
-      vim.cmd('vertical resize ' .. w)
-      ctx = api.nvim_get_current_win()
-    end)
+      h = math.max(3, math.min(h, math.max(3, avail - 3)))
+      ctx = split_keeping(s.tree_win, 'noautocmd rightbelow ' .. h .. 'split')
+    else
+      local host = pick_src_win()
+      if not (host and api.nvim_win_is_valid(host)) then
+        return nil
+      end
+      -- measure before the split: afterwards `host` is already halved
+      local host_w = api.nvim_win_get_width(host)
+      api.nvim_win_call(host, function()
+        vim.cmd('noautocmd ' ..
+          (where == 'right' and 'rightbelow' or 'leftabove') .. ' vertical split')
+        local w = cfg('context_width', 0)
+        if w <= 0 then
+          w = math.max(40, math.floor(vim.o.columns / 3))
+        end
+        -- never leave the file you are editing thinner than the preview
+        w = math.min(w, math.max(20, math.floor(host_w / 2)))
+        vim.cmd('vertical resize ' .. w)
+        ctx = api.nvim_get_current_win()
+      end)
+    end
+  elseif cfg('position', 'bottom') == 'right' then
+    -- keep the tree usable: on a short terminal a fixed height would
+    -- squash the list down to a row or two, so leave it at least 8 rows
+    local avail = api.nvim_win_get_height(s.win)
+    local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
+    -- 3등분이면 neo-tree 도 같은 열을 나눠 쓴다. 트리 몫을 먼저 떼어 두고
+    -- 남은 줄을 목록과 미리보기가 반씩 갖는다 (47줄이면 12/18/17).
+    if right_stack() then
+      local tree_h = tree_visible() and api.nvim_win_get_height(s.tree_win)
+          or math.max(3, tonumber(cfg('tree_height', 12)) or 12)
+      h = math.min(h, math.max(3, math.floor((avail - tree_h) / 2)))
+    end
+    ctx = split_keeping(s.win, 'noautocmd rightbelow ' .. h .. 'split')
   else
     api.nvim_win_call(s.win, function()
-      if cfg('position', 'bottom') == 'right' then
-        -- keep the tree usable: on a short terminal a fixed height would
-        -- squash the list down to a row or two, so leave it at least 8 rows
-        local avail = api.nvim_win_get_height(s.win)
-        local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
-        -- 3등분이면 neo-tree 도 같은 열을 나눠 쓰므로 패널에게 절반은 남긴다
-        if right_stack() then
-          h = math.min(h, math.max(3, math.floor(avail / 2)))
-        end
-        vim.cmd('noautocmd rightbelow ' .. h .. 'split')
-      else
-        vim.cmd('noautocmd rightbelow vertical split')
-        local w = cfg('context_width', 0)
-        if w > 0 then
-          vim.cmd('vertical resize ' .. w)
-        end
+      vim.cmd('noautocmd rightbelow vertical split')
+      local w = cfg('context_width', 0)
+      if w > 0 then
+        vim.cmd('vertical resize ' .. w)
       end
       ctx = api.nvim_get_current_win()
     end)
@@ -2418,7 +2478,7 @@ end
 -- 동시에 떠 있는 것을 확인했다.
 -- ---------------------------------------------------------------------------
 
-local function tree_visible()
+tree_visible = function()
   return s.tree_win ~= nil and api.nvim_win_is_valid(s.tree_win)
       and api.nvim_win_get_tabpage(s.tree_win) == api.nvim_get_current_tabpage()
 end
@@ -2453,31 +2513,15 @@ local function tree_dir()
   return vim.fn.getcwd()
 end
 
--- 패널이 아닌 다른 열을 가로로 쪼개면 'equalalways' 가 줄을 통째로 다시
--- 나눈다. 그러면 아래를 통째로 쓰는 패널이 16줄에서 3줄로 납작해진다
--- (실측: edit 30/panel 16 -> edit 43/panel 3). 우리는 noautocmd 로 쪼개니
--- restore_geom 의 WinNew 도 돌지 않는다. 그래서 직접 재어 두었다 되돌린다.
--- 패널 자신을 쪼개는 3등분 배치에서는 줄어드는 게 맞으므로 건드리지 않는다.
-local function keep_panel_height(host)
-  if host == s.win or not panel_visible() then
-    return nil
-  end
-  return api.nvim_win_get_height(s.win)
-end
-
-local function put_panel_height(h)
-  if h and panel_visible() then
-    pcall(api.nvim_win_set_height, s.win, h)
-  end
-end
-
 local function close_tree()
-  local keep = keep_panel_height(s.tree_win)
+  local keep_panel = panel_visible() and api.nvim_win_get_height(s.win) or nil
   if tree_visible() then
     pcall(api.nvim_win_close, s.tree_win, false)
   end
   s.tree_win = nil
-  put_panel_height(keep)
+  if keep_panel and panel_visible() then
+    pcall(api.nvim_win_set_height, s.win, keep_panel)
+  end
 end
 
 -- 창을 먼저 만들고 그 안에 neo-tree 를 그린다.
@@ -2502,15 +2546,15 @@ ensure_tree = function()
     host = s.ctx_win
   end
   local prev = api.nvim_get_current_win()
-  local keep = keep_panel_height(host)
   local win
   if host and api.nvim_win_is_valid(host) then
     local avail = api.nvim_win_get_height(host)
     local h = math.max(3, tonumber(cfg('tree_height', 12)) or 12)
     h = math.min(h, math.max(3, math.floor(avail / 2)))
-    api.nvim_set_current_win(host)
-    vim.cmd('noautocmd leftabove ' .. h .. 'split')
-    win = api.nvim_get_current_win()
+    win = split_keeping(host, 'noautocmd leftabove ' .. h .. 'split')
+    if win and api.nvim_win_is_valid(win) then
+      api.nvim_set_current_win(win)
+    end
   else
     -- 패널도 미리보기도 없다: 편집 창 오른쪽에 열을 새로 세운다
     local src = pick_src_win()
@@ -2531,10 +2575,8 @@ ensure_tree = function()
     if api.nvim_win_is_valid(prev) then
       api.nvim_set_current_win(prev)
     end
-    put_panel_height(keep)
     return nil
   end
-  put_panel_height(keep)
   s.tree_win = win
   local ok, err = pcall(function()
     require('neo-tree.command').execute({
