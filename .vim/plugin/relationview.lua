@@ -126,6 +126,17 @@
 --                             to half of the window it is split out of)
 --   g:relationview_tree_dir   'root' (default: the GTAGS root the panel is
 --                             querying) or 'file' (the edited file's directory)
+--   g:relationview_tree_follow  1 (default): focusing a file in an edit window
+--                             expands that tree down to the file, the way
+--                             :NERDTreeFind does. A file outside the tree root
+--                             is left alone (neo-tree would otherwise ask
+--                             'File not in cwd. Change cwd to ...?').
+--   g:relationview_tree_follow_delay  debounce for that, in ms (default 200)
+--   g:relationview_tree_follow_cwd  1: move the tree root to a file found
+--                             outside it instead of ignoring it (default 0)
+--   g:relationview_list_min_height  in the three-way column, rows the relation
+--                             list keeps; everything left over goes to the
+--                             preview (default 12, so 47 rows -> 12/12/23)
 --   g:relationview_right_stack  with position='right', divide the one right
 --                             column into three - neo-tree on top, the relation
 --                             list in the middle, the preview at the bottom
@@ -316,6 +327,8 @@ local s = {
   tree_win = nil,     -- 오른쪽 열 위에 얹은 neo-tree 창
   big_win = nil,      -- 세로 전체 context (오른쪽 열 왼쪽, 두 번째 미리보기)
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
+  tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
+  tree_timer = nil,   -- 트리 따라가기 디바운스
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
   ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
@@ -2408,12 +2421,15 @@ ensure_ctx = function()
     -- squash the list down to a row or two, so leave it at least 8 rows
     local avail = api.nvim_win_get_height(s.win)
     local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
-    -- 3등분이면 neo-tree 도 같은 열을 나눠 쓴다. 트리 몫을 먼저 떼어 두고
-    -- 남은 줄을 목록과 미리보기가 반씩 갖는다 (47줄이면 12/18/17).
+    -- 3등분이면 neo-tree 도 같은 열을 나눠 쓴다. 트리 몫과 목록의 최소
+    -- 줄수를 먼저 떼어 두고, 남은 것을 전부 미리보기에 준다.
+    -- 반씩 나누면 미리보기가 17줄밖에 안 돼서 코드를 읽기 좁았다.
+    -- 47줄이면 12(트리) / 12(목록) / 23(미리보기) 가 된다.
     if right_stack() then
       local tree_h = tree_visible() and api.nvim_win_get_height(s.tree_win)
           or math.max(3, tonumber(cfg('tree_height', 12)) or 12)
-      h = math.min(h, math.max(3, math.floor((avail - tree_h) / 2)))
+      local min_list = math.max(3, tonumber(cfg('list_min_height', 12)) or 12)
+      h = math.min(h, math.max(3, avail - tree_h - min_list))
     end
     ctx = split_keeping(s.win, 'noautocmd rightbelow ' .. h .. 'split')
   else
@@ -2578,17 +2594,31 @@ ensure_tree = function()
     return nil
   end
   s.tree_win = win
-  local ok, err = pcall(function()
-    require('neo-tree.command').execute({
-      source = 'filesystem',
-      action = 'show',
-      position = 'current',
-      dir = tree_dir(),
-    })
-  end)
-  if api.nvim_win_is_valid(prev) then
-    pcall(api.nvim_set_current_win, prev)
+  -- neo-tree 의 action='show' 는 '원래 창'으로 포커스를 되돌려 주는데, 그
+  -- 되돌리기가 navigate 콜백 안에서 비동기로 일어난다. 우리는 상태를 찾게
+  -- 하려고 트리 창을 먼저 잡아 놓은 참이라, neo-tree 가 보기엔 '원래 창'이
+  -- 트리 창 자신이다. 그래서 우리가 동기적으로 되돌려 놔도 곧바로 다시
+  -- 트리로 끌려온다 - 실측으로 both 직후 포커스가 neo-tree 에 남았고, 그
+  -- 상태에서 :edit 를 하면 트리 버퍼가 파일로 갈려 창이 통째로 사라졌다.
+  -- 그래서 schedule 로 한 번 더 되돌린다.
+  local function back()
+    if api.nvim_win_is_valid(prev) and api.nvim_get_current_win() ~= prev then
+      pcall(api.nvim_set_current_win, prev)
+    end
   end
+  -- command.execute 를 쓰지 않고 navigate 를 직접 부른다. execute 의
+  -- action='show' 도 결국 navigate 에 콜백을 넘겨 '원래 창'으로 돌아가는데,
+  -- 그 '원래 창'이 (상태를 찾게 하려고 우리가 미리 잡아 둔) 트리 창 자신이라
+  -- 포커스가 트리에 남는다. 콜백을 우리가 쥐면 제자리로 보낼 수 있다.
+  local ok, err = pcall(function()
+    local mgr = require('neo-tree.sources.manager')
+    local st = mgr.get_state('filesystem', nil, win)
+    st.current_position = 'current'
+    st._no_focus = true
+    mgr.navigate(st, tree_dir(), nil, back, false)
+  end)
+  back()
+  vim.schedule(back)
   if not ok then
     vim.notify('RelationView: neo-tree 를 못 열었습니다 - ' .. tostring(err),
       vim.log.levels.WARN)
@@ -2611,6 +2641,86 @@ ensure_tree = function()
   })
   return win
 end
+
+-- 편집 창에서 파일을 잡으면 오른쪽 열의 트리가 그 파일을 펼쳐 보여준다
+-- (NERDTreeFind 와 같은 동작). 뿌리 밖의 파일은 가만둔다 - neo-tree 는
+-- 그럴 때 'File not in cwd. Change cwd to ...?' 를 물어보는데, 자동으로
+-- 따라가는 기능이 사람에게 질문을 던지면 안 된다.
+--
+-- position='current' 상태는 '지금 포커스된 창'으로 찾으므로(command/init.lua
+-- 의 requested_position == 'current' 갈래) 상태를 직접 집어 navigate 를
+-- 부른다. 그래야 포커스를 옮겼다 되돌리는 곡예를 안 해도 된다.
+local function tree_follow_now()
+  if not tree_visible() or cfg('tree_follow', 1) == 0 then
+    return
+  end
+  local win = api.nvim_get_current_win()
+  if win == s.tree_win or win == s.win or win == s.ctx_win or win == s.big_win then
+    return
+  end
+  local buf = api.nvim_win_get_buf(win)
+  if vim.bo[buf].buftype ~= '' then
+    return
+  end
+  local file = api.nvim_buf_get_name(buf)
+  if file == '' or vim.fn.filereadable(file) ~= 1 then
+    return
+  end
+  if s.tree_last == file then
+    return
+  end
+  local ok_m, mgr = pcall(require, 'neo-tree.sources.manager')
+  local ok_u, ntutils = pcall(require, 'neo-tree.utils')
+  if not (ok_m and ok_u) then
+    return
+  end
+  local st = mgr.get_state('filesystem', nil, s.tree_win)
+  if not st then
+    return
+  end
+  local root = st.path
+  local force_cwd = cfg('tree_follow_cwd', 0) ~= 0
+  if not force_cwd then
+    if not (root and root ~= '' and ntutils.is_subpath(root, file)) then
+      return
+    end
+  end
+  s.tree_last = file
+  local prev = win
+  st.current_position = 'current'
+  pcall(function()
+    mgr.navigate(st, force_cwd and vim.fn.fnamemodify(file, ':h') or root, file,
+      function()
+        if api.nvim_win_is_valid(prev) and api.nvim_get_current_win() ~= prev then
+          pcall(api.nvim_set_current_win, prev)
+        end
+      end, false)
+  end)
+end
+
+-- 커서가 파일 사이를 빠르게 옮겨 다닐 때 트리를 매번 다시 그리지 않는다
+local function tree_follow_soon()
+  if not tree_visible() or cfg('tree_follow', 1) == 0 then
+    return
+  end
+  if s.tree_timer then
+    s.tree_timer:stop()
+  else
+    s.tree_timer = uv.new_timer()
+  end
+  s.tree_timer:start(tonumber(cfg('tree_follow_delay', 200)) or 200, 0,
+    vim.schedule_wrap(function()
+      pcall(tree_follow_now)
+    end))
+end
+
+api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
+  group = group,
+  callback = function()
+    tree_follow_soon()
+  end,
+  desc = 'RelationView: the column tree follows the edited file',
+})
 
 local function close_big()
   if big_visible() then

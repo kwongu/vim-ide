@@ -2207,6 +2207,17 @@ let g:relationview_unpin_delay = 2000
 let g:relationview_tree = 1
 let g:relationview_tree_height = 12
 let g:relationview_tree_dir = 'root'
+" 편집 창에서 파일을 잡으면 그 파일이 있는 경로까지 트리를 펼쳐 준다
+" (NERDTreeFind 과 같은 동작). 0 이면 따라가지 않는다.
+let g:relationview_tree_follow = 1
+" 파일 사이를 빠르게 옮겨 다닐 때 트리를 매번 다시 그리지 않는다 (ms)
+let g:relationview_tree_follow_delay = 200
+" 뿌리 밖의 파일을 잡았을 때 트리 뿌리까지 그 파일 쪽으로 옮길지.
+" 기본 0 = 가만둔다. neo-tree 는 1 일 때 뿌리를 그 파일의 상위로 바꾼다.
+let g:relationview_tree_follow_cwd = 0
+" 3등분에서 관계 목록에 최소 이만큼은 남기고, 나머지를 미리보기에 준다.
+" 이 값을 줄이면 오른쪽 하단 미리보기가 그만큼 커진다 (47줄이면 12/12/23).
+let g:relationview_list_min_height = 12
 let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
 
