@@ -6560,7 +6560,41 @@ function _G.relationview_state()
     big      = big_visible(),
     tree_off = s.tree_off and true or false,
     sym      = s.sym,
+    -- 미리보기가 보고 있던 자리. 세션이 이것을 적어 두었다가 그대로 되돌린다.
+    ctx      = s.ctx_last and {
+      path = s.ctx_last.path,
+      line = s.ctx_last.line,
+      sym  = s.ctx_last.sym,
+    } or nil,
   }
+end
+
+-- 세션이 미리보기 '내용'을 되돌릴 때 쓰는 입구.
+--
+-- 창만 되살리면 미리보기가 빈 채로 뜬다. 저장할 때 적어 둔 자리를 그대로
+-- 다시 그려 준다. 파일이 그새 없어졌으면 아무것도 하지 않는다 - 없는
+-- 파일을 열면 그 이름으로 빈 버퍼가 생기고, :w 한 번에 진짜 파일이 된다.
+function _G.relationview_restore_context(loc)
+  if type(loc) ~= 'table' or type(loc.path) ~= 'string' or loc.path == '' then
+    return false
+  end
+  if vim.fn.filereadable(loc.path) ~= 1 then
+    return false
+  end
+  if not (ctx_visible() or big_visible()) then
+    if not ensure_ctx() then
+      return false
+    end
+  end
+  -- show_context 는 '같은 자리면 다시 안 그린다'로 시작한다. 되살리는
+  -- 길에서는 그 기억이 남아 있을 수 있으니 지우고 부른다.
+  s.ctx_last = nil
+  show_context({
+    path = loc.path,
+    line = tonumber(loc.line) or 1,
+    sym  = type(loc.sym) == 'string' and loc.sym or nil,
+  })
+  return true
 end
 
 -- One key for "next item in whatever list is in front of me": the relation

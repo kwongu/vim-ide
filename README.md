@@ -2335,6 +2335,15 @@ window). Plain vim keeps the original cscope behavior.
 '무엇이 떠 있었나' (RelationView both/relation/context, 그 열의 neo-tree,
 세로 전체 context, 왼쪽 neo-tree, aerial, tagbar, NERDTree, quickfix 창).
 
+미리보기(context)는 창만이 아니라 **보고 있던 자리까지** 되살린다. 저장할 때
+{파일, 줄, 심볼}을 적어 두었다가 그대로 다시 그린다. 그 파일이 그새 없어졌으면
+아무것도 하지 않는다 - 없는 파일을 열면 그 이름으로 빈 버퍼가 생기고 :w 한 번에
+진짜 파일이 되기 때문이다.
+
+vim-mark 로 칠해 둔 색(F4, LookupReferences 가 쓰는 그것)도 같이 돌아온다.
+mark#ToList() 로 적고 mark#Load() 로 되돌린다. 색은 미리보기를 그리기 전에
+먼저 되돌려서, 되살아난 미리보기에도 칠해진 채로 뜨게 한다.
+
 되살리지 않는 것: telescope 뜬창, 터미널 버퍼, quickfix 의 **목록**(색인을
 다시 만들면 줄 번호가 어긋나 오히려 위험하다 - 창만 빈 채로 연다),
 RelationView 의 점프 스택과 pin 상태(다시 질의하는 편이 낫다).

@@ -108,6 +108,17 @@ end
 -- RelationView 는 자기 상태를 알려 준다(relationview.lua 의
 -- _G.relationview_state). 없는 버전이면 화면을 훑어서 흉내 낸다 - 원래
 -- current_mode() 도 기억이 아니라 화면에서 읽는다.
+-- vim-mark 의 색칠 상태. 플러그인이 없거나 예전 판이면 조용히 건너뛴다.
+-- autoload 라 exists('*mark#ToList') 는 처음 부르기 전까지 0 이다 - 그래서
+-- 존재 확인 대신 그냥 불러 보고 실패하면 만다.
+local function mark_list()
+  local ok, l = pcall(fn['mark#ToList'])
+  if ok and type(l) == 'table' and not vim.tbl_isempty(l) then
+    return l
+  end
+  return nil
+end
+
 local function rv_state()
   if type(_G.relationview_state) == 'function' then
     local ok, st = pcall(_G.relationview_state)
@@ -165,6 +176,12 @@ function M.capture()
     -- 그냥 안 보이는 것과는 다르다.
     rv_tree_off = st.tree_off and true or false,
     rv_big   = st.big and true or false,
+    -- 미리보기가 보고 있던 자리 {path, line, sym}. 창만 되살리면 빈 채로
+    -- 뜨기 때문에 내용도 같이 적는다.
+    rv_ctx   = st.ctx,
+    -- vim-mark 로 칠해 둔 색 (F4, LookupReferences 가 쓰는 그것).
+    -- mark#ToList() 가 '무엇을 몇 번 색으로 칠했나'를 그대로 내놓는다.
+    marks    = mark_list(),
     neotree  = false,
     aerial   = false,
     tagbar   = false,
@@ -438,6 +455,17 @@ function M.reopen(p)
     -- 옆 창들은 winfixwidth/winfixheight 라 이 명령이 건드리지 않는다.
     if p.had_panels then
       frozen(function() vim.cmd('wincmd =') end)
+    end
+
+    -- 색을 먼저 되돌린다. 미리보기를 그리기 전에 해 두어야 되살아난
+    -- 미리보기에도 그 색이 칠해진 채로 뜬다.
+    if type(p.marks) == 'table' and not vim.tbl_isempty(p.marks) then
+      pcall(fn['mark#Load'], p.marks, 1)
+    end
+
+    -- 미리보기 내용
+    if type(p.rv_ctx) == 'table' and type(_G.relationview_restore_context) == 'function' then
+      pcall(_G.relationview_restore_context, p.rv_ctx)
     end
 
     if p.edit_file and p.edit_file ~= '' then
