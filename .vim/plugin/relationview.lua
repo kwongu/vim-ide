@@ -1825,13 +1825,17 @@ local function ensure_buf()
       " the source column may be off (g:relationview_show_text = 0), so the
       " path can be followed by the '│' separator or by end of line
       syntax match RvLoc      /\S\+:\d\+\ze\s*\%(│\|$\)/
-      " 파일 칸의 '파일이름' 만 파랗게. 뒤의 ':줄' 과 '(경로)' 는 그대로 둔다.
-      " '/' 를 빼 두어서 path 스타일에서도 마지막 조각(= 이름)만 잡힌다.
-      " 나중에 정의한 match 가 같은 자리에서 이기므로 RvLoc 아래에 둔다.
-      syntax match RvFile     /[^ ()\/]\+\ze:\d\+ (/
-      syntax match RvFile     /[^ ()\/]\+\ze:\d\+\s*\%(│\|$\)/
       " '(x2)', '(util.h)' and the notes are dim: they are not symbols
       syntax match RvDim      /(no definition)\|(none)\|(x\d\+)\|…\d\++\? more.*\|([^ )]\+\.[^ )]\+)/
+      " 파일 칸은 '이름 (경로)' 를 한 덩어리로 파랗게 한다.
+      "
+      " RvDim 보다 뒤에 둔 것이 핵심이다. RvDim 의 '([^ )]\+\.[^ )]\+)' 가
+      " 괄호 안 경로에도 걸리는데, 이 규칙은 파일 이름에서 시작해 괄호까지
+      " 한 번에 덮으므로 더 왼쪽에서 시작해 이긴다.
+      " 심볼 칸의 '(util.h)' 나 '(x2)' 는 앞에 ':줄 ' 이 없어서 안 걸린다.
+      syntax match RvFile     /[^ ()\/]\+:\d\+ ([^)]*)/
+      " 경로가 이름과 같아 괄호를 안 붙인 경우
+      syntax match RvFile     /[^ ()\/]\+:\d\+\ze\s*\%(│\|$\)/
     ]])
   end)
   local function bmap(lhs, fn, desc)
