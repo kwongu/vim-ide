@@ -2773,7 +2773,18 @@ endfunc
 "
 "   let g:vimide_nerdtree_last_edit = 0   " 끄면 예전 동작
 function! VimIdeNERDTreeOpen(node) abort
-    let l:win = vimide#qf#Win()
+    " 트리에 들어오기 직전 창(winnr('#'))이 편집 창이면 그것이 가장 정확하다.
+    " 트리를 여는 동작 자체가 창을 밀어내며 WinEnter 를 여러 번 일으켜서,
+    " 전역 추적기가 엉뚱한 편집 창을 가리키는 경우가 있었다(실측: 3번째
+    " 창에서 열었는데 4번째에 열렸다). 그래서 여기서는 alternate 창을 먼저 본다.
+    let l:win = 0
+    let l:alt = winnr('#')
+    if l:alt > 0 && getbufvar(winbufnr(l:alt), '&buftype') ==# ''
+        let l:win = win_getid(l:alt)
+    endif
+    if l:win <= 0
+        let l:win = vimide#qf#Win()
+    endif
     if l:win <= 0
         " 편집 창을 못 찾으면 NERDTree 가 늘 하던 대로 맡긴다
         call a:node.activate({'reuse': 'all', 'where': 'p'})
