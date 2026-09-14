@@ -41,6 +41,9 @@
 --      (not 'g': that would break 'gg')
 --   c  toggle the context window (Source Insight style: shows the source
 --      around the location under the cursor, attached to the panel)
+--   t  toggle the neo-tree at the top of the panel's column
+--   T  toggle the full-height context window left of that column (a second
+--      preview of the same place, for reading a long function in one go)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
 --   C-n / C-p  next / previous item in the list, previewed in the context
 --              window; the edit window does not move (works from any
@@ -116,6 +119,21 @@
 --   g:relationview_context_height  context height, 'right' layout (default 25,
 --                             capped so the tree keeps at least 8 rows)
 --   g:relationview_context_width   context width, 'bottom' layout (default 0 = half)
+--   g:relationview_tree       1: open a neo-tree above the panel/preview
+--                             together with the panel (default 1). 0 keeps it
+--                             closed until 't' asks for it.
+--   g:relationview_tree_height  rows for that tree (default 12; always clamped
+--                             to half of the window it is split out of)
+--   g:relationview_tree_dir   'root' (default: the GTAGS root the panel is
+--                             querying) or 'file' (the edited file's directory)
+--   g:relationview_right_stack  with position='right', divide the one right
+--                             column into three - neo-tree on top, the relation
+--                             list in the middle, the preview at the bottom
+--                             (default 1). 0 restores the old behaviour, where
+--                             context_position decides where the preview goes.
+--   g:relationview_big_width  width of the full-height second preview that 'T'
+--                             opens (default 0 = a third of the screen, never
+--                             more than half of the edit window)
 --   g:relationview_context_position  'panel' (default: a split inside the
 --                             panel) or 'right'/'left' (a window of its own
 --                             beside the edit window, so the panel keeps the
@@ -295,6 +313,9 @@ local s = {
   ctx_timer = nil,    -- context update debounce timer
   ctx_stack = {},     -- <C-]> jump stack of the context window (<C-t> pops)
   ctx_fwd = {},       -- <C-t> 로 되돌린 것들 (<C-i> 가 다시 따라간다)
+  tree_win = nil,     -- 오른쪽 열 위에 얹은 neo-tree 창
+  big_win = nil,      -- 세로 전체 context (오른쪽 열 왼쪽, 두 번째 미리보기)
+  tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
   ctx_hl_buf = nil,   -- buffer currently carrying the context highlight
@@ -405,6 +426,10 @@ local hl_cursor_row
 local find_member
 local ensure_ctx
 local update_context
+-- 오른쪽 열 맨 위의 neo-tree. panel_open 이 이것을 부르는데 정의는 한참
+-- 아래라서 이름만 먼저 잡아 둔다 (없으면 전역 nil 로 잡힌다).
+local ensure_tree
+local want_tree
 -- context 만 켠 모드에서 커서를 따라간다. 실제 함수는 파일 아래쪽에 있고
 -- 여기서 이름만 잡아 둔다 - CursorHold 훅이 그보다 위에서 등록되기 때문에,
 -- 여기에 선언이 없으면 훅 안의 이름이 전역(nil)으로 잡혀 아무 일도 하지
@@ -1782,6 +1807,10 @@ local function ensure_buf()
   -- 'g' would swallow the first key of 'gg', so the graph lives on 'x'
   bmap('x', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
+  bmap('t', function() A.toggle_tree() end,
+    'RelationView: toggle the neo-tree above this column')
+  bmap('T', function() A.toggle_big() end,
+    'RelationView: toggle the full-height context window')
   -- the mouse side buttons act on the source window while the list has focus
   for _, k in ipairs({ '<X1Mouse>', '<C-o>', unpack(alias_keys('back')) }) do
     bmap(k, function() A.back() end, 'RelationView: back (<C-o>)')
@@ -1860,6 +1889,9 @@ local function panel_open()
     if want_ctx() then
       ensure_ctx()
     end
+    if want_tree() then
+      ensure_tree()
+    end
     return s.win
   end
   local buf = ensure_buf()
@@ -1868,6 +1900,9 @@ local function panel_open()
     s.win = existing
     if want_ctx() then
       ensure_ctx()
+    end
+    if want_tree() then
+      ensure_tree()
     end
     return existing
   end
@@ -1908,6 +1943,9 @@ local function panel_open()
   end
   if want_ctx() then
     ensure_ctx()
+  end
+  if want_tree() then
+    ensure_tree()
   end
   return win
 end
@@ -2204,6 +2242,20 @@ local function ctx_visible()
       and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
 end
 
+-- 세로 전체 미리보기(두 번째 context). 오른쪽 열 왼쪽에 선다.
+local function big_visible()
+  return s.big_win ~= nil and api.nvim_win_is_valid(s.big_win)
+      and api.nvim_win_get_tabpage(s.big_win) == api.nvim_get_current_tabpage()
+end
+
+-- 오른쪽 열을 셋으로 나누는 배치인가.
+-- position='right' 면 오른쪽 한 열 안에 neo-tree / relation / context 가
+-- 위에서 아래로 차례로 들어간다. 옛 배치로 돌리려면
+--   let g:relationview_right_stack = 0
+local function right_stack()
+  return cfg('position', 'bottom') == 'right' and cfg('right_stack', 1) ~= 0
+end
+
 -- copy `path` into the preview buffer (once per file version) and return the
 -- offset between the file's line numbers and the buffer's
 local MAX_CTX_LINES = 50000
@@ -2263,6 +2315,11 @@ ensure_ctx = function()
   if standalone and where ~= 'left' then
     where = 'right'
   end
+  -- 3등분 배치에서는 미리보기가 편집 창 옆이 아니라 패널 아래, 같은 오른쪽
+  -- 열 안으로 들어간다(사용자 요구: contextview = 오른쪽 하단).
+  if right_stack() and not standalone then
+    where = 'panel'
+  end
   if where == 'left' or where == 'right' then
     -- A window of its own, beside the file you are editing, instead of a
     -- split inside the panel: the panel keeps the whole bottom and the
@@ -2294,6 +2351,10 @@ ensure_ctx = function()
         -- squash the list down to a row or two, so leave it at least 8 rows
         local avail = api.nvim_win_get_height(s.win)
         local h = math.min(cfg('context_height', 25), math.max(3, avail - 9))
+        -- 3등분이면 neo-tree 도 같은 열을 나눠 쓰므로 패널에게 절반은 남긴다
+        if right_stack() then
+          h = math.min(h, math.max(3, math.floor(avail / 2)))
+        end
         vim.cmd('noautocmd rightbelow ' .. h .. 'split')
       else
         vim.cmd('noautocmd rightbelow vertical split')
@@ -2329,6 +2390,240 @@ ensure_ctx = function()
     end,
   })
   return ctx
+end
+
+-- ---------------------------------------------------------------------------
+-- 오른쪽 열의 나머지 두 창: 맨 위 neo-tree 와, 세로 전체 미리보기
+--
+--   g:relationview_position = 'right'        (3등분)
+--     +--------+-------+-----------+
+--     |        |       | neo-tree  |  s.tree_win   ('t' 로 토글)
+--     |  EDIT  | big   +-----------+
+--     |        | (T)   | relation  |  s.win
+--     |        |       | context   |  s.ctx_win    ('c' 로 토글)
+--     +--------+-------+-----------+
+--
+--   g:relationview_position = 'bottom'
+--     +----------------+-----------+
+--     |  EDIT          | neo-tree  |  s.tree_win
+--     |                | context   |  s.ctx_win
+--     +----------------+-----------+
+--     |   relation panel           |  s.win
+--     +----------------------------+
+--
+-- neo-tree 는 position='current' 로 그린다. 그 상태는 winid 로 갈무리되므로
+-- (sources/manager.lua 의 get_state_for_window: position=='current' 면
+-- get_state(source, tabid, winid), 아니면 get_state(source, tabid, nil))
+-- 왼쪽에 이미 떠 있는 보통 트리와 상태가 부딪히지 않는다. 실측으로 둘이
+-- 동시에 떠 있는 것을 확인했다.
+-- ---------------------------------------------------------------------------
+
+local function tree_visible()
+  return s.tree_win ~= nil and api.nvim_win_is_valid(s.tree_win)
+      and api.nvim_win_get_tabpage(s.tree_win) == api.nvim_get_current_tabpage()
+end
+
+-- 패널을 열 때 neo-tree 도 같이 열까. want_ctx 와 같은 규칙이다:
+-- g:relationview_tree = 0 이면 아예 안 열고, 사용자가 직접 끈 뒤에는
+-- (s.tree_off) 다시 켜기 전까지 열지 않는다.
+want_tree = function()
+  if s.tree_off then
+    return false
+  end
+  return cfg('tree', 1) ~= 0
+end
+
+-- neo-tree 가 어느 디렉터리를 보여줄까
+--   'root' (기본)  지금 질의한 GTAGS 루트 - 패널/미리보기와 같은 기준이다
+--   'file'         지금 편집 중인 파일의 디렉터리
+local function tree_dir()
+  if cfg('tree_dir', 'root') == 'file' then
+    local src = pick_src_win()
+    if src and api.nvim_win_is_valid(src) then
+      local f = api.nvim_buf_get_name(api.nvim_win_get_buf(src))
+      if f ~= '' then
+        return vim.fn.fnamemodify(f, ':h')
+      end
+    end
+  end
+  local r = s.tree and s.tree.root
+  if r and r ~= '' then
+    return r
+  end
+  return vim.fn.getcwd()
+end
+
+-- 패널이 아닌 다른 열을 가로로 쪼개면 'equalalways' 가 줄을 통째로 다시
+-- 나눈다. 그러면 아래를 통째로 쓰는 패널이 16줄에서 3줄로 납작해진다
+-- (실측: edit 30/panel 16 -> edit 43/panel 3). 우리는 noautocmd 로 쪼개니
+-- restore_geom 의 WinNew 도 돌지 않는다. 그래서 직접 재어 두었다 되돌린다.
+-- 패널 자신을 쪼개는 3등분 배치에서는 줄어드는 게 맞으므로 건드리지 않는다.
+local function keep_panel_height(host)
+  if host == s.win or not panel_visible() then
+    return nil
+  end
+  return api.nvim_win_get_height(s.win)
+end
+
+local function put_panel_height(h)
+  if h and panel_visible() then
+    pcall(api.nvim_win_set_height, s.win, h)
+  end
+end
+
+local function close_tree()
+  local keep = keep_panel_height(s.tree_win)
+  if tree_visible() then
+    pcall(api.nvim_win_close, s.tree_win, false)
+  end
+  s.tree_win = nil
+  put_panel_height(keep)
+end
+
+-- 창을 먼저 만들고 그 안에 neo-tree 를 그린다.
+--
+-- nvim_win_call 로 감싸면 안 된다: neo-tree 의 navigate 는 비동기라서
+-- 콜백이 도는 시점에는 win_call 이 이미 끝나 '현재 창'이 돌아와 있다.
+-- 그래서 창을 실제로 옮겨 놓고(set_current_win) 부른 뒤 되돌린다.
+ensure_tree = function()
+  if tree_visible() then
+    return s.tree_win
+  end
+  local ok_nt = pcall(require, 'neo-tree.command')
+  if not ok_nt then
+    vim.notify('RelationView: neo-tree 가 없습니다', vim.log.levels.WARN)
+    return nil
+  end
+  -- 어느 창을 쪼갤까. 3등분이면 패널 위, 아니면 미리보기 위가 '오른쪽 상단'.
+  local host
+  if right_stack() and panel_visible() then
+    host = s.win
+  elseif ctx_visible() then
+    host = s.ctx_win
+  end
+  local prev = api.nvim_get_current_win()
+  local keep = keep_panel_height(host)
+  local win
+  if host and api.nvim_win_is_valid(host) then
+    local avail = api.nvim_win_get_height(host)
+    local h = math.max(3, tonumber(cfg('tree_height', 12)) or 12)
+    h = math.min(h, math.max(3, math.floor(avail / 2)))
+    api.nvim_set_current_win(host)
+    vim.cmd('noautocmd leftabove ' .. h .. 'split')
+    win = api.nvim_get_current_win()
+  else
+    -- 패널도 미리보기도 없다: 편집 창 오른쪽에 열을 새로 세운다
+    local src = pick_src_win()
+    if not (src and api.nvim_win_is_valid(src)) then
+      return nil
+    end
+    local src_w = api.nvim_win_get_width(src)
+    local w = tonumber(cfg('context_width', 0)) or 0
+    if w <= 0 then
+      w = math.max(30, math.floor(vim.o.columns / 4))
+    end
+    w = math.min(w, math.max(20, math.floor(src_w / 2)))
+    api.nvim_set_current_win(src)
+    vim.cmd('noautocmd rightbelow vertical ' .. w .. 'split')
+    win = api.nvim_get_current_win()
+  end
+  if not (win and api.nvim_win_is_valid(win)) then
+    if api.nvim_win_is_valid(prev) then
+      api.nvim_set_current_win(prev)
+    end
+    put_panel_height(keep)
+    return nil
+  end
+  put_panel_height(keep)
+  s.tree_win = win
+  local ok, err = pcall(function()
+    require('neo-tree.command').execute({
+      source = 'filesystem',
+      action = 'show',
+      position = 'current',
+      dir = tree_dir(),
+    })
+  end)
+  if api.nvim_win_is_valid(prev) then
+    pcall(api.nvim_set_current_win, prev)
+  end
+  if not ok then
+    vim.notify('RelationView: neo-tree 를 못 열었습니다 - ' .. tostring(err),
+      vim.log.levels.WARN)
+    close_tree()
+    return nil
+  end
+  pcall(function()
+    local wo = vim.wo[win]
+    wo.winfixheight = true
+    wo.winfixwidth = true
+  end)
+  api.nvim_create_autocmd('WinClosed', {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      if s.tree_win == win then
+        s.tree_win = nil
+      end
+    end,
+  })
+  return win
+end
+
+local function close_big()
+  if big_visible() then
+    pcall(api.nvim_win_close, s.big_win, false)
+  end
+  s.big_win = nil
+end
+
+-- 오른쪽 열 '왼쪽'에, 세로 전체 높이로 두 번째 미리보기를 세운다.
+--
+-- 아래쪽 작은 미리보기와 같은 스크래치 버퍼(ctx_buf)를 본다. 그래서 내용도
+-- 하이라이트도 저절로 따라오고, <C-]>/<C-t>/<CR> 같은 버퍼 지역 키도 그대로
+-- 쓸 수 있다. 다른 곳을 보게 하고 싶다는 요구가 생기면 그때 버퍼를 하나 더
+-- 파면 된다 - 지금은 '같은 자리를 넓게 읽는 창'이다.
+local function ensure_big()
+  if big_visible() then
+    return s.big_win
+  end
+  local src = pick_src_win()
+  if not (src and api.nvim_win_is_valid(src)) then
+    return nil
+  end
+  local src_w = api.nvim_win_get_width(src)
+  local w = tonumber(cfg('big_width', 0)) or 0
+  if w <= 0 then
+    w = math.max(40, math.floor(vim.o.columns / 3))
+  end
+  -- 편집 창을 미리보기보다 좁게 만들지 않는다
+  w = math.min(w, math.max(20, math.floor(src_w / 2)))
+  local prev = api.nvim_get_current_win()
+  api.nvim_set_current_win(src)
+  vim.cmd('noautocmd rightbelow vertical ' .. w .. 'split')
+  local win = api.nvim_get_current_win()
+  if api.nvim_win_is_valid(prev) then
+    pcall(api.nvim_set_current_win, prev)
+  end
+  if not (win and api.nvim_win_is_valid(win)) then
+    return nil
+  end
+  api.nvim_win_set_buf(win, ctx_buf())
+  ctx_apply_opts(win)
+  pcall(function()
+    vim.wo[win].winfixwidth = true
+  end)
+  s.big_win = win
+  api.nvim_create_autocmd('WinClosed', {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      if s.big_win == win then
+        s.big_win = nil
+      end
+    end,
+  })
+  return win
 end
 
 -- <C-]> / <C-t> inside the context window: follow definitions and come back
@@ -2778,7 +3073,9 @@ function _G.relationview_unpin()
 end
 
 show_context = function(loc)
-  if not ctx_visible() then
+  -- 작은 미리보기와 세로 전체 미리보기는 따로 켜고 끈다. 둘 중 하나라도
+  -- 떠 있으면 그린다.
+  if not ctx_visible() and not big_visible() then
     return
   end
   local last = s.ctx_last
@@ -2792,7 +3089,7 @@ show_context = function(loc)
     return
   end
   local b = ctx_buf()
-  if api.nvim_win_get_buf(s.ctx_win) ~= b then
+  if ctx_visible() and api.nvim_win_get_buf(s.ctx_win) ~= b then
     pcall(function() vim.wo[s.ctx_win].winfixbuf = false end)
     pcall(api.nvim_win_set_buf, s.ctx_win, b)
     ctx_apply_opts(s.ctx_win)
@@ -2801,10 +3098,12 @@ show_context = function(loc)
   if loc.col and loc.sym == nil then
     col = loc.col
   end
-  api.nvim_win_call(s.ctx_win, function()
-    pcall(api.nvim_win_set_cursor, s.ctx_win, { line, col })
-    vim.cmd('normal! zz')
-  end)
+  if ctx_visible() then
+    api.nvim_win_call(s.ctx_win, function()
+      pcall(api.nvim_win_set_cursor, s.ctx_win, { line, col })
+      vim.cmd('normal! zz')
+    end)
+  end
   api.nvim_buf_clear_namespace(b, NS_CTX, 0, -1)
   s.ctx_hl_buf = nil
   if loc.sym then
@@ -2835,9 +3134,30 @@ show_context = function(loc)
   end
   local label = shown
       .. ':' .. (line + off) .. (loc.sym and ('  ◆ ' .. loc.sym) or '')
-  pcall(function()
-    vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
-  end)
+  if ctx_visible() then
+    pcall(function()
+      vim.wo[s.ctx_win].winbar = ' ' .. label:gsub('%%', '%%%%')
+    end)
+  end
+  -- 세로 전체 미리보기는 같은 버퍼를 보므로 내용과 하이라이트는 저절로
+  -- 따라온다. 창마다 따로인 커서와 winbar 만 맞춰 준다.
+  if big_visible() then
+    if api.nvim_win_get_buf(s.big_win) ~= b then
+      pcall(function() vim.wo[s.big_win].winfixbuf = false end)
+      pcall(api.nvim_win_set_buf, s.big_win, b)
+      ctx_apply_opts(s.big_win)
+    end
+    -- 그 창 안에서 사용자가 읽고 있는 중이면 끌어당기지 않는다
+    if api.nvim_get_current_win() ~= s.big_win then
+      api.nvim_win_call(s.big_win, function()
+        pcall(api.nvim_win_set_cursor, s.big_win, { line, col })
+        vim.cmd('normal! zz')
+      end)
+    end
+    pcall(function()
+      vim.wo[s.big_win].winbar = ' ' .. label:gsub('%%', '%%%%')
+    end)
+  end
 end
 
 -- preview the location under the panel cursor (falls back to the
@@ -2845,13 +3165,14 @@ end
 -- force: the user asked for this one (C-n/C-p), so show it even while the
 -- focus is inside the preview
 update_context = function(force)
-  if not ctx_visible() then
+  if not ctx_visible() and not big_visible() then
     return
   end
   -- while the user is browsing inside the context window (<C-]>/<C-t>), a
   -- late render must not yank the preview back to the list item - but an
   -- explicit step through the list must
-  if not force and api.nvim_get_current_win() == s.ctx_win then
+  local curwin = api.nvim_get_current_win()
+  if not force and (curwin == s.ctx_win or curwin == s.big_win) then
     return
   end
   if not (s.win and api.nvim_win_is_valid(s.win)) then
@@ -5070,6 +5391,10 @@ function A.close()
   else
     target = panel_win_here()
   end
+  -- 오른쪽 열 식구를 먼저 치운다. 패널보다 먼저 닫아야 남은 창들이
+  -- 빈자리를 나눠 갖는 일이 없다.
+  close_tree()
+  close_big()
   if s.ctx_win and api.nvim_win_is_valid(s.ctx_win)
       and api.nvim_win_get_tabpage(s.ctx_win) == api.nvim_get_current_tabpage()
   then
@@ -5102,6 +5427,43 @@ function A.toggle_ctx()
     s.ctx_stack = {}
   elseif ensure_ctx() then
     update_context()
+  end
+end
+
+-- 오른쪽 열 맨 위의 neo-tree 를 켜고 끈다.
+-- 사용자가 직접 끈 것은 기억해 둔다(s.tree_off): 그래야 F3 으로 다시 열어도
+-- 원하지 않은 트리가 되살아나지 않는다.
+function A.toggle_tree()
+  if tree_visible() then
+    s.tree_off = true
+    close_tree()
+  else
+    s.tree_off = false
+    if not ensure_tree() then
+      vim.notify('RelationView: neo-tree 를 세울 자리가 없습니다',
+        vim.log.levels.WARN)
+    end
+  end
+end
+
+-- 세로 전체 미리보기(두 번째 context)를 켜고 끈다
+function A.toggle_big()
+  if big_visible() then
+    close_big()
+    return
+  end
+  if not ensure_big() then
+    vim.notify('RelationView: 미리보기를 세울 자리가 없습니다',
+      vim.log.levels.WARN)
+    return
+  end
+  -- 지금 보고 있던 자리를 바로 채워 준다
+  if s.ctx_last then
+    local last = s.ctx_last
+    s.ctx_last = nil
+    show_context(last)
+  else
+    update_context(true)
   end
 end
 
@@ -5728,6 +6090,10 @@ local function apply_mode(m)
       s.ctx_sym = nil
       ctx_follow(true)
     end
+    -- A.close() 가 트리도 닫았으니, 끄기로 한 적이 없으면 다시 세운다
+    if want_tree() then
+      ensure_tree()
+    end
     return
   end
   s.ctx_alone = false
@@ -5766,6 +6132,14 @@ end, {
   complete = function() return { 'both', 'relation', 'context', 'off' } end,
   desc = 'Set the relation/context layout',
 })
+
+api.nvim_create_user_command('RelationViewTree', function()
+  A.toggle_tree()
+end, { desc = 'Toggle the neo-tree at the top of the RelationView column' })
+
+api.nvim_create_user_command('RelationViewBigContext', function()
+  A.toggle_big()
+end, { desc = 'Toggle the full-height context window left of the column' })
 
 api.nvim_create_user_command('RelationViewToggle', function()
   if panel_visible() or panel_win_here() then

@@ -2185,6 +2185,44 @@ let g:relationview_members = 0
 let g:relationview_unpin_delay = 2000
 
 " ------------------------------------
+" 오른쪽 열 구성 (relationview.lua)
+"
+"   g:relationview_position = 'right' 이면 오른쪽 한 열(width 만큼)을 셋으로
+"   나눈다. 위에서부터 neo-tree / 관계 목록 / 미리보기다.
+"
+"     +--------+--------+-----------+
+"     |        |        | neo-tree  |   t  (또는 \n)
+"     |  EDIT  |  big   +-----------+
+"     |        |  (T)   | relation  |
+"     |        |        +-----------+
+"     |        |        | context   |   c
+"     +--------+--------+-----------+
+"
+"   'T' (또는 \b) 는 그 열 왼쪽에 세로 전체 높이로 미리보기를 하나 더 연다.
+"   아래쪽 작은 미리보기와 같은 자리를 보여 주는 '넓게 읽는 창'이고, 둘은
+"   따로 켜고 끈다.
+"
+"   position = 'bottom' (지금 설정) 이면 관계 목록이 아래를 통째로 쓰고,
+"   오른쪽에는 neo-tree(위) 와 미리보기(아래)만 선다.
+let g:relationview_tree = 1
+let g:relationview_tree_height = 12
+let g:relationview_tree_dir = 'root'
+let g:relationview_right_stack = 1
+let g:relationview_big_width = 0
+
+" 패널 밖에서도 쓰도록 전역 단축키를 준다. 패널 안에서는 t / T 다.
+" (F1~F12 는 이미 전부 쓰고 있어서 <Leader> 를 쓴다. Leader 는 '\' 다)
+" 'l' = layout. \n 은 vim-mark 가, \t 는 neo-tree 가 이미 쓰고 있어서
+" 한 글자짜리는 남는 게 없다 - 실제로 \n 을 뺏었더니 vim-mark 가
+" E227 로 자기 매핑을 못 걸었다.
+" <Cmd> 는 vim 8.2 부터라 nvim 에서만 건다 (서버의 vim 8.1 이 이 파일을
+" 그대로 읽는다). 명령 자체도 relationview.lua 가 만드는 것이라 nvim 전용이다.
+if has('nvim')
+    nnoremap <silent> <Leader>lt <Cmd>RelationViewTree<CR>
+    nnoremap <silent> <Leader>lc <Cmd>RelationViewBigContext<CR>
+endif
+
+" ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창
 "   전부 telescope 픽커로 동작한다:
 "     <leader>fo  색인된 파일 찾아 열기   (^a 추가, ^d 목록에서 제거)
