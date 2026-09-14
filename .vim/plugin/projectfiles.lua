@@ -2887,15 +2887,41 @@ local function current_files(root)
   return {}
 end
 
-local function open_in_edit(root, rel)
+-- 고른 파일을 어느 창에 열까.
+--
+-- 예전에는 탭의 '첫 번째' 편집 창을 집었다. 그래서 EDIT 을 넷으로 나눠
+-- 놓고 어느 창에서 \fo 를 부르든 늘 맨 앞 창에 열렸다. 지금 보고 있던
+-- 자리를 잃는 셈이다.
+--
+-- 이제는 '부를 때 포커스가 있던 창'을 먼저 쓴다. telescope 는 닫을 때
+-- 원래 창으로 돌려주므로 대개 지금 창이 그것이지만, 확실하게 하려고
+-- 픽커가 열릴 때 잡아 둔 창(prefer)을 넘겨받는다.
+local function open_in_edit(root, rel, prefer)
   local abs = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
-  local target
-  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+  -- 편집에 쓸 수 있는 창인가. 패널/트리/미리보기는 buftype 이 비어 있지
+  -- 않으므로 여기서 걸러진다.
+  local function usable(w)
+    if not (w and api.nvim_win_is_valid(w)) then
+      return false
+    end
+    if api.nvim_win_get_tabpage(w) ~= api.nvim_get_current_tabpage() then
+      return false
+    end
     local b = api.nvim_win_get_buf(w)
-    local n = api.nvim_buf_get_name(b)
-    if vim.bo[b].buftype == '' and not n:match('RelationView') then
-      target = w
-      break
+    return vim.bo[b].buftype == ''
+        and not api.nvim_buf_get_name(b):match('RelationView')
+  end
+  local target
+  if usable(prefer) then
+    target = prefer
+  elseif usable(api.nvim_get_current_win()) then
+    target = api.nvim_get_current_win()
+  else
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if usable(w) then
+        target = w
+        break
+      end
     end
   end
   local buf = vim.fn.bufadd(abs)
@@ -3282,10 +3308,12 @@ end
 local function pick_find()
   local root = cur_root()
   local files = current_files(root)
+  -- 고른 파일은 '여기서 불렀다'는 그 창에 연다
+  local from_win = api.nvim_get_current_win()
   local t = telescope()
   if not t then
     return fallback_select(files, 'Project files',
-      function(c) open_in_edit(root, c) end)
+      function(c) open_in_edit(root, c, from_win) end)
   end
   t.pickers.new({}, {
     prompt_title = ('Project files (%d)  →  %s   ^a add  ^d remove')
@@ -3303,7 +3331,7 @@ local function pick_find()
         local entry = t.state.get_selected_entry()
         t.actions.close(bufnr)
         if entry then
-          open_in_edit(root, entry.value)
+          open_in_edit(root, entry.value, from_win)
         end
       end)
       map({ 'i', 'n' }, '<C-d>', function()
