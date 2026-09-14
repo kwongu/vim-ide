@@ -141,6 +141,47 @@ else
 	echo "      건너뜁니다. Ubuntu: sudo apt-get install -y neovim"
 fi
 
+# vim-ide 가 얹는 것들이 제자리에 왔는지 확인한다.
+#
+# ~/.vim 이 통째로 심볼릭 링크라 파일 자체는 저절로 따라온다. 그래도 굳이
+# 확인하는 이유는, 링크가 안 걸렸거나 예전 설치가 남아 있으면 조용히 기능만
+# 빠진 채로 돌기 때문이다 - 그 상태는 눈으로 알아채기 어렵다.
+echo "### check vim-ide add-ons ###"
+VIMIDE_MISS=0
+for f in \
+	.vim/plugin/relationview.lua \
+	.vim/plugin/projectfiles.lua \
+	.vim/plugin/autoindex.lua \
+	.vim/plugin/vimidesession.lua \
+	.vim/autoload/vimide/qf.vim \
+	.vim/after/ftplugin/qf.vim \
+	.vim/nerdtree_plugin/vimide_lastedit.vim ; do
+	if [ -r "${HOME}/${f}" ]; then
+		echo "  ok    ${f}"
+	else
+		echo "  MISS  ${f}"
+		VIMIDE_MISS=1
+	fi
+done
+if [ ${VIMIDE_MISS} -ne 0 ]; then
+	echo "note: 위 파일이 안 보이면 ${HOME}/.vim 링크를 확인하세요"
+	echo "      (ls -l ${HOME}/.vim  ->  ${VIMIDE}/.vim 를 가리켜야 합니다)"
+fi
+
+# 예전에 만들어 둔 init.vim 은 ~/.vim/after 를 runtimepath 에 안 넣을 수
+# 있다. quickfix 의 <CR> 을 EDIT 창으로 돌리는 파일이 거기 산다
+# (.vim/after/ftplugin/qf.vim). init.vim 은 이미 있으면 새로 쓰지 않으므로
+# 여기서 짚어만 준다 - 남의 설정을 말없이 고치지 않는다.
+if [ -e ${HOME}/.config/nvim/init.vim ] && \
+   ! grep -q 'runtimepath+=~/.vim/after' ${HOME}/.config/nvim/init.vim; then
+	echo "note: ${HOME}/.config/nvim/init.vim 에 아래 한 줄이 없습니다."
+	echo "        set runtimepath^=~/.vim runtimepath+=~/.vim/after"
+	echo "      없으면 quickfix 의 <CR> 이 EDIT 창으로 가지 않습니다."
+fi
+
+echo "tip: :qa 로 나간 자리에서 다시 시작하려면  nvim +Restore"
+echo "     (그냥  nvim  은 지금까지와 똑같이 기본 상태로 뜹니다)"
+
 pip install pathlib
 
 echo "### vim install end ###"
