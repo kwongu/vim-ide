@@ -328,6 +328,7 @@ local s = {
   big_win = nil,      -- 세로 전체 context (오른쪽 열 왼쪽, 두 번째 미리보기)
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
   tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
+  last_edit = nil,    -- 직전에 포커스가 있던 편집 창 (여기에 파일을 연다)
   tree_timer = nil,   -- 트리 따라가기 디바운스
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
@@ -5307,19 +5308,68 @@ end
 -- panel actions
 -- ---------------------------------------------------------------------------
 
+-- 편집 창으로 쓸 수 있는 창인가.
+-- 패널/미리보기/트리/aerial/quickfix 는 우리 버퍼이거나 buftype 이 비어
+-- 있지 않아 여기서 걸러진다.
+local function is_edit_win(w)
+  if not (w and api.nvim_win_is_valid(w)) then
+    return false
+  end
+  if api.nvim_win_get_tabpage(w) ~= api.nvim_get_current_tabpage() then
+    return false
+  end
+  if w == s.win or w == s.ctx_win or w == s.big_win or w == s.tree_win then
+    return false
+  end
+  local b = api.nvim_win_get_buf(w)
+  return vim.bo[b].buftype == '' and b ~= s.buf
+end
+
+-- 파일을 어느 편집 창에 열까.
+--
+-- 예전에는 '질의가 시작된 창'(src_win)을 먼저 쓰고, 없으면 탭의 '첫 번째'
+-- 편집 창을 집었다. 그래서 EDIT 을 넷으로 나눠 놓고 다른 창으로 옮겨 간
+-- 뒤 트리나 미리보기에서 파일을 열면, 방금까지 보고 있던 창이 아니라
+-- 엉뚱한 창이 바뀌었다.
+--
+-- 이제 '직전에 포커스가 있던 편집 창'을 먼저 쓴다. 트리/미리보기/목록
+-- 안에 있는 동안에는 그 값이 바뀌지 않으므로(아래 WinEnter 가 편집 창일
+-- 때만 적는다), 거기서 파일을 열면 들어오기 직전의 그 창이 된다.
 pick_src_win = function()
-  if s.src_win and s.src_win ~= s.ctx_win and api.nvim_win_is_valid(s.src_win)
-      and api.nvim_win_get_tabpage(s.src_win) == api.nvim_get_current_tabpage()
-  then
+  if is_edit_win(s.last_edit) then
+    return s.last_edit
+  end
+  if is_edit_win(s.src_win) then
     return s.src_win
   end
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
-    local b = api.nvim_win_get_buf(w)
-    if vim.bo[b].buftype == '' and b ~= s.buf and w ~= s.ctx_win then
+    if is_edit_win(w) then
       return w
     end
   end
   return nil
+end
+
+api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
+  group = group,
+  callback = function()
+    local w = api.nvim_get_current_win()
+    if is_edit_win(w) then
+      s.last_edit = w
+    end
+  end,
+  desc = 'RelationView: remember the edit window we came from',
+})
+
+-- 다른 플러그인도 같은 자리에 열 수 있도록 내보낸다.
+-- 편집 창을 못 찾으면 0 - telescope 의 get_selection_window 가 쓰는 규약이다
+-- ('0 이면 지금 창').
+function _G.vimide_last_edit_win()
+  local w = pick_src_win()
+  if w and api.nvim_win_is_valid(w) then
+    return w
+  end
+  return 0
 end
 
 -- <C-t> 가 쓰는 태그 스택에 '여기서 떠났다'를 적는다.

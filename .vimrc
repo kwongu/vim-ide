@@ -310,6 +310,24 @@ require'telescope'.setup{
 			height = 0.80,
 			preview_cutoff = 120,
 		},
+		-- 고른 파일을 '직전에 포커스가 있던 편집 창'에 연다.
+		--
+		-- telescope 는 기본으로 0(=지금 창)을 돌려주는데, 픽커를 부른 자리가
+		-- 트리나 아웃라인 같은 옆 창이면 그 옆 창에 파일이 열려 버린다.
+		-- relationview.lua 가 편집 창만 골라 기억해 둔 것을 쓴다
+		-- (_G.vimide_last_edit_win, 없으면 0 으로 떨어져 예전 동작).
+		--
+		-- 이 한 줄이 telescope 픽커 전부에 걸린다 - \ff \fg \fb \fr ... 포함.
+		get_selection_window = function()
+			local ok, w = pcall(function()
+				return _G.vimide_last_edit_win and _G.vimide_last_edit_win() or 0
+			end)
+			if ok and type(w) == 'number' and w ~= 0
+					and vim.api.nvim_win_is_valid(w) then
+				return w
+			end
+			return 0
+		end,
 	}
 }
 require'telescope'.load_extension'fzf'
@@ -2313,6 +2331,8 @@ endif
 let g:projectfiles_absorb = 1
 " ------------------------------------
 nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
+" F3 도 같은 것을 연다. RelationView 를 F12 로 옮기면서 비었다.
+nnoremap <silent> <F3> :ProjectFilesFind<CR>
 nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
 nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
 nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
