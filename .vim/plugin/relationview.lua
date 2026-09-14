@@ -99,6 +99,10 @@
 --                             index that holds this file, so the answer does
 --                             not depend on where nvim was started;
 --                             'cwd': the old behaviour
+--   g:relationview_path_style  how the file column reads in the list:
+--                             'name' (default) '<file>:<line> (<path>)',
+--                             'dir'  '<file>:<line> (<directory>)',
+--                             'path' the old '<path>:<line>'
 --   g:relationview_path_base  'root' (default): paths relative to the
 --                             outermost indexed project root, so the same
 --                             file always reads the same no matter where
@@ -3553,6 +3557,30 @@ render_tree = function()
     return vim.fn.fnamemodify(p, ':.')
   end
 
+  -- 목록의 파일 칸을 어떻게 보일까.
+  --
+  --   'name' (기본)  파일이름:줄 (파일경로)
+  --                  tcc_i2s.c:55 (sound/soc/telechips/tcc_i2s.c)
+  --   'dir'          파일이름:줄 (디렉터리) - 이름이 두 번 나오지 않는다
+  --                  tcc_i2s.c:55 (sound/soc/telechips)
+  --   'path'         예전 그대로
+  --                  sound/soc/telechips/tcc_i2s.c:55
+  --
+  -- 칸이 좁으면 뒤에서 자르므로(trunc_tail) 파일 이름 쪽이 끝까지 남는다.
+  local pstyle = tostring(cfg('path_style', 'name'))
+  local function loc_label(p, line)
+    local shown = rel(p)
+    if pstyle == 'path' then
+      return string.format('%s:%d', shown, line)
+    end
+    local name = vim.fn.fnamemodify(p, ':t')
+    local extra = (pstyle == 'dir') and vim.fn.fnamemodify(shown, ':h') or shown
+    if extra == '' or extra == '.' or extra == name then
+      return string.format('%s:%d', name, line)
+    end
+    return string.format('%s:%d (%s)', name, line, extra)
+  end
+
   -- pass 1: collect the three columns of every row so they can be padded
   -- to a common width (symbol | file:line | source text)
   local rows = {}      -- {kind='row', sym=, loc=, text=, item=, node=}
@@ -3562,7 +3590,7 @@ render_tree = function()
   end
   local function row(symcol, path, line, text, item, name)
     rows[#rows + 1] = { kind = 'row', sym = symcol,
-      loc = string.format('%s:%d', rel(path), line),
+      loc = loc_label(path, line),
       text = text, item = item, name = name }
     return rows[#rows]
   end
