@@ -346,13 +346,37 @@ nnoremap <silent> <Leader>v <Cmd>DiffviewOpen<CR>
 "   <leader>o 로 토글. treesitter 백엔드라 LSP 없이도 동작한다.
 "   F10 도 같은 aerial 을 연다(예전에는 tagbar 였다 - 파일 열기가 태그 수에
 "   비례해 느려져서 바꿨다. :Tagbar 로 tagbar 는 그대로 쓸 수 있다)
+"
+" g:vimide_outline_global
+"   1 (기본) 아웃라인은 화면 맨 왼쪽에 '하나만' 선다. EDIT 를 4분할로 쓰든
+"            몇 개로 쓰든 창은 하나고, 포커스를 옮기면 그 창의 파일로 내용이
+"            바뀐다. aerial 의 attach_mode='global' + layout.placement='edge'.
+"   0        예전 방식. EDIT 창마다 그 창에 붙은 아웃라인이 따로 뜬다
+"            (attach_mode='window' + placement='window').
+"
+"   이 둘은 aerial 이 setup 에서 한 번 읽으므로 바꾸면 nvim 을 다시 켜야 한다.
+"
+"   'edge' 는 'vertical topleft' 로 연다(aerial/window.lua). 그래서 왼쪽
+"   neo-tree 가 떠 있으면 aerial 이 그보다 더 바깥(맨 왼쪽)에 선다.
+"   순서는 aerial | neo-tree | EDIT 다.
+if !exists('g:vimide_outline_global')
+    let g:vimide_outline_global = 1
+endif
 " ------------------------------------
 lua << EOF
+local outline_global = (tonumber(vim.g.vimide_outline_global) or 1) ~= 0
 _G.rv_setup('aerial', {
   backends = { 'treesitter', 'lsp', 'markdown', 'man' },
   -- 아웃라인은 tagbar 시절부터 왼쪽에 있었다(g:tagbar_left=1). 그 자리를
   -- 그대로 쓴다 - 오른쪽은 RelationView 의 context 창이 쓰고 있다.
-  layout = { default_direction = 'left', width = 40 },
+  --   placement='edge'   화면 맨 왼쪽에 세로 전체로. 어느 EDIT 에서 열든
+  --                      같은 자리다.
+  --   placement='window' 지금 창을 쪼갠다 (예전 방식).
+  layout = {
+    default_direction = 'left',
+    width = 40,
+    placement = outline_global and 'edge' or 'window',
+  },
   -- 아웃라인은 F10 으로 켤 때만 연다.
   --
   -- 예전에는 심볼이 있는 파일을 열면 알아서 떴다. 문제는 aerial 이
@@ -377,10 +401,21 @@ _G.rv_setup('aerial', {
     if (tonumber(vim.g.vimide_outline_auto) or 0) == 0 then
       return false
     end
-    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-      local b = vim.api.nvim_win_get_buf(w)
-      if vim.bo[b].filetype == 'neo-tree' then
-        return false
+    -- neo-tree 검사는 예전 방식에서만 뜻이 있다.
+    --
+    -- 그때는 aerial 이 '지금 창'을 쪼개며 왼쪽 트리를 밀어냈다. global+edge
+    -- 는 topleft 로 서기 때문에 밀어내지 않고 그냥 나란히 선다.
+    --
+    -- 게다가 이 검사는 이제 늘 참이 된다 - RelationView 의 오른쪽 열에도
+    -- neo-tree 가 하나 있어서, 'neo-tree 가 있으면 열지 않는다' 가
+    -- 'g:vimide_outline_auto = 1 이어도 영영 안 연다' 가 돼 버렸다.
+    -- 그래서 예전 방식일 때만 본다.
+    if (tonumber(vim.g.vimide_outline_global) or 1) == 0 then
+      for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local b = vim.api.nvim_win_get_buf(w)
+        if vim.bo[b].filetype == 'neo-tree' then
+          return false
+        end
       end
     end
     local ok, util = pcall(require, 'aerial.util')
@@ -391,7 +426,9 @@ _G.rv_setup('aerial', {
   -- (s:TagbarFollowCursor, 아래 Tagbar 절).
   --   autojump = false 로 끄면 <CR> 로만 이동한다.
   autojump = true,
-  attach_mode = 'window',
+  --   'global' 아웃라인 창 하나가 '지금 포커스된 창'을 따라간다.
+  --   'window' 창마다 제 아웃라인을 갖는다 (예전 방식).
+  attach_mode = outline_global and 'global' or 'window',
   close_on_select = false,
   show_guides = true,
   -- h / l 은 커서를 움직이는 키다.
@@ -2652,7 +2689,13 @@ endfunc
 " 예전 NERDTree 왼쪽 창이 필요하면 :call NERDTreeOnlyLeft() 로 그대로 쓸 수 있다.
 func! NeoTreeOnlyLeft()
 	:TagbarClose
-	:AerialClose
+	" 예전 방식(g:vimide_outline_global = 0)에서만 아웃라인을 닫는다.
+	" 그때는 aerial 이 '지금 창'을 쪼개며 왼쪽 트리를 밀어냈다.
+	" 지금 기본인 global+edge 는 맨 왼쪽에 따로 서기 때문에 밀어내지 않는다
+	" (aerial | neo-tree | EDIT). 고정해 달라고 한 창을 F9 가 닫으면 안 된다.
+	if !get(g:, 'vimide_outline_global', 1)
+		:AerialClose
+	endif
 	:Neotree toggle left
 endfunc
 func! NeoTreeOnlyRight()
