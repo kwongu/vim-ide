@@ -329,6 +329,8 @@ local s = {
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
   tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
   last_edit = nil,    -- 직전에 포커스가 있던 편집 창 (여기에 파일을 연다)
+  edit_hist = {},     -- 최근 편집 창 (새 것이 앞). 곁창이 만들어지는 찰나에
+                      -- last_edit 이 오염되면 그 다음 것으로 되돌린다.
   tree_timer = nil,   -- 트리 따라가기 디바운스
   note = nil,         -- header suffix, e.g. '[struct arpc_msg]'
   shown = nil,        -- symbol of the last render (cursor reset on change)
@@ -5347,6 +5349,13 @@ end
 -- 안에 있는 동안에는 그 값이 바뀌지 않으므로(아래 WinEnter 가 편집 창일
 -- 때만 적는다), 거기서 파일을 열면 들어오기 직전의 그 창이 된다.
 pick_src_win = function()
+  -- 최근에 본 편집 창부터 차례로 (s.last_edit 이 그 맨 앞이다).
+  -- 죽은 창, 곁창으로 변한 창은 is_edit_win() 이 걸러낸다.
+  for _, w in ipairs(s.edit_hist) do
+    if is_edit_win(w) then
+      return w
+    end
+  end
   if is_edit_win(s.last_edit) then
     return s.last_edit
   end
@@ -5367,6 +5376,23 @@ api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
     local w = api.nvim_get_current_win()
     if is_edit_win(w) then
       s.last_edit = w
+      -- 한 칸만 들고 있으면 안 된다: 곁창을 만드는 플러그인은 먼저 :edit 로
+      -- 보통 버퍼를 띄우고 그 다음에 buftype 을 박는다(NERDTree 가 그렇다).
+      -- 그 찰나의 BufWinEnter 에 트리 창이 '편집 창'으로 적히고, 곧
+      -- buftype=nofile 이 되면서 그 값이 죽어 pick_src_win() 이 '첫 번째'
+      -- 창으로 떨어진다 - 고치려던 바로 그 증상이다. 그래서 두 칸을 쌓아
+      -- 두고, 죽은 것은 읽을 때 건너뛴다.
+      --   let g:vimide_edit_hist_depth = 1   " 1 이면 예전(한 칸) 동작
+      local depth = tonumber(vim.g.vimide_edit_hist_depth) or 2
+      if depth < 1 then depth = 1 end
+      local h = s.edit_hist
+      for i = #h, 1, -1 do
+        if h[i] == w then table.remove(h, i) end
+      end
+      table.insert(h, 1, w)
+      for i = #h, depth + 1, -1 do
+        table.remove(h, i)
+      end
     end
   end,
   desc = 'RelationView: remember the edit window we came from',

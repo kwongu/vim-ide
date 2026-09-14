@@ -1230,11 +1230,7 @@ func! s:ListStep(dir) abort
 		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
 		return
 	endif
-	try
-		exe a:dir > 0 ? 'cnext' : 'cprevious'
-	catch /^Vim\%((\a\+)\)\=:E\%(553\|42\|776\)/
-		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
-	endtry
+	call vimide#qf#Step(a:dir)
 endfunc
 nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
 nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
@@ -1245,11 +1241,7 @@ nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
 " - iTerm2 3.5+, kitty, WezTerm, Ghostty, foot 등. 안 먹으면 ]q / [q 를
 " 쓰면 된다(같은 동작).
 func! s:QfStep(dir) abort
-	try
-		exe a:dir > 0 ? 'cnext' : 'cprevious'
-	catch /^Vim\%((\a\+)\)\=:E\%(553\|42\|776\)/
-		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
-	endtry
+	call vimide#qf#Step(a:dir)
 endfunc
 " 리스트에서 고른 항목으로 실제 이동: Ctrl+Enter (어느 창에서 눌러도 된다)
 "   C-n/C-p 는 미리보기만 하므로, 이 키가 그 순회의 마침표다.
@@ -2773,48 +2765,84 @@ endfunc
 " 쪼개기/탭(s i t T gi gs)은 사용자가 일부러 고른 것이라 건드리지 않는다.
 "
 "   let g:vimide_nerdtree_last_edit = 0   " 끄면 예전 동작
-function! VimIdeNERDTreeOpen(node) abort
-    " 트리에 들어오기 직전 창(winnr('#'))이 편집 창이면 그것이 가장 정확하다.
-    " 트리를 여는 동작 자체가 창을 밀어내며 WinEnter 를 여러 번 일으켜서,
+" 어느 창에 열까 - stock 과 같은 순서다:
+"   1) 이미 그 파일을 띄우고 있는 창 ('reuse':'all' 과 같다)
+"   2) 트리에 들어오기 직전 창 winnr('#') 이 편집 창이면 그것
+"   3) relationview.lua 가 기억해 둔 마지막 편집 창 (_G.vimide_last_edit_win)
+"   4) 못 찾으면 NERDTree 가 늘 하던 대로 (stock opts 를 그대로 넘긴다)
+function! s:NERDTreeEditWin() abort
+    " 트리를 여는 동작 자체가 창을 밀어내며 WinEnter 를 여러 번 일으켜서
     " 전역 추적기가 엉뚱한 편집 창을 가리키는 경우가 있었다(실측: 3번째
-    " 창에서 열었는데 4번째에 열렸다). 그래서 여기서는 alternate 창을 먼저 본다.
-    let l:win = 0
+    " 창에서 열었는데 4번째에 열렸다). 그래서 alternate 창을 먼저 본다.
+    " (vim 8.1/9.1 에는 lua 추적기가 없어 이 줄만 남는다 - 그래도 곁창을
+    "  거쳐 들어오지 않은 보통의 경우는 이것으로 맞는다.)
     let l:alt = winnr('#')
-    if l:alt > 0 && getbufvar(winbufnr(l:alt), '&buftype') ==# ''
-        let l:win = win_getid(l:alt)
+    if l:alt > 0
+        let l:w = win_getid(l:alt)
+        if vimide#qf#Usable(l:w)
+            return l:w
+        endif
     endif
-    if l:win <= 0
-        let l:win = vimide#qf#Win()
+    let l:w = vimide#qf#Win()
+    return vimide#qf#Usable(l:w) ? l:w : 0
+endfunction
+
+" 새 NERDTree 는 nerdtree#closeTreeOnOpen() 을 주지만 서버의 예전 bundle
+" (.vim/bundle/The-NERD-tree) 에는 없다. 없으면 g: 변수를 직접 본다.
+function! s:NERDTreeQuitOnOpen() abort
+    if exists('*nerdtree#closeTreeOnOpen')
+        return nerdtree#closeTreeOnOpen()
     endif
-    if l:win <= 0
-        " 편집 창을 못 찾으면 NERDTree 가 늘 하던 대로 맡긴다
-        call a:node.activate({'reuse': 'all', 'where': 'p'})
-        return
-    endif
+    let l:q = get(g:, 'NERDTreeQuitOnOpen', 0)
+    return l:q == 1 || l:q == 3
+endfunction
+
+func! s:NERDTreeOpen(node, stay) abort
+    " stock 이 늘 주던 옵션. keepopen 을 빠뜨리면 Opener.New 의 has_opt()
+    " 가 0 으로 읽어 _checkToCloseTree() 가 트리를 닫아 버린다
+    " (opener.vim:141, 42) - 되돌아갈 트리가 사라진다.
+    let l:quit = s:NERDTreeQuitOnOpen()
+    let l:opts = {'reuse': 'all', 'where': 'p', 'stay': a:stay, 'keepopen': !l:quit}
+    let l:tree = win_getid()
     let l:path = a:node.path.str()
-    call win_gotoid(l:win)
-    execute 'edit ' . fnameescape(l:path)
-endfunction
-
-function! s:NERDTreeOpenKeys() abort
-    if !get(g:, 'vimide_nerdtree_last_edit', 1) || !exists('*NERDTreeAddKeyMap')
+    " 이미 그 파일을 띄운 창이 있으면 거기로 (stock 의 _reuseWindow 와 같다)
+    let l:nr = bufwinnr('^' . l:path . '$')
+    let l:win = l:nr > 0 ? win_getid(l:nr) : s:NERDTreeEditWin()
+    if l:win <= 0 || l:win == l:tree
+        " 편집 창이 없으면 NERDTree 가 늘 하던 대로 맡긴다 (쪼개기 등)
+        call a:node.activate(l:opts)
         return
     endif
-    for l:k in [get(g:, 'NERDTreeMapCustomOpen', '<CR>'),
-                \ get(g:, 'NERDTreeMapActivateNode', 'o')]
-        call NERDTreeAddKeyMap({
-            \ 'key': l:k,
-            \ 'scope': 'FileNode',
-            \ 'callback': 'VimIdeNERDTreeOpen',
-            \ 'override': 1,
-            \ 'quickhelpText': 'open in the last focused EDIT window' })
-    endfor
-endfunction
+    " zoom 해 둔 트리는 stock 과 똑같이 먼저 푼다 (opener.vim:220)
+    if !a:stay && !l:quit && get(b:, 'NERDTreeZoomed', 0)
+        call b:NERDTree.ui.toggleZoom()
+    endif
+    call win_gotoid(l:win)
+    if fnamemodify(bufname('%'), ':p') !=# fnamemodify(l:path, ':p')
+        try
+            execute 'edit ' . fnameescape(l:path)
+        catch /^Vim\%((\a\+)\)\=:E/
+            echohl WarningMsg
+            echomsg substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+            echohl None
+            return
+        endtry
+    endif
+    if l:quit
+        call g:NERDTree.Close()
+    elseif a:stay && win_id2win(l:tree) > 0
+        call win_gotoid(l:tree)
+    endif
+endfunc
 
-augroup VimIdeNERDTreeOpenInEdit
-    autocmd!
-    autocmd VimEnter * call <SID>NERDTreeOpenKeys()
-augroup END
+" 여는 키(<CR> o <2-LeftMouse>) 가 부른다
+function! VimIdeNERDTreeOpen(node) abort
+    call s:NERDTreeOpen(a:node, 0)
+endfunction
+" 미리보기(go): 파일은 EDIT 창에 뜨고 포커스는 트리에 남는다
+function! VimIdeNERDTreePreview(node) abort
+    call s:NERDTreeOpen(a:node, 1)
+endfunction
 
 func! NERDTreeOnly()
 	:TagbarClose
