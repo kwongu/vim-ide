@@ -609,5 +609,14 @@ api.nvim_create_autocmd('VimLeavePre', {
   desc = 'vim-ide: 나가기 전에 창 배치와 옆 창을 적어 둔다',
 })
 
+-- 복원 중인지 밖에서 물어볼 수 있게 한다.
+--
+-- 세션 파일 첫 줄의 `silent only` 가 편집 창부터 닫는 바람에, 복원 도중에
+-- '편집 창 0개' 인 순간이 실제로 여러 번 생긴다(커서가 패널 안에 있을 때
+-- 실측 3회). 'EDIT 창이 0개면 끝낸다' 규칙이 그 순간에 깨어나면 안 된다.
+function M.is_restoring()
+  return restoring
+end
+
 _G.vimide_session = M
 return M

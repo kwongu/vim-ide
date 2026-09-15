@@ -1297,8 +1297,14 @@ func! s:RvPanelOn() abort
 	return luaeval('(_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil) and 1 or 0')
 endfunc
 
-func! s:RvMarkCword() abort
-	if !get(g:, 'vimide_jump_mark', 1) || !s:RvPanelOn()
+" a:1 이 1 이면 패널이 꺼져 있어도 칠한다.
+"
+" <C-]> 가 그렇다 - 릴레이션 뷰가 꺼져 있을 때도 '뛰면 칠하고 <C-t> 로
+" 풀린다'가 요청된 동작이다. g] 는 예전대로 패널이 떠 있을 때만 칠한다
+" ('릴레이션 뷰 Off 면 기존 유지').
+func! s:RvMarkCword(...) abort
+	let l:always = a:0 > 0 && a:1
+	if !get(g:, 'vimide_jump_mark', 1) || (!l:always && !s:RvPanelOn())
 		return
 	endif
 	let l:w = expand('<cword>')
@@ -1347,7 +1353,7 @@ nnoremap <silent> g] :call <SID>RvEditJump()<CR>
 nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvEditJump()<CR>
 
 func! s:RvCtxJump() abort
-	call s:RvMarkCword()
+	call s:RvMarkCword(1)
 	if has('nvim') && exists('*luaeval')
 		try
 			" #include 줄이면 배치와 상관없이 그 헤더로 간다
@@ -1365,24 +1371,39 @@ func! s:RvCtxJump() abort
 			if luaeval('_G.relationview_ctx_jump ~= nil and _G.relationview_ctx_jump() or false')
 				return
 			endif
-			" 패널이 닫혀 있으면 예전처럼 quickfix 로 보낸다. 거기서도
-			" 못 찾으면 그 심볼을 정의한 파일을 project files 에 넣고
-			" (색인까지) 한 번 더 찾는다.
-			" 패널도 미리보기도 없을 때만 여기로 온다. 예전에는 패널만
-			" 봐서, context only 모드(F3 의 시작 기본값)에서는 위 핸들러가
-			" 처리했는데도 이 줄이 한 번 더 quickfix 를 열었다.
+			" 여기부터는 릴레이션 뷰가 꺼져 있을 때다.
+			" 패널도 미리보기도 없을 때만 온다. 예전에는 패널만 봐서,
+			" context only 모드에서는 위 핸들러가 처리했는데도 이 줄이
+			" 한 번 더 quickfix 를 열었다.
 			if !luaeval('(_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil) or (_G.relationview_ctx_win ~= nil and _G.relationview_ctx_win() ~= nil) or false')
-						\ && exists(':Gtags') == 2
-						\ && luaeval('_G.relationview_has_db ~= nil and _G.relationview_has_db() or false')
-				let l:w = expand('<cword>')
-				call setqflist([])
-				try | execute 'Gtags -d ' . l:w | catch | endtry
-				if empty(getqflist()) && l:w =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-					" 소스 전체 검색은 커널에서 1초를 훌쩍 넘긴다: 백그라운드로
-					" 돌리고, 파일이 추가되면 그때 다시 찾는다
-					call luaeval('_G.projectfiles_add_for_symbol_async ~= nil and (function() _G.projectfiles_add_for_symbol_async(_A, function(n) if n and n > 0 then vim.cmd("Gtags -d " .. _A) end end) return 1 end)() or 0', l:w)
+				" 릴레이션 뷰가 꺼져 있으면 '지금 보고 있는 EDIT 창'에서 바로
+				" 뛴다. tagfunc(GTAGS)가 답한다.
+				"
+				" 예전에는 여기서 곧장 quickfix 로 보냈다. 요청대로 먼저
+				" 편집 창에서 뛰어 보고, 태그가 답하지 못할 때만 예전 길로
+				" 떨어진다.
+				if &buftype ==# '' || &buftype ==# 'help'
+					try
+						execute "normal! \<C-]>"
+						return
+					catch
+					endtry
 				endif
-				return
+				" 태그가 답하지 못했다: 예전처럼 quickfix 로 보내고, 거기서도
+				" 못 찾으면 그 심볼을 정의한 파일을 project files 에 넣고
+				" (색인까지) 한 번 더 찾는다.
+				if exists(':Gtags') == 2
+							\ && luaeval('_G.relationview_has_db ~= nil and _G.relationview_has_db() or false')
+					let l:w = expand('<cword>')
+					call setqflist([])
+					try | execute 'Gtags -d ' . l:w | catch | endtry
+					if empty(getqflist()) && l:w =~# '^[A-Za-z_][A-Za-z0-9_]*$'
+						" 소스 전체 검색은 커널에서 1초를 훌쩍 넘긴다: 백그라운드로
+						" 돌리고, 파일이 추가되면 그때 다시 찾는다
+						call luaeval('_G.projectfiles_add_for_symbol_async ~= nil and (function() _G.projectfiles_add_for_symbol_async(_A, function(n) if n and n > 0 then vim.cmd("Gtags -d " .. _A) end end) return 1 end)() or 0', l:w)
+					endif
+					return
+				endif
 			endif
 		catch
 		endtry
@@ -1408,6 +1429,12 @@ func! s:RvGotoFile() abort
 			endif
 		catch
 		endtry
+	endif
+	" 곁창에서는 그냥 둔다. <C-]>/g]/더블클릭은 이 가드가 있는데 gf 만
+	" 빠져 있어서, NERDTree/aerial/tagbar/bufexplorer 에서 파일 이름처럼
+	" 보이는 글자 위에 gf 를 누르면 그 사이드바에 파일이 실렸다.
+	if &buftype !=# '' && &buftype !=# 'help'
+		return
 	endif
 	normal! gf
 endfunc
@@ -1935,21 +1962,43 @@ map <C-k> :wincmd k<cr>
 map <C-j> :wincmd j<cr>
 
 
-"===== 버퍼?????동
-map ,r :bn!<CR>	  " Switch to Next File Buffer
-map ,e :bp!<CR>	  " Switch to Previous File Buffer
-map ,w :bw!<CR>	  " Close Current File Buffer
+"===== 버퍼 이동
+"
+" 곁창에서는 아무 일도 하지 않는다. 이 매핑들은 bang 형태(:bn! :bp! :b!N)라
+" winfixbuf 마저 뚫고 들어간다 - RelationView 패널이 이 매핑들에 버퍼를
+" 빼앗겨 스스로 되돌리는 코드를 따로 들고 있을 정도였다. 곁창에서 눌러도
+" 사이드바가 일반 파일로 바뀌지 않게 여기서 한 번에 막는다.
+"
+" 주석을 줄 위로 올린 이유: :map 은 줄 끝까지를 통째로 오른쪽 항으로 삼는다.
+" 예전에는 `map ,r :bn!<CR>   " Switch to ...` 라서 <CR> 뒤의 글자들이 노멀
+" 모드 키로 딸려 들어갔다.
+func! s:BufCycle(cmd) abort
+	if &buftype !=# ''
+		return
+	endif
+	if has('nvim') && exists('*luaeval')
+				\ && !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+		return
+	endif
+	execute a:cmd
+endfunc
 
-map ,1 :b!1<CR>	  " Switch to File Buffer #1
-map ,2 :b!2<CR>	  " Switch to File Buffer #2
-map ,3 :b!3<CR>	  " Switch to File Buffer #3
-map ,4 :b!4<CR>	  " Switch to File Buffer #4
-map ,5 :b!5<CR>	  " Switch to File Buffer #5
-map ,6 :b!6<CR>	  " Switch to File Buffer #6
-map ,7 :b!7<CR>	  " Switch to File Buffer #7
-map ,8 :b!8<CR>	  " Switch to File Buffer #8
-map ,9 :b!9<CR>	  " Switch to File Buffer #9
-map ,0 :b!0<CR>	  " Switch to File Buffer #0
+" 다음 / 이전 / 지금 버퍼 닫기
+map ,r :call <SID>BufCycle('bn!')<CR>
+map ,e :call <SID>BufCycle('bp!')<CR>
+map ,w :call <SID>BufCycle('bw!')<CR>
+
+" 버퍼 번호로 바로 가기 (,1 ~ ,0)
+map ,1 :call <SID>BufCycle('b!1')<CR>
+map ,2 :call <SID>BufCycle('b!2')<CR>
+map ,3 :call <SID>BufCycle('b!3')<CR>
+map ,4 :call <SID>BufCycle('b!4')<CR>
+map ,5 :call <SID>BufCycle('b!5')<CR>
+map ,6 :call <SID>BufCycle('b!6')<CR>
+map ,7 :call <SID>BufCycle('b!7')<CR>
+map ,8 :call <SID>BufCycle('b!8')<CR>
+map ,9 :call <SID>BufCycle('b!9')<CR>
+map ,0 :call <SID>BufCycle('b!0')<CR>
 
 
 "===== text change

@@ -153,6 +153,7 @@ for f in \
 	.vim/plugin/projectfiles.lua \
 	.vim/plugin/autoindex.lua \
 	.vim/plugin/vimidesession.lua \
+	.vim/plugin/vimidewin.lua \
 	.vim/autoload/vimide/qf.vim \
 	.vim/after/ftplugin/qf.vim \
 	.vim/nerdtree_plugin/vimide_lastedit.vim ; do

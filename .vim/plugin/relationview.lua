@@ -1868,7 +1868,11 @@ local function ensure_buf()
   bmap('w', function() A.toggle_wide() end,
     'RelationView: widen this panel to half the screen (toggle)')
   -- the mouse side buttons act on the source window while the list has focus
-  for _, k in ipairs({ '<X1Mouse>', '<C-o>', unpack(alias_keys('back')) }) do
+  --
+  -- <C-t> 도 같이 건다. 안 걸면 패널에서 누른 <C-t> 가 .vimrc 의 전역
+  -- s:JumpBack() 으로 새어 나가, 되돌아가지도 않은 채 점프 색 하나를
+  -- 스택에서 지운다(패널은 태그 스택을 쌓은 적이 없다).
+  for _, k in ipairs({ '<X1Mouse>', '<C-o>', '<C-t>', unpack(alias_keys('back')) }) do
     bmap(k, function() A.back() end, 'RelationView: back (<C-o>)')
   end
   for _, k in ipairs({ '<X2Mouse>', '<C-i>', unpack(alias_keys('forward')) }) do
@@ -2998,6 +3002,10 @@ ctx_tag_jump = function(from_mouse)
           vim.log.levels.WARN)
         return
       end
+      -- 헤더로 따라가는 것은 심볼이 아니라 파일이다: 칠할 것이 없다.
+      -- 그래도 자리는 쌓는다 - ctx_stack 한 칸 = jump_marks 한 칸 이어야
+      -- <C-t> 를 여러 번 눌러도 짝이 어긋나지 않는다.
+      pcall(_G.vimide_jump_mark_push, nil)
       table.insert(s.ctx_stack,
         { path = file, line = pos[1] + off, col = pos[2] })
       s.ctx_last = nil
@@ -3022,6 +3030,7 @@ ctx_tag_jump = function(from_mouse)
     -- 'msg->cmd' first: the member belongs to the base variable's struct,
     -- not to whatever else carries that name (a local, say)
     local taken = member_jump(fbuf, here, pos[2], function(loc)
+      pcall(_G.vimide_jump_mark_push, sym)
       table.insert(s.ctx_stack,
         { path = file, line = here, col = pos[2], sym = sym })
       s.ctx_last = nil
@@ -3039,6 +3048,7 @@ ctx_tag_jump = function(from_mouse)
     local okd, d = pcall(local_decl, fbuf, here, sym)
     if okd and d and d.line then
       if d.line ~= here then
+        pcall(_G.vimide_jump_mark_push, sym)
         table.insert(s.ctx_stack,
           { path = file, line = here, col = pos[2], sym = sym })
         s.ctx_last = nil
@@ -3069,6 +3079,7 @@ ctx_tag_jump = function(from_mouse)
         if not ctx_visible() then
           return
         end
+        pcall(_G.vimide_jump_mark_push, sym)
         table.insert(s.ctx_stack,
           { path = file, line = pos[1] + off, col = pos[2], sym = sym })
         s.ctx_last = nil -- a manual jump, not a list preview
@@ -3088,6 +3099,17 @@ ctx_tag_back = function()
   if not prev then
     vim.notify('RelationView context: jump stack is empty')
     return
+  end
+  -- 되짚는 칸마다 색을 하나씩 푼다.
+  --
+  -- ctx_stack 한 칸 = jump_marks 한 칸 이다. 편집 창에서 떠날 때는 .vimrc 의
+  -- s:RvMarkCword() 가, 미리보기 안에서 더 팔 때는 ctx_tag_jump() 가 칠하고
+  -- 자리를 쌓는다. 그래서 여기서 한 칸 빼면 그 칸의 색 하나가 풀린다 -
+  -- 편집 창까지 돌아오는 마지막 칸이든, 미리보기 안에서 되짚는 중간 칸이든
+  -- 똑같다. 예전에는 마지막 칸(origin)에서만 풀어서, 미리보기 안에서 판
+  -- 색들이 그대로 남았다.
+  if _G.vimide_jump_mark_pop then
+    pcall(_G.vimide_jump_mark_pop)
   end
   -- 어디에서 되돌아왔는지 적어 둔다: <C-i> 가 여기로 다시 온다
   if s.ctx_file then
@@ -3115,17 +3137,6 @@ ctx_tag_back = function()
       pcall(api.nvim_win_set_cursor, ow, { prev.line, prev.col or 0 })
     end
     pcall(api.nvim_set_current_win, ow)
-    -- 편집 창까지 돌아왔다 = 편집 창에서 <C-]> 로 떠날 때 칠한 색을 풀 자리다.
-    --
-    -- .vimrc 의 <C-t>(s:JumpBack)만 풀도록 두었더니 이 길에서 새어 나갔다.
-    -- <C-]> 는 포커스를 미리보기로 옮기므로, 거기서 누른 <C-t> 는 저쪽이
-    -- 아니라 이 함수를 탄다.
-    --
-    -- origin 이 있는 단계에서만 푼다. 미리보기 안에서 <C-]> 로 더 판 뒤
-    -- 되짚는 단계는 origin 이 없고, 그때는 칠한 것도 없기 때문이다.
-    if _G.vimide_jump_mark_pop then
-      pcall(_G.vimide_jump_mark_pop)
-    end
   end
 end
 
@@ -3144,6 +3155,8 @@ ctx_tag_forward = function()
     vim.notify('RelationView context: 앞으로 갈 곳이 없습니다')
     return
   end
+  -- 되짚었던 칸을 도로 쌓으니 색도 도로 칠한다(칸과 색은 1:1 이다)
+  pcall(_G.vimide_jump_mark_push, nxt.back and nxt.back.sym or nil)
   table.insert(s.ctx_stack, nxt.back)
   s.ctx_last = nil
   show_context(nxt.to)
@@ -3164,6 +3177,9 @@ ctx_enter_from = function(win, loc, sym)
   -- the way back instead of stacking another dead C-t on top of it
   local top = s.ctx_stack[#s.ctx_stack]
   if top and top.origin and top.origin.win == win then
+    -- 이 칸을 버리므로 거기 딸린 색도 놓아준다. 방금 s:RvMarkCword() 가
+    -- 이번 심볼로 맨 위에 하나 쌓았으니, 버릴 것은 그 바로 아래다.
+    pcall(_G.vimide_jump_mark_pop_at, 2)
     s.ctx_stack[#s.ctx_stack] = entry
   else
     table.insert(s.ctx_stack, entry)
@@ -6450,7 +6466,16 @@ end
 local jump_marks = {}
 
 local function mark_pat(word)
-  return (vim.fn.escape(word, '\\^$.*[~'):gsub('\n', '\\n'))
+  local pat = (vim.fn.escape(word, '\\^$.*[~'):gsub('\n', '\\n'))
+  -- F4(<Plug>MarkSet)는 mark#MarkCurrentWord 를 거치며 낱말을 \<...\> 로
+  -- 감싼다. 이쪽이 맨 foo 를 쓰면 mark#GetMarkNumber 의 정확 비교(==#)가
+  -- 어긋나, 사용자가 F4 로 칠해 둔 심볼 위에서 점프할 때 '이미 칠해졌다'를
+  -- 못 알아보고 같은 낱말에 색을 하나 더 얹는다. 같은 모양으로 맞춘다.
+  -- (낱말일 때만이다. \fr 처럼 아무 글자나 찾는 길은 이 함수를 안 쓴다.)
+  if word:match('^[%a_][%w_]*$') then
+    return '\\<' .. pat .. '\\>'
+  end
+  return pat
 end
 
 local function mark_number(pat)
@@ -6483,17 +6508,31 @@ function _G.vimide_jump_mark_push(word)
   return ok
 end
 
-function _G.vimide_jump_mark_pop()
-  local pat = table.remove(jump_marks)
-  if type(pat) ~= 'string' then
+-- 스택의 '위에서 n 번째' 칸을 빼고 그 색을 지운다(n=1 이 맨 위).
+--
+-- n 이 필요한 자리는 하나다: 미리보기의 origin 칸이 교체될 때. 그때는
+-- 이번 <C-]> 가 칠한 것이 이미 맨 위에 있으므로, 버려지는 옛 칸은 그 바로
+-- 아래(n=2)다.
+function _G.vimide_jump_mark_pop_at(n)
+  n = tonumber(n) or 1
+  local i = #jump_marks - n + 1
+  if i < 1 or i > #jump_marks then
     return false
   end
-  local n = mark_number(pat)
-  if n > 0 then
-    pcall(vim.fn['mark#Clear'], n)
+  local pat = table.remove(jump_marks, i)
+  if type(pat) ~= 'string' then
+    return false -- 우리가 칠한 것이 아닌 자리표시자
+  end
+  local num = mark_number(pat)
+  if num > 0 then
+    pcall(vim.fn['mark#Clear'], num)
     return true
   end
   return false
+end
+
+function _G.vimide_jump_mark_pop()
+  return _G.vimide_jump_mark_pop_at(1)
 end
 
 local function lookup_to_qf(root, pat, refs)
