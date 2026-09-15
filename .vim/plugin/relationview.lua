@@ -6174,18 +6174,18 @@ end
 
 -- 오른쪽 열 세 창의 높이를 비율로 나눈다.
 --
--- 기본 2 : 3 : 5 (neo-tree : 관계 목록 : 미리보기). 10등분했을 때의 몫이다.
+-- 기본 2 : 4 : 6 (neo-tree : 관계 목록 : 미리보기). 12등분했을 때의 몫이다.
 -- 예전에는 트리와 목록에 고정 줄수를 떼어 주고 남은 것을 전부 미리보기에
 -- 주었는데, 터미널 높이가 달라지면 비율이 제각각이 됐다.
 --
---   let g:relationview_column_ratio = [2, 3, 5]   " 바꾸려면
+--   let g:relationview_column_ratio = [2, 4, 6]   " 바꾸려면
 --   let g:relationview_column_ratio = []          " 예전 방식(고정 줄수)
 --
 -- 셋 중 일부만 열려 있으면 열린 것들끼리 같은 비율로 나눈다.
 local function column_ratio()
   local v = vim.g.relationview_column_ratio
   if v == nil then
-    return 2, 3, 5
+    return 2, 4, 6
   end
   if type(v) ~= 'table' or #v ~= 3 then
     return nil -- 예전 방식(고정 줄수)을 쓴다
