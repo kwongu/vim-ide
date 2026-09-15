@@ -2723,6 +2723,9 @@ let g:overview_mouse = 1
 " 연다. 다른 명령도 그렇게 돌리고 싶으면:
 "   :VimIdeInEdit <명령>
 "
+" 1 (기본) :only / <C-w>o 가 곁창은 그대로 두고 편집 창만 하나로 합친다.
+"          :only! 은 늘 예전대로 모든 창을 닫는다.
+let g:vimide_only_keeps_sides = 1
 " 1 (기본) 곁창에서 친 아래 명령을 EDIT 창으로 옮겨서 실행한다.
 "            :e :ene :find :view :sview :sfind :diffsplit
 "            :b :bn :bp :sb :bd :bw  :h :tag :tjump :tselect :pop :tn :tp
@@ -3634,6 +3637,47 @@ func! s:RouteCR() abort
 	return "\<CR>"
 endfunc
 cnoremap <expr> <CR> <SID>RouteCR()
+
+ " :only / <C-w>o 는 곁창까지 통째로 닫는다.
+"
+" 실측(178칸 F12 배치): EDIT 창에서 :only 한 번에 aerial / neo-tree /
+" RelationView 패널 / context / overview 막대가 한꺼번에 사라지고 편집 창
+" 하나만 남는다. 다시 세우려면 F12 와 F9/F10 을 손으로 눌러야 한다.
+"
+" 뜻은 살리되 범위를 편집 영역으로 좁힌다 - '편집 창을 하나로 합친다'.
+" 곁창까지 진짜로 다 닫고 싶으면 :only! 로 예전 그대로 쓴다.
+"
+" 왜 '닫힌 뒤 되살리기' 가 아닌가: 닫히는 순간만 보고는 일부러 닫은 것과
+" 딸려 닫힌 것을 가릴 수 없다. 실측한 여섯 가지 중
+"   aerial 안에서 :q        -> 커서가 그 창에 있다
+"   aerial 안에서 q(제 키)  -> 커서가 다른 창에 있다   <- 일부러인데
+"   EDIT 에서 win_close()   -> 커서가 다른 창에 있다   <- 딸려인데 똑같다
+" 둘이 구별되지 않는다. 그래서 되살리기를 만들면 aerial 에서 q 를 눌러도
+" 도로 튀어나온다. 닫는 쪽을 고치는 것이 맞다.
+"
+"   let g:vimide_only_keeps_sides = 0   " :only 를 예전 그대로
+func! s:OnlyEdit(bang) abort
+	if !empty(a:bang) || !get(g:, 'vimide_only_keeps_sides', 1)
+				\ || !has('nvim') || !exists('*luaeval')
+		execute 'only' . a:bang
+		return
+	endif
+	" 곁창에 선 채로 쳤으면 먼저 편집 자리로 옮긴다. 안 그러면 '이 창만
+	" 남기기' 가 되어 편집 창이 전부 사라진다.
+	if !s:GotoEditSlot(1)
+		execute 'only' . a:bang
+		return
+	endif
+	let l:keep = win_getid()
+	for l:w in luaeval('_G.vimide_edit_wins ~= nil and _G.vimide_edit_wins() or {}')
+		if l:w != l:keep && win_id2win(l:w) > 0
+			execute win_id2win(l:w) . 'wincmd c'
+		endif
+	endfor
+endfunc
+command! -bang -bar VimIdeOnly call s:OnlyEdit('<bang>')
+nnoremap <silent> <C-w>o :<C-u>VimIdeOnly<CR>
+call s:RouteAbbrev('only', 'on', 'VimIdeOnly', 0)
 
 " '지금 창'에 버퍼를 들이는 명령들. 곁창에서 치면 EDIT 창으로 돌린다.
 "
