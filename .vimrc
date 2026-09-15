@@ -1247,10 +1247,21 @@ let g:Gtags_OpenQuickfixWindow = 1
 "let g:Gtags_VerticalWindow = 0
 "let g:Gtags_Auto_Map = 0
 "let g:Gtags_Auto_Update = 0
-" C-n / C-p 는 quickfix 를 훑는다. \c, Ctrl+/ 등 '찾은 줄 목록'이
-" quickfix 로 가므로, 그 목록을 넘기는 키도 여기에 둔다.
-" 릴레이션 패널 리스트를 훑는 키는 Ctrl+0 / Ctrl+9 (아래).
+" C-n / C-p 는 '지금 앞에 있는 목록'의 다음/이전이다.
+"
+"   릴레이션 뷰가 켜져 있으면  -> 패널 목록을 훑는다
+"                               (context view 에만 미리보기가 뜨고 EDIT 창은
+"                                움직이지 않는다. 포커스도 그대로. 실제로 그
+"                                자리로 가려면 Ctrl+Enter 또는 패널에서 Enter)
+"   꺼져 있으면                -> quickfix 를 훑는다
+"
+" 판단 기준은 '패널이 떠 있는가'(s:RvPanelOn)다. 명령이 있는지로만 보면
+" 뷰를 꺼 둔 상태에서도 패널 쪽으로 가려 해서 quickfix 가 안 움직인다.
 func! s:ListStep(dir) abort
+	if s:RvPanelOn() && exists(':RelationViewNext') == 2
+		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
+		return
+	endif
 	call vimide#qf#Step(a:dir)
 endfunc
 nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
