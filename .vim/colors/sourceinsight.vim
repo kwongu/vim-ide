@@ -400,6 +400,20 @@ call s:hi('@si.inactive', 'linenr', '', '')
 call s:hi('SiJumpLocal', 'jumplocal', '', '')
 " 색인이 정의부를 모르는 심볼 (sihlindex.lua). 본문색으로 떨어뜨린다 -
 " 초록이 '점프할 수 있다'는 뜻이 되려면, 못 하는 것은 초록이 아니어야 한다.
+"
+" 볼드도 빼야 한다. 그런데 이 그룹에서 'NONE' 을 준다고 빠지지 않는다:
+" nvim 은 겹친 하이라이트의 속성을 OR 로 합치고, bold=false 를 따로
+" 기억하지 않는다(실측: nvim_set_hl 에 bold=false 를 줘도 get_hl 은 nil).
+" 그래서 밑에 깔린 treesitter 의 @function.call(초록 볼드)이 그대로 비쳐
+" '검정 볼드'로 보였다.
+"   실측: @function.call bold=true / SiJumpNone bold=nil -> 검정 볼드
+"
+" 고치는 자리는 아래쪽 레이어다. treesitter 표에서 function.call 의 볼드를
+" 빼고, 볼드가 필요한 쪽(색인이 아는 심볼)이 제 그룹에서 직접 준다
+" - SiJumpFound, SiFnMacro 에 'bold' 를 붙여 둔 것이 그것이다.
+" 그래서 sihlindex 가 칠하지 않는 버퍼(색인 끔, C 아닌 파일)에서는 함수
+" 호출이 초록 볼드가 아니라 초록으로 보인다. 되돌리려면 위 표의
+" 'function.call' 에 'bold' 를 도로 넣으면 된다.
 call s:hi('SiJumpNone', 'fg', '', '')
 " 함수 안에서 쓰는 전역 변수 (sihllocal.lua)
 call s:hi('SiGlobalRef', 'globalref', '', 'italic')
@@ -411,7 +425,7 @@ call s:hi('SiMacroRef', 'number', '', '')
 "   let g:sihl_index_macro_navy = ['include/linux/module\.h', 'include/linux/init\.h']
 call s:hi('SiMacroKw', 'decl', '', 'bold')
 " 색인이 아는데 매크로가 아닌 상수(enum 요소). 기본색이 빨강이라 되돌린다.
-call s:hi('SiJumpFound', 'ref', '', '')
+call s:hi('SiJumpFound', 'ref', '', 'bold')
 " 로그 매크로 (ape_dbg, arpc_info, DIRAC_TRACE_ERR ...). 매크로지만 읽을 때는
 " 함수 호출이라 @function.call 과 같은 초록 볼드로 둔다 - 빨강으로 두면
 " 본문에서 로그 줄만 튀어 정작 읽어야 할 코드를 가린다.
@@ -424,7 +438,7 @@ call s:hi('SiEnumRef', 'number', '', '')
 " 함수처럼 부르는 매크로 (sihlindex.lua). '#define NAME(' 꼴이면 읽을 때는
 " 함수 호출이라 초록이다. 빨강은 상수 매크로 몫으로 남긴다. 로그 매크로는
 " 이것의 부분집합이고 볼드까지 붙는다(SiLogMacro).
-call s:hi('SiFnMacro', 'ref', '', '')
+call s:hi('SiFnMacro', 'ref', '', 'bold')
 " EXPORT_SYMBOL(sym) 의 sym (sihlindex.lua). 내보내는 대상은 언제나 이
 " 파일이 정의한 함수나 변수라서, 함수 호출과 같은 초록 볼드로 둔다.
 "   let g:sihl_index_export_macros = []   " 이 규칙을 끈다
@@ -475,7 +489,7 @@ let s:ts = {
       \ 'constant.builtin':   ['number',  ''],
       \ 'constant.macro':     ['macro',   s:kw],
       \ 'function':           ['ref',     'bold'],
-      \ 'function.call':      ['ref',     'bold'],
+      \ 'function.call':      ['ref',     ''],
       \ 'function.builtin':   ['ref',     'bold'],
       \ 'function.macro':     ['macro',   'bold'],
       \ 'variable':           ['fg',      ''],
