@@ -650,6 +650,13 @@ local function install_mouse()
   if mouse_installed then
     return
   end
+  -- 마우스 키를 매핑으로 가로채는 것은 터미널에 따라 탈이 날 수 있다.
+  -- 막대는 쓰되 마우스만 안 잡고 싶으면:
+  --   let g:overview_mouse = 0
+  local m = cfg('mouse', 1)
+  if m == 0 or m == false then
+    return
+  end
   mouse_installed = true
   for _, lhs in ipairs(MOUSE_KEYS) do
     local key = lhs

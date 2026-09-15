@@ -5766,34 +5766,73 @@ local function marker_at(m)
   return nil
 end
 
-vim.keymap.set('n', '<LeftMouse>', function()
-  local line, col = marker_at(vim.fn.getmousepos())
-  if line then
-    -- expr 매핑 안에서는 창/버퍼를 건드릴 수 없다(textlock). 기본 클릭이
-    -- 끝난 뒤로 미룬다 - 그때는 포커스도 커서도 이미 그 자리에 있다.
-    vim.schedule(function()
-      if not (s.win and api.nvim_win_is_valid(s.win)) then
-        return
-      end
-      pcall(api.nvim_set_current_win, s.win)
-      pcall(api.nvim_win_set_cursor, s.win, { line, math.max(0, col - 1) })
-      A.toggle('toggle')
-    end)
+-- 이 매핑은 패널이 떠 있는 동안에만 건다.
+--
+-- 늘 걸어 두면 릴레이션 뷰를 안 쓰는 동안에도 모든 왼쪽 클릭이 이 매핑을
+-- 거쳐 간다. 마우스 키를 매핑으로 가로채는 것은 터미널에 따라 탈이 날 수
+-- 있는 일이라(실제로 한 번 클릭을 통째로 죽인 전례가 있다) 필요한 동안만
+-- 건다. 끄고 싶으면:
+--   let g:relationview_global_mouse = 0
+local mouse_on = false
+
+local function mouse_install()
+  if mouse_on or cfg('global_mouse', 1) == 0 then
+    return
   end
-  -- 반드시 '문자열' 로 돌려주고 replace_keycodes 에 맡긴다.
-  --
-  -- nvim_replace_termcodes() 로 미리 치환한 바이트를 돌려주면 클릭이
-  -- 통째로 죽는다 - 창도 커서도 안 움직이고 터미널 커서가 엉뚱한 자리에
-  -- 남는다. 실측(개발서버, 같은 자리 클릭):
-  --   '<LeftMouse>' + replace_keycodes  : 100줄 -> 103줄  정상
-  --   미리 치환한 바이트 (아래 둘 다)     : 100줄 -> 100줄  죽음
-  --     · replace_keycodes 없이
-  --     · replace_keycodes 와 같이
-  -- 마우스 키는 자리 정보를 따로 들고 오는데, 미리 치환한 바이트로는
-  -- 그것이 붙지 않는 것으로 보인다.
-  return '<LeftMouse>'
-end, { expr = true, replace_keycodes = true,
-  desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
+  mouse_on = true
+  vim.keymap.set('n', '<LeftMouse>', function()
+    local line, col = marker_at(vim.fn.getmousepos())
+    if line then
+      -- expr 매핑 안에서는 창/버퍼를 건드릴 수 없다(textlock). 기본 클릭이
+      -- 끝난 뒤로 미룬다 - 그때는 포커스도 커서도 이미 그 자리에 있다.
+      vim.schedule(function()
+        if not (s.win and api.nvim_win_is_valid(s.win)) then
+          return
+        end
+        pcall(api.nvim_set_current_win, s.win)
+        pcall(api.nvim_win_set_cursor, s.win, { line, math.max(0, col - 1) })
+        A.toggle('toggle')
+      end)
+    end
+    -- 반드시 '문자열' 로 돌려주고 replace_keycodes 에 맡긴다.
+    --
+    -- nvim_replace_termcodes() 로 미리 치환한 바이트를 돌려주면 클릭이
+    -- 통째로 죽는다 - 창도 커서도 안 움직이고 터미널 커서가 엉뚱한 자리에
+    -- 남는다. 실측(개발서버, 같은 자리 클릭):
+    --   '<LeftMouse>' + replace_keycodes  : 100줄 -> 103줄  정상
+    --   미리 치환한 바이트 (아래 둘 다)     : 100줄 -> 100줄  죽음
+    --     · replace_keycodes 없이
+    --     · replace_keycodes 와 같이
+    -- 마우스 키는 자리 정보를 따로 들고 오는데, 미리 치환한 바이트로는
+    -- 그것이 붙지 않는 것으로 보인다.
+    return '<LeftMouse>'
+  end, { expr = true, replace_keycodes = true,
+    desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
+end
+
+local function mouse_remove()
+  if not mouse_on then
+    return
+  end
+  mouse_on = false
+  pcall(vim.keymap.del, 'n', '<LeftMouse>')
+end
+
+-- 패널이 떴다 사라지는 것을 따라간다. 창을 만들고 닫는 길이 여럿이라
+-- (panel_open / A.close / 사용자가 :q / 모드 전환) 한 곳에서 상태만 본다.
+api.nvim_create_autocmd({ 'WinEnter', 'WinClosed', 'WinNew', 'BufWinEnter' }, {
+  group = group,
+  callback = function()
+    vim.schedule(function()
+      if s.win and api.nvim_win_is_valid(s.win) then
+        mouse_install()
+      else
+        mouse_remove()
+      end
+    end)
+  end,
+  desc = 'RelationView: 패널이 떠 있는 동안만 전역 <LeftMouse> 를 건다',
+})
 
 function A.expand_all()
   local t = s.tree
