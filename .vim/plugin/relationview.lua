@@ -3879,7 +3879,20 @@ render_rows = function(t, rows)
   -- 밀려 그것대로 안 보인다).
   --   let g:relationview_path_truncate = 1   " 예전처럼 창 폭에 맞춰 자른다
   local trunc_path = cfg('path_truncate', 0) ~= 0
-  if show_text then
+  -- 칸을 끝까지 맞출지.
+  --
+  -- 1 (기본) 심볼도 경로도 자르지 않고, 줄이 창보다 길어져도 칸을 맞춘다.
+  --          모든 줄에서 파일 이름과 소스 칸이 같은 자리에서 시작한다.
+  --          긴 심볼이나 깊은 경로가 하나 있으면 그만큼 전부 벌어지고,
+  --          소스 줄은 오른쪽으로 밀려 창 밖으로 나간다(잘리지는 않는다).
+  -- 0        예전 방식. 창에 들어갈 때만 칸을 맞추고 넘치면 각 줄이 제
+  --          길이만 쓴다. 화면 안에 욱여넣는 대신 줄이 들쭉날쭉해진다.
+  --
+  --   let g:relationview_align = 0
+  local align = cfg('align', 1) ~= 0
+  if align then
+    -- 자르지 않으므로 캡을 두지 않는다. wsym/wloc 은 위에서 잰 실제 최댓값.
+  elseif show_text then
     local wide = cfg('full_path', 0) ~= 0
     wsym = math.min(wsym, math.max(24, math.floor(avail * (wide and 0.35 or 0.45))))
     if trunc_path then
@@ -3900,7 +3913,9 @@ render_rows = function(t, rows)
     if r.kind == 'raw' then
       lines[#lines + 1] = r.text
     else
-      local symcell = pad(trunc_w(r.sym, wsym), wsym)
+      -- align 이면 자르지 않는다 (심볼 이름을 통째로 보여 준다)
+      local symcell = align and pad(r.sym, wsym)
+          or pad(trunc_w(r.sym, wsym), wsym)
       -- 경로 칸을 맞출지.
       --
       -- 자르지 않기로 했으니 가장 긴 경로에 맞춰 패딩하면, 깊은 경로 하나
@@ -3908,7 +3923,10 @@ render_rows = function(t, rows)
       -- 그래서 창에 들어갈 때만 칸을 맞추고, 넘치면 각 줄이 제 길이만 쓴다
       -- (줄은 들쭉날쭉해지지만 잘리는 것은 없다).
       local loccell
-      if trunc_path then
+      if align then
+        -- 창을 넘기더라도 늘 맞춘다 - 소스 칸이 모든 줄에서 같은 자리다
+        loccell = pad(r.loc, wloc)
+      elseif trunc_path then
         loccell = pad(trunc_tail(r.loc, wloc), wloc)
       elseif wsym + 2 + wloc + 3 <= avail then
         loccell = pad(r.loc, wloc)
