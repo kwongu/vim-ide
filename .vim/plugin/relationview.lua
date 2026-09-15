@@ -6815,15 +6815,14 @@ function A.lookup_refs(pat, regex)
       -- 본문에도 남아 눈이 덜 헤맨다. 색은 F4 와 같은 체계라 F4 나 \m 으로
       -- 지울 수 있고, 여러 번 찾으면 MarkWord1, 2, 3 … 으로 돌아간다.
       pcall(_G.vimide_mark_text, pat)
-      -- 결과는 quickfix 로 보낸다.
+      -- 패널이 떠 있으면 패널에, 닫혀 있으면 quickfix 로.
       --
-      -- 예전에는 패널이 떠 있으면 패널에 실었는데, 그러면 보고 있던 관계
-      -- 트리가 글자 검색 결과로 덮여 버린다. 패널은 '이 심볼의 관계'를,
-      -- quickfix 는 '찾은 줄 목록'을 맡는 편이 섞이지 않는다.
-      -- 패널이 닫혀 있을 때의 동작(quickfix)은 원래 그대로다.
+      -- 한동안 늘 quickfix 로 보냈다 - 보고 있던 관계 트리가 글자 검색
+      -- 결과로 덮이는 것이 싫어서였다. 요청대로 패널 쪽으로 되돌린다.
+      -- 트리를 지키고 싶으면 아래 설정으로 예전처럼 쓸 수 있다.
       --
-      --   let g:relationview_lookup_panel = 1   " 예전처럼 패널에 싣는다
-      if panel_visible() and cfg('lookup_panel', 0) ~= 0 then
+      --   let g:relationview_lookup_panel = 0   " 늘 quickfix 로 보낸다
+      if panel_visible() and cfg('lookup_panel', 1) ~= 0 then
         s.gen = s.gen + 1
         s.pinned = true
         s.note = ('색인된 파일에서 찾은 글자 %d건'):format(#refs)

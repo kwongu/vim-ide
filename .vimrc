@@ -1220,18 +1220,16 @@ function! s:MarkAndCallRefs() abort
     if has('nvim') && exists('*luaeval')
         silent! call luaeval('_G.vimide_mark_text ~= nil and _G.vimide_mark_text(_A) or 0', l:w)
     endif
-    " caller 목록은 quickfix 로 보낸다.
+    " caller 목록은 릴레이션 패널이 떠 있으면 패널에, 아니면 quickfix 로.
     "
-    " 릴레이션 패널이 떠 있으면 :Gtags 는 결과를 패널에 싣는다(덮어쓰기).
-    " 그러면 보고 있던 관계 트리가 검색 결과로 덮여 버린다. 패널은 '이
-    " 심볼의 관계'를, quickfix 는 '찾은 줄 목록'을 맡는 편이 섞이지 않는다.
-    " :GtagsQf 는 relationview.lua 가 있을 때만 생긴다 - 없으면(진짜 vim)
-    " :Gtags 가 원래대로 quickfix 를 쓰므로 갈라 줄 필요가 없다.
-    if exists(':GtagsQf') == 2
-        execute 'GtagsQf -r ' . l:w
-    else
-        execute 'Gtags -r ' . l:w
-    endif
+    " :Gtags 는 relationview.lua 가 덮어써 두었다 - 패널이 떠 있으면 결과를
+    " 패널에 싣고, 닫혀 있으면 gtags.vim 본래대로 quickfix 를 쓴다. 그러니
+    " 여기서는 그냥 :Gtags 를 부르면 된다.
+    "
+    " 한동안 :GtagsQf 로 늘 quickfix 에 보냈다. 요청대로 패널 쪽으로
+    " 되돌린다. :GtagsQf 명령 자체는 남겨 둔다 - 관계 트리를 지키면서
+    " 찾고 싶을 때 직접 칠 수 있다.
+    execute 'Gtags -r ' . l:w
 endfunction
 nnoremap <silent> <Leader><Leader>c :call <SID>MarkAndCallRefs()<CR>
 nmap <Leader><Leader>f <plug>(quickr_cscope_files)
@@ -1385,6 +1383,14 @@ func! s:RvEditJump() abort
 	execute "normal! \<C-]>"
 endfunc
 nnoremap <silent> g] :call <SID>RvEditJump()<CR>
+" f] 도 같은 자리에 건다(요청). g] 는 그대로 둔다 - 손에 익은 쪽을 쓰면 된다.
+"
+" 대가: 원래 f] 는 '이 줄에서 다음 ] 로' 가는 움직임인데 그 자리를 내준다.
+" 그 움직임이 필요하면 t] 나 F] 를 쓰거나, 아래 설정으로 이 매핑을 끈다.
+"   let g:vimide_edit_jump_fkey = 0
+if get(g:, 'vimide_edit_jump_fkey', 1)
+	nnoremap <silent> f] :call <SID>RvEditJump()<CR>
+endif
 " <C-마우스왼쪽> 도 같은 자리로 걸어 두기는 한다. 다만 지금 쓰는 두
 " 터미널에서는 이 키가 nvim 까지 오지 않는다 - 터미널이 먼저 먹는다.
 "   Tera Term  Ctrl+드래그 = 사각 영역 선택 + 클립보드 복사
