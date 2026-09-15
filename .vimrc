@@ -1299,6 +1299,29 @@ nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 " DoMark 는 토글이라 두 번 부르면 색이 꺼지기 때문이다.
 "
 "   let g:vimide_jump_mark = 0   " 점프할 때 색칠하지 않는다
+" ------------------------------------
+" 점프 키 관련 옵션
+"
+" 이 셋은 바로 아래에서 매핑을 걸 때 읽으므로 여기(그 줄보다 앞)에 둔다.
+" 나머지 vim-ide 옵션은 아래쪽 RelationView 설정 절에 모여 있다.
+
+" 점프할 때(Ctrl+] / g] / f]) 그 심볼에 F4 색을 자동으로 칠할지.
+" Ctrl+t 로 돌아오면 그만큼만 풀린다.
+let g:vimide_jump_mark = 1
+
+" f] 도 g] 와 같이 '지금 EDIT 창에서 그 심볼로' 가게 할지.
+" 0 으로 두면 f] 는 vim 본래의 '이 줄에서 다음 ] 로' 가 된다.
+let g:vimide_edit_jump_fkey = 1
+
+" 패널 목록의 다음/이전 대체키.
+"
+" Ctrl+0 / Ctrl+9 는 전통적인 터미널 인코딩에 자리가 없어 CSI-u 를 쓰는
+" 터미널(iTerm2 3.5+, kitty, WezTerm, Ghostty, foot)에서만 닿는다.
+" 테라텀 등에서는 맨 '0' / '9' 가 들어가 엉뚱하게 움직이므로 대체키를 둔다.
+" 빈 문자열로 두면 대체키를 만들지 않는다.
+let g:vimide_rvlist_next_key = ']r'
+let g:vimide_rvlist_prev_key = '[r'
+
 func! s:RvPanelOn() abort
 	if !has('nvim') || !exists('*luaeval')
 		return 0
@@ -2494,6 +2517,42 @@ let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
 " 'w' (또는 \lw) 로 패널을 넓힐 폭. 0 이면 화면의 4/5 지점까지.
 let g:relationview_wide_width = 0
+" 'bottom' 배치에서 넓힐 높이. 0 이면 화면의 4/5.
+let g:relationview_wide_height = 0
+
+" ------------------------------------
+" 점프 / 검색 결과를 어디에 보여 줄까
+"
+" (여기서 쓰는 매핑 관련 옵션 - g:vimide_jump_mark, g:vimide_edit_jump_fkey,
+"  g:vimide_rvlist_next_key/prev_key - 는 이 파일 앞쪽 '점프 키' 절에 있다.
+"  .vimrc 안에서 매핑을 걸 때 읽으므로 그 줄보다 앞에 있어야 한다.)
+"
+" Ctrl+/ (글자 찾기) 와 \c (caller 찾기) 는 릴레이션 패널이 떠 있으면
+" 패널에, 닫혀 있으면 quickfix 에 싣는다. 0 으로 두면 늘 quickfix 다
+" (보고 있던 관계 트리가 검색 결과로 덮이지 않는다).
+let g:relationview_lookup_panel = 1
+
+" ------------------------------------
+" 창 규칙 (vimidewin.lua)
+"
+" 1 (기본) 곁창(패널/aerial/quickfix/neo-tree/NERDTree ...)에 파일이 실리면
+"          그 파일을 '직전에 보던 EDIT 창'으로 옮기고 곁창을 되돌린다.
+let g:vimide_win_guard = 1
+" 1 (기본) 곁창만 남고 EDIT 창이 0개가 되면 vim 을 끝낸다.
+"          저장 안 한 버퍼나 돌아가는 터미널이 있으면 끝내지 않는다.
+let g:vimide_min_edit_win = 1
+" 1 (기본) 패널/aerial/tagbar 등을 켜고 끌 때 EDIT 창 크기를 고르게 맞춘다.
+let g:vimide_balance_on_toggle = 1
+
+" ------------------------------------
+" 마우스를 매핑으로 가로챌지 (터미널에 따라 탈이 날 수 있는 자리다)
+"
+" 1 (기본) 편집 창에서도 패널 목록의 [+]/[-] 를 한 번 클릭으로 펼친다.
+"          패널이 떠 있는 동안에만 매핑을 건다.
+let g:relationview_global_mouse = 1
+" 1 (기본) overview 막대를 마우스로 끌어 화면을 옮긴다.
+let g:overview_mouse = 1
+" 마우스가 이상하면 이 둘을 0 으로 두고 :VimIdeMouseCheck / :VimIdeMouseOff 로 가른다.
 
 " 패널 밖에서도 쓰도록 전역 단축키를 준다. 패널 안에서는 t / T 다.
 " (F1~F12 는 이미 전부 쓰고 있어서 <Leader> 를 쓴다. Leader 는 '\' 다)
