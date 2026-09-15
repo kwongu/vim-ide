@@ -6373,6 +6373,61 @@ function _G.vimide_mark_text(text, keep)
   return ok
 end
 
+-- 점프하며 칠한 F4 색을, <C-t> 로 돌아올 때 되돌린다.
+--
+-- '우리가 새로 칠한 것'만 되돌린다. 이미 칠해져 있던 심볼은 사용자가 손으로
+-- 칠해 둔 것일 수 있어 건드리면 안 된다 - 그때는 스택에 낱말 대신 false 를
+-- 쌓아 자리만 맞춰 둔다. 그래야 여러 번 판 뒤 <C-t> 를 여러 번 눌러도
+-- 짝이 어긋나지 않는다.
+local jump_marks = {}
+
+local function mark_pat(word)
+  return (vim.fn.escape(word, '\\^$.*[~'):gsub('\n', '\\n'))
+end
+
+local function mark_number(pat)
+  local ok, n = pcall(vim.fn['mark#GetMarkNumber'], pat, 0, 1)
+  if ok and type(n) == 'number' then
+    return n
+  end
+  return 0
+end
+
+function _G.vimide_jump_mark_push(word)
+  local function skip()
+    jump_marks[#jump_marks + 1] = false
+    return false
+  end
+  if type(word) ~= 'string' or word == '' then
+    return skip()
+  end
+  if (tonumber(vim.g.vimide_lookup_mark) or 1) == 0
+      or (tonumber(vim.g.vimide_jump_mark) or 1) == 0 then
+    return skip()
+  end
+  local pat = mark_pat(word)
+  if mark_number(pat) > 0 then
+    -- 이미 칠해져 있다: 우리 것이 아니므로 <C-t> 로도 지우지 않는다
+    return skip()
+  end
+  local ok = pcall(vim.fn['mark#DoMark'], 0, pat)
+  jump_marks[#jump_marks + 1] = ok and pat or false
+  return ok
+end
+
+function _G.vimide_jump_mark_pop()
+  local pat = table.remove(jump_marks)
+  if type(pat) ~= 'string' then
+    return false
+  end
+  local n = mark_number(pat)
+  if n > 0 then
+    pcall(vim.fn['mark#Clear'], n)
+    return true
+  end
+  return false
+end
+
 local function lookup_to_qf(root, pat, refs)
   local items = {}
   for _, r in ipairs(refs) do

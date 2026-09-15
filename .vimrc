@@ -1295,7 +1295,8 @@ func! s:RvMarkCword() abort
 	if l:w !~# '^[A-Za-z_][A-Za-z0-9_]*$'
 		return
 	endif
-	call luaeval('_G.vimide_mark_text ~= nil and (function() _G.vimide_mark_text(_A, true) return 1 end)() or 0', l:w)
+	" 스택에 쌓아 둔다 - <C-t> 로 돌아올 때 그만큼만 되돌린다.
+	call luaeval('_G.vimide_jump_mark_push ~= nil and (function() _G.vimide_jump_mark_push(_A) return 1 end)() or 0', l:w)
 endfunc
 
 " g] / <C-마우스왼쪽> : 미리보기가 아니라 '지금 편집 창'에서 그 심볼로 간다.
@@ -1420,6 +1421,11 @@ nmap <C-\><C-]> :GtagsCursor<CR>
 " 점프가 태그 스택을 제대로 쌓으므로(relationview.lua 의 push_tag,
 " projectfiles.lua 의 jump_to_symbol) 진짜 <C-t> 를 쓴다.
 func! s:JumpBack() abort
+	" 갈 때 칠해 둔 색을 먼저 푼다. 우리가 새로 칠한 것만 풀린다 -
+	" 원래 칠해져 있던 심볼은 스택에 false 로 쌓여 그대로 남는다.
+	if has('nvim') && exists('*luaeval')
+		call luaeval('_G.vimide_jump_mark_pop ~= nil and (function() _G.vimide_jump_mark_pop() return 1 end)() or 0')
+	endif
 	let l:st = gettagstack(win_getid())
 	if get(l:st, 'curidx', 1) > 1
 		try
