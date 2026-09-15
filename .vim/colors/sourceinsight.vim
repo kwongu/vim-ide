@@ -448,12 +448,20 @@ call s:hi('SiJumpLocal', 'jumplocal', '', '')
 " 호출과 builtin 이 초록 볼드가 아니라 초록으로 보이고, __attribute__ 의
 " packed/aligned 는 네이비 볼드가 아니라 네이비로 보인다. 되돌리려면 위 표의
 " 해당 줄에 'bold' 를 도로 넣으면 된다.
-call s:hi('SiJumpNone', 'fg', '', '')
+" nocombine: 아래 레이어와 속성을 합치지 않는다.
+"
+" nvim 은 겹친 하이라이트를 OR 로 합치고 'bold 끄기'가 없다. 그래서 지금까지
+" 밑에 깔린 treesitter 쪽 볼드를 하나씩 찾아 뺐는데, 기계마다(파서 판이
+" 다르면) 또 다른 capture 가 볼드를 물고 올 수 있다 - 실제로 서버는 멀쩡한데
+" 맥에서만 빨강이 볼드로 보인다는 보고가 왔다.
+" nocombine 을 주면 이 그룹의 속성만 쓰이므로 무엇이 밑에 있든 볼드가 새지
+" 않는다. 색 자체(fg)는 그대로다.
+call s:hi('SiJumpNone', 'fg', '', 'nocombine')
 " 함수 안에서 쓰는 전역 변수 (sihllocal.lua)
 call s:hi('SiGlobalRef', 'globalref', '', 'italic')
 " 색인이 '#define' 으로 확인해 준 매크로 (sihlindex.lua). 상수 매크로가
 " 원래 쓰던 빨강과 같은 색이다 - 함수형 매크로도 같은 것으로 보여야 한다.
-call s:hi('SiMacroRef', 'number', '', '')
+call s:hi('SiMacroRef', 'number', '', 'nocombine')
 " 선언처럼 읽히는 커널 매크로 (module.h 의 MODULE_LICENSE, module_init ...).
 " 코드가 아니라 선언을 적는 자리라 예약어와 같은 네이비 볼드로 둔다.
 "   let g:sihl_index_macro_navy = ['include/linux/module\.h', 'include/linux/init\.h']
@@ -471,7 +479,7 @@ call s:hi('SiLogMacro', 'ref', '', 'bold')
 " enum 요소를 쓰는 자리 (sihlindex.lua). 매크로와 같은 빨강이다 - 둘 다
 " '이름이 붙은 상수'이고, 코드에서 하는 일이 같다. 선언하는 자리는
 " @si.declaration.enumconst 라 네이비 볼드 그대로다.
-call s:hi('SiEnumRef', 'number', '', '')
+call s:hi('SiEnumRef', 'number', '', 'nocombine')
 " 함수처럼 부르는 매크로 (sihlindex.lua). '#define NAME(' 꼴이면 읽을 때는
 " 함수 호출이라 초록이다. 빨강은 상수 매크로 몫으로 남긴다. 로그 매크로는
 " 이것의 부분집합이고 볼드까지 붙는다(SiLogMacro).
