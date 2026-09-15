@@ -1840,7 +1840,8 @@ local function ensure_buf()
       " 괄호 안 경로에도 걸리는데, 이 규칙은 파일 이름에서 시작해 괄호까지
       " 한 번에 덮으므로 더 왼쪽에서 시작해 이긴다.
       " 심볼 칸의 '(util.h)' 나 '(x2)' 는 앞에 ':줄 ' 이 없어서 안 걸린다.
-      syntax match RvFile     /[^ ()\/]\+:\d\+ ([^)]*)/
+      " 줄 번호와 괄호 사이는 칸을 맞추느라 공백이 여러 개다
+      syntax match RvFile     /[^ ()\/]\+:\d\+\s\+([^)]*)/
       " 경로가 이름과 같아 괄호를 안 붙인 경우
       syntax match RvFile     /[^ ()\/]\+:\d\+\ze\s*\%(│\|$\)/
     ]])
@@ -3633,18 +3634,23 @@ render_tree = function()
   --                  sound/soc/telechips/tcc_i2s.c:55
   --
   -- 칸이 좁으면 뒤에서 자르므로(trunc_tail) 파일 이름 쪽이 끝까지 남는다.
+  --
+  -- 앞뒤 두 조각으로 나눠 돌려준다: '파일이름:줄' 과 '(경로)'.
+  -- 줄 번호는 자릿수가 들쭉날쭉해서(80 과 156) 한 덩어리로 두면 괄호가
+  -- 줄마다 다른 자리에서 시작한다. 아래에서 앞 조각을 제일 긴 것에 맞춰
+  -- 채운 뒤 붙이면 '(' 가 모든 줄에서 같은 칸이다.
   local pstyle = tostring(cfg('path_style', 'name'))
   local function loc_label(p, line)
     local shown = rel(p)
     if pstyle == 'path' then
-      return string.format('%s:%d', shown, line)
+      return string.format('%s:%d', shown, line), ''
     end
     local name = vim.fn.fnamemodify(p, ':t')
     local extra = (pstyle == 'dir') and vim.fn.fnamemodify(shown, ':h') or shown
     if extra == '' or extra == '.' or extra == name then
-      return string.format('%s:%d', name, line)
+      return string.format('%s:%d', name, line), ''
     end
-    return string.format('%s:%d (%s)', name, line, extra)
+    return string.format('%s:%d', name, line), string.format('(%s)', extra)
   end
 
   -- pass 1: collect the three columns of every row so they can be padded
@@ -3655,8 +3661,9 @@ render_tree = function()
     rows[#rows + 1] = { kind = 'raw', text = text }
   end
   local function row(symcol, path, line, text, item, name)
+    local head, tail = loc_label(path, line)
     rows[#rows + 1] = { kind = 'row', sym = symcol,
-      loc = loc_label(path, line),
+      lhead = head, ltail = tail,
       text = text, item = item, name = name }
     return rows[#rows]
   end
@@ -3907,6 +3914,24 @@ end
 -- pass 2: size the columns to the widest entry, capped so the source text
 -- still gets room in a narrow panel, then paint the buffer
 render_rows = function(t, rows)
+  -- '파일이름:줄' 을 제일 긴 것에 맞춰 채운 뒤 '(경로)' 를 붙인다.
+  -- 그래야 괄호가 모든 줄에서 같은 칸에서 시작한다.
+  local whead = 0
+  for _, r in ipairs(rows) do
+    if r.kind == 'row' then
+      whead = math.max(whead, vim.fn.strwidth(r.lhead or ''))
+    end
+  end
+  for _, r in ipairs(rows) do
+    if r.kind == 'row' then
+      if r.ltail and r.ltail ~= '' then
+        r.loc = pad(r.lhead, whead) .. ' ' .. r.ltail
+      else
+        r.loc = r.lhead
+      end
+    end
+  end
+
   local wsym, wloc = 0, 0
   for _, r in ipairs(rows) do
     if r.kind == 'row' then
@@ -6089,8 +6114,8 @@ end
 --
 -- winfixwidth 가 걸려 있어도 명시적인 크기 지정은 통한다(실측).
 --
---   g:relationview_wide_width   넓힐 폭 (0 = 화면의 절반)
---   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 절반)
+--   g:relationview_wide_width   넓힐 폭 (0 = 화면의 2/3)
+--   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 2/3)
 function A.toggle_wide()
   if not panel_visible() then
     vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
@@ -6106,7 +6131,7 @@ function A.toggle_wide()
   if cfg('position', 'bottom') == 'right' then
     local w = tonumber(cfg('wide_width', 0)) or 0
     if w <= 0 then
-      w = math.floor(vim.o.columns / 2)
+      w = math.floor(vim.o.columns * 2 / 3)
     end
     -- 편집 창이 아예 사라지지 않게 최소한은 남긴다
     w = math.min(w, math.max(20, vim.o.columns - 20))
@@ -6114,7 +6139,7 @@ function A.toggle_wide()
   else
     local h = tonumber(cfg('wide_height', 0)) or 0
     if h <= 0 then
-      h = math.floor(vim.o.lines / 2)
+      h = math.floor(vim.o.lines * 2 / 3)
     end
     h = math.min(h, math.max(5, vim.o.lines - 5))
     pcall(api.nvim_win_set_height, s.win, h)

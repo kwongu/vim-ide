@@ -2455,7 +2455,7 @@ let g:relationview_tree_follow_cwd = 0
 let g:relationview_list_min_height = 12
 let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
-" 'w' (또는 \lw) 로 패널을 넓힐 폭. 0 이면 화면의 절반.
+" 'w' (또는 \lw) 로 패널을 넓힐 폭. 0 이면 화면의 2/3 지점까지.
 let g:relationview_wide_width = 0
 
 " 패널 밖에서도 쓰도록 전역 단축키를 준다. 패널 안에서는 t / T 다.
