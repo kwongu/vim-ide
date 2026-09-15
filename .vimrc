@@ -1326,7 +1326,13 @@ func! s:RvEditJump() abort
 	execute "normal! \<C-]>"
 endfunc
 nnoremap <silent> g] :call <SID>RvEditJump()<CR>
-" 마우스는 먼저 클릭한 자리로 커서를 옮긴 뒤 같은 동작을 한다.
+" <C-마우스왼쪽> 도 같은 자리로 걸어 두기는 한다. 다만 지금 쓰는 두
+" 터미널에서는 이 키가 nvim 까지 오지 않는다 - 터미널이 먼저 먹는다.
+"   Tera Term  Ctrl+드래그 = 사각 영역 선택 + 클립보드 복사
+"   iTerm2     Ctrl+클릭  = 컨텍스트 메뉴
+" 그래서 실제로 쓰는 길은 g] 다. 터미널 쪽 배정을 풀면(iTerm2 는
+" Settings > Pointer) 이 매핑이 그때부터 살아난다. 지워 두면 그때 다시
+" 만들어야 하므로 남겨 둔다 - 걸려 있어도 해가 없다.
 nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvEditJump()<CR>
 
 func! s:RvCtxJump() abort
