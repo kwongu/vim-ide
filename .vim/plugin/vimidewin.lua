@@ -273,11 +273,17 @@ local function rescue(win)
       return
     end
   else
-    -- 버퍼가 창과 함께 사라지는 곁창이 있다(quickfix, aerial 처럼
-    -- bufhidden=wipe). 되돌릴 것이 없으니 창을 닫고, 다시 세울 수 있는
-    -- 종류면 아래에서 그 명령으로 새로 연다.
+    -- 곁창 버퍼가 사라졌다 = 그 플러그인이 이 창을 '돌려준' 것이다.
+    --
+    -- F6 의 BufExplorer 가 그렇다. 편집 창을 잠시 빌려 목록을 띄우고,
+    -- 고른 파일을 바로 그 자리에 연 뒤 자기 버퍼는 지운다. 그러면 여기서
+    -- 되돌릴 것이 없다.
+    --
+    -- 예전에는 그 창을 닫고 파일을 딴 창에 다시 열었는데, 그 바람에
+    -- aerial 과 EDIT 창이 자리를 맞바꿨다(실측: 고른 뒤 tcc_mem.c 가 열0,
+    -- aerial 이 열64 로 튀었다). 돌려준 창은 그냥 놓아준다.
     guarded[win] = nil
-    pcall(api.nvim_win_close, win, false)
+    return
   end
 
   -- 그 파일은 '직전에 보던 EDIT 창'에 연다.
@@ -427,9 +433,20 @@ api.nvim_create_autocmd('WinClosed', {
     if cfg('min_edit_win', 1) == 0 or pending or busy() then
       return
     end
-    -- WinClosed 는 창이 아직 목록에 있을 때 뜬다: 닫히는 창은 빼고 센다.
+    -- 닫히는 그 창이 EDIT 창이었을 때만 따진다.
+    --
+    -- 이것이 없으면 'EDIT 창은 이미 0인데 곁창 하나가 닫히는' 아무 순간에도
+    -- 규칙이 깨어난다. 실제로 F6 을 누르면 BufExplorer 가 하나뿐인 편집 창을
+    -- 제자리에서 차지해 EDIT 이 0이 되고, 그 직후 overview 막대(부동 창)가
+    -- 닫히면서 vim 이 통째로 꺼졌다.
+    --
+    -- WinClosed 는 창이 아직 목록에 있을 때 뜨므로 여기서 물어볼 수 있다.
+    local dying = tonumber(a.match)
+    if not (dying and _G.vimide_is_edit_win(dying)) then
+      return
+    end
     -- 세는 것은 반드시 탭 전체다(지금 탭만 보면 남의 탭까지 끄게 된다).
-    if _G.vimide_edit_win_count_all(tonumber(a.match)) > 0 then
+    if _G.vimide_edit_win_count_all(dying) > 0 then
       return
     end
     pending = true

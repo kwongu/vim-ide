@@ -3092,7 +3092,26 @@ nnoremap <silent> <F2> :ProjectFilesPreset<CR>
 command! -bar Maketags call Maketags()
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
-map <F6> :BufExplorer<CR>
+" F6 버퍼 목록은 EDIT 창에서 연다.
+"
+" BufExplorer 는 '지금 창'을 차지해 목록을 띄우고, 고른 파일도 그 자리에
+" 연다. 곁창에서 누르면 사이드바가 목록으로 바뀌고 이어서 파일로 바뀐다.
+" 먼저 직전에 보던 EDIT 창으로 옮긴 뒤 연다.
+func! s:BufExplorerHere() abort
+	if has('nvim') && exists('*luaeval')
+		if !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+			let l:w = luaeval('_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0')
+			if l:w > 0 && win_id2win(l:w) > 0
+				call win_gotoid(l:w)
+			else
+				" 열 자리가 없다: 곁창을 부수느니 아무것도 안 한다
+				return
+			endif
+		endif
+	endif
+	BufExplorer
+endfunc
+map <F6> :call <SID>BufExplorerHere()<CR>
 " <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색).
 " <F8> 은 커서 밑 심볼에 노란 표시를 붙이고 뗀다 (yellowmark.lua).
 " 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.
