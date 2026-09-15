@@ -422,8 +422,10 @@ call s:hi('SiJumpLocal', 'jumplocal', '', '')
 "   실측: @function.call bold=true / SiJumpNone bold=nil -> 검정 볼드
 "
 " 고치는 자리는 아래쪽 레이어다. treesitter 표에서 볼드를 빼고, 볼드가
-" 필요한 쪽(색인이 아는 심볼)이 제 그룹에서 직접 준다
-" - SiJumpFound, SiFnMacro, SiMacroRef 에 'bold' 를 붙여 둔 것이 그것이다.
+" 필요한 쪽이 제 그룹에서 직접 준다 - SiJumpFound 와 SiFnMacro 에 'bold' 를
+" 붙여 둔 것이 그것이다. SiMacroRef(색인이 아는 매크로)는 볼드 없이
+" 빨강만 쓴다 - 한 번 볼드로 두었다가 '빨간색 볼드 말고 빨간색' 으로
+" 바꿔 달라는 요청을 받아 되돌렸다.
 "
 " 실제 커널 파일 넷을 훑어 SiJumpNone 밑에 깔린 볼드 capture 를 세어 보니
 " 딱 셋이었다: @function.call, @function.macro(x4), @constant.macro(x8).
@@ -436,7 +438,7 @@ call s:hi('SiJumpNone', 'fg', '', '')
 call s:hi('SiGlobalRef', 'globalref', '', 'italic')
 " 색인이 '#define' 으로 확인해 준 매크로 (sihlindex.lua). 상수 매크로가
 " 원래 쓰던 빨강과 같은 색이다 - 함수형 매크로도 같은 것으로 보여야 한다.
-call s:hi('SiMacroRef', 'number', '', 'bold')
+call s:hi('SiMacroRef', 'number', '', '')
 " 선언처럼 읽히는 커널 매크로 (module.h 의 MODULE_LICENSE, module_init ...).
 " 코드가 아니라 선언을 적는 자리라 예약어와 같은 네이비 볼드로 둔다.
 "   let g:sihl_index_macro_navy = ['include/linux/module\.h', 'include/linux/init\.h']
