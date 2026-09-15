@@ -1560,6 +1560,12 @@ nmap <C-\><C-]> :GtagsCursor<CR>
 " 점프가 태그 스택을 제대로 쌓으므로(relationview.lua 의 push_tag,
 " projectfiles.lua 의 jump_to_symbol) 진짜 <C-t> 를 쓴다.
 func! s:JumpBack() abort
+	" 곁창에서 눌렀으면 먼저 편집 자리로 옮긴다.
+	" 태그 스택도 점프 목록도 '창마다' 따로 쌓인다. 곁창에서 부르면 그 곁창이
+	" 물려받은 남의 이력을 뒤지다가 거기에 파일을 실어 버린다 - aerial 이
+	" 소스 파일로 바뀌는 식이다. s:GotoEditSlot 은 한참 아래(s:InEditWin 옆)에
+	" 있다. 자리가 없으면 0 을 주는데, 그때는 예전처럼 그냥 해 본다.
+	call s:GotoEditSlot(0)
 	" 갈 때 칠해 둔 색을 먼저 푼다. 우리가 새로 칠한 것만 풀린다 -
 	" 원래 칠해져 있던 심볼은 스택에 false 로 쌓여 그대로 남는다.
 	if has('nvim') && exists('*luaeval')
@@ -1611,8 +1617,21 @@ nnoremap <silent> <4-LeftMouse> :call <SID>RvMouseJump()<CR>
 "- RelationView 패널에서는 편집 창의 점프 목록을 움직이고, ContextView 에서는
 "- 그 창의 <C-]> 스택을 되돌린다(각 창의 버퍼 로컬 매핑이 우선).
 "------------------------------------------------------------------------------
-nnoremap <X1Mouse> <C-o>
-nnoremap <X2Mouse> <C-i>
+" 곁창에서 눌렀을 때 그 곁창의 점프 목록을 뒤지지 않도록 한 번 거른다.
+" (RelationView 패널과 context 창은 자기 버퍼 지역 매핑이 먼저라 그대로다)
+func! s:JumpList(dir) abort
+	call s:GotoEditSlot(0)
+	try
+		if a:dir ==# 'back'
+			execute "normal! \<C-o>"
+		else
+			execute "normal! \<C-i>"
+		endif
+	catch /^Vim\%((\a\+)\)\=:E/
+	endtry
+endfunc
+nnoremap <silent> <X1Mouse> :call <SID>JumpList('back')<CR>
+nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 
 " 터미널이 그 버튼을 아예 안 보낼 때.
 "
@@ -1656,8 +1675,8 @@ func! s:MapJumpAlias(which, rhs) abort
 		execute 'nnoremap <silent> ' . l:k . ' ' . a:rhs
 	endfor
 endfunc
-call s:MapJumpAlias('back', '<C-o>')
-call s:MapJumpAlias('forward', '<C-i>')
+call s:MapJumpAlias('back', ":call <SID>JumpList('back')<CR>")
+call s:MapJumpAlias('forward', ":call <SID>JumpList('forward')<CR>")
 
 " :JumpKeyTest - 이 키가 여기까지 오기는 하는가
 "
@@ -2565,10 +2584,18 @@ let g:overview_mouse = 1
 " ------------------------------------
 " 곁창에서 시작하면 안 되는 명령
 "
-" '지금 창'을 차지하는 기능(F6 BufExplorer, :Ex netrw ...)은 곁창에서 부르면
-" 그 사이드바를 차지해 버린다. 그래서 먼저 직전 EDIT 창으로 옮긴 뒤 연다.
-" 다른 명령도 그렇게 돌리고 싶으면:
+" '지금 창'을 차지하는 기능(F6 BufExplorer, :Ex netrw, :e . ...)은 곁창에서
+" 부르면 그 사이드바를 차지해 버린다. 그래서 먼저 직전 EDIT 창으로 옮긴 뒤
+" 연다. 다른 명령도 그렇게 돌리고 싶으면:
 "   :VimIdeInEdit <명령>
+"
+" 1 (기본) 곁창에서 친 아래 명령을 EDIT 창으로 옮겨서 실행한다.
+"            :e :ene :find :view :b :bn :bp :sb :h :tag :tjump :tselect
+"          마우스 뒤로/앞으로 버튼과 <C-t>(되돌아가기)도 같이 따른다.
+"          EDIT 창에서 친 것은 손대지 않는다 - 글자 하나 안 바뀐다.
+" 0        곁창에서도 그대로 실행한다 (예전 그대로).
+" <F6> 과 :Ex :Vex :Sex :Hex :Tex :Lex 는 이 값과 상관없이 늘 EDIT 창으로 간다.
+let g:vimide_edit_route = 1
 
 " 패널 밖에서도 쓰도록 전역 단축키를 준다. 패널 안에서는 t / T 다.
 " (F1~F12 는 이미 전부 쓰고 있어서 <Leader> 를 쓴다. Leader 는 '\' 다)
@@ -3215,21 +3242,39 @@ map <F5> :MarkClear<CR> :noh<CR>
 "
 " EDIT 창이 하나도 없으면 아무것도 하지 않는다. 곁창을 부수느니 안 여는
 " 편이 낫다.
+
+" 곁창에 있으면 '편집 자리' 로 옮긴다.
+"   1 = 이제 편집할 수 있는 창에 있다 (원래 EDIT 창이었거나, 옮겼다)
+"   0 = 갈 자리가 없다
+" a:always 가 0 이면 g:vimide_edit_route 를 따른다. <F6> 과 :Ex 처럼
+" 늘 옮겨야 하는 것은 1 로 부른다.
+func! s:GotoEditSlot(always) abort
+	if !has('nvim') || !exists('*luaeval')
+		return 1
+	endif
+	if !a:always && !get(g:, 'vimide_edit_route', 1)
+		return 1
+	endif
+	if luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+		return 1
+	endif
+	" '편집 자리' 를 묻는다. 진짜 EDIT 창이 없어도, BufExplorer 나 netrw 가
+	" 잠시 빌려 쓰는 중인 창이 있으면 그 자리를 되찾아 쓴다.
+	let l:w = luaeval('_G.vimide_edit_slot ~= nil and _G.vimide_edit_slot()'
+				\ . ' or (_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0)')
+	if l:w > 0 && win_id2win(l:w) > 0
+		call win_gotoid(l:w)
+		return 1
+	endif
+	return 0
+endfunc
+
 func! s:InEditWin(cmd) abort
-	if has('nvim') && exists('*luaeval')
-				\ && !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
-		" '편집 자리' 를 묻는다. 진짜 EDIT 창이 없어도, BufExplorer 나 netrw 가
-		" 잠시 빌려 쓰는 중인 창이 있으면 그 자리를 되찾아 쓴다.
-		let l:w = luaeval('_G.vimide_edit_slot ~= nil and _G.vimide_edit_slot()'
-					\ . ' or (_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0)')
-		if l:w > 0 && win_id2win(l:w) > 0
-			call win_gotoid(l:w)
-		else
-			echohl WarningMsg
-			echo 'vim-ide: EDIT 창이 없어 실행하지 않았습니다'
-			echohl None
-			return
-		endif
+	if !s:GotoEditSlot(1)
+		echohl WarningMsg
+		echo 'vim-ide: EDIT 창이 없어 실행하지 않았습니다'
+		echohl None
+		return
 	endif
 	execute a:cmd
 endfunc
@@ -3239,6 +3284,16 @@ command! -nargs=+ -complete=command VimIdeInEdit call s:InEditWin(<q-args>)
 
 " F6 버퍼 목록
 map <F6> :call <SID>InEditWin('BufExplorer')<CR>
+
+" bufexplorer 는 '제 이름이 걸린 매핑이 없으면' 자기 기본 매핑을 만든다
+" (\be \bt \bs \bv). <F6> 에 'BufExplorer' 가 들어 있어서 \be 는 안 생기지만
+" 나머지 셋은 생기고, 그것들은 곁창에서 누르면 그 사이드바를 차지한다.
+" 여기서 먼저 걸어 두면 (1) 그 자리를 EDIT 창으로 돌리고 (2) hasmapto() 가
+" 참이 되어 플러그인이 제 것을 덧씌우지 않는다.
+nnoremap <silent> <Leader>be :call <SID>InEditWin('BufExplorer')<CR>
+nnoremap <silent> <Leader>bt :call <SID>InEditWin('ToggleBufExplorer')<CR>
+nnoremap <silent> <Leader>bs :call <SID>InEditWin('BufExplorerHorizontalSplit')<CR>
+nnoremap <silent> <Leader>bv :call <SID>InEditWin('BufExplorerVerticalSplit')<CR>
 
 " :Ex / :Explore (netrw, 또는 그것을 가로챈 nvim-tree) 도 EDIT 창에서.
 "
@@ -3253,7 +3308,7 @@ map <F6> :call <SID>InEditWin('BufExplorer')<CR>
 "
 " 그 두 줄만 잠시 치웠다가 되돌린다. 창 이동 매핑을 내주지 않으면서 netrw 도
 " 살리는 길이 이것뿐이다 - netrw 는 <unique> 를 조건 없이 쓴다.
-func! s:Explore(args) abort
+func! s:Explore(cmd, args) abort
 	let l:saved = {}
 	for l:k in ['<C-h>', '<C-l>']
 		let l:m = maparg(l:k, 'n', 0, 1)
@@ -3263,7 +3318,7 @@ func! s:Explore(args) abort
 		endif
 	endfor
 	try
-		call s:InEditWin('Explore ' . a:args)
+		call s:InEditWin(a:cmd . ' ' . a:args)
 	finally
 		for [l:k, l:m] in items(l:saved)
 			if exists('*mapset')
@@ -3274,13 +3329,91 @@ func! s:Explore(args) abort
 		endfor
 	endtry
 endfunc
-command! -nargs=* -complete=dir VimIdeExplore call s:Explore(<q-args>)
-for s:c in ['Ex', 'Exp', 'Expl', 'Explo', 'Explor', 'Explore']
-	execute 'cnoreabbrev <expr> ' . s:c
-				\ . ' (getcmdtype() ==# ":" && getcmdline() ==# "' . s:c . '")'
-				\ . ' ? "VimIdeExplore" : "' . s:c . '"'
+
+" 지금 곁창에 있는가. s:InEditWin 과 같은 잣대(_G.vimide_is_edit_win)를 쓴다.
+"
+" 진짜 vim 8.1 에는 그 판정기(lua)가 없다 - 거기서는 늘 0 이라 아래 약어가
+" 아무것도 바꾸지 않는다. 서버에서는 예전 그대로 동작한다.
+func! s:SideWin() abort
+	if !get(g:, 'vimide_edit_route', 1)
+		return 0
+	endif
+	if !has('nvim') || !exists('*luaeval')
+		return 0
+	endif
+	return !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+endfunc
+
+" 명령줄 약어 한 벌을 깐다.
+"
+"   a:full   진짜 명령 이름          'Explore'
+"   a:short  잡기 시작할 가장 짧은 꼴 'Ex'  ->  Ex Exp Expl Explo Explor Explore
+"   a:target 바꿔 칠 이름            'VimIdeExplore'
+"   a:guard  1 이면 곁창에 있을 때만 바꾼다
+"
+" 왜 약어인가: 명령을 같은 이름으로 덮어쓰면 그 안에서 원래 명령을 부를 때
+" 제 자신을 다시 부른다. 약어는 사람이 명령줄에 친 것에만 걸려서 그 고리가
+" 없고, 스크립트의 :execute 'edit ...' 은 건드리지 않는다.
+func! s:RouteAbbrev(full, short, target, guard) abort
+	let l:i = len(a:short)
+	while l:i <= len(a:full)
+		let l:k = strpart(a:full, 0, l:i)
+		execute 'cnoreabbrev <expr> ' . l:k
+					\ . ' (getcmdtype() ==# ":" && getcmdline() ==# "' . l:k . '"'
+					\ . (a:guard ? ' && <SID>SideWin()' : '')
+					\ . ') ? "' . a:target . '" : "' . l:k . '"'
+		let l:i += 1
+	endwhile
+endfunc
+
+" netrw 한 벌. :Ex 만이 아니라 쪼개 여는 것들도 같이 돌린다 - 곁창에서
+" :Vex 를 치면 그 사이드바를 세로로 쪼개 거기에 목록을 편다.
+" :Rexplore 는 뺀다. netrw 버퍼 안에서 '보던 디렉터리로 돌아가기' 라서
+" EDIT 창으로 옮기면 뜻이 없어진다.
+for s:x in ['Explore', 'Vexplore', 'Sexplore', 'Hexplore', 'Texplore', 'Lexplore']
+	execute 'command! -nargs=* -complete=dir VimIde' . s:x
+				\ . " call s:Explore('" . s:x . "', <q-args>)"
+	call s:RouteAbbrev(s:x, s:x ==# 'Explore' ? 'Ex' : strpart(s:x, 0, 3),
+				\ 'VimIde' . s:x, 0)
 endfor
-unlet! s:c
+unlet! s:x
+
+" '지금 창'에 버퍼를 들이는 명령들. 곁창에서 치면 EDIT 창으로 돌린다.
+"
+" :e . 이 특히 나쁘다. nvim 0.12 에는 netrw 대신 NERDTree 가 디렉터리를
+" 가로채는데, 곁창을 차지하는 데 그치지 않고 그 창을 아예 없앤다.
+" 실측(개발서버, nvim 0.12.4):
+"   aerial 창에서 :e .  -> aerial 이 사라지고 NERDTree 가 열150 에 새로 뜸
+"   quickfix 창에서     -> quickfix 가 사라지고 NERDTree 가 새로 뜸
+"   RelationView 패널   -> winfixbuf 라 E1513 만 나고 아무 일도 안 남
+" 사후 복구(vimidewin.lua)로는 이것을 못 잡는다 - 되돌릴 창이 이미 없다.
+"
+" EDIT 창에서 친 것은 글자 하나 건드리지 않는다. :e 는 하루에 백 번 치는
+" 명령이라 거기서까지 남의 이름으로 갈아 두면 <Tab> 파일 이름 완성처럼
+" 미묘한 것이 조금만 달라져도 바로 걸림돌이 된다.
+for s:r in [
+			\ ['edit',      'e',   'file'],
+			\ ['enew',      'ene', 'file'],
+			\ ['find',      'fin', 'file_in_path'],
+			\ ['view',      'vie', 'file'],
+			\ ['buffer',    'b',   'buffer'],
+			\ ['bnext',     'bn',  'buffer'],
+			\ ['bprevious', 'bp',  'buffer'],
+			\ ['sbuffer',   'sb',  'buffer'],
+			\ ['help',      'h',   'help'],
+			\ ['tag',       'ta',  'tag'],
+			\ ['tjump',     'tj',  'tag'],
+			\ ['tselect',   'ts',  'tag'],
+			\ ['BufExplorer',       'BufE',    'buffer'],
+			\ ['ToggleBufExplorer', 'ToggleB', 'buffer'],
+			\ ]
+	let s:cmd = s:r[0]
+	let s:nm = 'VimIde' . toupper(s:cmd[0]) . s:cmd[1:]
+	execute 'command! -nargs=* -bang -complete=' . s:r[2] . ' ' . s:nm
+				\ . " call s:InEditWin('" . s:cmd . "<bang> ' . <q-args>)"
+	call s:RouteAbbrev(s:cmd, s:r[1], s:nm, 1)
+endfor
+unlet! s:r s:cmd s:nm
 " <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색).
 " <F8> 은 커서 밑 심볼에 노란 표시를 붙이고 뗀다 (yellowmark.lua).
 " 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.

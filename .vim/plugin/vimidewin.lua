@@ -161,6 +161,16 @@ function _G.vimide_edit_slot()
   if wins[1] then
     return wins[1]
   end
+  return _G.vimide_borrowed_win()
+end
+
+--- 지금 '편집 자리를 빌려 쓰는 중'인 창. 없으면 0.
+---
+--- 따로 내놓는 이유는 되돌이 때문이다. vimide_edit_slot() 은 첫 수로
+--- _G.vimide_last_edit_win()(= relationview 의 pick_src_win) 을 부른다.
+--- 그래서 pick_src_win 이 마지막 수로 edit_slot 을 부르면 서로 물고 돈다.
+--- 이 함수는 아무도 되부르지 않으니 양쪽이 같이 쓸 수 있다.
+function _G.vimide_borrowed_win()
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
     local ok, conf = pcall(api.nvim_win_get_config, w)
     local floating = ok and conf and conf.relative and conf.relative ~= ''
@@ -241,8 +251,25 @@ end
 -- RelationView 패널/미리보기 세 창에는 winfixbuf 가 걸려 있어 애초에 거부되고
 -- (E1513), 여기 오는 것은 그것이 없는 나머지 곁창들이다.
 
-local guarded = {} -- winid -> { buf = 곁창 버퍼, kind = 'quickfix'|'loclist'|'other' }
+local guarded = {} -- winid -> { buf = 곁창 버퍼, ft = 곁창 filetype, kind = ... }
 local sweeping = false
+
+-- '지금 창을 그 자리에서 차지하는' 플러그인들.
+--
+-- EDIT 창에 들어앉는 것은 정상이다 - 자리를 잠시 빌렸다가 고르고 나면
+-- 돌려준다. 곁창에 들어앉으면 그 곁창이 통째로 없어진다.
+--
+-- 이 표는 BORROWED_FT 와 목적이 다르다. 저쪽은 '이 창을 편집 자리로 쳐도
+-- 되나'를 묻고, 이쪽은 '이 버퍼가 곁창에 들어온 침입자인가'를 묻는다.
+-- nerdtree 가 이쪽에만 있는 이유: NERDTree 는 제 창을 따로 만들지만
+-- (그래서 편집 자리가 아니다) NERDTreeHijackNetrw 로 디렉터리를 가로챌
+-- 때는 지금 창을 차지한다.
+local TAKEOVER_FT = {
+  netrw = true,
+  bufexplorer = true,
+  nerdtree = true,
+  NvimTree = true,
+}
 
 local function kind_of(buf)
   if vim.bo[buf].buftype == 'quickfix' then
@@ -278,6 +305,7 @@ local function remember(win)
   local buf = api.nvim_win_get_buf(win)
   guarded[win] = {
     buf = buf,
+    ft = vim.bo[buf].filetype,
     kind = kind_of(buf),
     reopen = REOPEN[vim.bo[buf].filetype] or REOPEN[kind_of(buf)],
   }
@@ -290,8 +318,21 @@ local function rescue(win)
     return
   end
   local buf = api.nvim_win_get_buf(win)
-  if buf == g.buf or is_plugin_buf(buf) then
+  if buf == g.buf then
     return -- 아직 제자리다
+  end
+  if is_plugin_buf(buf) then
+    -- 곁창 자리에 들어온 것이 또 곁창 버퍼다. 두 경우가 있다.
+    --
+    --   같은 플러그인이 제 버퍼를 갈아 끼운 것 - NERDTree 새로 고침,
+    --   quickfix 다시 열기. 그냥 둔다.
+    --
+    --   남의 창차지 플러그인이 들어앉은 것 - aerial 창에서 :e . 를 쳐서
+    --   NERDTree 가 그 자리를 먹은 경우. 이것은 되돌려야 한다.
+    local ft = vim.bo[buf].filetype
+    if not TAKEOVER_FT[ft] or ft == g.ft then
+      return
+    end
   end
 
   -- 되돌리기 전에 커서를 기억해 둔다. 사용자가 보려던 자리다.

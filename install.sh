@@ -186,9 +186,13 @@ echo "     (그냥  nvim  은 지금까지와 똑같이 기본 상태로 뜹니�
 # 두 군데가 되어 곧 어긋난다. 어디를 보면 되는지만 가리킨다.
 echo "tip: 기능을 켜고 끄는 설정은 모두 ${HOME}/.vimrc 에 'let g:...' 로 있습니다."
 echo "     주요 절: '점프 키 관련 옵션' / 'RelationView' / '창 규칙' / '마우스'"
+echo "              / '곁창에서 시작하면 안 되는 명령'"
 VIMIDE_OPTS=$(grep -c '^let g:\(vimide\|relationview\|overview\)_' ${HOME}/.vimrc 2>/dev/null || echo 0)
 echo "     (지금 ${VIMIDE_OPTS}개. 값을 고치고 nvim 을 다시 띄우면 바로 먹습니다)"
 echo "tip: 마우스가 이상하면  :VimIdeMouseCheck  /  :VimIdeMouseOff  로 가릅니다."
+echo "tip: 곁창(aerial/quickfix/RelationView/neo-tree ...)에서 친 :e :b :find 는"
+echo "     EDIT 창으로 옮겨서 실행합니다. 끄려면  let g:vimide_edit_route = 0"
+echo "     아무 명령이나 그렇게 돌리려면  :VimIdeInEdit <명령>"
 
 pip install pathlib
 

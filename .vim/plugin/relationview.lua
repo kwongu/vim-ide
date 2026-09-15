@@ -5531,6 +5531,18 @@ pick_src_win = function()
       return w
     end
   end
+  -- 마지막 수: 편집 자리를 잠시 빌려 쓰는 창.
+  --
+  -- <F6> 으로 BufExplorer 를 띄우거나 :Ex 로 netrw 를 열면 그 창이 하나뿐인
+  -- 편집 자리를 차지한다. 그 상태에서 패널의 <CR> 을 누르면 '편집 창' 이
+  -- 하나도 없어서 'no source window' 로 거절당했다. 그 자리는 원래 EDIT
+  -- 창이고 고르고 나면 돌려주는 자리니, 되찾아 쓴다. (vimidewin.lua)
+  if type(_G.vimide_borrowed_win) == 'function' then
+    local ok, w = pcall(_G.vimide_borrowed_win)
+    if ok and w and w ~= 0 and api.nvim_win_is_valid(w) then
+      return w
+    end
+  end
   return nil
 end
 
