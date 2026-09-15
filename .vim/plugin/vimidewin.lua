@@ -395,6 +395,62 @@ api.nvim_create_autocmd('WinClosed', {
 -- ^[[?1002h ^[[?1006h 를 쓴다), tmux 도 자기 mouse 옵션과 무관하게 앱이
 -- 요청했으면 그대로 넘겨 준다(실측: 중첩 tmux 로 확인). 그러니 남는 고리는
 -- 터미널 프로그램 자신이다 - 그것을 여기서 직접 확인한다.
+-- 지금 누가 마우스 키를 잡고 있나. 전역 매핑만 본다(버퍼 지역은 그 창에서만 산다).
+local MOUSE_KEYS = { '<LeftMouse>', '<LeftDrag>', '<LeftRelease>',
+  '<2-LeftMouse>', '<3-LeftMouse>', '<4-LeftMouse>',
+  '<ScrollWheelUp>', '<ScrollWheelDown>' }
+
+local function who(key, mode)
+  local d = vim.fn.maparg(key, mode, false, true)
+  if type(d) ~= 'table' or not d.lhs then
+    return nil
+  end
+  if d.desc and d.desc ~= '' then
+    return d.desc
+  end
+  if d.rhs and d.rhs ~= '' then
+    return d.rhs
+  end
+  if d.callback then
+    -- 누구 것인지 파일 이름으로라도 알려 준다
+    local info = debug.getinfo(d.callback, 'S')
+    return 'lua ' .. tostring(info and info.short_src or '?')
+        .. ':' .. tostring(info and info.linedefined or '?')
+  end
+  return '(?)'
+end
+
+local function mouse_maps()
+  local out = {}
+  for _, k in ipairs(MOUSE_KEYS) do
+    local w = who(k, 'n')
+    if w then
+      out[#out + 1] = '  ' .. k .. '  ->  ' .. w
+    end
+  end
+  if #out == 0 then
+    return '  (전역 마우스 매핑 없음)'
+  end
+  return table.concat(out, '\n')
+end
+
+-- 매핑 층이 범인인지 한 세션 안에서 가른다. 다시 띄울 필요 없이 지금 끈다.
+api.nvim_create_user_command('VimIdeMouseOff', function()
+  local n = 0
+  for _, k in ipairs(MOUSE_KEYS) do
+    for _, m in ipairs({ 'n', 'i', 'v' }) do
+      if pcall(vim.keymap.del, m, k) then
+        n = n + 1
+      end
+    end
+  end
+  print(('전역 마우스 매핑 %d개를 지웠습니다. 이제 클릭과 드래그를 해 보세요.'):format(n))
+  print('되살리려면 nvim 을 다시 띄우면 됩니다.')
+  print('이걸로 정상이 되면 범인은 매핑입니다:')
+  print('  let g:overview_mouse = 0            " 막대 쪽')
+  print('  let g:relationview_global_mouse = 0  " [+] 한 번 클릭 쪽')
+end, { desc = '전역 마우스 매핑을 지금 전부 끈다 (원인 가리기)' })
+
 api.nvim_create_user_command('VimIdeMouseCheck', function()
   local v = vim.version()
   print('── 마우스 진단 ──')
@@ -415,6 +471,9 @@ api.nvim_create_user_command('VimIdeMouseCheck', function()
       or vim.inspect(ch)
   print('')
   print('받은 것 = ' .. shown)
+  print('')
+  print('── 지금 마우스 키를 잡고 있는 매핑 ──')
+  print(mouse_maps())
   if shown:match('Mouse') then
     print(string.format('창=%d 줄=%d 칸=%d', vim.v.mouse_win, vim.v.mouse_lnum,
       vim.v.mouse_col))
