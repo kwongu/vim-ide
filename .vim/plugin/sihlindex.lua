@@ -125,6 +125,17 @@ local OK_NODE = { identifier = true, type_identifier = true,
                   field_identifier = true }
 -- 기본색이 빨강인 캡처. 찾았는데 매크로가 아니면 초록으로 돌려놔야 한다.
 local CONST_CAP = { ['constant'] = true, ['constant.macro'] = true }
+-- 함수처럼 불리는 자리. 색인이 아는 것만 초록 볼드로 올린다.
+--
+-- 예전에는 아무것도 안 칠하고 treesitter 의 @function.call(초록 볼드)에
+-- 기댔다. 그런데 그 볼드를 빼야 했다 - nvim 은 겹친 속성을 OR 로 합쳐서,
+-- 색인이 모르는 심볼에 SiJumpNone(검정)을 얹어도 밑의 볼드가 그대로
+-- 비쳤기 때문이다. 이제 볼드는 '아는 것'이 제 손으로 붙인다.
+local FN_CAP = {
+  ['function'] = true, ['function.call'] = true,
+  ['function.builtin'] = true, ['function.macro'] = true,
+  ['function.method'] = true, ['function.method.call'] = true,
+}
 -- 기본색이 본문색(검정)인 캡처: 구조체 멤버. 찾았으면 초록으로 올린다.
 --
 -- GNU Global 의 기본 파서는 멤버를 대부분 색인하지 않는다 - 실제 커널
@@ -1123,14 +1134,17 @@ repaint = function(win)
               end_row = r2, end_col = c2,
               hl_group = 'SiEnumRef', priority = prio,
             })
-          elseif how == 'found' and (extra == 'member'
-              or CONST_CAP[cap] or MEMBER_CAP[cap]) then
-            -- 찾았는데 매크로가 아니다 = enum 상수이거나 구조체 멤버다.
-            --
-            -- 둘 다 '아무것도 안 칠하기'로는 초록이 되지 않는다. enum 상수는
-            -- nvim 기본 쿼리가 상수 매크로와 똑같이 @constant 로 잡아 빨강
-            -- 으로 시작하고, 멤버는 @property 라 본문색(검정)으로 시작한다.
-            -- 초록으로 올려 준다.
+          elseif how == 'found' and (extra == 'member' or MEMBER_CAP[cap]) then
+            -- 구조체 멤버(a->b.c 처럼 타고 들어간 것). 초록이되 볼드는
+            -- 없다 - 멤버는 코드에 빽빽해서 굵게 두면 본문이 얼룩진다.
+            -- @property 라 그냥 두면 검정이므로 초록으로 올려는 준다.
+            pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
+              end_row = r2, end_col = c2,
+              hl_group = 'SiMemberRef', priority = prio,
+            })
+          elseif how == 'found' and (CONST_CAP[cap] or FN_CAP[cap]) then
+            -- enum 상수(기본 빨강)와 색인이 아는 함수형 심볼의 역참조.
+            -- 초록 볼드로 올린다 - '점프되는 것'의 표시다.
             pcall(api.nvim_buf_set_extmark, buf, NS, r1, c1, {
               end_row = r2, end_col = c2,
               hl_group = 'SiJumpFound', priority = prio,

@@ -52,7 +52,7 @@ let s:c = {
       \ 'linenr':    ['#808080', 244, 'grey'],
       \ 'linenrbg':  ['#f2f2f2', 255, 'white'],
       \ 'ui':        ['#d9d9d9', 252, 'lightgrey'],
-      \ 'aerialbg':  ['#d9d9d9', 252, 'lightgrey'],
+      \ 'aerialbg':  ['#5fafd7', 74,  'darkcyan'],
       \ 'uifg':      ['#333333', 236, 'black'],
       \ 'err':       ['#cc0000', 160, 'red'],
       \ 'warn':      ['#b35c00', 130, 'darkyellow'],
@@ -460,6 +460,9 @@ call s:hi('SiMacroRef', 'number', '', '')
 call s:hi('SiMacroKw', 'decl', '', 'bold')
 " 색인이 아는데 매크로가 아닌 상수(enum 요소). 기본색이 빨강이라 되돌린다.
 call s:hi('SiJumpFound', 'ref', '', 'bold')
+" 타고 들어간 구조체 멤버 (a->b.c). 점프는 되므로 초록이지만 볼드는
+" 없다 - 멤버는 코드에 빽빽해서 굵게 두면 본문이 얼룩진다.
+call s:hi('SiMemberRef', 'ref', '', '')
 " 로그 매크로 (ape_dbg, arpc_info, DIRAC_TRACE_ERR ...). 매크로지만 읽을 때는
 " 함수 호출이라 @function.call 과 같은 초록 볼드로 둔다 - 빨강으로 두면
 " 본문에서 로그 줄만 튀어 정작 읽어야 할 코드를 가린다.
