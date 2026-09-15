@@ -451,6 +451,9 @@ end
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
+-- 오른쪽 열 세 창의 높이를 비율로 나눈다. 아래쪽에서 정의한다.
+local apply_column_ratio
+
 -- 왼쪽 클릭 한 번을 어떻게 다룰지. 아래쪽에서 정의한다.
 -- 패널 버퍼의 매핑과 전역 매핑이 같은 것을 쓴다.
 local mouse_expr
@@ -2558,6 +2561,11 @@ ensure_ctx = function()
       end
     end,
   })
+  vim.schedule(function()
+    if apply_column_ratio then
+      pcall(apply_column_ratio)
+    end
+  end)
   return ctx
 end
 
@@ -6085,6 +6093,11 @@ function A.toggle_ctx()
   elseif ensure_ctx() then
     update_context()
   end
+  vim.schedule(function()
+    if apply_column_ratio then
+      pcall(apply_column_ratio)
+    end
+  end)
 end
 
 -- 오른쪽 열 맨 위의 neo-tree 를 켜고 끈다.
@@ -6102,6 +6115,11 @@ function A.toggle_tree()
     end
   end
   balance_edits()
+  vim.schedule(function()
+    if apply_column_ratio then
+      pcall(apply_column_ratio)
+    end
+  end)
 end
 
 -- 세로 전체 미리보기(두 번째 context)를 켜고 끈다
@@ -6152,6 +6170,76 @@ local function win_fingerprint()
     end
   end
   return table.concat(ids, ',')
+end
+
+-- 오른쪽 열 세 창의 높이를 비율로 나눈다.
+--
+-- 기본 2 : 3 : 5 (neo-tree : 관계 목록 : 미리보기). 10등분했을 때의 몫이다.
+-- 예전에는 트리와 목록에 고정 줄수를 떼어 주고 남은 것을 전부 미리보기에
+-- 주었는데, 터미널 높이가 달라지면 비율이 제각각이 됐다.
+--
+--   let g:relationview_column_ratio = [2, 3, 5]   " 바꾸려면
+--   let g:relationview_column_ratio = []          " 예전 방식(고정 줄수)
+--
+-- 셋 중 일부만 열려 있으면 열린 것들끼리 같은 비율로 나눈다.
+local function column_ratio()
+  local v = vim.g.relationview_column_ratio
+  if v == nil then
+    return 2, 3, 5
+  end
+  if type(v) ~= 'table' or #v ~= 3 then
+    return nil -- 예전 방식(고정 줄수)을 쓴다
+  end
+  local a, b, c = tonumber(v[1]), tonumber(v[2]), tonumber(v[3])
+  if not (a and b and c) or (a + b + c) <= 0 then
+    return nil
+  end
+  return a, b, c
+end
+
+apply_column_ratio = function()
+  local a, b, c = column_ratio()
+  if not a then
+    return
+  end
+  if cfg('position', 'bottom') ~= 'right' or not right_stack() then
+    return
+  end
+  if not panel_visible() then
+    return
+  end
+  local parts = {}
+  if tree_visible() then
+    parts[#parts + 1] = { win = s.tree_win, r = a }
+  end
+  parts[#parts + 1] = { win = s.win, r = b }
+  if ctx_visible() then
+    parts[#parts + 1] = { win = s.ctx_win, r = c }
+  end
+  if #parts < 2 then
+    return -- 나눌 것이 없다
+  end
+  local sum, total = 0, 0
+  for _, p in ipairs(parts) do
+    sum = sum + p.r
+    total = total + api.nvim_win_get_height(p.win)
+  end
+  if sum <= 0 or total < #parts * 2 then
+    return -- 너무 좁아 나누면 오히려 못 쓴다
+  end
+  -- 마지막 창에 나머지를 몰아 준다. 반올림 때문에 한두 줄이 뜨는데,
+  -- 그것을 미리보기가 갖는 편이 코드를 읽기에 낫다.
+  local used = 0
+  for i, p in ipairs(parts) do
+    local h
+    if i == #parts then
+      h = total - used
+    else
+      h = math.max(2, math.floor(total * p.r / sum))
+      used = used + h
+    end
+    pcall(api.nvim_win_set_height, p.win, h)
+  end
 end
 
 -- 지금 탭 창들의 크기를 창 id 와 함께 적어 둔다.

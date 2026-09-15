@@ -2510,8 +2510,13 @@ let g:relationview_tree_follow_delay = 200
 " 뿌리 밖의 파일을 잡았을 때 트리 뿌리까지 그 파일 쪽으로 옮길지.
 " 기본 0 = 가만둔다. neo-tree 는 1 일 때 뿌리를 그 파일의 상위로 바꾼다.
 let g:relationview_tree_follow_cwd = 0
-" 3등분에서 관계 목록에 최소 이만큼은 남기고, 나머지를 미리보기에 준다.
-" 이 값을 줄이면 오른쪽 하단 미리보기가 그만큼 커진다 (47줄이면 12/12/23).
+" 오른쪽 열 세 창의 높이를 10등분했을 때의 몫.
+"   neo-tree(2) / 관계 목록(3) / 미리보기(5)
+" 셋 중 일부만 열려 있으면 열린 것들끼리 같은 비율로 나눈다.
+" 빈 목록([])으로 두면 예전 방식(아래 고정 줄수)을 쓴다.
+let g:relationview_column_ratio = [2, 3, 5]
+" 위 비율을 안 쓸 때만 의미가 있다: 관계 목록에 최소 이만큼은 남기고
+" 나머지를 미리보기에 준다.
 let g:relationview_list_min_height = 12
 let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
