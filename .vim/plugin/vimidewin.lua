@@ -326,12 +326,58 @@ local function remember(win)
       and is_plugin_buf(buf) and vim.bo[buf].filetype ~= g.ft then
     return
   end
+  -- 폭도 같이 적는다. 찌그러진 값은 적지 않고 전에 적어 둔 것을 지킨다 -
+  -- 되돌릴 기준이 1칸이 되어 버리면 되돌릴 방법이 없어진다.
+  local floor = cfg('side_min_width', 8)
+  local keep = g and g.width or nil
+  local wid = nil
+  if floor > 0 then
+    local okw, fixed = pcall(function() return vim.wo[win].winfixwidth end)
+    if okw and fixed then
+      local now = api.nvim_win_get_width(win)
+      wid = now > floor and now or keep
+    end
+  end
   guarded[win] = {
     buf = buf,
     ft = vim.bo[buf].filetype,
     kind = kind_of(buf),
+    width = wid,
     reopen = REOPEN[vim.bo[buf].filetype] or REOPEN[kind_of(buf)],
   }
+end
+
+-- 곁창이 한두 칸으로 뭉개졌으면 원래 폭으로 되돌린다.
+--
+-- winfixwidth 는 '균등 분할이 이 폭을 건드리지 말라' 는 뜻이지, 이미 줄어든
+-- 것을 되돌려 주지는 않는다. 그래서 새 창이 억지로 자리를 빼앗아 가면
+-- (NERDTree 가 :e . 로 디렉터리를 가로챌 때가 그렇다 - 실측: aerial 이
+-- 35칸에서 1칸이 된다) 그 곁창은 :wincmd = 로도 영영 안 돌아왔다.
+-- F9/F10 으로 껐다 켜는 수밖에 없었다.
+--
+-- '조금 줄어든 것' 은 건드리지 않는다. RelationView 의 w(wide) 토글이
+-- 일부러 줄이는 폭이 그 자리다(실측: 같은 aerial 이 35 -> 43 -> 31 -> 20
+-- 으로 오간다). 여기서 되돌리는 것은 쓸 수 없게 뭉개진 경우뿐이다.
+--
+--   let g:vimide_side_min_width = 0    " 이 되돌리기를 끈다
+--   let g:vimide_side_min_width = 12   " 더 일찍 되돌린다
+local function unsquash(win)
+  local g = guarded[win]
+  if not (g and g.width) or not api.nvim_win_is_valid(win) then
+    return
+  end
+  local floor = cfg('side_min_width', 8)
+  if floor <= 0 or g.width <= floor then
+    return
+  end
+  local ok, fixed = pcall(function() return vim.wo[win].winfixwidth end)
+  if not ok or not fixed then
+    return
+  end
+  if api.nvim_win_get_width(win) > floor then
+    return
+  end
+  pcall(api.nvim_win_set_width, win, g.width)
 end
 
 -- 곁창에 실린 파일을 EDIT 창으로 옮기고 곁창을 되돌린다
@@ -513,6 +559,11 @@ local function sweep(note_only)
   end
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
     pcall(remember, w)
+  end
+  if not (note_only or busy()) then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      pcall(unsquash, w)
+    end
   end
   sweeping = false
 end

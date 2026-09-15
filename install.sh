@@ -190,6 +190,8 @@ echo "              / '곁창에서 시작하면 안 되는 명령'"
 VIMIDE_OPTS=$(grep -c '^let g:\(vimide\|relationview\|overview\)_' ${HOME}/.vimrc 2>/dev/null || echo 0)
 echo "     (지금 ${VIMIDE_OPTS}개. 값을 고치고 nvim 을 다시 띄우면 바로 먹습니다)"
 echo "tip: 마우스가 이상하면  :VimIdeMouseCheck  /  :VimIdeMouseOff  로 가릅니다."
+echo "tip: 곁창이 한두 칸으로 뭉개지면 저절로 원래 폭으로 돌아옵니다."
+echo "     기준을 바꾸려면  let g:vimide_side_min_width = 8  (0 이면 끔)"
 echo "tip: 곁창(aerial/quickfix/RelationView/neo-tree ...)에서 친 :e :b :bn :bd"
 echo "     :find :h :tag 와 <C-t> / <C-^> / 마우스 뒤로·앞으로 버튼은 EDIT 창으로"
 echo "     옮겨서 실행합니다. 끄려면  let g:vimide_edit_route = 0"

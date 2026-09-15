@@ -2674,6 +2674,15 @@ let g:vimide_win_guard = 1
 let g:vimide_min_edit_win = 1
 " 1 (기본) 패널/aerial/tagbar 등을 켜고 끌 때 EDIT 창 크기를 고르게 맞춘다.
 let g:vimide_balance_on_toggle = 1
+" 8 (기본) 곁창이 이 칸수 이하로 뭉개지면 원래 폭으로 되돌린다. 0 이면 끈다.
+"
+"          winfixwidth 는 '균등 분할이 이 폭을 건드리지 말라' 는 뜻이지,
+"          이미 줄어든 것을 되돌려 주지는 않는다. 그래서 :e . 한 번이면
+"          (NERDTree 가 디렉터리를 가로채며 자리를 빼앗는다) aerial 이
+"          35칸에서 1칸이 된 채 :wincmd = 로도 안 돌아왔다.
+"          조금 줄어든 것은 건드리지 않는다 - RelationView 의 w(wide)
+"          토글이 일부러 줄이는 폭이 그 위(실측: 35 -> 43 -> 31 -> 20)다.
+let g:vimide_side_min_width = 8
 
 " ------------------------------------
 " 마우스를 매핑으로 가로챌지 (터미널에 따라 탈이 날 수 있는 자리다)
