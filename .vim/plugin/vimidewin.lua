@@ -388,6 +388,47 @@ api.nvim_create_autocmd('WinClosed', {
 })
 
 -- ---------------------------------------------------------------------------
+-- 곁들이: 마우스가 nvim 까지 오는지 본다  (:VimIdeMouseCheck)
+-- ---------------------------------------------------------------------------
+-- '클릭해도 커서가 안 움직인다' 는 원인이 여럿이라 말로는 안 갈린다.
+-- nvim 은 터미널 종류와 상관없이 마우스 보고를 켜고(실측: TERM 이 무엇이든
+-- ^[[?1002h ^[[?1006h 를 쓴다), tmux 도 자기 mouse 옵션과 무관하게 앱이
+-- 요청했으면 그대로 넘겨 준다(실측: 중첩 tmux 로 확인). 그러니 남는 고리는
+-- 터미널 프로그램 자신이다 - 그것을 여기서 직접 확인한다.
+api.nvim_create_user_command('VimIdeMouseCheck', function()
+  local v = vim.version()
+  print('── 마우스 진단 ──')
+  print('TERM   = ' .. tostring(vim.env.TERM))
+  print('TMUX   = ' .. (vim.env.TMUX and '있음' or '없음'))
+  print('mouse  = ' .. vim.o.mouse .. '   (a 여야 정상)')
+  print('nvim   = ' .. string.format('%d.%d.%d', v.major, v.minor, v.patch))
+  print('')
+  print('이제 이 창 아무 데나 왼쪽 버튼으로 한 번 클릭하세요.')
+  print('(아무 일도 안 일어난 채 멈춘 것처럼 보이면, 아무 키나 눌러 빠져나오세요)')
+  vim.cmd('redraw')
+  local ok, ch = pcall(vim.fn.getcharstr)
+  if not ok then
+    print('입력을 못 받았습니다: ' .. tostring(ch))
+    return
+  end
+  local shown = (vim.fn.exists('*keytrans') == 1) and vim.fn.keytrans(ch)
+      or vim.inspect(ch)
+  print('')
+  print('받은 것 = ' .. shown)
+  if shown:match('Mouse') then
+    print(string.format('창=%d 줄=%d 칸=%d', vim.v.mouse_win, vim.v.mouse_lnum,
+      vim.v.mouse_col))
+    print('=> 마우스가 nvim 까지 옵니다. 터미널은 정상입니다.')
+  else
+    print('=> 클릭이 아니라 키가 들어왔습니다.')
+    print('   터미널이 마우스 이벤트를 안 보내고 있습니다:')
+    print('   * 테라텀: 설정 > 기타 설정 > 마우스 - 마우스 이벤트 추적을 켠다')
+    print('             (SGR 확장은 4.87 이상이어야 합니다)')
+    print('   * iTerm2: Settings > Profiles > Terminal - Enable mouse reporting')
+  end
+end, { desc = '마우스가 nvim 까지 오는지 본다' })
+
+-- ---------------------------------------------------------------------------
 -- 2. EDIT 창이 0개가 되면 끝낸다
 -- ---------------------------------------------------------------------------
 -- 지금은 편집 창을 전부 닫아도 nvim 이 안 죽는다. neo-tree 와 RelationView
