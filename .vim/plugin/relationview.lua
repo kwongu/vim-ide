@@ -2008,6 +2008,9 @@ local function panel_open()
     callback = function()
       if s.win == win then
         s.win = nil
+        -- 넓혀 둔 채로 패널을 닫았다: 그 기억은 이제 쓸 데가 없다.
+        -- 남겨 두면 다음에 열어 'w' 를 눌렀을 때 옛 배치를 되돌린다.
+        s.wide_saved = nil
       end
     end,
   })
@@ -6104,7 +6107,7 @@ function A.toggle_big()
   end
 end
 
--- 패널을 화면 절반까지 넓혔다가 도로 좁힌다.
+-- 패널을 화면의 4/5 까지 넓혔다가 도로 좁힌다.
 --
 -- 되돌릴 때 EDIT 창들의 크기까지 원래대로여야 한다. 창 하나만 되돌리면
 -- 나머지가 나눠 가진 폭은 그대로 남아 배치가 조금씩 어긋난다. vim 에는
@@ -6112,26 +6115,58 @@ end
 -- 명령 문자열을 만들어 준다. 넓히기 직전에 그것을 적어 두었다가 그대로
 -- 실행한다 (실측: 60 -> 100 으로 넓힌 뒤 되돌리니 정확히 60).
 --
+-- 다만 winrestcmd() 는 '창 번호' 기준이다(:1resize, :vert 2resize ...).
+-- 넓혀 둔 사이에 창이 하나 열리거나 닫히면 번호가 밀려서, 그 명령이
+-- 엉뚱한 창을 줄였다 늘렸다 한다. 그래서 창 목록도 같이 적어 두고,
+-- 되돌릴 때 그 목록이 그대로일 때만 명령을 쓴다. 달라졌으면 패널 폭만
+-- 되돌리고 나머지는 건드리지 않는다 - 잘못 되돌리느니 그냥 두는 편이 낫다.
+--
 -- winfixwidth 가 걸려 있어도 명시적인 크기 지정은 통한다(실측).
 --
---   g:relationview_wide_width   넓힐 폭 (0 = 화면의 2/3)
---   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 2/3)
+--   g:relationview_wide_width   넓힐 폭 (0 = 화면의 4/5)
+--   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 4/5)
+
+-- 지금 탭의 창 목록을 '그대로인지 견줄 수 있는' 한 줄로
+local function win_fingerprint()
+  local ids = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    ids[#ids + 1] = tostring(w)
+  end
+  return table.concat(ids, ',')
+end
+
 function A.toggle_wide()
   if not panel_visible() then
     vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
     return
   end
-  if s.wide_saved then
-    local cmd = s.wide_saved
+  local right = cfg('position', 'bottom') == 'right'
+  local sv = s.wide_saved
+  if sv then
     s.wide_saved = nil
-    pcall(vim.cmd, cmd)
+    if sv.wins == win_fingerprint() then
+      -- 배치가 그대로다: 모든 창 크기를 통째로 되돌린다
+      pcall(vim.cmd, sv.cmd)
+    else
+      -- 그 사이 창이 바뀌었다: 패널만 원래 폭으로, 나머지는 손대지 않는다
+      if right and sv.size then
+        pcall(api.nvim_win_set_width, s.win, sv.size)
+      elseif sv.size then
+        pcall(api.nvim_win_set_height, s.win, sv.size)
+      end
+    end
     return
   end
-  s.wide_saved = vim.fn.winrestcmd()
-  if cfg('position', 'bottom') == 'right' then
+  s.wide_saved = {
+    cmd = vim.fn.winrestcmd(),
+    wins = win_fingerprint(),
+    size = right and api.nvim_win_get_width(s.win)
+        or api.nvim_win_get_height(s.win),
+  }
+  if right then
     local w = tonumber(cfg('wide_width', 0)) or 0
     if w <= 0 then
-      w = math.floor(vim.o.columns * 2 / 3)
+      w = math.floor(vim.o.columns * 4 / 5)
     end
     -- 편집 창이 아예 사라지지 않게 최소한은 남긴다
     w = math.min(w, math.max(20, vim.o.columns - 20))
@@ -6139,7 +6174,7 @@ function A.toggle_wide()
   else
     local h = tonumber(cfg('wide_height', 0)) or 0
     if h <= 0 then
-      h = math.floor(vim.o.lines * 2 / 3)
+      h = math.floor(vim.o.lines * 4 / 5)
     end
     h = math.min(h, math.max(5, vim.o.lines - 5))
     pcall(api.nvim_win_set_height, s.win, h)
