@@ -2673,27 +2673,82 @@ local function install_open_hook()
       if not (args and args.state and args.path) then
         return
       end
-      if not (s.tree_win and args.state.winid == s.tree_win) then
-        return
+      local from = args.state.winid
+      if not (s.tree_win and from == s.tree_win) then
+        -- 왼쪽 neo-tree(파일 탐색기)도 같은 길로 보낸다.
+        --
+        -- neo-tree 는 제 get_prior_window() 로 열 창을 고르는데, 그 잣대가
+        -- filetype/buftype 만 봐서 quickr-preview 의 미리보기 창(\p)을
+        -- 편집 창으로 쳤다. 그래서 미리보기를 띄워 둔 채 트리에서 파일을
+        -- 열면 그 미리보기에 파일이 들어갔다.
+        local ok_ft = from and api.nvim_win_is_valid(from)
+            and (vim.bo[api.nvim_win_get_buf(from)].filetype or ''):match('^neo%-tree')
+        if not ok_ft then
+          return
+        end
       end
-      -- split/vsplit/tabnew 는 사용자가 일부러 고른 것이니 건드리지 않는다
-      if args.open_cmd and args.open_cmd ~= 'edit' then
+      -- 여기 들어온 뒤로는 무슨 일이 있어도 { handled = true } 로 나간다.
+      --
+      -- 그냥 return 하면 neo-tree 가 제 'current' 갈래를 돌려 트리 창
+      -- 자신에 파일을 연다. 실측: F6 으로 BufExplorer 가 하나뿐인 편집
+      -- 자리를 차지한 상태에서 트리의 파일에 <CR> 을 누르면, 트리가 파일로
+      -- 갈렸다가 그 창이 닫히며 nvim 이 통째로 꺼졌다.
+      local cmd = args.open_cmd
+      if cmd == nil or cmd == '' or cmd == 'open' then
+        cmd = 'edit'
+      end
+      -- 새 탭은 창 자리와 상관없다. 트리만 지키고 neo-tree 에 맡긴다.
+      if cmd:match('^tab') then
         return
       end
       local target = pick_src_win()
+      if not (target and api.nvim_win_is_valid(target))
+          and type(_G.vimide_edit_slot) == 'function' then
+        -- 편집 자리를 빌려 쓰는 창(BufExplorer / netrw)까지 본다
+        local ok, w = pcall(_G.vimide_edit_slot)
+        if ok and w and w ~= 0 and api.nvim_win_is_valid(w) then
+          target = w
+        end
+      end
       if not (target and api.nvim_win_is_valid(target)) then
-        return
+        -- 그래도 없으면 편집 창을 하나 만든다
+        local ok = pcall(function()
+          vim.cmd('noautocmd topleft vertical split')
+          target = api.nvim_get_current_win()
+        end)
+        if ok and target and api.nvim_win_is_valid(target) then
+          for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight',
+            'previewwindow' }) do
+            pcall(function() vim.wo[target][o] = false end)
+          end
+        else
+          target = nil
+        end
+      end
+      if not (target and api.nvim_win_is_valid(target)) then
+        return { handled = true } -- 못 열더라도 트리는 지킨다
       end
       api.nvim_set_current_win(target)
-      if not pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(args.path)) then
-        return
-      end
+      -- split / vsplit 은 사용자가 일부러 고른 것이다. 그 뜻은 살리되,
+      -- 쪼개지는 자리를 곁창이 아니라 편집 영역으로 옮겨서 한다.
+      -- 예전에는 여기서 손을 떼어, 트리 열 안쪽에 10줄짜리 쪽창이 생겼다.
+      pcall(vim.cmd, cmd .. ' ' .. vim.fn.fnameescape(args.path))
       -- 우리가 열었으니 트리가 그 파일을 다시 펼치려 들 필요가 없다
       s.tree_last = args.path
       return { handled = true }
     end,
   })
 end
+
+-- neo-tree 가 화면에 뜨는 순간 훅을 건다. RelationView 의 오른쪽 트리를
+-- 한 번도 열지 않아도 왼쪽 탐색기가 보호를 받는다. 여기서 걸어야
+-- neo-tree 를 미리 require 하지 않는다(시작이 느려진다).
+api.nvim_create_autocmd('FileType', {
+  group = group,
+  pattern = 'neo-tree',
+  callback = function() pcall(install_open_hook) end,
+  desc = 'RelationView: neo-tree 가 뜨면 파일 열기 훅을 건다',
+})
 
 ensure_tree = function()
   if tree_visible() then
@@ -3441,6 +3496,17 @@ function _G.relationview_local_jump()
   end
   local win = api.nvim_get_current_win()
   local pos = api.nvim_win_get_cursor(0)
+
+  -- buftype 만 보면 quickr-preview 의 미리보기 창(\p)이 그냥 통과한다.
+  -- 거기에 :edit 를 치면 미리보기가 점프한 파일로 바뀌었다가 곁창 지킴이가
+  -- 도로 끌어내는 깜빡임이 났다. 낱말과 자리는 여기서 읽고, '여는 것'만
+  -- 편집 자리에서 한다.
+  if not is_edit_win(win) then
+    local t = pick_src_win()
+    if t and api.nvim_win_is_valid(t) then
+      win = t
+    end
+  end
 
   -- a member access resolves through the base variable's type, not by name
   if member_jump(buf, pos[1], pos[2], function(loc)
@@ -5492,14 +5558,29 @@ local function is_edit_win(w)
   if not (w and api.nvim_win_is_valid(w)) then
     return false
   end
+  if w == s.win or w == s.ctx_win or w == s.big_win or w == s.tree_win then
+    return false -- 우리 창들
+  end
+  if api.nvim_win_get_buf(w) == s.buf then
+    return false
+  end
+  -- 나머지는 정본에 맡긴다(vimidewin.lua).
+  --
+  -- 여기 있던 판정은 buftype 만 봐서 quickr-preview 의 미리보기 창(\p)을
+  -- 편집 창으로 쳤다. 그래서 패널에서 <CR> 을 누르면 파일이 그 미리보기에
+  -- 한 번 깜빡 열렸다가 곁창 지킴이에게 끌려 나갔다. 정본은 &previewwindow
+  -- 와 부동 창까지 본다.
+  if type(_G.vimide_is_edit_win) == 'function' then
+    local ok, r = pcall(_G.vimide_is_edit_win, w)
+    if ok then
+      return r and true or false
+    end
+  end
+  -- 정본이 없을 때(진짜 vim 이거나 적재 순서가 어긋날 때)만 예전 잣대.
   if api.nvim_win_get_tabpage(w) ~= api.nvim_get_current_tabpage() then
     return false
   end
-  if w == s.win or w == s.ctx_win or w == s.big_win or w == s.tree_win then
-    return false
-  end
-  local b = api.nvim_win_get_buf(w)
-  return vim.bo[b].buftype == '' and b ~= s.buf
+  return vim.bo[api.nvim_win_get_buf(w)].buftype == ''
 end
 
 -- 파일을 어느 편집 창에 열까.
@@ -5573,6 +5654,23 @@ api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
   end,
   desc = 'RelationView: remember the edit window we came from',
 })
+
+-- 곁창에 있으면 편집 자리로 옮긴다. 1 = 이제 편집 창에 있다.
+--
+-- 남의 명령(gtags.vim 의 :Gtags 원본 같은 것)을 그대로 돌려야 할 때 쓴다.
+-- 그것들은 '지금 창' 에 결과를 열기 때문에, 곁창에서 부르면 그 사이드바가
+-- 통째로 소스 파일로 바뀐다.
+local function goto_edit_slot()
+  if is_edit_win(api.nvim_get_current_win()) then
+    return true
+  end
+  local w = pick_src_win()
+  if w and api.nvim_win_is_valid(w) then
+    pcall(api.nvim_set_current_win, w)
+    return is_edit_win(api.nvim_get_current_win())
+  end
+  return false
+end
 
 -- 다른 플러그인도 같은 자리에 열 수 있도록 내보낸다.
 -- 편집 창을 못 찾으면 0 - telescope 의 get_selection_window 가 쓰는 규약이다
@@ -7448,7 +7546,23 @@ function A.gtags(args, retried)
   end
   if not (panel_visible() and ok_flags) then
     if gtags_orig then
-      gtags_orig(args)
+      -- 곁창에서 불렀으면 편집 자리로 옮겨서 돌린다.
+      --
+      -- 패널을 닫아 둔 채 aerial/BufExplorer 같은 곁창에서 \g \s \e \a
+      -- \i \f 를 누르면 전부 여기로 온다. gtags.vim 의 원본은 '지금 창'에
+      -- 결과를 열기 때문에 그 곁창이 통째로 소스 파일로 바뀌었고,
+      -- aerial/BufExplorer 는 버퍼가 wipe 되어 사후 복구도 못 돌려놓았다.
+      local a = tostring(args)
+      if pattern == '' then
+        -- 인자에 찾을 말이 없으면 gtags.vim 이 '지금 커서 밑 낱말'을 쓴다.
+        -- 창을 옮기면 그 낱말이 달라지니 여기서 미리 붙여 둔다.
+        local cw = vim.fn.expand('<cword>')
+        if cw ~= '' then
+          a = a .. ' ' .. cw
+        end
+      end
+      goto_edit_slot()
+      gtags_orig(a)
     end
     return
   end

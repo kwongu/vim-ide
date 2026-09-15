@@ -7,8 +7,11 @@
 " 그래서 이 자리에서는 기본 키가 이미 있고 override 가 그대로 먹는다
 " - VimEnter 로 미룰 필요도, :source ~/.vimrc 를 따로 챙길 필요도 없다.
 "
-" 쪼개기/탭(i s t T gi gs)과 디렉터리(DirNode)는 건드리지 않는다. 사용자가
-" 일부러 고른 것이다. projectfiles_tree 의 + - = 와 nerdtree-git 의 ]c [c 는
+" 탭(t T)과 디렉터리 펼치기는 건드리지 않는다 - 사용자가 일부러 고른 것이고
+" 창 자리와도 상관없다. 반면 쪼개기(i s gi gs)와 'e'(그 디렉터리를 탐색기로
+" 열기)는 stock 이 'wincmd p' 로 직전 창을 잡는데, 그 직전 창이 aerial 이나
+" quickfix 면 곁창이 쪼개지거나 통째로 디렉터리 목록으로 바뀌었다. 그 둘은
+" 자리만 EDIT 창으로 옮겨서 한다. projectfiles_tree 의 + - = 와 nerdtree-git 의 ]c [c 는
 " scope 'Node' 라, FileNode 를 먼저 보는 KeyMap.Invoke() 순서상 가려지지
 " 않는다 (key_map.vim:102-121).
 "
@@ -53,4 +56,33 @@ if !empty(s:p)
                 \ 'override': 1,
                 \ 'quickhelpText': 'preview in the last focused EDIT window' })
 endif
-unlet! s:keys s:n s:v s:k s:p
+" 쪼개서 열기 - 쪼개지는 자리를 EDIT 창으로 옮긴다
+for [s:n, s:f] in [
+            \ ['NERDTreeMapOpenSplit',    'VimIdeNERDTreeSplit'],
+            \ ['NERDTreeMapOpenVSplit',   'VimIdeNERDTreeVSplit'],
+            \ ['NERDTreeMapPreviewSplit', 'VimIdeNERDTreeSplitStay'],
+            \ ['NERDTreeMapPreviewVSplit','VimIdeNERDTreeVSplitStay'] ]
+    let s:v = get(g:, s:n, '')
+    if !empty(s:v) && exists('*' . s:f)
+        call NERDTreeAddKeyMap({
+                    \ 'key': s:v,
+                    \ 'scope': 'FileNode',
+                    \ 'callback': s:f,
+                    \ 'override': 1,
+                    \ 'quickhelpText': 'split in the EDIT area' })
+    endif
+endfor
+
+" e : 그 디렉터리를 탐색기로. 파일 줄에서는 그 파일이 있는 디렉터리다.
+let s:e = get(g:, 'NERDTreeMapOpenExpl', '')
+if !empty(s:e) && exists('*VimIdeNERDTreeExplore')
+    for s:sc in ['DirNode', 'FileNode']
+        call NERDTreeAddKeyMap({
+                    \ 'key': s:e,
+                    \ 'scope': s:sc,
+                    \ 'callback': 'VimIdeNERDTreeExplore',
+                    \ 'override': 1,
+                    \ 'quickhelpText': 'explore in the last focused EDIT window' })
+    endfor
+endif
+unlet! s:keys s:n s:v s:k s:p s:f s:e s:sc

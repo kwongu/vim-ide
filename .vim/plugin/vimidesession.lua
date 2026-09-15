@@ -588,10 +588,42 @@ function M.restore()
 
   if #args > 0 then
     vim.defer_fn(function()
-      local w = type(_G.vimide_last_edit_win) == 'function'
-        and _G.vimide_last_edit_win() or 0
-      if w and w ~= 0 and api.nvim_win_is_valid(w) then
+      -- 인자로 준 파일은 반드시 '편집 창'에 연다.
+      --
+      -- 예전에는 last_edit_win() 이 0 을 줘도 그냥 :edit 를 쳤다. 그러면
+      -- 지금 창이 곁창일 때(예: :tab help 로 띄운 도움말 창) 그 자리에
+      -- 파일이 실리고 곁창은 그대로 사라졌다 - 되돌릴 방법이 없다.
+      local function edit_win()
+        for _, fn_ in ipairs({ _G.vimide_last_edit_win, _G.vimide_edit_slot }) do
+          if type(fn_) == 'function' then
+            local ok, w = pcall(fn_)
+            if ok and w and w ~= 0 and api.nvim_win_is_valid(w) then
+              return w
+            end
+          end
+        end
+        -- 지금 탭 안에서 한 번 더 훑는다.
+        if type(_G.vimide_edit_wins) == 'function' then
+          local ok, list = pcall(_G.vimide_edit_wins)
+          if ok and type(list) == 'table' and list[1] then
+            return list[1]
+          end
+        end
+        return nil
+      end
+      local w = edit_win()
+      if w then
         pcall(api.nvim_set_current_win, w)
+      elseif type(_G.vimide_is_edit_win) == 'function'
+          and not _G.vimide_is_edit_win() then
+        -- 편집 창이 하나도 없다: 곁창을 부수느니 하나 만든다.
+        pcall(function()
+          vim.cmd('noautocmd topleft vertical split')
+          for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight',
+            'previewwindow' }) do
+            pcall(function() vim.wo[0][o] = false end)
+          end
+        end)
       end
       for _, a in ipairs(args) do
         pcall(vim.cmd, 'edit ' .. fn.fnameescape(a))

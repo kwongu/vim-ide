@@ -2898,11 +2898,19 @@ end
 -- 픽커가 열릴 때 잡아 둔 창(prefer)을 넘겨받는다.
 local function open_in_edit(root, rel, prefer)
   local abs = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
-  -- 편집에 쓸 수 있는 창인가. 패널/트리/미리보기는 buftype 이 비어 있지
-  -- 않으므로 여기서 걸러진다.
+  -- 편집에 쓸 수 있는 창인가.
+  --
+  -- 판정은 정본(vimidewin.lua)에 맡긴다. 여기 있던 잣대는 buftype 만 봐서
+  -- quickr-preview 의 미리보기 창(\p)을 편집 창으로 쳤다.
   local function usable(w)
     if not (w and api.nvim_win_is_valid(w)) then
       return false
+    end
+    if type(_G.vimide_is_edit_win) == 'function' then
+      local ok, r = pcall(_G.vimide_is_edit_win, w)
+      if ok then
+        return r and true or false
+      end
     end
     if api.nvim_win_get_tabpage(w) ~= api.nvim_get_current_tabpage() then
       return false
@@ -2911,12 +2919,32 @@ local function open_in_edit(root, rel, prefer)
     return vim.bo[b].buftype == ''
         and not api.nvim_buf_get_name(b):match('RelationView')
   end
+  -- 어느 창에 열까.
+  --
+  -- 예전에는 셋째 수가 '이 탭의 첫 번째 편집 창' 이었다. 그래서 곁창
+  -- (aerial/quickfix/트리/패널)에 커서를 둔 채 \fo 나 \fs/F7 로 파일을
+  -- 고르면, 직전까지 보던 창이 아니라 맨 왼쪽/위 창이 바뀌어 보던 자리를
+  -- 잃었다. 이제 '직전에 보던 편집 창'(_G.vimide_last_edit_win) 을 먼저
+  -- 묻고, 그래도 없으면 편집 자리를 빌려 쓰는 창까지 본다.
   local target
   if usable(prefer) then
     target = prefer
   elseif usable(api.nvim_get_current_win()) then
     target = api.nvim_get_current_win()
   else
+    for _, fn in ipairs({ '_G.vimide_last_edit_win', '_G.vimide_edit_slot' }) do
+      local f = fn == '_G.vimide_last_edit_win' and _G.vimide_last_edit_win
+          or _G.vimide_edit_slot
+      if type(f) == 'function' then
+        local ok, w = pcall(f)
+        if ok and w and w ~= 0 and api.nvim_win_is_valid(w) then
+          target = w
+          break
+        end
+      end
+    end
+  end
+  if not target then
     for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
       if usable(w) then
         target = w

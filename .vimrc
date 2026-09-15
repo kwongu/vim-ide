@@ -318,13 +318,34 @@ require'telescope'.setup{
 		-- (_G.vimide_last_edit_win, 없으면 0 으로 떨어져 예전 동작).
 		--
 		-- 이 한 줄이 telescope 픽커 전부에 걸린다 - \ff \fg \fb \fr ... 포함.
+		-- 0 으로 떨어지면 '지금 창' 이라는 뜻이라, 곁창만 있는 탭
+		-- (Neogit/Diffview 탭이나 편집 창을 닫아 둔 탭)에서는 그 곁창이
+		-- 파일에 덮였다. 편집 자리를 빌려 쓰는 창까지 본 뒤(edit_slot),
+		-- 그래도 없으면 편집 창을 하나 만들어 그 창을 준다.
 		get_selection_window = function()
-			local ok, w = pcall(function()
-				return _G.vimide_last_edit_win and _G.vimide_last_edit_win() or 0
-			end)
-			if ok and type(w) == 'number' and w ~= 0
-					and vim.api.nvim_win_is_valid(w) then
-				return w
+			for _, f in ipairs({ _G.vimide_last_edit_win, _G.vimide_edit_slot }) do
+				if type(f) == 'function' then
+					local ok, w = pcall(f)
+					if ok and type(w) == 'number' and w ~= 0
+							and vim.api.nvim_win_is_valid(w) then
+						return w
+					end
+				end
+			end
+			if type(_G.vimide_is_edit_win) == 'function'
+					and not _G.vimide_is_edit_win() then
+				local w
+				local ok = pcall(function()
+					vim.cmd('noautocmd topleft vertical split')
+					w = vim.api.nvim_get_current_win()
+				end)
+				if ok and w and vim.api.nvim_win_is_valid(w) then
+					for _, o in ipairs({ 'winfixbuf', 'winfixwidth',
+						'winfixheight', 'previewwindow' }) do
+						pcall(function() vim.wo[w][o] = false end)
+					end
+					return w
+				end
 			end
 			return 0
 		end,
@@ -1386,6 +1407,49 @@ endfunc
 " (실측: 둘 다 { 27 }). 매핑하면 Esc 가 통째로 가로채여 insert 를 빠져
 " 나오지 못한다. g] 는 원래 :tselect(태그 후보 목록)인데, 이 설정에서는
 " 그 자리를 이 동작에 내준다 - 후보 목록은 <C-]> 가 패널에 띄워 준다.
+" 이 창에서 점프해도 되나.
+"
+" 예전에는 &buftype 하나만 봤다. quickr-preview 의 미리보기 창(\p)은
+" buftype 이 비어 있어서 그 검사를 그냥 통과했고, 거기서 <C-]>/g]/f]/gf/
+" 더블클릭을 누르면 미리보기가 점프한 파일로 바뀌었다가 곁창 지킴이가 도로
+" 끌어내는 깜빡임이 났다. 이제 창 단위로 묻는다 - &previewwindow 와 부동
+" 창까지 그 판정기가 본다.
+"
+" help 창은 살려 둔다. 거기서 <C-]> 는 |태그| 를 따라가는 제 동작이다.
+func! s:JumpHere() abort
+	if &buftype ==# 'help'
+		return 1
+	endif
+	if &buftype !=# ''
+		return 0
+	endif
+	if has('nvim') && exists('*luaeval')
+		return luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+	endif
+	return 1
+endfunc
+
+" 'buftype 은 비었는데 EDIT 창이 아닌' 자리(= 미리보기 창)에서 점프를
+" 눌렀을 때. 커서 밑 낱말을 들고 EDIT 자리로 옮겨 거기서 태그로 간다.
+" <C-]> 는 '지금 창의 커서 밑 낱말' 을 쓰기 때문에, 옮기고 나서 부르면
+" 엉뚱한 낱말을 찾는다. 그래서 낱말을 먼저 들고 :tjump 로 넘긴다
+" (tagfunc 가 걸려 있어 <C-]> 와 같은 곳을 본다).
+" 1 = 여기서 처리했다.
+func! s:JumpFromPeek() abort
+	if &buftype !=# '' || s:JumpHere()
+		return 0
+	endif
+	let l:cw = expand('<cword>')
+	if empty(l:cw) || !s:GotoEditSlot(1)
+		return 1
+	endif
+	try
+		execute 'tjump ' . l:cw
+	catch
+	endtry
+	return 1
+endfunc
+
 func! s:RvEditJump() abort
 	let l:marked = s:RvMarkCword()
 	if has('nvim') && exists('*luaeval')
@@ -1400,7 +1464,8 @@ func! s:RvEditJump() abort
 		catch
 		endtry
 	endif
-	if &buftype !=# '' && &buftype !=# 'help'
+	if !s:JumpHere()
+		call s:JumpFromPeek()
 		return
 	endif
 	execute "normal! \<C-]>"
@@ -1455,7 +1520,13 @@ func! s:RvCtxJump() abort
 				" 예전에는 여기서 곧장 quickfix 로 보냈다. 요청대로 먼저
 				" 편집 창에서 뛰어 보고, 태그가 답하지 못할 때만 예전 길로
 				" 떨어진다.
-				if &buftype ==# '' || &buftype ==# 'help'
+				if !s:JumpHere()
+					" 미리보기 창이면 낱말을 들고 EDIT 자리로 옮겨 거기서 뛴다
+					if s:JumpFromPeek()
+						return
+					endif
+				endif
+				if s:JumpHere()
 					try
 						execute "normal! \<C-]>"
 						return
@@ -1492,8 +1563,9 @@ func! s:RvCtxJump() abort
 	endif
 	" 특수 창(패널/ProjectFiles/Tagbar/NERDTree/quickfix ...)에서 builtin
 	" C-] 는 그 창의 버퍼를 갈아치워 사이드바를 부순다. help 는 <C-]> 가
-	" |태그| 점프라서 살려둔다.
-	if &buftype !=# '' && &buftype !=# 'help'
+	" |태그| 점프라서 살려둔다. 미리보기 창은 낱말을 들고 EDIT 창으로 간다.
+	if !s:JumpHere()
+		call s:JumpFromPeek()
 		return
 	endif
 	execute "normal! \<C-]>"
@@ -1515,7 +1587,15 @@ func! s:RvGotoFile() abort
 	" 곁창에서는 그냥 둔다. <C-]>/g]/더블클릭은 이 가드가 있는데 gf 만
 	" 빠져 있어서, NERDTree/aerial/tagbar/bufexplorer 에서 파일 이름처럼
 	" 보이는 글자 위에 gf 를 누르면 그 사이드바에 파일이 실렸다.
-	if &buftype !=# '' && &buftype !=# 'help'
+	" 미리보기 창(\p)도 여기 걸린다 - buftype 은 비었지만 EDIT 창이 아니다.
+	if !s:JumpHere()
+		if &buftype ==# '' && s:GotoEditSlot(1)
+			" 파일 이름은 낱말이 아니라 <cfile> 이다. 들고 옮겨서 연다.
+			let l:f = expand('<cfile>')
+			if !empty(l:f)
+				execute 'silent! find ' . fnameescape(l:f)
+			endif
+		endif
 		return
 	endif
 	normal! gf
@@ -1548,7 +1628,9 @@ if !empty(s:rv_prev)
 	execute 'nnoremap <silent> ' . s:rv_prev . ' :call <SID>QfStep(-1)<CR>'
 endif
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
-nmap <C-\><C-]> :GtagsCursor<CR>
+" 곁창에서 누르면 그 창의 파일 이름(NERD_tree_1 ...)으로 global 을 돌려
+" 'global command failed' 만 났다. F6 과 같은 길로 EDIT 창에서 돌린다.
+nnoremap <silent> <C-\><C-]> :VimIdeInEdit GtagsCursor<CR>
 " <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고
 " 포커스 이동, 패널이 없으면 tagfunc 로 편집창 점프). 예전 매핑은 남겨둔다:
 "nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
@@ -1591,9 +1673,13 @@ nnoremap <silent> <C-t> :call <SID>JumpBack()<CR>
 "- (버퍼 로컬 매핑이 우선하고, buftype 이 빈 일반 파일 창에서만 아래가 동작).
 "------------------------------------------------------------------------------
 function! s:RvMouseJump() abort
-	" 특수 버퍼(quickfix, help, terminal ...)는 기본 더블클릭 동작 유지
-	if &buftype !=# ''
-		execute "normal! \<2-LeftMouse>"
+	" 특수 버퍼(quickfix, help, terminal ...)는 기본 더블클릭 동작 유지.
+	" 미리보기 창(\p)은 buftype 이 비어 있어 예전에는 이 검사를 통과했다 -
+	" 거기서 더블클릭하면 미리보기가 점프한 파일로 바뀌었다.
+	if !s:JumpHere()
+		if !s:JumpFromPeek()
+			execute "normal! \<2-LeftMouse>"
+		endif
 		return
 	endif
 	" 더블클릭은 <C-]> 와 똑같이 동작한다:
@@ -2104,6 +2190,24 @@ func! s:BufCycle(cmd) abort
 	execute a:cmd
 endfunc
 
+" <C-^> (대체 버퍼로 전환) 도 같은 자리에서.
+"
+" 이것만 매핑이 없어서 vim 본래 동작이 그대로 살아 있었다 - 곁창에서 누르면
+" 그 사이드바에 대체 파일이 실리고, RelationView 패널에서는 winfixbuf 라
+" E1513 만 났다. 숫자를 앞에 붙이는 꼴(3<C-^>)도 그대로 살린다.
+func! s:AltBuf() abort
+	let l:n = v:count > 0 ? v:count : 0
+	if !s:GotoEditSlot(1)
+		return
+	endif
+	try
+		execute 'normal! ' . (l:n > 0 ? l:n : '') . "\<C-^>"
+	catch /^Vim\%((\a\+)\)\=:E/
+		echohl WarningMsg | echo v:exception | echohl None
+	endtry
+endfunc
+nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
+
 " 다음 / 이전 / 지금 버퍼 닫기
 map ,r :call <SID>BufCycle('bn!')<CR>
 map ,e :call <SID>BufCycle('bp!')<CR>
@@ -2590,7 +2694,11 @@ let g:overview_mouse = 1
 "   :VimIdeInEdit <명령>
 "
 " 1 (기본) 곁창에서 친 아래 명령을 EDIT 창으로 옮겨서 실행한다.
-"            :e :ene :find :view :b :bn :bp :sb :h :tag :tjump :tselect
+"            :e :ene :find :view :sview :sfind :diffsplit
+"            :b :bn :bp :sb :bd :bw  :h :tag :tjump :tselect :pop :tn :tp
+"            :cn :cp :cc :cfirst :clast :lne :lp :ll  :next :previous
+"            :terminal :Man :BufExplorer
+"          <C-^>(대체 버퍼)
 "          마우스 뒤로/앞으로 버튼과 <C-t>(되돌아가기)도 같이 따른다.
 "          EDIT 창에서 친 것은 손대지 않는다 - 글자 하나 안 바뀐다.
 " 0        곁창에서도 그대로 실행한다 (예전 그대로).
@@ -3174,6 +3282,65 @@ function! VimIdeNERDTreePreview(node) abort
     call s:NERDTreeOpen(a:node, 1)
 endfunction
 
+" i / s / gi / gs (쪼개서 열기): 쪼개는 자리를 EDIT 창으로 옮긴다.
+"
+" stock 은 'wincmd p' 로 직전 창을 쪼갠다. 그 직전 창이 aerial 이나
+" quickfix 면 곁창 옆에 낀 좁은 창에 소스가 뜨고 편집 창은 한 칸까지
+" 눌렸다. '쪼개고 싶다' 는 뜻은 살리되 쪼개지는 자리만 편집 영역으로 옮긴다.
+" t / T (새 탭) 는 창 자리와 상관없으니 그대로 둔다.
+func! s:NERDTreeSplit(node, cmd, stay) abort
+    let l:tree = win_getid()
+    let l:path = a:node.path.str()
+    let l:win = s:NERDTreeEditWin()
+    if l:win <= 0 || l:win == l:tree
+        " 편집 창이 없으면 NERDTree 가 늘 하던 대로 맡긴다
+        call a:node.activate({'reuse': 'all',
+                    \ 'where': a:cmd ==# 'vsplit' ? 'v' : 'h',
+                    \ 'stay': a:stay, 'keepopen': !s:NERDTreeQuitOnOpen()})
+        return
+    endif
+    call win_gotoid(l:win)
+    try
+        execute a:cmd . ' ' . fnameescape(l:path)
+    catch /^Vim\%((\a\+)\)\=:E/
+        echohl WarningMsg
+        echomsg substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+        echohl None
+        return
+    endtry
+    if a:stay && win_id2win(l:tree) > 0
+        call win_gotoid(l:tree)
+    endif
+endfunc
+function! VimIdeNERDTreeSplit(node) abort
+    call s:NERDTreeSplit(a:node, 'split', 0)
+endfunction
+function! VimIdeNERDTreeVSplit(node) abort
+    call s:NERDTreeSplit(a:node, 'vsplit', 0)
+endfunction
+function! VimIdeNERDTreeSplitStay(node) abort
+    call s:NERDTreeSplit(a:node, 'split', 1)
+endfunction
+function! VimIdeNERDTreeVSplitStay(node) abort
+    call s:NERDTreeSplit(a:node, 'vsplit', 1)
+endfunction
+
+" e (그 디렉터리를 탐색기로 열기): stock 은 'wincmd p' 로 직전 창에
+" 디렉터리를 :edit 한다. 직전 창이 aerial 이면 아웃라인이 통째로 디렉터리
+" 목록으로 바뀌고 다시는 안 돌아왔다.
+function! VimIdeNERDTreeExplore(node) abort
+    let l:p = a:node.path.str()
+    if !isdirectory(l:p)
+        let l:p = fnamemodify(l:p, ':h')
+    endif
+    let l:win = s:NERDTreeEditWin()
+    if l:win <= 0
+        return
+    endif
+    call win_gotoid(l:win)
+    execute 'silent! edit ' . fnameescape(l:p)
+endfunction
+
 func! NERDTreeOnly()
 	:TagbarClose
 	:NERDTreeToggle
@@ -3354,12 +3521,37 @@ endfunc
 " 왜 약어인가: 명령을 같은 이름으로 덮어쓰면 그 안에서 원래 명령을 부를 때
 " 제 자신을 다시 부른다. 약어는 사람이 명령줄에 친 것에만 걸려서 그 고리가
 " 없고, 스크립트의 :execute 'edit ...' 은 건드리지 않는다.
+" 명령 앞에 붙을 수 있는 수식어. :vert Ex / :silent e . / :botright b 3
+" 처럼 앞에 뭐가 붙어도 같은 길로 보내야 한다. 예전에는 '명령줄 전체가
+" 그 낱말과 같은가' 만 봐서, :vert Ex 하나로 곁창이 그대로 쪼개졌다.
+" 수식어 자체는 <mods> 로 그대로 넘겨 주니 :vert 의 뜻도 살아 있다.
+let s:mod_pat = '\v^%(%(sil%[ent]!?|uns%[ilent]|verb%[ose]|noa%[utocmd]'
+			\ . '|keepa%[lt]|keepj%[umps]|keepm%[arks]|keepp%[atterns]'
+			\ . '|lock%[marks]|hid%[e]|conf%[irm]|bro%[wse]|leg%[acy]'
+			\ . '|vert%[ical]|hor%[izontal]|lefta%[bove]|abo%[veleft]'
+			\ . '|rightb%[elow]|bel%[owright]|to%[pleft]|bo%[tright]|tab)'
+			\ . '!?\s+)*'
+
+" 지금 명령줄이 '수식어들 + 이 낱말' 인가. 약어의 <expr> 에서 부른다.
+func! s:RouteHit(key) abort
+	if getcmdtype() !=# ':'
+		return 0
+	endif
+	return getcmdline() =~# s:mod_pat . a:key . '$'
+endfunc
+
+" 깔아 둔 약어 장부. <CR> 가로채기(s:RouteCR)가 같은 표를 쓴다.
+let s:route_map = {}
+let s:route_guard = {}
+
 func! s:RouteAbbrev(full, short, target, guard) abort
 	let l:i = len(a:short)
 	while l:i <= len(a:full)
 		let l:k = strpart(a:full, 0, l:i)
+		let s:route_map[l:k] = a:target
+		let s:route_guard[l:k] = a:guard
 		execute 'cnoreabbrev <expr> ' . l:k
-					\ . ' (getcmdtype() ==# ":" && getcmdline() ==# "' . l:k . '"'
+					\ . ' (<SID>RouteHit("' . l:k . '")'
 					\ . (a:guard ? ' && <SID>SideWin()' : '')
 					\ . ') ? "' . a:target . '" : "' . l:k . '"'
 		let l:i += 1
@@ -3370,13 +3562,48 @@ endfunc
 " :Vex 를 치면 그 사이드바를 세로로 쪼개 거기에 목록을 편다.
 " :Rexplore 는 뺀다. netrw 버퍼 안에서 '보던 디렉터리로 돌아가기' 라서
 " EDIT 창으로 옮기면 뜻이 없어진다.
-for s:x in ['Explore', 'Vexplore', 'Sexplore', 'Hexplore', 'Texplore', 'Lexplore']
+for s:x in ['Explore', 'Vexplore', 'Sexplore', 'Hexplore', 'Texplore',
+			\ 'Lexplore', 'Ntree']
 	execute 'command! -nargs=* -complete=dir VimIde' . s:x
-				\ . " call s:Explore('" . s:x . "', <q-args>)"
+				\ . " call s:Explore('<mods> " . s:x . "', <q-args>)"
 	call s:RouteAbbrev(s:x, s:x ==# 'Explore' ? 'Ex' : strpart(s:x, 0, 3),
 				\ 'VimIde' . s:x, 0)
+	" :Ntree 는 netrw 가 '트리 꼴로 연다'. 곁창에서 치면 그 자리를 먹는다.
 endfor
 unlet! s:x
+
+" 명령줄에서 <CR> 을 누를 때 한 번 더 거른다.
+"
+" 약어는 '사람이 그 낱말을 방금 칠 때' 만 걸린다. ':' <Up> 으로 예전 명령을
+" 되부르거나 q: 창에서 실행하면 그냥 지나간다 - 곁창에 서서 예전 :Explore 를
+" 되부르면 그 곁창이 netrw 목록으로 바뀌었다. 여기서 줄을 통째로 다시 써서
+" 같은 길로 보낸다.
+"
+" setcmdline() 이 없는 vim(8.1)에서는 아무것도 하지 않는다. 거기서는 약어도
+" 곁창 판정기도 없어서 예전 그대로다.
+func! s:RouteCR() abort
+	if getcmdtype() !=# ':' || !exists('*setcmdline')
+		return "\<CR>"
+	endif
+	let l:line = getcmdline()
+	let l:pre = matchstr(l:line, s:mod_pat)
+	let l:rest = strpart(l:line, len(l:pre))
+	let l:w = matchstr(l:rest, '^\a\+')
+	if empty(l:w) || !has_key(s:route_map, l:w)
+		return "\<CR>"
+	endif
+	if s:route_guard[l:w] && !s:SideWin()
+		return "\<CR>"
+	endif
+	let l:tail = strpart(l:rest, len(l:w))
+	let l:bang = strpart(l:tail, 0, 1) ==# '!' ? '!' : ''
+	if !empty(l:bang)
+		let l:tail = strpart(l:tail, 1)
+	endif
+	call setcmdline(l:pre . s:route_map[l:w] . l:bang . ' ' . l:tail)
+	return "\<CR>"
+endfunc
+cnoremap <expr> <CR> <SID>RouteCR()
 
 " '지금 창'에 버퍼를 들이는 명령들. 곁창에서 치면 EDIT 창으로 돌린다.
 "
@@ -3400,17 +3627,38 @@ for s:r in [
 			\ ['bnext',     'bn',  'buffer'],
 			\ ['bprevious', 'bp',  'buffer'],
 			\ ['sbuffer',   'sb',  'buffer'],
+			\ ['bdelete',   'bd',  'buffer'],
+			\ ['bwipeout',  'bw',  'buffer'],
 			\ ['help',      'h',   'help'],
 			\ ['tag',       'ta',  'tag'],
 			\ ['tjump',     'tj',  'tag'],
 			\ ['tselect',   'ts',  'tag'],
 			\ ['BufExplorer',       'BufE',    'buffer'],
 			\ ['ToggleBufExplorer', 'ToggleB', 'buffer'],
+			\ ['terminal',  'ter',   ''],
+			\ ['cnext',     'cn',    ''],
+			\ ['cprevious', 'cp',    ''],
+			\ ['cc',        'cc',    ''],
+			\ ['cfirst',    'cfir',  ''],
+			\ ['clast',     'cla',   ''],
+			\ ['lnext',     'lne',   ''],
+			\ ['lprevious', 'lp',    ''],
+			\ ['ll',        'll',    ''],
+			\ ['next',      'nex',   'file'],
+			\ ['previous',  'prev',  'file'],
+			\ ['pop',       'po',    ''],
+			\ ['tnext',     'tn',    ''],
+			\ ['tprevious', 'tp',    ''],
+			\ ['sview',     'sv',    'file'],
+			\ ['sfind',     'sf',    'file_in_path'],
+			\ ['diffsplit', 'diffs', 'file'],
+			\ ['Man',       'Man',   ''],
 			\ ]
 	let s:cmd = s:r[0]
 	let s:nm = 'VimIde' . toupper(s:cmd[0]) . s:cmd[1:]
-	execute 'command! -nargs=* -bang -complete=' . s:r[2] . ' ' . s:nm
-				\ . " call s:InEditWin('" . s:cmd . "<bang> ' . <q-args>)"
+	execute 'command! -nargs=* -bang '
+				\ . (empty(s:r[2]) ? '' : '-complete=' . s:r[2] . ' ') . s:nm
+				\ . " call s:InEditWin('<mods> " . s:cmd . "<bang> ' . <q-args>)"
 	call s:RouteAbbrev(s:cmd, s:r[1], s:nm, 1)
 endfor
 unlet! s:r s:cmd s:nm

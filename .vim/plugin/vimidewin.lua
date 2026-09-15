@@ -302,7 +302,30 @@ local function remember(win)
   if _G.vimide_is_edit_win(win) then
     return
   end
+  -- 부동 창(overview 막대, telescope, 각종 popup)은 지키지 않는다.
+  --
+  -- 이것들은 제 버퍼를 수시로 새로 만들고 창째로 사라졌다 나타난다.
+  -- 그 오르내림을 '침입' 으로 읽으면 멀쩡한 버퍼를 EDIT 창으로 밀어 넣는다
+  -- (실측: 이 줄이 없을 때 시작하자마자 편집 창이 overview 버퍼로 바뀌고
+  -- 배치가 통째로 무너졌다). 어차피 파일이 부동 창에 실려도 잠깐이다.
+  local okc, conf = pcall(api.nvim_win_get_config, win)
+  if okc and conf and conf.relative and conf.relative ~= '' then
+    guarded[win] = nil
+    return
+  end
   local buf = api.nvim_win_get_buf(win)
+  -- 이미 적어 둔 곁창이 있고, 지금 들어와 있는 것이 그것과 다른 남의
+  -- 곁창 버퍼면 덮어쓰지 않는다.
+  --
+  -- 안 그러면 되살릴 대상이 침입자로 바뀐다. 실제로 그렇게 된다:
+  -- aerial 창에서 :term 을 치면 BufEnter 가 먼저 떠서 여기가 돌고,
+  -- 그 자리에서 덮어쓰면 뒤이어 도는 rescue 가 '되돌릴 것은 터미널'
+  -- 이라고 믿는다. 곁창의 정체는 한 번 잡으면 유지한다.
+  local g = guarded[win]
+  if g and g.buf and g.buf ~= buf and api.nvim_buf_is_valid(g.buf)
+      and is_plugin_buf(buf) and vim.bo[buf].filetype ~= g.ft then
+    return
+  end
   guarded[win] = {
     buf = buf,
     ft = vim.bo[buf].filetype,
@@ -325,18 +348,30 @@ local function rescue(win)
     -- 곁창 자리에 들어온 것이 또 곁창 버퍼다. 두 경우가 있다.
     --
     --   같은 플러그인이 제 버퍼를 갈아 끼운 것 - NERDTree 새로 고침,
-    --   quickfix 다시 열기. 그냥 둔다.
+    --   quickfix 다시 열기, neo-tree 가 source 를 바꾼 것. 그냥 둔다.
     --
-    --   남의 창차지 플러그인이 들어앉은 것 - aerial 창에서 :e . 를 쳐서
-    --   NERDTree 가 그 자리를 먹은 경우. 이것은 되돌려야 한다.
+    --   낯선 특수 버퍼가 들어앉은 것 - aerial 창에서 :e . 를 쳐서
+    --   NERDTree 가 그 자리를 먹거나, :term 으로 터미널이 들어앉은 경우.
+    --   이것은 되돌려야 한다.
+    --
+    -- '아는 것만 잡는' 목록으로 간다. 한때 이것을 뒤집어 '같은 filetype 일
+    -- 때만 놓아주고 나머지는 전부 잡는' 쪽으로 해 봤는데, 배치를 세우는
+    -- 동안 한 창이 여러 역할을 거치는 것까지 침입으로 읽혀 F12 배치가
+    -- 통째로 무너졌다(실측: 편집 창이 사라지고 트리와 패널이 두 개씩).
+    -- 곁창을 세우는 플러그인은 제 창을 그렇게 돌려 쓴다.
     local ft = vim.bo[buf].filetype
-    if not TAKEOVER_FT[ft] or ft == g.ft then
+    local bt = vim.bo[buf].buftype
+    local intruder = TAKEOVER_FT[ft] or bt == 'terminal'
+        or ft == 'help' or ft == 'man'
+    if not intruder or ft == g.ft then
       return
     end
   end
 
   -- 되돌리기 전에 커서를 기억해 둔다. 사용자가 보려던 자리다.
   local pos = api.nvim_win_get_cursor(win)
+  -- 곁창 버퍼가 이미 지워져 '되돌리기' 대신 '다시 세우기' 를 해야 하는가
+  local reopen_after = false
 
   -- 곁창을 원래대로.
   --
@@ -344,7 +379,19 @@ local function rescue(win)
   -- 이미 무효). 그때는 되살릴 것이 없으니 그 창을 닫는다 - 같은 파일이
   -- 두 창에 뜬 채 남는 것보다 낫다.
   if g.buf and api.nvim_buf_is_valid(g.buf) then
+    -- winfixbuf 는 침입을 못 막는다. netrw 는 :enew! 로 새 버퍼를 만들어
+    -- 그냥 뚫고 들어온다(netrw.vim 의 s:NetrwEditFile). 그런데 되돌릴
+    -- 때는 그 winfixbuf 가 우리를 막아, '침입은 되고 복구는 안 되는'
+    -- 순손해가 된다. 되돌리는 동안만 끄고 원래대로 돌려 놓는다.
+    local fixed = false
+    pcall(function() fixed = vim.wo[win].winfixbuf end)
+    if fixed then
+      pcall(function() vim.wo[win].winfixbuf = false end)
+    end
     local ok = pcall(api.nvim_win_set_buf, win, g.buf)
+    if fixed and api.nvim_win_is_valid(win) then
+      pcall(function() vim.wo[win].winfixbuf = true end)
+    end
     if not ok or api.nvim_win_get_buf(win) ~= g.buf then
       -- 되돌리지 못했다(winfixbuf 가 걸린 창에 :b!N 을 직접 친 경우 등).
       -- 여기서 포기하지 않으면 창을 옮길 때마다 rescue 가 다시 깨어나
@@ -354,8 +401,9 @@ local function rescue(win)
         vim.log.levels.WARN)
       return
     end
-  else
-    -- 곁창 버퍼가 사라졌다 = 그 플러그인이 이 창을 '돌려준' 것이다.
+  elseif BORROWED_FT[g.ft or ''] or not g.reopen then
+    -- 곁창 버퍼가 사라졌는데, 그것이 '편집 자리를 빌려 쓰던' 플러그인이다
+    -- = 이 창을 돌려준 것이다.
     --
     -- F6 의 BufExplorer 가 그렇다. 편집 창을 잠시 빌려 목록을 띄우고,
     -- 고른 파일을 바로 그 자리에 연 뒤 자기 버퍼는 지운다. 그러면 여기서
@@ -364,19 +412,35 @@ local function rescue(win)
     -- 예전에는 그 창을 닫고 파일을 딴 창에 다시 열었는데, 그 바람에
     -- aerial 과 EDIT 창이 자리를 맞바꿨다(실측: 고른 뒤 tcc_mem.c 가 열0,
     -- aerial 이 열64 로 튀었다). 돌려준 창은 그냥 놓아준다.
+    --
+    -- 다시 세울 명령(g.reopen)이 없는 곁창도 여기로 온다. 되살릴 길이
+    -- 없으니 건드리지 않는 편이 낫다.
     guarded[win] = nil
     return
+  else
+    -- 진짜 곁창인데 제 버퍼가 함께 지워졌다. aerial 창에서 :cnext 를
+    -- 치면 그렇다 - 아웃라인이 사라지고 그 16칸짜리 좁은 자리에 소스가
+    -- 실린 채 남으며, 그 창은 이제 EDIT 창 취급이라 다시는 보호받지
+    -- 못했다. 파일은 편집 자리로 옮기고, 이 창은 닫은 뒤 곁창을 다시
+    -- 세운다(아래 g.reopen).
+    reopen_after = true
   end
 
   -- 그 파일은 '직전에 보던 EDIT 창'에 연다.
+  --
+  -- 이 창(win) 자신은 빼야 한다. reopen_after 일 때 win 은 이미 파일을
+  -- 들고 있어서 EDIT 창처럼 보이고, 그대로 고르면 '제자리에 그대로 두는'
+  -- 것이 되어 곁창이 영영 안 돌아온다.
   local target
   if type(_G.vimide_last_edit_win) == 'function' then
     local ok, w = pcall(_G.vimide_last_edit_win)
-    if ok and w and w ~= 0 and _G.vimide_is_edit_win(w) then
+    if ok and w and w ~= 0 and w ~= win and _G.vimide_is_edit_win(w) then
       target = w
     end
   end
-  target = target or _G.vimide_edit_wins()[1]
+  if not target then
+    target = _G.vimide_edit_wins(win)[1]
+  end
   if not target then
     -- EDIT 창이 하나도 없다: 하나 만든다. 여기서 포기하면 사용자가 연
     -- 파일이 아무 데도 안 뜬 채 사라진다.
@@ -404,6 +468,20 @@ local function rescue(win)
   pcall(api.nvim_win_set_cursor, target, pos)
   pcall(api.nvim_set_current_win, target)
 
+  -- 곁창 버퍼가 이미 지워져 되돌리지 못했으면, 그 창을 닫고 곁창을 새로
+  -- 세운다. 파일은 바로 위에서 편집 자리로 옮겨 놓았으니 여기서 닫아도
+  -- 잃는 것이 없다. EDIT 창은 target 이 지키고 있어 '최소 1개' 규칙도
+  -- 걸리지 않는다.
+  if reopen_after then
+    guarded[win] = nil
+    -- 창을 닫는 것은 되돌릴 수 없다. 확실할 때만 한다 - 나가는 중도
+    -- 복구 중도 아니고, 닫아도 창이 둘은 남을 때.
+    if not busy() and api.nvim_win_is_valid(win)
+        and #api.nvim_tabpage_list_wins(0) > 2 then
+      pcall(api.nvim_win_close, win, false)
+    end
+  end
+
   -- 닫아 버린 곁창은 다시 세워 준다. 보던 중이었을 테니까.
   if g.reopen and not api.nvim_win_is_valid(win) then
     pcall(vim.cmd, 'silent! ' .. g.reopen)
@@ -415,20 +493,86 @@ end
 --
 -- 지금 창만 보면 모자란다 - 포커스를 준 적 없는 곁창은 기록조차 안 되고,
 -- 파일이 실려도 아무도 모른다.
-local function sweep()
-  if sweeping or busy() then
+-- '적기' 와 '되돌리기' 를 갈라 둔다.
+--
+-- 예전에는 busy()(세션 복구 중 / 나가는 중) 면 둘 다 건너뛰었다. 그러면
+-- 복구 직후 수백 ms 동안(사이드카가 깨졌으면 15초) 곁창이 장부에 한 줄도
+-- 안 적히고, 그 사이에 곁창에 파일이 실리면 되돌릴 근거가 없어 영영 그대로
+-- 남았다. 창을 옮기는 것만 미루고, 장부는 그때도 적는다.
+local function sweep(note_only)
+  if sweeping then
     return
   end
   sweeping = true
-  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
-    if guarded[w] then
-      pcall(rescue, w)
+  if not (note_only or busy()) then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if guarded[w] then
+        pcall(rescue, w)
+      end
     end
   end
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
     pcall(remember, w)
   end
   sweeping = false
+end
+
+-- 디렉터리 버퍼가 곁창에 들어오려 한다: 가로채는 쪽이 손대기 전에 넘긴다.
+--
+-- :e . / :edit <디렉터리> 는 특히 나쁘다. nvim 0.12 에는 netrw 대신
+-- NERDTree 가 디렉터리를 가로채는데(NERDTreeHijackNetrw), 그것이 곁창의
+-- 버퍼를 바꾸는 데 그치지 않고 그 창을 아예 없앤다. 없어진 창은 사후
+-- 복구가 되돌릴 수 없다.
+--
+-- .vimrc 의 명령줄 약어가 사람이 곧게 친 :e . 는 이미 EDIT 창으로 돌린다.
+-- 여기는 그 그물을 빠져나가는 나머지다 - ':' <Up> 으로 되부른 것,
+-- 남의 플러그인이 :execute 'edit '.dir 로 부르는 것, :0Ex 처럼 카운트가
+-- 붙어 약어가 아예 안 터지는 것.
+--
+-- 이 augroup 은 NERDTreeHijackNetrw / FileExplorer 보다 먼저 돈다
+-- (실측: :autocmd BufEnter 에서 VimIdeWinGuard 가 그 둘보다 위).
+local function divert_dir()
+  local win = api.nvim_get_current_win()
+  local g = guarded[win]
+  if not g then
+    return -- 원래 곁창이 아니었다
+  end
+  local buf = api.nvim_get_current_buf()
+  if buf == g.buf then
+    return -- 제자리다
+  end
+  local name = api.nvim_buf_get_name(buf)
+  if name == '' or vim.fn.isdirectory(name) ~= 1 then
+    return -- 디렉터리가 아니면 사후 복구(rescue)가 맡는다
+  end
+  local target = _G.vimide_edit_slot()
+  if target == 0 or target == win or not api.nvim_win_is_valid(target) then
+    return
+  end
+  -- 곁창을 제자리로. 여기는 BufEnter 안이라 자동명령을 꺼야 한다 -
+  -- 안 그러면 이 함수가 제 손으로 다시 불린다.
+  local ei = vim.o.eventignore
+  vim.o.eventignore = 'all'
+  if g.buf and api.nvim_buf_is_valid(g.buf) then
+    local fixed = false
+    pcall(function() fixed = vim.wo[win].winfixbuf end)
+    if fixed then
+      pcall(function() vim.wo[win].winfixbuf = false end)
+    end
+    pcall(api.nvim_win_set_buf, win, g.buf)
+    if fixed and api.nvim_win_is_valid(win) then
+      pcall(function() vim.wo[win].winfixbuf = true end)
+    end
+  end
+  pcall(api.nvim_set_current_win, target)
+  vim.o.eventignore = ei
+  -- 편집 자리에서 원래 하려던 것을 한다
+  vim.schedule(function()
+    if api.nvim_win_is_valid(target) then
+      pcall(api.nvim_set_current_win, target)
+      pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(name))
+    end
+  end)
 end
 
 -- 지금 무엇을 지키고 있는지. 시험과 문제 추적용이다.
@@ -445,12 +589,29 @@ end
 api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
   group = api.nvim_create_augroup('VimIdeWinGuard', { clear = true }),
   callback = function()
-    if cfg('win_guard', 1) == 0 or busy() then
+    if cfg('win_guard', 1) == 0 then
       return
     end
-    -- 한 틱 미룬다. 곁창을 세우는 플러그인은 먼저 보통 버퍼를 :edit 로
-    -- 띄우고 그 다음에 buftype 을 박는다(NERDTree 가 그렇다). 그 찰나에
-    -- 판정하면 멀쩡한 곁창을 '파일이 실렸다'고 오해한다.
+    -- 디렉터리 가로채기는 여기서 막는다. 뒤로 미루면 늦는다.
+    if not sweeping then
+      sweeping = true
+      pcall(divert_dir)
+      sweeping = false
+    end
+    -- 장부는 지금 당장 적는다.
+    --
+    -- 한 줄/한 매핑으로 곁창을 열고 곧바로 파일을 여는 경우가 있다
+    -- (:copen | e tcc_mem.c). 적는 것까지 vim.schedule 로 미루면 그
+    -- 사이에 파일이 실려, 곁창이 장부에 오르기도 전에 사라진다.
+    if not sweeping then
+      sweeping = true
+      pcall(remember, api.nvim_get_current_win())
+      sweeping = false
+    end
+    -- 되돌리는 것은 한 틱 미룬다. 곁창을 세우는 플러그인은 먼저 보통
+    -- 버퍼를 :edit 로 띄우고 그 다음에 buftype 을 박는다(NERDTree 가
+    -- 그렇다). 그 찰나에 판정하면 멀쩡한 곁창을 '파일이 실렸다'고
+    -- 오해한다.
     vim.schedule(function()
       if cfg('win_guard', 1) == 0 then
         return
