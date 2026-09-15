@@ -1957,6 +1957,28 @@ local function want_ctx()
   return cfg('context', 1) ~= 0
 end
 
+-- 패널 창이 닫히는 것을 지켜본다.
+--
+-- 창을 새로 만들 때만이 아니라 '이미 있는 패널 창을 다시 집는' 갈래에서도
+-- 걸어야 한다. 안 그러면 그 창에는 훅이 없어, 닫혀도 넓힘 기억이 남는다.
+local function watch_panel(win)
+  local tab = api.nvim_win_get_tabpage(win)
+  api.nvim_create_autocmd('WinClosed', {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      -- 넓혀 둔 채로 패널을 닫았다: 그 탭의 기억은 이제 쓸 데가 없다.
+      -- 남겨 두면 다음에 열어 'w' 를 눌렀을 때 옛 배치를 되돌린다.
+      if s.wide then
+        s.wide[tab] = nil
+      end
+      if s.win == win then
+        s.win = nil
+      end
+    end,
+  })
+end
+
 local function panel_open()
   if panel_visible() then
     if want_ctx() then
@@ -1971,6 +1993,7 @@ local function panel_open()
   local existing = panel_win_here()
   if existing then
     s.win = existing
+    watch_panel(existing)
     if want_ctx() then
       ensure_ctx()
     end
@@ -2002,18 +2025,7 @@ local function panel_open()
   wo.winfixwidth = true
   pcall(function() wo.winfixbuf = true end)
   s.win = win
-  api.nvim_create_autocmd('WinClosed', {
-    pattern = tostring(win),
-    once = true,
-    callback = function()
-      if s.win == win then
-        s.win = nil
-        -- 넓혀 둔 채로 패널을 닫았다: 그 기억은 이제 쓸 데가 없다.
-        -- 남겨 두면 다음에 열어 'w' 를 눌렀을 때 옛 배치를 되돌린다.
-        s.wide_saved = nil
-      end
-    end,
-  })
+  watch_panel(win)
   if api.nvim_win_is_valid(prev) then
     api.nvim_set_current_win(prev)
   end
@@ -2031,16 +2043,20 @@ end
 -- 'winfixwidth' does not stop that. Remember the panel's size the moment a
 -- window appears or disappears and put that size back once the layout has
 -- settled; anything the user resized by hand is therefore kept as it is.
-local function restore_geom(w, h)
-  if not (s.win and api.nvim_win_is_valid(s.win)) then
+--
+-- 크기를 잰 그 창에만 되돌린다. 예전에는 s.win 만 보고 되돌렸는데, 그
+-- 사이 다른 탭에서 패널이 새로 열려 s.win 이 그쪽을 가리키면 이쪽 탭의
+-- 크기를 저쪽 새 패널에 씌웠다 - 넓혀 둔 폭이 새 탭으로 새어 나갔다.
+local function restore_geom(win, w, h)
+  if not (win and api.nvim_win_is_valid(win) and s.win == win) then
     return
   end
   if cfg('position', 'bottom') == 'right' then
-    if w and api.nvim_win_get_width(s.win) ~= w then
-      pcall(api.nvim_win_set_width, s.win, w)
+    if w and api.nvim_win_get_width(win) ~= w then
+      pcall(api.nvim_win_set_width, win, w)
     end
-  elseif h and api.nvim_win_get_height(s.win) ~= h then
-    pcall(api.nvim_win_set_height, s.win, h)
+  elseif h and api.nvim_win_get_height(win) ~= h then
+    pcall(api.nvim_win_set_height, win, h)
   end
 end
 
@@ -6029,7 +6045,9 @@ function A.close()
   end
   -- 오른쪽 열 식구를 먼저 치운다. 패널보다 먼저 닫아야 남은 창들이
   -- 빈자리를 나눠 갖는 일이 없다.
-  s.wide_saved = nil
+  if s.wide then
+    s.wide[api.nvim_get_current_tabpage()] = nil
+  end
   close_tree()
   close_big()
   if s.ctx_win and api.nvim_win_is_valid(s.ctx_win)
@@ -6126,11 +6144,18 @@ end
 --   g:relationview_wide_width   넓힐 폭 (0 = 화면의 4/5)
 --   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 4/5)
 
--- 지금 탭의 창 목록을 '그대로인지 견줄 수 있는' 한 줄로
+-- 지금 탭의 창 목록을 '그대로인지 견줄 수 있는' 한 줄로.
+--
+-- 부동 창(팝업, telescope, 진단 float, overview 막대)은 뺀다. 그런 것이
+-- 하나 떴다 사라진 것만으로 '배치가 달라졌다'고 보면, 실제로는 한 치도
+-- 안 바뀐 배치를 되돌리지 못하고 폴백으로 새어 나간다.
 local function win_fingerprint()
   local ids = {}
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
-    ids[#ids + 1] = tostring(w)
+    local ok, c = pcall(api.nvim_win_get_config, w)
+    if not (ok and c and c.relative and c.relative ~= '') then
+      ids[#ids + 1] = tostring(w)
+    end
   end
   return table.concat(ids, ',')
 end
@@ -6140,26 +6165,53 @@ function A.toggle_wide()
     vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
     return
   end
+  -- 탭마다 따로 기억한다.
+  --
+  -- 하나로 두면 탭1 을 넓힌 채 탭2 에서 패널을 열고 'w' 를 누를 때, 탭1 의
+  -- 기억을 되돌리기로 읽어 거꾸로 좁아진다. 심하면 탭1 이 넓은 채로 굳는다.
+  s.wide = s.wide or {}
+  local tab = api.nvim_get_current_tabpage()
   local right = cfg('position', 'bottom') == 'right'
-  local sv = s.wide_saved
+  local sv = s.wide[tab]
+
   if sv then
-    s.wide_saved = nil
-    if sv.wins == win_fingerprint() then
-      -- 배치가 그대로다: 모든 창 크기를 통째로 되돌린다
-      pcall(vim.cmd, sv.cmd)
-    else
-      -- 그 사이 창이 바뀌었다: 패널만 원래 폭으로, 나머지는 손대지 않는다
-      if right and sv.size then
-        pcall(api.nvim_win_set_width, s.win, sv.size)
-      elseif sv.size then
-        pcall(api.nvim_win_set_height, s.win, sv.size)
+    -- 저장한 명령은 '창 번호' 기준이고 화면 크기에도 매여 있다. 배치나
+    -- 화면이 그대로일 때만 쓴다.
+    local same = sv.wins == win_fingerprint()
+        and sv.cols == vim.o.columns and sv.lines == vim.o.lines
+    local ok = false
+    if same then
+      ok = pcall(vim.cmd, sv.cmd)
+    end
+    if not ok then
+      -- 그 사이 창이 생기거나 사라졌거나 터미널 크기가 바뀌었다.
+      -- 패널만 원래 크기로 돌리고, 패널이 내놓은 폭은 편집 창들이 고르게
+      -- 나눠 갖게 한다. 한 창이 통째로 삼키면 배치가 더 망가진다.
+      if sv.axis == 'w' then
+        ok = pcall(api.nvim_win_set_width, s.win, sv.size)
+      else
+        ok = pcall(api.nvim_win_set_height, s.win, sv.size)
       end
+      if ok then
+        balance_edits()
+      end
+    end
+    -- 되돌리는 데 성공했을 때만 기억을 버린다. 먼저 버리면, 실패했을 때
+    -- 넓은 배치가 다음 'w' 의 새 기준선이 되어 영영 넓은 채로 굳는다.
+    if ok then
+      s.wide[tab] = nil
     end
     return
   end
-  s.wide_saved = {
+
+  s.wide[tab] = {
     cmd = vim.fn.winrestcmd(),
     wins = win_fingerprint(),
+    cols = vim.o.columns,
+    lines = vim.o.lines,
+    -- 폭인지 높이인지 적어 둔다. 넓혀 둔 사이에 배치 설정이 바뀌어도
+    -- 폭을 높이에 집어넣는 일이 없다.
+    axis = right and 'w' or 'h',
     size = right and api.nvim_win_get_width(s.win)
         or api.nvim_win_get_height(s.win),
   }
@@ -6179,6 +6231,12 @@ function A.toggle_wide()
     h = math.min(h, math.max(5, vim.o.lines - 5))
     pcall(api.nvim_win_set_height, s.win, h)
   end
+  -- 남은 자리를 편집 창들이 고르게 나눠 갖게 한다.
+  --
+  -- 안 하면 패널 옆에 붙어 있던 창 하나가 1칸으로 뭉개진다(실측: 200칸에서
+  -- 편집 창 둘이 37/1). 패널은 winfixwidth 라 'wincmd =' 가 건드리지 않으니
+  -- 넓힌 폭은 그대로다.
+  balance_edits()
 end
 
 function A.pin()
@@ -6446,9 +6504,10 @@ api.nvim_create_autocmd({ 'WinNew', 'WinClosed' }, {
     if not (s.win and api.nvim_win_is_valid(s.win)) then
       return -- the panel itself is being created/closed
     end
-    local w = api.nvim_win_get_width(s.win)
-    local h = api.nvim_win_get_height(s.win)
-    vim.schedule(function() restore_geom(w, h) end)
+    local win = s.win
+    local w = api.nvim_win_get_width(win)
+    local h = api.nvim_win_get_height(win)
+    vim.schedule(function() restore_geom(win, w, h) end)
   end,
 })
 
