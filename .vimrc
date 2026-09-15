@@ -2559,6 +2559,14 @@ let g:relationview_global_mouse = 1
 let g:overview_mouse = 1
 " 마우스가 이상하면 이 둘을 0 으로 두고 :VimIdeMouseCheck / :VimIdeMouseOff 로 가른다.
 
+" ------------------------------------
+" 곁창에서 시작하면 안 되는 명령
+"
+" '지금 창'을 차지하는 기능(F6 BufExplorer, :Ex netrw ...)은 곁창에서 부르면
+" 그 사이드바를 차지해 버린다. 그래서 먼저 직전 EDIT 창으로 옮긴 뒤 연다.
+" 다른 명령도 그렇게 돌리고 싶으면:
+"   :VimIdeInEdit <명령>
+
 " 패널 밖에서도 쓰도록 전역 단축키를 준다. 패널 안에서는 t / T 다.
 " (F1~F12 는 이미 전부 쓰고 있어서 <Leader> 를 쓴다. Leader 는 '\' 다)
 " 'l' = layout. \n 은 vim-mark 가, \t 는 neo-tree 가 이미 쓰고 있어서
@@ -3193,26 +3201,80 @@ nnoremap <silent> <F2> :ProjectFilesPreset<CR>
 command! -bar Maketags call Maketags()
 map <F4> <Plug>MarkSet
 map <F5> :MarkClear<CR> :noh<CR>
-" F6 버퍼 목록은 EDIT 창에서 연다.
+" 곁창에서 실행하면 먼저 직전 EDIT 창으로 옮긴 뒤 실행한다.
 "
-" BufExplorer 는 '지금 창'을 차지해 목록을 띄우고, 고른 파일도 그 자리에
-" 연다. 곁창에서 누르면 사이드바가 목록으로 바뀌고 이어서 파일로 바뀐다.
-" 먼저 직전에 보던 EDIT 창으로 옮긴 뒤 연다.
-func! s:BufExplorerHere() abort
+" '지금 창'을 차지하는 기능들이 있다 - BufExplorer(F6), netrw(:Ex) 같은
+" 것들이다. 곁창에서 부르면 사이드바가 그 목록으로 바뀌고, 거기서 파일을
+" 고르면 사이드바 자리에 파일이 열린다. 곁창은 그 플러그인 일만 해야 한다.
+"
+" 파일이 곁창에 '실린 뒤' 되돌리는 것은 vimidewin.lua 가 맡는다. 여기는
+" 애초에 곁창에서 시작하지 않게 막는 쪽이다 - 되돌리는 것보다 낫다.
+"
+" EDIT 창이 하나도 없으면 아무것도 하지 않는다. 곁창을 부수느니 안 여는
+" 편이 낫다.
+func! s:InEditWin(cmd) abort
 	if has('nvim') && exists('*luaeval')
-		if !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
-			let l:w = luaeval('_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0')
-			if l:w > 0 && win_id2win(l:w) > 0
-				call win_gotoid(l:w)
-			else
-				" 열 자리가 없다: 곁창을 부수느니 아무것도 안 한다
-				return
-			endif
+				\ && !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
+		let l:w = luaeval('_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0')
+		if l:w > 0 && win_id2win(l:w) > 0
+			call win_gotoid(l:w)
+		else
+			echohl WarningMsg
+			echo 'vim-ide: EDIT 창이 없어 실행하지 않았습니다'
+			echohl None
+			return
 		endif
 	endif
-	BufExplorer
+	execute a:cmd
 endfunc
-map <F6> :call <SID>BufExplorerHere()<CR>
+
+" 아무 명령이나 EDIT 창에서 돌리고 싶을 때:  :VimIdeInEdit <명령>
+command! -nargs=+ -complete=command VimIdeInEdit call s:InEditWin(<q-args>)
+
+" F6 버퍼 목록
+map <F6> :call <SID>InEditWin('BufExplorer')<CR>
+
+" :Ex / :Explore (netrw, 또는 그것을 가로챈 nvim-tree) 도 EDIT 창에서.
+"
+" 명령을 덮어쓰면 그 안에서 원래 명령을 부를 때 제 자신을 다시 부른다.
+" 그래서 명령줄 약어로 바꿔 준다 - 곁창이든 아니든 :Ex 를 치면 아래
+" :VimIdeExplore 로 바뀌고, 그것이 EDIT 창으로 옮긴 뒤 진짜 :Explore 를 부른다.
+" netrw(:Ex)는 자기 버퍼에 <unique> 로 <C-h> / <C-l> 을 걸려 한다. 그런데
+" 이 설정은 그 둘을 창 이동(:wincmd h / l)에 전역으로 쓰고 있어서 충돌한다:
+"   E225: Global mapping already exists for <C-h>
+" 그러면 netrw 가 버퍼를 다 만들지 못한 채 죽어 :Ex 가 아무 창도 못 연다
+" (실측: 이 설정에서 :Explore 가 늘 실패했다).
+"
+" 그 두 줄만 잠시 치웠다가 되돌린다. 창 이동 매핑을 내주지 않으면서 netrw 도
+" 살리는 길이 이것뿐이다 - netrw 는 <unique> 를 조건 없이 쓴다.
+func! s:Explore(args) abort
+	let l:saved = {}
+	for l:k in ['<C-h>', '<C-l>']
+		let l:m = maparg(l:k, 'n', 0, 1)
+		if !empty(l:m)
+			let l:saved[l:k] = l:m
+			execute 'silent! nunmap ' . l:k
+		endif
+	endfor
+	try
+		call s:InEditWin('Explore ' . a:args)
+	finally
+		for [l:k, l:m] in items(l:saved)
+			if exists('*mapset')
+				silent! call mapset('n', 0, l:m)
+			elseif has_key(l:m, 'rhs')
+				execute 'silent! map ' . l:k . ' ' . l:m.rhs
+			endif
+		endfor
+	endtry
+endfunc
+command! -nargs=* -complete=dir VimIdeExplore call s:Explore(<q-args>)
+for s:c in ['Ex', 'Exp', 'Expl', 'Explo', 'Explor', 'Explore']
+	execute 'cnoreabbrev <expr> ' . s:c
+				\ . ' (getcmdtype() ==# ":" && getcmdline() ==# "' . s:c . '")'
+				\ . ' ? "VimIdeExplore" : "' . s:c . '"'
+endfor
+unlet! s:c
 " <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색).
 " <F8> 은 커서 밑 심볼에 노란 표시를 붙이고 뗀다 (yellowmark.lua).
 " 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.
