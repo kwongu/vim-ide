@@ -42,6 +42,8 @@
 --   c  toggle the context window (Source Insight style: shows the source
 --      around the location under the cursor, attached to the panel)
 --   t  toggle the neo-tree at the top of the panel's column
+--   w  widen this panel to half the screen, and back (the edit windows get
+--      their exact sizes back - winrestcmd)
 --   T  toggle the full-height context window left of that column (a second
 --      preview of the same place, for reading a long function in one go)
 --   p  pin (freeze) current symbol            r  refresh (drop cache)
@@ -331,6 +333,7 @@ local s = {
   tree_win = nil,     -- 오른쪽 열 위에 얹은 neo-tree 창
   big_win = nil,      -- 세로 전체 context (오른쪽 열 왼쪽, 두 번째 미리보기)
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
+  wide_saved = nil,   -- 패널을 넓히기 전의 '모든 창 크기' (winrestcmd 문자열)
   tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
   last_edit = nil,    -- 직전에 포커스가 있던 편집 창 (여기에 파일을 연다)
   edit_hist = {},     -- 최근 편집 창 (새 것이 앞). 곁창이 만들어지는 찰나에
@@ -1860,6 +1863,8 @@ local function ensure_buf()
     'RelationView: toggle the neo-tree above this column')
   bmap('T', function() A.toggle_big() end,
     'RelationView: toggle the full-height context window')
+  bmap('w', function() A.toggle_wide() end,
+    'RelationView: widen this panel to half the screen (toggle)')
   -- the mouse side buttons act on the source window while the list has focus
   for _, k in ipairs({ '<X1Mouse>', '<C-o>', unpack(alias_keys('back')) }) do
     bmap(k, function() A.back() end, 'RelationView: back (<C-o>)')
@@ -5848,6 +5853,7 @@ function A.close()
   end
   -- 오른쪽 열 식구를 먼저 치운다. 패널보다 먼저 닫아야 남은 창들이
   -- 빈자리를 나눠 갖는 일이 없다.
+  s.wide_saved = nil
   close_tree()
   close_big()
   if s.ctx_win and api.nvim_win_is_valid(s.ctx_win)
@@ -5920,6 +5926,48 @@ function A.toggle_big()
     show_context(last)
   else
     update_context(true)
+  end
+end
+
+-- 패널을 화면 절반까지 넓혔다가 도로 좁힌다.
+--
+-- 되돌릴 때 EDIT 창들의 크기까지 원래대로여야 한다. 창 하나만 되돌리면
+-- 나머지가 나눠 가진 폭은 그대로 남아 배치가 조금씩 어긋난다. vim 에는
+-- 이걸 위한 도구가 있다: winrestcmd() 는 '지금 모든 창 크기'를 되살리는
+-- 명령 문자열을 만들어 준다. 넓히기 직전에 그것을 적어 두었다가 그대로
+-- 실행한다 (실측: 60 -> 100 으로 넓힌 뒤 되돌리니 정확히 60).
+--
+-- winfixwidth 가 걸려 있어도 명시적인 크기 지정은 통한다(실측).
+--
+--   g:relationview_wide_width   넓힐 폭 (0 = 화면의 절반)
+--   g:relationview_wide_height  'bottom' 배치에서 넓힐 높이 (0 = 절반)
+function A.toggle_wide()
+  if not panel_visible() then
+    vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
+    return
+  end
+  if s.wide_saved then
+    local cmd = s.wide_saved
+    s.wide_saved = nil
+    pcall(vim.cmd, cmd)
+    return
+  end
+  s.wide_saved = vim.fn.winrestcmd()
+  if cfg('position', 'bottom') == 'right' then
+    local w = tonumber(cfg('wide_width', 0)) or 0
+    if w <= 0 then
+      w = math.floor(vim.o.columns / 2)
+    end
+    -- 편집 창이 아예 사라지지 않게 최소한은 남긴다
+    w = math.min(w, math.max(20, vim.o.columns - 20))
+    pcall(api.nvim_win_set_width, s.win, w)
+  else
+    local h = tonumber(cfg('wide_height', 0)) or 0
+    if h <= 0 then
+      h = math.floor(vim.o.lines / 2)
+    end
+    h = math.min(h, math.max(5, vim.o.lines - 5))
+    pcall(api.nvim_win_set_height, s.win, h)
   end
 end
 
@@ -6594,6 +6642,10 @@ end, {
 api.nvim_create_user_command('RelationViewTree', function()
   A.toggle_tree()
 end, { desc = 'Toggle the neo-tree at the top of the RelationView column' })
+
+api.nvim_create_user_command('RelationViewWide', function()
+  A.toggle_wide()
+end, { desc = 'Widen the relation panel to half the screen (toggle)' })
 
 api.nvim_create_user_command('RelationViewBigContext', function()
   A.toggle_big()
