@@ -148,15 +148,14 @@ fi
 # 빠진 채로 돌기 때문이다 - 그 상태는 눈으로 알아채기 어렵다.
 echo "### check vim-ide add-ons ###"
 VIMIDE_MISS=0
-for f in \
-	.vim/plugin/relationview.lua \
-	.vim/plugin/projectfiles.lua \
-	.vim/plugin/autoindex.lua \
-	.vim/plugin/vimidesession.lua \
-	.vim/plugin/vimidewin.lua \
-	.vim/autoload/vimide/qf.vim \
-	.vim/after/ftplugin/qf.vim \
-	.vim/nerdtree_plugin/vimide_lastedit.vim ; do
+# 목록을 손으로 적지 않는다. 손으로 적으면 파일이 늘 때마다 낡는다 -
+# 실제로 21개 중 8개만 들고 있었다. 저장소에 있는 것을 훑어 견준다.
+for f in $(cd ${VIMIDE} && ls \
+	.vim/plugin/*.lua .vim/plugin/*.vim \
+	.vim/autoload/vimide/*.vim \
+	.vim/after/ftplugin/*.vim \
+	.vim/nerdtree_plugin/*.vim \
+	.vim/colors/sourceinsight.vim 2>/dev/null); do
 	if [ -r "${HOME}/${f}" ]; then
 		echo "  ok    ${f}"
 	else
@@ -182,6 +181,14 @@ fi
 
 echo "tip: :qa 로 나간 자리에서 다시 시작하려면  nvim +Restore"
 echo "     (그냥  nvim  은 지금까지와 똑같이 기본 상태로 뜹니다)"
+
+# 켜고 끌 수 있는 것들. 여기에 값을 늘어놓지 않는다 - 늘어놓으면 .vimrc 와
+# 두 군데가 되어 곧 어긋난다. 어디를 보면 되는지만 가리킨다.
+echo "tip: 기능을 켜고 끄는 설정은 모두 ${HOME}/.vimrc 에 'let g:...' 로 있습니다."
+echo "     주요 절: '점프 키 관련 옵션' / 'RelationView' / '창 규칙' / '마우스'"
+VIMIDE_OPTS=$(grep -c '^let g:\(vimide\|relationview\|overview\)_' ${HOME}/.vimrc 2>/dev/null || echo 0)
+echo "     (지금 ${VIMIDE_OPTS}개. 값을 고치고 nvim 을 다시 띄우면 바로 먹습니다)"
+echo "tip: 마우스가 이상하면  :VimIdeMouseCheck  /  :VimIdeMouseOff  로 가릅니다."
 
 pip install pathlib
 
