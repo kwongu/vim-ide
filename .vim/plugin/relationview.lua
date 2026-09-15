@@ -6658,7 +6658,16 @@ api.nvim_create_autocmd({ 'WinNew', 'WinClosed' }, {
     local win = s.win
     local w = api.nvim_win_get_width(win)
     local h = api.nvim_win_get_height(win)
-    vim.schedule(function() restore_geom(win, w, h) end)
+    vim.schedule(function()
+      restore_geom(win, w, h)
+      -- 열 전체 높이가 달라졌을 수 있다(quickfix 가 열리거나, 창이 하나
+      -- 생기거나 사라지거나). 그때마다 비율을 다시 맞춘다 - 안 그러면
+      -- 열을 세울 때 한 번 맞추고 끝이라, quickfix 하나 열었다고 목록이
+      -- 4줄로 눌린다(실측: 7/11/21 -> 3/4/21).
+      if apply_column_ratio then
+        pcall(apply_column_ratio)
+      end
+    end)
   end,
 })
 
@@ -6667,6 +6676,9 @@ api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
   callback = function()
     if not (s.win and api.nvim_win_is_valid(s.win)) then
       return
+    end
+    if apply_column_ratio then
+      vim.schedule(function() pcall(apply_column_ratio) end)
     end
     if not s.tree then
       return
