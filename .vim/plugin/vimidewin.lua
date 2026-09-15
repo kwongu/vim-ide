@@ -130,6 +130,47 @@ function _G.vimide_edit_wins(skip)
   return out
 end
 
+-- '편집 자리를 잠시 빌려 쓰는' 플러그인들.
+--
+-- aerial / neo-tree / NERDTree / tagbar / quickfix 같은 것은 자기 창을 새로
+-- 만드는 '곁창' 이다. 반면 BufExplorer 와 netrw 는 지금 창을 그 자리에서
+-- 차지한다 - 그 창은 원래 EDIT 창이었고, 고르고 나면 돌려준다.
+local BORROWED_FT = {
+  bufexplorer = true,
+  netrw = true,
+  NvimTree = true, -- hijack_netrw 로 netrw 자리를 대신 차지한다
+}
+
+--- 파일을 열 '편집 자리' 를 고른다.
+---
+--- 1) 진짜 EDIT 창이 있으면 직전에 보던 것
+--- 2) 없으면, 편집 자리를 빌려 쓰는 중인 창(BufExplorer / netrw)
+--- 3) 그것도 없으면 0
+---
+--- 2)가 필요한 이유: F6 으로 BufExplorer 를 띄워 두면 그 창이 유일한 편집
+--- 자리를 차지한다. 그 상태에서 곁창에서 :Ex 를 누르면 '진짜 EDIT 창' 은
+--- 하나도 없어서 아무 일도 못 했다.
+function _G.vimide_edit_slot()
+  if type(_G.vimide_last_edit_win) == 'function' then
+    local ok, w = pcall(_G.vimide_last_edit_win)
+    if ok and w and w ~= 0 and _G.vimide_is_edit_win(w) then
+      return w
+    end
+  end
+  local wins = _G.vimide_edit_wins()
+  if wins[1] then
+    return wins[1]
+  end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local ok, conf = pcall(api.nvim_win_get_config, w)
+    local floating = ok and conf and conf.relative and conf.relative ~= ''
+    if not floating and BORROWED_FT[vim.bo[api.nvim_win_get_buf(w)].filetype] then
+      return w
+    end
+  end
+  return 0
+end
+
 --- 모든 탭을 통틀어 EDIT 창이 몇 개인가.
 ---
 --- '끝낼까'는 반드시 이쪽으로 센다. 지금 탭만 보면 다른 탭에 편집 창이

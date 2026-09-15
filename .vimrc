@@ -3218,7 +3218,10 @@ map <F5> :MarkClear<CR> :noh<CR>
 func! s:InEditWin(cmd) abort
 	if has('nvim') && exists('*luaeval')
 				\ && !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
-		let l:w = luaeval('_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0')
+		" '편집 자리' 를 묻는다. 진짜 EDIT 창이 없어도, BufExplorer 나 netrw 가
+		" 잠시 빌려 쓰는 중인 창이 있으면 그 자리를 되찾아 쓴다.
+		let l:w = luaeval('_G.vimide_edit_slot ~= nil and _G.vimide_edit_slot()'
+					\ . ' or (_G.vimide_last_edit_win ~= nil and _G.vimide_last_edit_win() or 0)')
 		if l:w > 0 && win_id2win(l:w) > 0
 			call win_gotoid(l:w)
 		else
