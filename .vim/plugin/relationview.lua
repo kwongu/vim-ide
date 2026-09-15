@@ -459,6 +459,10 @@ local apply_column_ratio
 local mouse_expr
 
 local pick_src_win
+local is_edit_win   -- '파일을 열어도 되는 창인가' (아래에서 정의한다)
+                    -- 여기서 미리 이름을 잡아 두지 않으면 위쪽에서 부를 때
+                    -- 전역 조회가 되어 nil 이 나오고, .vimrc 의 try/catch 가
+                    -- 그 오류를 삼켜 <C-]> 가 말없이 편집 창 점프로 떨어진다.
 local local_decl    -- treesitter: the declaration of a local/parameter
 local member_jump   -- 'msg->cmd': where that member is declared
 local update        -- the panel's own refresh, defined further down
@@ -5554,7 +5558,7 @@ end
 -- 편집 창으로 쓸 수 있는 창인가.
 -- 패널/미리보기/트리/aerial/quickfix 는 우리 버퍼이거나 buftype 이 비어
 -- 있지 않아 여기서 걸러진다.
-local function is_edit_win(w)
+is_edit_win = function(w)
   if not (w and api.nvim_win_is_valid(w)) then
     return false
   end

@@ -1407,6 +1407,23 @@ endfunc
 " (실측: 둘 다 { 27 }). 매핑하면 Esc 가 통째로 가로채여 insert 를 빠져
 " 나오지 못한다. g] 는 원래 :tselect(태그 후보 목록)인데, 이 설정에서는
 " 그 자리를 이 동작에 내준다 - 후보 목록은 <C-]> 가 패널에 띄워 준다.
+" luaeval 을 감싼 try 가 삼킨 오류를 알린다.
+"
+" 그 try 들은 '그 lua 함수가 아직 없을 때'(E117)를 견디려고 둔 것인데, 바로
+" catch 로 아무 오류나 다 삼키고 있었다. 그래서 우리 lua 안의 진짜 오류가
+" 말없이 사라졌다 - relationview 의 is_edit_win 을 정의보다 위에서 부르는
+" 바람에 nil 이 나왔고, <C-]> 가 아무 말도 없이 '편집 창에서 태그 점프' 로
+" 떨어졌다. 화면에는 아무 표시도 없어서 찾는 데 오래 걸렸다.
+" E117 만 조용히 넘기고 나머지는 알린다.
+func! s:LuaOops() abort
+	if v:exception =~# 'E117'
+		return
+	endif
+	echohl WarningMsg
+	echomsg 'vim-ide: ' . substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+	echohl None
+endfunc
+
 " 이 창에서 점프해도 되나.
 "
 " 예전에는 &buftype 하나만 봤다. quickr-preview 의 미리보기 창(\p)은
@@ -1462,6 +1479,7 @@ func! s:RvEditJump() abort
 				return
 			endif
 		catch
+			call s:LuaOops()
 		endtry
 	endif
 	if !s:JumpHere()
@@ -1559,6 +1577,7 @@ func! s:RvCtxJump() abort
 				endif
 			endif
 		catch
+			call s:LuaOops()
 		endtry
 	endif
 	" 특수 창(패널/ProjectFiles/Tagbar/NERDTree/quickfix ...)에서 builtin
@@ -1582,6 +1601,7 @@ func! s:RvGotoFile() abort
 				return
 			endif
 		catch
+			call s:LuaOops()
 		endtry
 	endif
 	" 곁창에서는 그냥 둔다. <C-]>/g]/더블클릭은 이 가드가 있는데 gf 만
@@ -2519,6 +2539,7 @@ func! s:RvUnpin() abort
 				return
 			endif
 		catch
+			call s:LuaOops()
 		endtry
 	endif
 	if exists('*CheckSymbol')
