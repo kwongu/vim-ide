@@ -1398,8 +1398,9 @@ nnoremap <silent> gf :call <SID>RvGotoFile()<CR>
 
 " C-c 매핑은 checksymbol.vim 을 source 한 뒤에 둔다(아래쪽 참고)
 
-nnoremap <silent> <C-9> :call <SID>QfStep(1)<CR>
-nnoremap <silent> <C-0> :call <SID>QfStep(-1)<CR>
+" 요청대로 C-0 이 다음, C-9 가 이전이다 (예전에는 반대였다).
+nnoremap <silent> <C-0> :call <SID>QfStep(1)<CR>
+nnoremap <silent> <C-9> :call <SID>QfStep(-1)<CR>
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
 " <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고

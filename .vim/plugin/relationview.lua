@@ -1852,6 +1852,8 @@ local function ensure_buf()
     bmap(lhs, function() A.mouse_jump(false) end,
       'RelationView: jump (double click)')
   end
+  bmap('<LeftMouse>', function() A.mouse_toggle() end,
+    'RelationView: click [+]/[-] to expand/collapse (elsewhere just moves)')
   bmap('<Space>', function() A.toggle('toggle') end, 'RelationView: expand/collapse')
   bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
@@ -5677,6 +5679,29 @@ end
 
 -- expand the whole visible tree, breadth-first, bounded by
 -- g:relationview_max_depth / g:relationview_max_nodes
+-- 목록의 [+] / [-] / […] 를 마우스로 누르면 스페이스와 같다(펼치기/접기).
+--
+-- 마커를 정확히 눌렀을 때만 토글한다. 그 밖을 누르면 커서만 옮긴다 -
+-- 한 번 클릭이 늘 펼침/접힘이 되면 목록을 훑기가 어렵다.
+function A.mouse_toggle()
+  local m = vim.fn.getmousepos()
+  if not (m and s.win and m.winid == s.win and m.line and m.line > 0) then
+    return
+  end
+  pcall(api.nvim_win_set_cursor, s.win,
+    { m.line, math.max(0, (m.column or 1) - 1) })
+  local txt = api.nvim_buf_get_lines(s.buf, m.line - 1, m.line, false)[1] or ''
+  local col = m.column or 1
+  -- getmousepos 의 column 도, find 가 주는 자리도 바이트 기준이라 그대로 견준다
+  for _, pat in ipairs({ '%[%+%]', '%[%-%]', '%[…%]' }) do
+    local a, b = txt:find(pat)
+    if a and col >= a and col <= b then
+      A.toggle('toggle')
+      return
+    end
+  end
+end
+
 function A.expand_all()
   local t = s.tree
   if not t or t.expanding or not t.nodes then
@@ -6404,9 +6429,15 @@ function A.lookup_refs(pat, regex)
       -- 본문에도 남아 눈이 덜 헤맨다. 색은 F4 와 같은 체계라 F4 나 \m 으로
       -- 지울 수 있고, 여러 번 찾으면 MarkWord1, 2, 3 … 으로 돌아간다.
       pcall(_G.vimide_mark_text, pat)
-      -- 패널이 떠 있으면 거기에. group_refs 는 fn 이 없으면 파일로 묶으므로
-      -- (파일 -> 그 안의 줄들) Source Insight 와 같은 모양이 된다.
-      if panel_visible() then
+      -- 결과는 quickfix 로 보낸다.
+      --
+      -- 예전에는 패널이 떠 있으면 패널에 실었는데, 그러면 보고 있던 관계
+      -- 트리가 글자 검색 결과로 덮여 버린다. 패널은 '이 심볼의 관계'를,
+      -- quickfix 는 '찾은 줄 목록'을 맡는 편이 섞이지 않는다.
+      -- 패널이 닫혀 있을 때의 동작(quickfix)은 원래 그대로다.
+      --
+      --   let g:relationview_lookup_panel = 1   " 예전처럼 패널에 싣는다
+      if panel_visible() and cfg('lookup_panel', 0) ~= 0 then
         s.gen = s.gen + 1
         s.pinned = true
         s.note = ('색인된 파일에서 찾은 글자 %d건'):format(#refs)
