@@ -5724,8 +5724,6 @@ end
 -- 위였을 때만 뒤이어 토글한다. expr 매핑의 결과는 다시 매핑되지 않으니
 -- 재귀가 없고, 패널 밖 클릭은 한 글자도 달라지지 않는다. 패널 안에서는
 -- 버퍼 지역 매핑이 이겨서 예전 그대로다.
-local LEFTMOUSE = api.nvim_replace_termcodes('<LeftMouse>', true, true, true)
-
 -- 클릭 자리가 목록의 [+]/[-]/[…] 위인가. 맞으면 그 줄과 칸을 준다.
 local function marker_at(m)
   if not (m and s.win and s.buf and m.winid == s.win and m.line
@@ -5757,8 +5755,19 @@ vim.keymap.set('n', '<LeftMouse>', function()
       A.toggle('toggle')
     end)
   end
-  return LEFTMOUSE
-end, { expr = true,
+  -- 반드시 '문자열' 로 돌려주고 replace_keycodes 에 맡긴다.
+  --
+  -- nvim_replace_termcodes() 로 미리 치환한 바이트를 돌려주면 클릭이
+  -- 통째로 죽는다 - 창도 커서도 안 움직이고 터미널 커서가 엉뚱한 자리에
+  -- 남는다. 실측(개발서버, 같은 자리 클릭):
+  --   '<LeftMouse>' + replace_keycodes  : 100줄 -> 103줄  정상
+  --   미리 치환한 바이트 (아래 둘 다)     : 100줄 -> 100줄  죽음
+  --     · replace_keycodes 없이
+  --     · replace_keycodes 와 같이
+  -- 마우스 키는 자리 정보를 따로 들고 오는데, 미리 치환한 바이트로는
+  -- 그것이 붙지 않는 것으로 보인다.
+  return '<LeftMouse>'
+end, { expr = true, replace_keycodes = true,
   desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
 
 function A.expand_all()
