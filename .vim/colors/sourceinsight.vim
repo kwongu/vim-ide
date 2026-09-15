@@ -52,7 +52,7 @@ let s:c = {
       \ 'linenr':    ['#808080', 244, 'grey'],
       \ 'linenrbg':  ['#f2f2f2', 255, 'white'],
       \ 'ui':        ['#d9d9d9', 252, 'lightgrey'],
-      \ 'aerialbg':  ['#87ceeb', 117, 'cyan'],
+      \ 'aerialbg':  ['#c5d2de', 252, 'lightgrey'],
       \ 'uifg':      ['#333333', 236, 'black'],
       \ 'err':       ['#cc0000', 160, 'red'],
       \ 'warn':      ['#b35c00', 130, 'darkyellow'],
