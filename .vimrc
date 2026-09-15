@@ -2520,9 +2520,12 @@ let g:relationview_column_ratio = [2, 4, 6]
 let g:relationview_list_min_height = 12
 let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
-" 'w' (또는 \lw) 로 패널을 넓힐 폭. 0 이면 화면의 4/5 지점까지.
+" 'w' (또는 \lw) 를 누를 때마다 도는 단계. 화면의 몇 %까지 넓힐지.
+"   1/3 -> 1/2 -> 2/3 -> 기본 크기 -> (다시 1/3)
+let g:relationview_wide_steps = [33, 50, 67]
+" 칸수를 박아 두면 위 단계 대신 그 한 단계만 돈다(기본 0 = 단계를 쓴다).
 let g:relationview_wide_width = 0
-" 'bottom' 배치에서 넓힐 높이. 0 이면 화면의 4/5.
+" 'bottom' 배치에서 같은 뜻의 줄수.
 let g:relationview_wide_height = 0
 
 " ------------------------------------

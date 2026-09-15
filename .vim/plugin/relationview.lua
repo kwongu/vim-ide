@@ -6242,6 +6242,74 @@ apply_column_ratio = function()
   end
 end
 
+-- 이 창이 오른쪽 열(패널/미리보기/트리/큰 미리보기) 식구인가.
+-- 그 셋은 폭을 함께 쓰므로 '남은 폭 나누기' 에서 빼야 한다.
+local function is_column_win(w)
+  return w == s.win or w == s.ctx_win or w == s.tree_win or w == s.big_win
+end
+
+-- 'w' 를 누를 때마다 도는 단계. 화면의 몇 %까지 넓힐지.
+--
+--   let g:relationview_wide_steps = [33, 50, 67]   " 기본
+--   let g:relationview_wide_steps = [50]           " 한 단계만
+--
+-- g:relationview_wide_width 를 칸수로 박아 두면 그 한 단계만 돈다.
+local function wide_steps()
+  local v = vim.g.relationview_wide_steps
+  if type(v) == 'table' and #v > 0 then
+    local t = {}
+    for _, x in ipairs(v) do
+      local n = tonumber(x)
+      if n and n > 0 and n < 100 then
+        t[#t + 1] = n
+      end
+    end
+    if #t > 0 then
+      return t
+    end
+  end
+  return { 33, 50, 67 }
+end
+
+-- 패널이 자리를 차지하고 남은 폭을, 편집 창들이 '원래 비율대로' 나눠 갖게 한다.
+--
+-- 그냥 두면 vim 이 패널 바로 옆 창에서만 폭을 뺏어 그 창이 1칸으로 뭉개진다
+-- (실측: 200칸에서 편집 창 둘이 37/1). 'wincmd =' 로 고르게 펴는 방법도
+-- 있지만 그러면 사용자가 일부러 다르게 잡아 둔 비율이 사라진다.
+local function spread_others(sizes, axis)
+  local others, base_sum, now_sum = {}, 0, 0
+  for _, e in ipairs(sizes or {}) do
+    if api.nvim_win_is_valid(e.win) and not is_column_win(e.win)
+        and api.nvim_win_get_tabpage(e.win) == api.nvim_get_current_tabpage() then
+      local base = (axis == 'h') and e.h or e.w
+      if base > 0 then
+        others[#others + 1] = { win = e.win, base = base }
+        base_sum = base_sum + base
+        now_sum = now_sum + ((axis == 'h') and api.nvim_win_get_height(e.win)
+          or api.nvim_win_get_width(e.win))
+      end
+    end
+  end
+  if #others < 2 or base_sum <= 0 or now_sum < #others then
+    return
+  end
+  local used = 0
+  for i, e in ipairs(others) do
+    local v
+    if i == #others then
+      v = now_sum - used
+    else
+      v = math.max(1, math.floor(now_sum * e.base / base_sum))
+      used = used + v
+    end
+    if axis == 'h' then
+      pcall(api.nvim_win_set_height, e.win, v)
+    else
+      pcall(api.nvim_win_set_width, e.win, v)
+    end
+  end
+end
+
 -- 지금 탭 창들의 크기를 창 id 와 함께 적어 둔다.
 --
 -- winrestcmd() 는 '창 번호' 기준이라 창이 하나 생기거나 사라지면 못 쓴다.
@@ -6311,22 +6379,43 @@ function A.toggle_wide()
   s.wide = s.wide or {}
   local tab = api.nvim_get_current_tabpage()
   local right = cfg('position', 'bottom') == 'right'
+  local axis = right and 'w' or 'h'
   local sv = s.wide[tab]
+  local steps = wide_steps()
+  local fixed = tonumber(cfg(right and 'wide_width' or 'wide_height', 0)) or 0
+  if fixed > 0 then
+    steps = { false } -- 칸수를 박아 두었으면 그 한 단계만
+  end
 
-  if sv then
-    -- 되돌리기는 '창 id 로 적어 둔 크기' 만 쓴다.
-    --
-    -- winrestcmd() 를 쓰지 않는 이유: 그것은 '창 번호' 기준 명령이라
-    -- (:1resize, :vert 2resize ...) 번호가 한 칸만 밀려도 엉뚱한 창을
-    -- 줄였다 늘렸다 한다. 번호는 쉽게 밀린다 - overview 막대(부동 창)가
-    -- 넓힐 때 사라졌다 돌아오기만 해도 그렇다. 부동 창을 지문에서 빼 둔
-    -- 탓에 '배치 그대로' 로 판정되어 그 어긋난 명령을 실행했고, 높이가
-    -- 통째로 망가졌다(실측: quickfix 10줄 -> 30줄, 미리보기 17줄 -> 1줄).
-    --
-    -- 'wincmd =' 로 고르게 펴지도 않는다. 사용자가 일부러 다르게 잡아 둔
-    -- EDIT 창 크기를 균등 분할로 뭉개기 때문이다.
-    --
-    -- 그 사이 사라진 창은 건너뛰고, 살아남은 창은 원래 크기를 되찾는다.
+  -- 처음 누르면 지금 배치를 기준으로 적어 둔다.
+  if not sv then
+    sv = {
+      sizes = win_sizes(),
+      wins = win_fingerprint(),
+      cols = vim.o.columns,
+      lines = vim.o.lines,
+      -- 폭인지 높이인지 적어 둔다. 넓혀 둔 사이에 배치 설정이 바뀌어도
+      -- 폭을 높이에 집어넣는 일이 없다.
+      axis = axis,
+      size = right and api.nvim_win_get_width(s.win)
+          or api.nvim_win_get_height(s.win),
+      step = 0,
+    }
+    s.wide[tab] = sv
+  end
+
+  sv.step = sv.step + 1
+
+  -- 한 바퀴 돌았다: 기준 크기로 되돌린다.
+  --
+  -- 되돌리기는 '창 id 로 적어 둔 크기' 만 쓴다. winrestcmd() 는 '창 번호'
+  -- 기준이라(:1resize, :vert 2resize ...) 번호가 한 칸만 밀려도 엉뚱한 창을
+  -- 줄였다 늘렸다 하고, 번호는 쉽게 밀린다 - overview 막대(부동 창)가
+  -- 사라졌다 돌아오기만 해도 그렇다(실측: 그 탓에 quickfix 가 10줄에서
+  -- 30줄로, 미리보기가 17줄에서 1줄로 망가졌다).
+  -- 'wincmd =' 로 고르게 펴지도 않는다 - 일부러 다르게 잡아 둔 크기를
+  -- 균등 분할로 뭉개기 때문이다.
+  if sv.step > #steps then
     local ok = apply_sizes(sv.sizes, sv.axis)
     -- 패널은 화면에 맞게 한 번 더 못박는다. 화면이 줄어 있으면 옛 크기를
     -- 그대로 넣어 봐야 clamp 되어 넓은 채로 굳는다(실측: 80칸에서 잰 50 을
@@ -6338,56 +6427,38 @@ function A.toggle_wide()
       local h = math.min(sv.size, math.max(5, vim.o.lines - 5))
       ok = pcall(api.nvim_win_set_height, s.win, h) or ok
     end
-    -- 한 틱 뒤에 한 번 더 넣는다.
-    --
-    -- 넓힐 때 부른 balance_edits() 는 'wincmd =' 를 vim.schedule 로 미룬다.
-    -- 그것이 아직 안 돌았으면 방금 되돌린 크기를 덮어쓴다. 마지막 말은
-    -- 이쪽이 하게 둔다.
+    -- 한 틱 뒤에 한 번 더 넣는다. 다른 데서 미뤄 둔 'wincmd =' 가 방금
+    -- 되돌린 크기를 덮어쓸 수 있다 - 마지막 말은 이쪽이 하게 둔다.
     local again = sv
     vim.schedule(function()
       apply_sizes(again.sizes, again.axis)
     end)
-    -- 되돌리는 데 성공했을 때만 기억을 버린다. 먼저 버리면, 실패했을 때
-    -- 넓은 배치가 다음 'w' 의 새 기준선이 되어 영영 넓은 채로 굳는다.
     if ok then
       s.wide[tab] = nil
+    else
+      sv.step = 0 -- 되돌리지 못했으면 다음 'w' 가 처음부터 돈다
     end
     return
   end
 
-  s.wide[tab] = {
-    sizes = win_sizes(),
-    wins = win_fingerprint(),
-    cols = vim.o.columns,
-    lines = vim.o.lines,
-    -- 폭인지 높이인지 적어 둔다. 넓혀 둔 사이에 배치 설정이 바뀌어도
-    -- 폭을 높이에 집어넣는 일이 없다.
-    axis = right and 'w' or 'h',
-    size = right and api.nvim_win_get_width(s.win)
-        or api.nvim_win_get_height(s.win),
-  }
+  -- 한 단계 넓힌다.
+  --
+  -- 늘 기준 크기로 되돌린 뒤 계산한다. 앞 단계 위에 덧칠하면 반올림이
+  -- 쌓여 단계마다 조금씩 어긋난다.
+  apply_sizes(sv.sizes, sv.axis)
+  local pct = steps[sv.step]
   if right then
-    local w = tonumber(cfg('wide_width', 0)) or 0
-    if w <= 0 then
-      w = math.floor(vim.o.columns * 4 / 5)
-    end
+    local w = fixed > 0 and fixed or math.floor(vim.o.columns * pct / 100)
     -- 편집 창이 아예 사라지지 않게 최소한은 남긴다
     w = math.min(w, math.max(20, vim.o.columns - 20))
     pcall(api.nvim_win_set_width, s.win, w)
   else
-    local h = tonumber(cfg('wide_height', 0)) or 0
-    if h <= 0 then
-      h = math.floor(vim.o.lines * 4 / 5)
-    end
+    local h = fixed > 0 and fixed or math.floor(vim.o.lines * pct / 100)
     h = math.min(h, math.max(5, vim.o.lines - 5))
     pcall(api.nvim_win_set_height, s.win, h)
   end
-  -- 남은 자리를 편집 창들이 고르게 나눠 갖게 한다.
-  --
-  -- 안 하면 패널 옆에 붙어 있던 창 하나가 1칸으로 뭉개진다(실측: 200칸에서
-  -- 편집 창 둘이 37/1). 패널은 winfixwidth 라 'wincmd =' 가 건드리지 않으니
-  -- 넓힌 폭은 그대로다.
-  balance_edits()
+  -- 남은 자리를 편집 창들이 '원래 비율대로' 나눠 갖게 한다
+  spread_others(sv.sizes, sv.axis)
 end
 
 function A.pin()
