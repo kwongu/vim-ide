@@ -548,7 +548,42 @@ end
 -- 더블클릭)은 전역보다 우선하므로 그대로 살아 있다.
 local MOUSE_KEYS = { '<LeftMouse>', '<LeftDrag>', '<LeftRelease>',
   '<ScrollWheelUp>', '<ScrollWheelDown>' }
+local MOUSE_MODES = { 'n', 'i', 'v' }
 local mouse_installed = false
+
+-- 남이 이미 걸어 둔 같은 마우스 키를 기억해 둔다.
+--
+-- 위에 적은 대로 마우스 매핑은 '누르기 전 버퍼'에서 찾는다. 그래서 막대든
+-- RelationView 목록이든 마우스를 받으려면 전역에 걸 수밖에 없고, 그러면
+-- 서로 덮어쓴다. 실제로 막대를 켜 두면 RelationView 목록의 [+] 클릭이
+-- 죽었다(실측: 전역 <LeftMouse> 는 있는데 그쪽 핸들러가 한 번도 안 불림).
+--
+-- 막대 위가 아닌 클릭은 원래 주인에게 넘기고, 막대를 닫을 때 그대로
+-- 돌려놓는다.
+local prev_mouse = {}
+
+-- 지금 모드를 매핑 모드 한 글자로. V 와 <C-v> 도 'v' 로 친다.
+local function map_mode()
+  local m = (vim.fn.mode() or 'n'):sub(1, 1)
+  if m == 'V' or m == '\22' then
+    return 'v'
+  end
+  return (m == 'i' or m == 'v') and m or 'n'
+end
+
+-- 막대가 아닌 자리의 클릭: 원래 주인을 불러 주고 그 결과를 그대로 쓴다.
+-- 되돌려 줄 수 있는 것은 expr + lua 콜백뿐이다. 문자열 rhs 는 지금 쓰는
+-- 데가 없고, expr 안에서 억지로 흉내 내면 재귀에 빠지기 쉽다.
+local function chain(key)
+  local d = prev_mouse[map_mode() .. key]
+  if d and d.expr == 1 and d.callback then
+    local ok, res = pcall(d.callback)
+    if ok and type(res) == 'string' then
+      return res
+    end
+  end
+  return key
+end
 
 -- 드래그는 이벤트가 쏟아진다. 하나마다 vim.schedule 을 걸면 콜백이 쌓여
 -- 마지막 위치까지 가는 데 그만큼 밀리고, 지나간 위치를 전부 그리느라
@@ -618,7 +653,13 @@ local function install_mouse()
   mouse_installed = true
   for _, lhs in ipairs(MOUSE_KEYS) do
     local key = lhs
-    vim.keymap.set({ 'n', 'i', 'v' }, key, function()
+    for _, m in ipairs(MOUSE_MODES) do
+      local d = vim.fn.maparg(key, m, false, true)
+      if type(d) == 'table' and d.lhs and d.buffer == 0 then
+        prev_mouse[m .. key] = d
+      end
+    end
+    vim.keymap.set(MOUSE_MODES, key, function()
       local r = mouse_row()
       if not r then
         if key == '<LeftRelease>' and s.dragging then
@@ -629,7 +670,7 @@ local function install_mouse()
           -- 그래서 잠금이 풀린 뒤로 미룬다.
           restore_focus()
         end
-        return key -- 막대가 아니면 원래 동작
+        return chain(key) -- 막대가 아니면 원래 동작(주인이 있으면 그쪽으로)
       end
       if key == '<ScrollWheelUp>' or key == '<ScrollWheelDown>' then
         -- 막대 위에서 휠: 편집 창을 굴린다.
@@ -692,10 +733,17 @@ local function remove_mouse()
   end
   mouse_installed = false
   for _, lhs in ipairs(MOUSE_KEYS) do
-    for _, m in ipairs({ 'n', 'i', 'v' }) do
+    for _, m in ipairs(MOUSE_MODES) do
       pcall(vim.keymap.del, m, lhs)
+      -- 우리가 덮기 전에 있던 매핑을 돌려놓는다. 안 그러면 막대를 한 번
+      -- 껐다 켜는 것만으로 RelationView 의 [+] 클릭이 영영 죽는다.
+      local d = prev_mouse[m .. lhs]
+      if d then
+        pcall(vim.fn.mapset, m, 0, d)
+      end
     end
   end
+  prev_mouse = {}
 end
 
 map_bar = function()

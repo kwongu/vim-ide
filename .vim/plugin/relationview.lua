@@ -5713,6 +5713,54 @@ function A.mouse_toggle()
   end
 end
 
+-- 전역 <LeftMouse>: 포커스가 패널 밖에 있어도 [+]/[-] 를 한 번에 누른다.
+--
+-- 버퍼 지역 매핑은 '지금 그 버퍼에 있을 때'만 걸린다. 편집 창에서 패널의
+-- [+] 를 누르면 첫 클릭은 포커스를 옮기는 기본 동작으로 먹히고 위의
+-- bmap('<LeftMouse>') 은 아예 돌지 않는다 - 그래서 두 번 눌러야 펼쳐졌다.
+-- (서버에서 측정: 1번 클릭 뒤 포커스만 패널로, 2번째에 [+] -> [-])
+--
+-- <expr> 로 두어 기본 클릭은 언제나 그대로 흘려보내고, 그 클릭이 마커
+-- 위였을 때만 뒤이어 토글한다. expr 매핑의 결과는 다시 매핑되지 않으니
+-- 재귀가 없고, 패널 밖 클릭은 한 글자도 달라지지 않는다. 패널 안에서는
+-- 버퍼 지역 매핑이 이겨서 예전 그대로다.
+local LEFTMOUSE = api.nvim_replace_termcodes('<LeftMouse>', true, true, true)
+
+-- 클릭 자리가 목록의 [+]/[-]/[…] 위인가. 맞으면 그 줄과 칸을 준다.
+local function marker_at(m)
+  if not (m and s.win and s.buf and m.winid == s.win and m.line
+      and m.line > 0 and api.nvim_buf_is_valid(s.buf)) then
+    return nil
+  end
+  local txt = api.nvim_buf_get_lines(s.buf, m.line - 1, m.line, false)[1] or ''
+  local col = m.column or 1
+  for _, pat in ipairs({ '%[%+%]', '%[%-%]', '%[…%]' }) do
+    local a, b = txt:find(pat)
+    if a and col >= a and col <= b then
+      return m.line, col
+    end
+  end
+  return nil
+end
+
+vim.keymap.set('n', '<LeftMouse>', function()
+  local line, col = marker_at(vim.fn.getmousepos())
+  if line then
+    -- expr 매핑 안에서는 창/버퍼를 건드릴 수 없다(textlock). 기본 클릭이
+    -- 끝난 뒤로 미룬다 - 그때는 포커스도 커서도 이미 그 자리에 있다.
+    vim.schedule(function()
+      if not (s.win and api.nvim_win_is_valid(s.win)) then
+        return
+      end
+      pcall(api.nvim_set_current_win, s.win)
+      pcall(api.nvim_win_set_cursor, s.win, { line, math.max(0, col - 1) })
+      A.toggle('toggle')
+    end)
+  end
+  return LEFTMOUSE
+end, { expr = true,
+  desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
+
 function A.expand_all()
   local t = s.tree
   if not t or t.expanding or not t.nodes then
@@ -6987,6 +7035,22 @@ local function capture_gtags()
 end
 
 api.nvim_create_autocmd('VimEnter', { group = group, callback = capture_gtags })
+
+-- \c (caller 검색) 처럼 '결과를 반드시 quickfix 로' 보내고 싶은 자리가 있다.
+-- 위의 :Gtags 덮어쓰기를 우회해 gtags.vim 본래의 경로로 돌린다.
+--
+-- :Gtags! 로 만들지 않은 이유: gtags.vim 의 :Gtags 에는 -bang 이 없어서,
+-- relationview.lua 가 없는 진짜 vim 8.1 에서 E477 이 난다. 이름을 따로
+-- 두면 .vimrc 가 exists(':GtagsQf') 하나로 갈라 쓸 수 있다.
+api.nvim_create_user_command('GtagsQf', function(o)
+  if gtags_orig then
+    gtags_orig(o.args)
+  else
+    -- 덮어쓰기를 못 잡았으면 원래 :Gtags 가 그대로 살아 있다는 뜻이다
+    pcall(vim.cmd, 'Gtags ' .. o.args)
+  end
+end, { nargs = '*', complete = 'custom,GtagsCandidate',
+  desc = 'gtags search - always into the quickfix window' })
 
 api.nvim_create_user_command('RelationViewUnpin', function()
   if not A.unpin() then

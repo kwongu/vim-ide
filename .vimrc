@@ -1220,7 +1220,18 @@ function! s:MarkAndCallRefs() abort
     if has('nvim') && exists('*luaeval')
         silent! call luaeval('_G.vimide_mark_text ~= nil and _G.vimide_mark_text(_A) or 0', l:w)
     endif
-    execute 'Gtags -r ' . l:w
+    " caller 목록은 quickfix 로 보낸다.
+    "
+    " 릴레이션 패널이 떠 있으면 :Gtags 는 결과를 패널에 싣는다(덮어쓰기).
+    " 그러면 보고 있던 관계 트리가 검색 결과로 덮여 버린다. 패널은 '이
+    " 심볼의 관계'를, quickfix 는 '찾은 줄 목록'을 맡는 편이 섞이지 않는다.
+    " :GtagsQf 는 relationview.lua 가 있을 때만 생긴다 - 없으면(진짜 vim)
+    " :Gtags 가 원래대로 quickfix 를 쓰므로 갈라 줄 필요가 없다.
+    if exists(':GtagsQf') == 2
+        execute 'GtagsQf -r ' . l:w
+    else
+        execute 'Gtags -r ' . l:w
+    endif
 endfunction
 nnoremap <silent> <Leader><Leader>c :call <SID>MarkAndCallRefs()<CR>
 nmap <Leader><Leader>f <plug>(quickr_cscope_files)
@@ -1236,28 +1247,27 @@ let g:Gtags_OpenQuickfixWindow = 1
 "let g:Gtags_VerticalWindow = 0
 "let g:Gtags_Auto_Map = 0
 "let g:Gtags_Auto_Update = 0
-" C-n / C-p 는 "지금 앞에 있는 리스트의 다음/이전 항목" 이다:
-"   RelationView 패널에 리스트가 있으면 그 caller 리스트를 훑고
-"   (context view 에만 미리보기가 뜨고 EDIT 창은 움직이지 않는다.
-"    포커스도 그대로. 실제로 그 위치로 가려면 패널에서 Enter)
-"   패널이 비어 있으면 예전처럼 quickfix 를 훑는다.
-" quickfix 만 따로 움직이려면 Ctrl+9 / Ctrl+0 (아래) 또는 ]q / [q
+" C-n / C-p 는 quickfix 를 훑는다. \c, Ctrl+/ 등 '찾은 줄 목록'이
+" quickfix 로 가므로, 그 목록을 넘기는 키도 여기에 둔다.
+" 릴레이션 패널 리스트를 훑는 키는 Ctrl+0 / Ctrl+9 (아래).
 func! s:ListStep(dir) abort
-	if exists(':RelationViewNext') == 2
-		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
-		return
-	endif
 	call vimide#qf#Step(a:dir)
 endfunc
 nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
 nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
 
-" quickfix 전용: Ctrl+9 (next) / Ctrl+0 (prev)
+" 릴레이션 패널 리스트 전용: Ctrl+0 (다음) / Ctrl+9 (이전)
+"   context view 에만 미리보기가 뜨고 EDIT 창은 움직이지 않는다. 포커스도
+"   그대로다. 실제로 그 위치로 가려면 Ctrl+Enter 또는 패널에서 Enter.
+"   패널이 비어 있으면 quickfix 를 훑는다(RelationViewNext 의 대비책).
 " 이 두 키는 전통적인 터미널 인코딩으로는 아예 전달되지 않는다. CSI-u
 " (kitty keyboard protocol) 를 쓰는 터미널이어야 nvim 까지 도달한다
-" - iTerm2 3.5+, kitty, WezTerm, Ghostty, foot 등. 안 먹으면 ]q / [q 를
-" 쓰면 된다(같은 동작).
+" - iTerm2 3.5+, kitty, WezTerm, Ghostty, foot 등.
 func! s:QfStep(dir) abort
+	if exists(':RelationViewNext') == 2
+		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
+		return
+	endif
 	call vimide#qf#Step(a:dir)
 endfunc
 " 리스트에서 고른 항목으로 실제 이동: Ctrl+Enter (어느 창에서 눌러도 된다)
