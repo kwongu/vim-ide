@@ -6324,7 +6324,13 @@ end
 -- autoload 함수는 한 번 불러 보기 전에는 exists('*mark#DoMark') 가 0 이라
 -- '있는지 묻고 부르기'가 통하지 않는다. 그냥 불러 보고 없으면 넘어간다.
 --   let g:vimide_lookup_mark = 0   " 찾아도 색은 입히지 않기
-function _G.vimide_mark_text(text)
+-- keep = true 면 '이미 칠해져 있으면 그대로 둔다'.
+--
+-- vim-mark 의 DoMark 는 토글이라 같은 글자에 두 번 부르면 색이 꺼진다
+-- (실측: DoMark -> mark-1/alpha, 한 번 더 -> mark-1 cleared).
+-- 점프할 때마다 칠하는 길에서는 같은 심볼로 두 번 뛰면 색이 사라지는
+-- 셈이라, 미리 번호를 물어보고 이미 있으면 건드리지 않는다.
+function _G.vimide_mark_text(text, keep)
   if type(text) ~= 'string' or text == '' then
     return false
   end
@@ -6332,6 +6338,12 @@ function _G.vimide_mark_text(text)
     return false
   end
   local pat = (vim.fn.escape(text, '\\^$.*[~'):gsub('\n', '\\n'))
+  if keep then
+    local okn, n = pcall(vim.fn['mark#GetMarkNumber'], pat, 0, 1)
+    if okn and type(n) == 'number' and n > 0 then
+      return true
+    end
+  end
   local ok = pcall(vim.fn['mark#DoMark'], 0, pat)
   return ok
 end

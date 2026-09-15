@@ -1273,7 +1273,64 @@ nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 "       (편집 창은 그대로. C-t 로 편집 창에 돌아온다. context view 안에서는
 "        그 창의 자체 점프 스택으로 계속 파고들 수 있다)
 "       패널/미리보기가 없으면 예전처럼 tagfunc(gtags) 로 편집 창에서 점프.
+" 릴레이션 뷰가 떠 있을 때, 점프한 심볼에 F4(vim-mark) 색을 자동으로 입힌다.
+"
+" 패널이 닫혀 있으면 아무것도 하지 않는다 - '릴레이션 뷰 Off 면 기존 유지'.
+" 이미 칠해진 심볼은 건드리지 않는다(vimide_mark_text 의 keep). vim-mark 의
+" DoMark 는 토글이라 두 번 부르면 색이 꺼지기 때문이다.
+"
+"   let g:vimide_jump_mark = 0   " 점프할 때 색칠하지 않는다
+func! s:RvPanelOn() abort
+	if !has('nvim') || !exists('*luaeval')
+		return 0
+	endif
+	return luaeval('(_G.relationview_panel_win ~= nil and _G.relationview_panel_win() ~= nil) and 1 or 0')
+endfunc
+
+func! s:RvMarkCword() abort
+	if !get(g:, 'vimide_jump_mark', 1) || !s:RvPanelOn()
+		return
+	endif
+	let l:w = expand('<cword>')
+	if l:w !~# '^[A-Za-z_][A-Za-z0-9_]*$'
+		return
+	endif
+	call luaeval('_G.vimide_mark_text ~= nil and (function() _G.vimide_mark_text(_A, true) return 1 end)() or 0', l:w)
+endfunc
+
+" g] / <C-마우스왼쪽> : 미리보기가 아니라 '지금 편집 창'에서 그 심볼로 간다.
+"
+" <C-]> 는 패널이 떠 있으면 context view 로 보내는데, 편집 창 자체를 그
+" 심볼로 옮기고 싶을 때가 있다. 그 길이다.
+"
+" <C-[> 를 쓰지 않은 이유: 터미널에서 <C-[> 는 ESC 와 같은 바이트(27)다
+" (실측: 둘 다 { 27 }). 매핑하면 Esc 가 통째로 가로채여 insert 를 빠져
+" 나오지 못한다. g] 는 원래 :tselect(태그 후보 목록)인데, 이 설정에서는
+" 그 자리를 이 동작에 내준다 - 후보 목록은 <C-]> 가 패널에 띄워 준다.
+func! s:RvEditJump() abort
+	call s:RvMarkCword()
+	if has('nvim') && exists('*luaeval')
+		try
+			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				return
+			endif
+			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
+				return
+			endif
+		catch
+		endtry
+	endif
+	if &buftype !=# '' && &buftype !=# 'help'
+		return
+	endif
+	execute "normal! \<C-]>"
+endfunc
+nnoremap <silent> g] :call <SID>RvEditJump()<CR>
+" 마우스는 먼저 클릭한 자리로 커서를 옮긴 뒤 같은 동작을 한다.
+nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvEditJump()<CR>
+
 func! s:RvCtxJump() abort
+	call s:RvMarkCword()
 	if has('nvim') && exists('*luaeval')
 		try
 			" #include 줄이면 배치와 상관없이 그 헤더로 간다
