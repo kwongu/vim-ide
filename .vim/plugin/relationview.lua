@@ -333,7 +333,7 @@ local s = {
   tree_win = nil,     -- 오른쪽 열 위에 얹은 neo-tree 창
   big_win = nil,      -- 세로 전체 context (오른쪽 열 왼쪽, 두 번째 미리보기)
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
-  wide_saved = nil,   -- 패널을 넓히기 전의 '모든 창 크기' (winrestcmd 문자열)
+  wide = nil,         -- 탭마다: 넓히기 전의 창별 크기 (창 id 기준)
   tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
   last_edit = nil,    -- 직전에 포커스가 있던 편집 창 (여기에 파일을 연다)
   edit_hist = {},     -- 최근 편집 창 (새 것이 앞). 곁창이 만들어지는 찰나에
@@ -6128,16 +6128,10 @@ end
 -- 패널을 화면의 4/5 까지 넓혔다가 도로 좁힌다.
 --
 -- 되돌릴 때 EDIT 창들의 크기까지 원래대로여야 한다. 창 하나만 되돌리면
--- 나머지가 나눠 가진 폭은 그대로 남아 배치가 조금씩 어긋난다. vim 에는
--- 이걸 위한 도구가 있다: winrestcmd() 는 '지금 모든 창 크기'를 되살리는
--- 명령 문자열을 만들어 준다. 넓히기 직전에 그것을 적어 두었다가 그대로
--- 실행한다 (실측: 60 -> 100 으로 넓힌 뒤 되돌리니 정확히 60).
+-- 나머지가 나눠 가진 폭은 그대로 남아 배치가 조금씩 어긋난다.
 --
--- 다만 winrestcmd() 는 '창 번호' 기준이다(:1resize, :vert 2resize ...).
--- 넓혀 둔 사이에 창이 하나 열리거나 닫히면 번호가 밀려서, 그 명령이
--- 엉뚱한 창을 줄였다 늘렸다 한다. 그래서 창 목록도 같이 적어 두고,
--- 되돌릴 때 그 목록이 그대로일 때만 명령을 쓴다. 달라졌으면 패널 폭만
--- 되돌리고 나머지는 건드리지 않는다 - 잘못 되돌리느니 그냥 두는 편이 낫다.
+-- 넓히기 직전에 창마다 크기를 '창 id' 와 함께 적어 두었다가 그대로
+-- 돌려준다. 자세한 사정은 아래 A.toggle_wide 의 되돌리기 쪽 주석에 있다.
 --
 -- winfixwidth 가 걸려 있어도 명시적인 크기 지정은 통한다(실측).
 --
@@ -6178,9 +6172,15 @@ end
 
 -- 적어 둔 크기를 도로 넣는다.
 --
+-- 건드린 축만 되돌린다. 오른쪽 배치에서 넓히는 것은 '폭'뿐인데 높이까지
+-- 같이 집어넣으면 멀쩡하던 세로 배치가 무너진다 - 실측: aerial + EDIT 넷 +
+-- 오른쪽 열 + quickfix 에서 quickfix 가 10줄에서 30줄로 부풀고 미리보기가
+-- 17줄에서 1줄로 눌렸다. 가로로 나뉜 창에 높이를 하나씩 밀어 넣으면
+-- 이웃에서 뺏고 뺏기느라 수렴하지 않는다.
+--
 -- 두 바퀴 돈다. 한 창을 늘리면 이웃이 그만큼 줄어드는 탓에 한 바퀴로는
 -- 앞쪽 창들이 다시 어긋난다.
-local function apply_sizes(list)
+local function apply_sizes(list, axis)
   if type(list) ~= 'table' then
     return false
   end
@@ -6190,8 +6190,11 @@ local function apply_sizes(list)
     for _, e in ipairs(list) do
       if api.nvim_win_is_valid(e.win)
           and api.nvim_win_get_tabpage(e.win) == tab then
-        pcall(api.nvim_win_set_width, e.win, e.w)
-        pcall(api.nvim_win_set_height, e.win, e.h)
+        if axis == 'h' then
+          pcall(api.nvim_win_set_height, e.win, e.h)
+        else
+          pcall(api.nvim_win_set_width, e.win, e.w)
+        end
         any = true
       end
     end
@@ -6223,35 +6226,29 @@ function A.toggle_wide()
   local sv = s.wide[tab]
 
   if sv then
-    -- 저장한 명령은 '창 번호' 기준이고 화면 크기에도 매여 있다. 배치나
-    -- 화면이 그대로일 때만 쓴다.
-    local same = sv.wins == win_fingerprint()
-        and sv.cols == vim.o.columns and sv.lines == vim.o.lines
-    local ok = false
-    if same then
-      ok = pcall(vim.cmd, sv.cmd)
-    end
-    if not ok then
-      -- 그 사이 창이 생기거나 사라졌거나 터미널 크기가 바뀌었다.
-      --
-      -- 예전에는 패널만 되돌리고 나머지는 'wincmd =' 로 고르게 폈다. 그게
-      -- 문제였다 - 사용자가 일부러 다르게 잡아 둔 EDIT 창 크기를 균등
-      -- 분할로 뭉개 버린다. 게다가 이 길은 자주 탄다: 두 번 누르는 사이에
-      -- 미리보기나 열 트리가 다시 만들어지기만 해도 창 목록이 달라진다.
-      --
-      -- 이제 창마다 적어 둔 크기를 그대로 돌려준다. 그 사이 사라진 창은
-      -- 건너뛰고, 살아남은 창은 원래 크기를 되찾는다.
-      ok = apply_sizes(sv.sizes)
-      -- 패널은 화면에 맞게 한 번 더 못박는다. 화면이 줄어 있으면 옛 크기를
-      -- 그대로 넣어 봐야 clamp 되어 넓은 채로 굳는다(실측: 80칸에서 잰 50 을
-      -- 50칸 화면에 넣으면 46).
-      if sv.axis == 'w' then
-        local w = math.min(sv.size, math.max(20, vim.o.columns - 20))
-        ok = pcall(api.nvim_win_set_width, s.win, w) or ok
-      else
-        local h = math.min(sv.size, math.max(5, vim.o.lines - 5))
-        ok = pcall(api.nvim_win_set_height, s.win, h) or ok
-      end
+    -- 되돌리기는 '창 id 로 적어 둔 크기' 만 쓴다.
+    --
+    -- winrestcmd() 를 쓰지 않는 이유: 그것은 '창 번호' 기준 명령이라
+    -- (:1resize, :vert 2resize ...) 번호가 한 칸만 밀려도 엉뚱한 창을
+    -- 줄였다 늘렸다 한다. 번호는 쉽게 밀린다 - overview 막대(부동 창)가
+    -- 넓힐 때 사라졌다 돌아오기만 해도 그렇다. 부동 창을 지문에서 빼 둔
+    -- 탓에 '배치 그대로' 로 판정되어 그 어긋난 명령을 실행했고, 높이가
+    -- 통째로 망가졌다(실측: quickfix 10줄 -> 30줄, 미리보기 17줄 -> 1줄).
+    --
+    -- 'wincmd =' 로 고르게 펴지도 않는다. 사용자가 일부러 다르게 잡아 둔
+    -- EDIT 창 크기를 균등 분할로 뭉개기 때문이다.
+    --
+    -- 그 사이 사라진 창은 건너뛰고, 살아남은 창은 원래 크기를 되찾는다.
+    local ok = apply_sizes(sv.sizes, sv.axis)
+    -- 패널은 화면에 맞게 한 번 더 못박는다. 화면이 줄어 있으면 옛 크기를
+    -- 그대로 넣어 봐야 clamp 되어 넓은 채로 굳는다(실측: 80칸에서 잰 50 을
+    -- 50칸 화면에 넣으면 46).
+    if sv.axis == 'w' then
+      local w = math.min(sv.size, math.max(20, vim.o.columns - 20))
+      ok = pcall(api.nvim_win_set_width, s.win, w) or ok
+    else
+      local h = math.min(sv.size, math.max(5, vim.o.lines - 5))
+      ok = pcall(api.nvim_win_set_height, s.win, h) or ok
     end
     -- 한 틱 뒤에 한 번 더 넣는다.
     --
@@ -6260,11 +6257,7 @@ function A.toggle_wide()
     -- 이쪽이 하게 둔다.
     local again = sv
     vim.schedule(function()
-      if same and again.cmd then
-        pcall(vim.cmd, again.cmd)
-      else
-        apply_sizes(again.sizes)
-      end
+      apply_sizes(again.sizes, again.axis)
     end)
     -- 되돌리는 데 성공했을 때만 기억을 버린다. 먼저 버리면, 실패했을 때
     -- 넓은 배치가 다음 'w' 의 새 기준선이 되어 영영 넓은 채로 굳는다.
@@ -6275,7 +6268,6 @@ function A.toggle_wide()
   end
 
   s.wide[tab] = {
-    cmd = vim.fn.winrestcmd(),
     sizes = win_sizes(),
     wins = win_fingerprint(),
     cols = vim.o.columns,
