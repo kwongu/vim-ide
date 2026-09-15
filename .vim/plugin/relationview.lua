@@ -451,6 +451,10 @@ end
 local A = {}          -- panel actions (jump/close/pin/...), defined below
 local render_tree     -- forward declarations
 local update_header
+-- 왼쪽 클릭 한 번을 어떻게 다룰지. 아래쪽에서 정의한다.
+-- 패널 버퍼의 매핑과 전역 매핑이 같은 것을 쓴다.
+local mouse_expr
+
 local pick_src_win
 local local_decl    -- treesitter: the declaration of a local/parameter
 local member_jump   -- 'msg->cmd': where that member is declared
@@ -1852,8 +1856,16 @@ local function ensure_buf()
     bmap(lhs, function() A.mouse_jump(false) end,
       'RelationView: jump (double click)')
   end
-  bmap('<LeftMouse>', function() A.mouse_toggle() end,
-    'RelationView: click [+]/[-] to expand/collapse (elsewhere just moves)')
+  -- 반드시 <expr> 여야 한다.
+  --
+  -- 버퍼 지역 매핑은 '지금 그 버퍼에 있을 때' 모든 왼쪽 클릭을 가져간다 -
+  -- 패널을 한 번 누른 뒤에는 편집 창을 눌러도 이 매핑이 돈다. 예전에는
+  -- 보통 매핑이라, 패널 밖 클릭이면 아무것도 안 하고 return 해서 클릭이
+  -- 통째로 삼켜졌다(커서가 안 움직이고 드래그도 안 됐다).
+  -- 이제 기본 클릭은 언제나 흘려보내고, 마커 위였을 때만 뒤이어 토글한다.
+  vim.keymap.set('n', '<LeftMouse>', function() return mouse_expr() end,
+    { buffer = buf, nowait = true, expr = true, replace_keycodes = true,
+      desc = 'RelationView: click [+]/[-] to expand/collapse (elsewhere just moves)' })
   bmap('<Space>', function() A.toggle('toggle') end, 'RelationView: expand/collapse')
   bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
@@ -5713,36 +5725,11 @@ function A.toggle(mode)
   end
 end
 
--- expand the whole visible tree, breadth-first, bounded by
--- g:relationview_max_depth / g:relationview_max_nodes
--- 목록의 [+] / [-] / […] 를 마우스로 누르면 스페이스와 같다(펼치기/접기).
---
--- 마커를 정확히 눌렀을 때만 토글한다. 그 밖을 누르면 커서만 옮긴다 -
--- 한 번 클릭이 늘 펼침/접힘이 되면 목록을 훑기가 어렵다.
-function A.mouse_toggle()
-  local m = vim.fn.getmousepos()
-  if not (m and s.win and m.winid == s.win and m.line and m.line > 0) then
-    return
-  end
-  pcall(api.nvim_win_set_cursor, s.win,
-    { m.line, math.max(0, (m.column or 1) - 1) })
-  local txt = api.nvim_buf_get_lines(s.buf, m.line - 1, m.line, false)[1] or ''
-  local col = m.column or 1
-  -- getmousepos 의 column 도, find 가 주는 자리도 바이트 기준이라 그대로 견준다
-  for _, pat in ipairs({ '%[%+%]', '%[%-%]', '%[…%]' }) do
-    local a, b = txt:find(pat)
-    if a and col >= a and col <= b then
-      A.toggle('toggle')
-      return
-    end
-  end
-end
-
 -- 전역 <LeftMouse>: 포커스가 패널 밖에 있어도 [+]/[-] 를 한 번에 누른다.
 --
 -- 버퍼 지역 매핑은 '지금 그 버퍼에 있을 때'만 걸린다. 편집 창에서 패널의
--- [+] 를 누르면 첫 클릭은 포커스를 옮기는 기본 동작으로 먹히고 위의
--- bmap('<LeftMouse>') 은 아예 돌지 않는다 - 그래서 두 번 눌러야 펼쳐졌다.
+-- [+] 를 누르면 첫 클릭은 포커스를 옮기는 기본 동작으로 먹히고 패널 버퍼에
+-- 걸어 둔 매핑은 아예 돌지 않는다 - 그래서 두 번 눌러야 펼쳐졌다.
 -- (서버에서 측정: 1번 클릭 뒤 포커스만 패널로, 2번째에 [+] -> [-])
 --
 -- <expr> 로 두어 기본 클릭은 언제나 그대로 흘려보내고, 그 클릭이 마커
@@ -5775,40 +5762,42 @@ end
 --   let g:relationview_global_mouse = 0
 local mouse_on = false
 
+-- 왼쪽 클릭 한 번. 기본 동작은 언제나 그대로 흘려보내고, 그 클릭이 목록의
+-- [+]/[-] 위였을 때만 뒤이어 토글한다. 패널 버퍼 매핑과 전역 매핑이 같이 쓴다.
+mouse_expr = function()
+  local line, col = marker_at(vim.fn.getmousepos())
+  if line then
+    -- expr 매핑 안에서는 창/버퍼를 건드릴 수 없다(textlock). 기본 클릭이
+    -- 끝난 뒤로 미룬다 - 그때는 포커스도 커서도 이미 그 자리에 있다.
+    vim.schedule(function()
+      if not (s.win and api.nvim_win_is_valid(s.win)) then
+        return
+      end
+      pcall(api.nvim_set_current_win, s.win)
+      pcall(api.nvim_win_set_cursor, s.win, { line, math.max(0, col - 1) })
+      A.toggle('toggle')
+    end)
+  end
+  -- 반드시 '문자열' 로 돌려주고 replace_keycodes 에 맡긴다.
+  --
+  -- nvim_replace_termcodes() 로 미리 치환한 바이트를 돌려주면 클릭이
+  -- 통째로 죽는다 - 창도 커서도 안 움직이고 터미널 커서가 엉뚱한 자리에
+  -- 남는다. 실측(개발서버, 같은 자리 클릭):
+  --   '<LeftMouse>' + replace_keycodes  : 100줄 -> 103줄  정상
+  --   미리 치환한 바이트                 : 100줄 -> 100줄  죽음
+  return '<LeftMouse>'
+end
+
 local function mouse_install()
   if mouse_on or cfg('global_mouse', 1) == 0 then
     return
   end
   mouse_on = true
-  vim.keymap.set('n', '<LeftMouse>', function()
-    local line, col = marker_at(vim.fn.getmousepos())
-    if line then
-      -- expr 매핑 안에서는 창/버퍼를 건드릴 수 없다(textlock). 기본 클릭이
-      -- 끝난 뒤로 미룬다 - 그때는 포커스도 커서도 이미 그 자리에 있다.
-      vim.schedule(function()
-        if not (s.win and api.nvim_win_is_valid(s.win)) then
-          return
-        end
-        pcall(api.nvim_set_current_win, s.win)
-        pcall(api.nvim_win_set_cursor, s.win, { line, math.max(0, col - 1) })
-        A.toggle('toggle')
-      end)
-    end
-    -- 반드시 '문자열' 로 돌려주고 replace_keycodes 에 맡긴다.
-    --
-    -- nvim_replace_termcodes() 로 미리 치환한 바이트를 돌려주면 클릭이
-    -- 통째로 죽는다 - 창도 커서도 안 움직이고 터미널 커서가 엉뚱한 자리에
-    -- 남는다. 실측(개발서버, 같은 자리 클릭):
-    --   '<LeftMouse>' + replace_keycodes  : 100줄 -> 103줄  정상
-    --   미리 치환한 바이트 (아래 둘 다)     : 100줄 -> 100줄  죽음
-    --     · replace_keycodes 없이
-    --     · replace_keycodes 와 같이
-    -- 마우스 키는 자리 정보를 따로 들고 오는데, 미리 치환한 바이트로는
-    -- 그것이 붙지 않는 것으로 보인다.
-    return '<LeftMouse>'
-  end, { expr = true, replace_keycodes = true,
-    desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
+  vim.keymap.set('n', '<LeftMouse>', function() return mouse_expr() end,
+    { expr = true, replace_keycodes = true,
+      desc = 'RelationView: 패널 밖에서도 [+]/[-] 를 한 번에 누른다' })
 end
+
 
 local function mouse_remove()
   if not mouse_on then
@@ -5834,6 +5823,8 @@ api.nvim_create_autocmd({ 'WinEnter', 'WinClosed', 'WinNew', 'BufWinEnter' }, {
   desc = 'RelationView: 패널이 떠 있는 동안만 전역 <LeftMouse> 를 건다',
 })
 
+-- expand the whole visible tree, breadth-first, bounded by
+-- g:relationview_max_depth / g:relationview_max_nodes
 function A.expand_all()
   local t = s.tree
   if not t or t.expanding or not t.nodes then
