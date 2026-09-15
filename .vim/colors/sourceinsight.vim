@@ -427,12 +427,27 @@ call s:hi('SiJumpLocal', 'jumplocal', '', '')
 " 빨강만 쓴다 - 한 번 볼드로 두었다가 '빨간색 볼드 말고 빨간색' 으로
 " 바꿔 달라는 요청을 받아 되돌렸다.
 "
-" 실제 커널 파일 넷을 훑어 SiJumpNone 밑에 깔린 볼드 capture 를 세어 보니
-" 딱 셋이었다: @function.call, @function.macro(x4), @constant.macro(x8).
-" 그래서 그 셋만 볼드를 뺀다.
+" SiJumpNone 이 칠하는 자리(ASK_CAP/MEMBER_CAP + identifier 계열)에 겹칠 수
+" 있는 볼드 capture 를 전부 훑어 지웠다. 지금까지 확인해 뺀 것:
+"   @function.call      일반 함수 호출
+"   @function.macro     #define NAME(...) 이름, #if defined(X)
+"   @constant.macro     #define NAME 이름, #ifdef 조건 이름
+"   @function.builtin   __builtin_expect(), __attribute__((aligned(4)))
+"   @variable.builtin   __attribute__ 의 속성 이름 (packed, aligned ...)
+"   @function.method(.call)  C++ 의 b->run() - 표에 없어서 @function 의
+"                       볼드를 물려받고 있었다. 제 줄을 줘서 끊는다.
+"   @si.directive.cond  factory 배색에서만 볼드였다 (아래 참고)
+"
+" @function 은 일부러 볼드로 둔다. 그 자리는 si 확장 쿼리가 모두
+" @si.declaration* 로도 잡고 sihlindex 가 decl_here 로 건너뛰므로 검정 볼드가
+" 될 수 없다. 게다가 @function 은 언어 공통이라 볼드를 빼면 lua/python 의
+" 함수 정의 이름까지 같이 눌리고, g:sourceinsight_declaration_emphasis='off'
+" 에서는 함수 정의 이름의 유일한 볼드가 사라진다.
+"
 " 그래서 sihlindex 가 칠하지 않는 버퍼(색인 끔, C 아닌 파일)에서는 함수
-" 호출이 초록 볼드가 아니라 초록으로 보인다. 되돌리려면 위 표의
-" 'function.call' 에 'bold' 를 도로 넣으면 된다.
+" 호출과 builtin 이 초록 볼드가 아니라 초록으로 보이고, __attribute__ 의
+" packed/aligned 는 네이비 볼드가 아니라 네이비로 보인다. 되돌리려면 위 표의
+" 해당 줄에 'bold' 를 도로 넣으면 된다.
 call s:hi('SiJumpNone', 'fg', '', '')
 " 함수 안에서 쓰는 전역 변수 (sihllocal.lua)
 call s:hi('SiGlobalRef', 'globalref', '', 'italic')
@@ -509,10 +524,12 @@ let s:ts = {
       \ 'constant.macro':     ['macro',   ''],
       \ 'function':           ['ref',     'bold'],
       \ 'function.call':      ['ref',     ''],
-      \ 'function.builtin':   ['ref',     'bold'],
+      \ 'function.builtin':   ['ref',     ''],
       \ 'function.macro':     ['macro',   ''],
+      \ 'function.method':      ['ref',   ''],
+      \ 'function.method.call': ['ref',   ''],
       \ 'variable':           ['fg',      ''],
-      \ 'variable.builtin':   ['keyword', 'bold'],
+      \ 'variable.builtin':   ['keyword', ''],
       \ 'variable.parameter': ['reflocal', ''],
       \ 'variable.member':    ['fg',      ''],
       \ 'property':           ['fg',      ''],
@@ -551,8 +568,11 @@ call s:hi('@si.kernel.attr', 'number', '', '')
 
 " #ifdef/#if defined() 의 조건 이름: 지시문과 같은 색 (코드 안의 상수
 " 매크로와 캡처가 같아서 확장 쿼리로 따로 잡아 낸다)
+" 이 자리는 sihlindex 가 덮어 칠하는 자리라 볼드를 주면 안 된다 (위 SiJumpNone
+" 의 OR 합침 설명 참고). 출고 기본값(factory)에서만 볼드였는데, 그래서 factory
+" 에서는 색인이 모르는 '#ifdef FOO' 가 아직 검정 볼드로 남아 있었다.
 call s:hi('@si.directive.cond', s:variant ==# 'factory' ? 'preproc' : 'number',
-      \ '', s:variant ==# 'factory' ? 'bold' : '')
+      \ '', '')
 
 " 선언 (~/.vim/after/queries/{c,cpp}/highlights.scm 이 잡아 준다)
 " 함수/구조체/enum/typedef 의 '정의된 이름' 강조 (위 g:..._emphasis)
