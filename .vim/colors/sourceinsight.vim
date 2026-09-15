@@ -52,6 +52,7 @@ let s:c = {
       \ 'linenr':    ['#808080', 244, 'grey'],
       \ 'linenrbg':  ['#f2f2f2', 255, 'white'],
       \ 'ui':        ['#d9d9d9', 252, 'lightgrey'],
+      \ 'aerialbg':  ['#d9d9d9', 252, 'lightgrey'],
       \ 'uifg':      ['#333333', 236, 'black'],
       \ 'err':       ['#cc0000', 160, 'red'],
       \ 'warn':      ['#b35c00', 130, 'darkyellow'],
@@ -281,9 +282,14 @@ highlight! link TermCursor Cursor
 " ── 코드: SI 는 색을 적게 쓴다 ─────────────────────────────────────────────
 call s:hi('Comment',       'comment', '',          '')
 call s:hi('Constant',      'number',  '',          '')
-" SI 의 String 스타일은 글자색뿐 아니라 연노랑 배경까지 포함한다
-call s:hi('String',        'string',  'stringbg',  '')
-call s:hi('Character',     'string',  'stringbg',  '')
+" SI 의 String 스타일은 글자색뿐 아니라 연노랑 배경까지 포함한다.
+"
+" 글자색은 검정이 기본이다 - 콘솔에 찍히는 문자열을 '연노랑 바탕에 검정'
+" 으로 읽고 싶다는 요청이다. 예전 진홍(#800000)으로 돌리려면:
+"   let g:sourceinsight_string_dark_red = 1
+let s:strfg = get(g:, 'sourceinsight_string_dark_red', 0) ? 'string' : 'fg'
+call s:hi('String',        s:strfg,   'stringbg',  '')
+call s:hi('Character',     s:strfg,   'stringbg',  '')
 call s:hi('Number',        'number',  '',          '')
 call s:hi('Boolean',       'keyword', '',          s:kw)
 call s:hi('Float',         'number',  '',          '')
@@ -313,7 +319,7 @@ call s:hi('StorageClass',  'keyword', '',          s:kw)
 call s:hi('Structure',     'keyword', '',          s:kw)
 call s:hi('Typedef',       'type',    '',          s:tp)
 call s:hi('Special',       'fg',      '',          '')
-call s:hi('SpecialChar',   'string',  'stringbg',  '')
+call s:hi('SpecialChar',   s:strfg,   'stringbg',  '')
 call s:hi('Delimiter',     'delim',   '',          '')
 call s:hi('SpecialComment','comment', '',          'bold')
 call s:hi('Debug',         'macro',   '',          '')
@@ -331,6 +337,13 @@ call s:hi('SpellBad',      'err',     '',          'underline')
 call s:hi('SpellCap',      'warn',    '',          'underline')
 call s:hi('SpellLocal',    'comment', '',          'underline')
 call s:hi('SpellRare',     'macro',   '',          'underline')
+
+" ── aerial (심볼 아웃라인) ────────────────────────────────────────────────
+" SI 의 Symbol Window 처럼 본문과 다른 옅은 회색 바탕으로 둔다. 창 단위
+" 배경이라 Normal 을 바꿔치기하는 방식이다(.vimrc 의 FileType aerial 에서
+" winhighlight 를 건다). 색을 바꾸려면 팔레트의 'aerialbg' 를 고치면 된다.
+call s:hi('AerialBg',       'fg',      'aerialbg',   '')
+call s:hi('AerialBgNC',     'fg',      'aerialbg',   '')
 
 " ── RelationView / ProjectSymbols 패널 ────────────────────────────────────
 " 패널은 코드가 아니라 목록이다: 주석 초록이 아니라 회색이 맞다.
@@ -522,7 +535,7 @@ endfor
 " 문자열은 연노랑 배경까지가 SI 의 String 스타일이다 (표는 글자색만 다룬다)
 for s:g in ['string', 'string.escape', 'string.special', 'string.special.path',
       \ 'string.special.url', 'character', 'character.special']
-  call s:hi('@' . s:g, 'string', 'stringbg', '')
+  call s:hi('@' . s:g, s:strfg, 'stringbg', '')
 endfor
 
 " 선언에 밑줄 (~/.vim/after/queries/c/highlights.scm 이 잡아 준다).

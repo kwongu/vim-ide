@@ -470,6 +470,23 @@ _G.rv_setup('aerial', {
 })
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
+
+" aerial 창만 옅은 회색 바탕으로 (SI 의 Symbol Window 처럼).
+"
+" 창 단위 배경은 Normal 을 그 창에서만 바꿔치기하는 방식이다 - overview.lua
+" 가 이미 같은 방법을 쓴다. 색은 colorscheme 의 AerialBg(팔레트 'aerialbg').
+"
+"   let g:vimide_aerial_bg = 0   " 끄면 본문과 같은 흰 바탕
+if !exists('g:vimide_aerial_bg')
+    let g:vimide_aerial_bg = 1
+endif
+augroup VimIdeAerialBg
+    autocmd!
+    autocmd FileType aerial
+        \ if get(g:, 'vimide_aerial_bg', 1)
+        \ |   setlocal winhighlight=Normal:AerialBg,NormalNC:AerialBgNC,EndOfBuffer:AerialBg
+        \ | endif
+augroup END
 " 아웃라인에서 더블클릭(또는 v)하면 편집 창에서 그 함수를 주석까지 블록으로
 " 잡는다 - ~/.vim/plugin/aerialrange.lua
 
