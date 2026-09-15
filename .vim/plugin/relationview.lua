@@ -3115,6 +3115,17 @@ ctx_tag_back = function()
       pcall(api.nvim_win_set_cursor, ow, { prev.line, prev.col or 0 })
     end
     pcall(api.nvim_set_current_win, ow)
+    -- 편집 창까지 돌아왔다 = 편집 창에서 <C-]> 로 떠날 때 칠한 색을 풀 자리다.
+    --
+    -- .vimrc 의 <C-t>(s:JumpBack)만 풀도록 두었더니 이 길에서 새어 나갔다.
+    -- <C-]> 는 포커스를 미리보기로 옮기므로, 거기서 누른 <C-t> 는 저쪽이
+    -- 아니라 이 함수를 탄다.
+    --
+    -- origin 이 있는 단계에서만 푼다. 미리보기 안에서 <C-]> 로 더 판 뒤
+    -- 되짚는 단계는 origin 이 없고, 그때는 칠한 것도 없기 때문이다.
+    if _G.vimide_jump_mark_pop then
+      pcall(_G.vimide_jump_mark_pop)
+    end
   end
 end
 
