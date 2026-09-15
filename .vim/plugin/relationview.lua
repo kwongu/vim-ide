@@ -6161,9 +6161,18 @@ local function win_fingerprint()
 end
 
 function A.toggle_wide()
+  -- s.win 은 패널을 연 그 순간에만 잡히고, 탭을 오갈 때 다시 맞춰 주는 곳이
+  -- 없다. 그래서 다른 탭에서 패널을 한 번 열면 이쪽 탭 패널이 눈앞에 떠
+  -- 있는데도 '닫혀 있습니다' 라며 거부했다 - 넓혀 둔 탭이 그대로 굳었다.
+  -- 이 탭에 패널이 있으면 그것을 다시 집는다.
   if not panel_visible() then
-    vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
-    return
+    local here = panel_win_here()
+    if here then
+      s.win = here
+    else
+      vim.notify('RelationView: 패널이 닫혀 있습니다', vim.log.levels.WARN)
+      return
+    end
   end
   -- 탭마다 따로 기억한다.
   --
@@ -6187,10 +6196,15 @@ function A.toggle_wide()
       -- 그 사이 창이 생기거나 사라졌거나 터미널 크기가 바뀌었다.
       -- 패널만 원래 크기로 돌리고, 패널이 내놓은 폭은 편집 창들이 고르게
       -- 나눠 갖게 한다. 한 창이 통째로 삼키면 배치가 더 망가진다.
+      -- 화면이 줄어 있으면 옛 크기를 그대로 넣어 봐야 clamp 되어 패널이
+      -- 넓은 채로 굳는다(실측: 80칸에서 잰 50 을 50칸 화면에 넣으면 46).
+      -- 지금 화면에 맞게 다듬어서 넣는다.
       if sv.axis == 'w' then
-        ok = pcall(api.nvim_win_set_width, s.win, sv.size)
+        local w = math.min(sv.size, math.max(20, vim.o.columns - 20))
+        ok = pcall(api.nvim_win_set_width, s.win, w)
       else
-        ok = pcall(api.nvim_win_set_height, s.win, sv.size)
+        local h = math.min(sv.size, math.max(5, vim.o.lines - 5))
+        ok = pcall(api.nvim_win_set_height, s.win, h)
       end
       if ok then
         balance_edits()

@@ -1487,6 +1487,26 @@ nnoremap <silent> gf :call <SID>RvGotoFile()<CR>
 " 요청대로 C-0 이 다음, C-9 가 이전이다 (예전에는 반대였다).
 nnoremap <silent> <C-0> :call <SID>QfStep(1)<CR>
 nnoremap <silent> <C-9> :call <SID>QfStep(-1)<CR>
+
+" 터미널이 Ctrl+0 / Ctrl+9 를 못 보낼 때의 대체키: ]r 다음 / [r 이전
+"
+" 이 두 키는 전통적인 터미널 인코딩에 자리가 없다. CSI-u(kitty keyboard
+" protocol)를 쓰는 터미널만 nvim 까지 보낸다 - iTerm2 3.5+, kitty, WezTerm,
+" Ghostty, foot. 테라텀 같은 데서는 아예 안 오고 맨 '0' / '9' 가 대신
+" 들어간다. 그러면 0 은 줄 맨 앞으로 가고 9 는 count 가 되어 엉뚱하게
+" 움직인다 - 안 먹는 것보다 나쁘다.
+"
+"   let g:vimide_rvlist_next_key = ']r'   " 다른 키로 바꾸려면
+"   let g:vimide_rvlist_prev_key = '[r'
+"   let g:vimide_rvlist_next_key = ''     " 대체키를 아예 안 만들려면
+let s:rv_next = get(g:, 'vimide_rvlist_next_key', ']r')
+let s:rv_prev = get(g:, 'vimide_rvlist_prev_key', '[r')
+if !empty(s:rv_next)
+	execute 'nnoremap <silent> ' . s:rv_next . ' :call <SID>QfStep(1)<CR>'
+endif
+if !empty(s:rv_prev)
+	execute 'nnoremap <silent> ' . s:rv_prev . ' :call <SID>QfStep(-1)<CR>'
+endif
 "nmap <C-h> :.,$s/<C-R>=expand("<cword>")<CR>//gc<SPACE>
 nmap <C-\><C-]> :GtagsCursor<CR>
 " <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고
