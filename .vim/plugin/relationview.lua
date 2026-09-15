@@ -6160,6 +6160,45 @@ local function win_fingerprint()
   return table.concat(ids, ',')
 end
 
+-- 지금 탭 창들의 크기를 창 id 와 함께 적어 둔다.
+--
+-- winrestcmd() 는 '창 번호' 기준이라 창이 하나 생기거나 사라지면 못 쓴다.
+-- 그때 쓸 대비책이다 - 살아남은 창에는 원래 크기를 그대로 돌려준다.
+local function win_sizes()
+  local t = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local ok, c = pcall(api.nvim_win_get_config, w)
+    if not (ok and c and c.relative and c.relative ~= '') then
+      t[#t + 1] = { win = w, w = api.nvim_win_get_width(w),
+        h = api.nvim_win_get_height(w) }
+    end
+  end
+  return t
+end
+
+-- 적어 둔 크기를 도로 넣는다.
+--
+-- 두 바퀴 돈다. 한 창을 늘리면 이웃이 그만큼 줄어드는 탓에 한 바퀴로는
+-- 앞쪽 창들이 다시 어긋난다.
+local function apply_sizes(list)
+  if type(list) ~= 'table' then
+    return false
+  end
+  local tab = api.nvim_get_current_tabpage()
+  local any = false
+  for _ = 1, 2 do
+    for _, e in ipairs(list) do
+      if api.nvim_win_is_valid(e.win)
+          and api.nvim_win_get_tabpage(e.win) == tab then
+        pcall(api.nvim_win_set_width, e.win, e.w)
+        pcall(api.nvim_win_set_height, e.win, e.h)
+        any = true
+      end
+    end
+  end
+  return any
+end
+
 function A.toggle_wide()
   -- s.win 은 패널을 연 그 순간에만 잡히고, 탭을 오갈 때 다시 맞춰 주는 곳이
   -- 없다. 그래서 다른 탭에서 패널을 한 번 열면 이쪽 탭 패널이 눈앞에 떠
@@ -6194,22 +6233,39 @@ function A.toggle_wide()
     end
     if not ok then
       -- 그 사이 창이 생기거나 사라졌거나 터미널 크기가 바뀌었다.
-      -- 패널만 원래 크기로 돌리고, 패널이 내놓은 폭은 편집 창들이 고르게
-      -- 나눠 갖게 한다. 한 창이 통째로 삼키면 배치가 더 망가진다.
-      -- 화면이 줄어 있으면 옛 크기를 그대로 넣어 봐야 clamp 되어 패널이
-      -- 넓은 채로 굳는다(실측: 80칸에서 잰 50 을 50칸 화면에 넣으면 46).
-      -- 지금 화면에 맞게 다듬어서 넣는다.
+      --
+      -- 예전에는 패널만 되돌리고 나머지는 'wincmd =' 로 고르게 폈다. 그게
+      -- 문제였다 - 사용자가 일부러 다르게 잡아 둔 EDIT 창 크기를 균등
+      -- 분할로 뭉개 버린다. 게다가 이 길은 자주 탄다: 두 번 누르는 사이에
+      -- 미리보기나 열 트리가 다시 만들어지기만 해도 창 목록이 달라진다.
+      --
+      -- 이제 창마다 적어 둔 크기를 그대로 돌려준다. 그 사이 사라진 창은
+      -- 건너뛰고, 살아남은 창은 원래 크기를 되찾는다.
+      ok = apply_sizes(sv.sizes)
+      -- 패널은 화면에 맞게 한 번 더 못박는다. 화면이 줄어 있으면 옛 크기를
+      -- 그대로 넣어 봐야 clamp 되어 넓은 채로 굳는다(실측: 80칸에서 잰 50 을
+      -- 50칸 화면에 넣으면 46).
       if sv.axis == 'w' then
         local w = math.min(sv.size, math.max(20, vim.o.columns - 20))
-        ok = pcall(api.nvim_win_set_width, s.win, w)
+        ok = pcall(api.nvim_win_set_width, s.win, w) or ok
       else
         local h = math.min(sv.size, math.max(5, vim.o.lines - 5))
-        ok = pcall(api.nvim_win_set_height, s.win, h)
-      end
-      if ok then
-        balance_edits()
+        ok = pcall(api.nvim_win_set_height, s.win, h) or ok
       end
     end
+    -- 한 틱 뒤에 한 번 더 넣는다.
+    --
+    -- 넓힐 때 부른 balance_edits() 는 'wincmd =' 를 vim.schedule 로 미룬다.
+    -- 그것이 아직 안 돌았으면 방금 되돌린 크기를 덮어쓴다. 마지막 말은
+    -- 이쪽이 하게 둔다.
+    local again = sv
+    vim.schedule(function()
+      if same and again.cmd then
+        pcall(vim.cmd, again.cmd)
+      else
+        apply_sizes(again.sizes)
+      end
+    end)
     -- 되돌리는 데 성공했을 때만 기억을 버린다. 먼저 버리면, 실패했을 때
     -- 넓은 배치가 다음 'w' 의 새 기준선이 되어 영영 넓은 채로 굳는다.
     if ok then
@@ -6220,6 +6276,7 @@ function A.toggle_wide()
 
   s.wide[tab] = {
     cmd = vim.fn.winrestcmd(),
+    sizes = win_sizes(),
     wins = win_fingerprint(),
     cols = vim.o.columns,
     lines = vim.o.lines,
