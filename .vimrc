@@ -1303,6 +1303,15 @@ endfunc
 " 풀린다'가 요청된 동작이다. g] 는 예전대로 패널이 떠 있을 때만 칠한다
 " ('릴레이션 뷰 Off 면 기존 유지').
 func! s:RvMarkCword(...) abort
+	" 진짜 vim(8.1)에는 luaeval 이 없다.
+	"
+	" 예전에는 s:RvPanelOn() 이 has('nvim') 을 보고 0 을 돌려주는 덕에 여기서
+	" 걸러졌는데, always=1 이 그 검사를 건너뛰게 되면서 vim 8.1 의 <C-]> 가
+	" 아래 luaeval 에서 E117 로 죽었다. 적재만 확인하고 키를 안 눌러 봐서
+	" 놓쳤다. 이제 맨 앞에서 막는다.
+	if !has('nvim') || !exists('*luaeval')
+		return
+	endif
 	let l:always = a:0 > 0 && a:1
 	if !get(g:, 'vimide_jump_mark', 1) || (!l:always && !s:RvPanelOn())
 		return
@@ -1321,6 +1330,19 @@ func! s:RvMarkCword(...) abort
 	endif
 	" 스택에 쌓아 둔다 - <C-t> 로 돌아올 때 그만큼만 되돌린다.
 	call luaeval('_G.vimide_jump_mark_push ~= nil and (function() _G.vimide_jump_mark_push(_A) return 1 end)() or 0', l:w)
+	return 1
+endfunc
+
+" 칠했는데 결국 안 뛴 경우, 방금 쌓은 것을 도로 푼다.
+"
+" 색칠이 점프보다 먼저라(커서가 움직이기 전의 <cword> 가 필요하다),
+" #include 를 따라가거나 태그를 못 찾으면 심볼만 칠해진 채 남는다.
+" 그 칸은 <C-t> 로 풀 수도 없다 - 되돌릴 점프가 없기 때문이다.
+func! s:RvUnmark(marked) abort
+	if !a:marked || !has('nvim') || !exists('*luaeval')
+		return
+	endif
+	call luaeval('_G.vimide_jump_mark_pop ~= nil and (function() _G.vimide_jump_mark_pop() return 1 end)() or 0')
 endfunc
 
 " g] / <C-마우스왼쪽> : 미리보기가 아니라 '지금 편집 창'에서 그 심볼로 간다.
@@ -1333,10 +1355,11 @@ endfunc
 " 나오지 못한다. g] 는 원래 :tselect(태그 후보 목록)인데, 이 설정에서는
 " 그 자리를 이 동작에 내준다 - 후보 목록은 <C-]> 가 패널에 띄워 준다.
 func! s:RvEditJump() abort
-	call s:RvMarkCword()
+	let l:marked = s:RvMarkCword()
 	if has('nvim') && exists('*luaeval')
 		try
 			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				call s:RvUnmark(l:marked)
 				return
 			endif
 			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
@@ -1361,11 +1384,13 @@ nnoremap <silent> g] :call <SID>RvEditJump()<CR>
 nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvEditJump()<CR>
 
 func! s:RvCtxJump() abort
-	call s:RvMarkCword(1)
+	let l:marked = s:RvMarkCword(1)
 	if has('nvim') && exists('*luaeval')
 		try
 			" #include 줄이면 배치와 상관없이 그 헤더로 간다
 			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
+				" 헤더는 심볼이 아니다: 칠한 것을 도로 푼다
+				call s:RvUnmark(l:marked)
 				return
 			endif
 			" 파라미터/지역변수는 색인에 없다: 이 함수 안의 선언으로 간다
@@ -1395,6 +1420,15 @@ func! s:RvCtxJump() abort
 						execute "normal! \<C-]>"
 						return
 					catch
+						" 태그를 못 찾았다(E426/E433 등). 칠한 것을 도로 푼다 -
+						" 안 뛰었으니 <C-t> 로 풀 기회도 없다.
+						call s:RvUnmark(l:marked)
+						let l:marked = 0
+						" 아래 :Gtags 길이 없으면 맨 끝에서 같은 <C-]> 를
+						" 한 번 더 시도하게 된다. 이미 해 봤으니 여기서 끝낸다.
+						if exists(':Gtags') != 2
+							return
+						endif
 					endtry
 				endif
 				" 태그가 답하지 못했다: 예전처럼 quickfix 로 보내고, 거기서도

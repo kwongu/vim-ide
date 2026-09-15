@@ -6572,6 +6572,15 @@ function _G.vimide_jump_mark_pop_under(word)
   return _G.vimide_jump_mark_pop_at(n)
 end
 
+-- 스택을 통째로 버린다(색은 손대지 않는다).
+--
+-- :Restore 가 mark#Load 로 vim-mark 목록을 통째로 갈아 끼우면, 우리가
+-- 기억하던 패턴들은 더 이상 화면의 색과 아무 상관이 없다. 그대로 두면
+-- 그 뒤의 <C-t> 가 복원된 남의 색을 지운다.
+function _G.vimide_jump_mark_reset()
+  jump_marks = {}
+end
+
 -- 맨 위 n 칸을 한꺼번에 푼다.
 --
 -- 미리보기가 닫히면 ctx_stack 이 통째로 비워지는데, 그 칸들에 딸린 색은

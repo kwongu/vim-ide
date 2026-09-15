@@ -44,6 +44,17 @@ local SIDECAR_VERSION = 1
 -- (에러, :qa, 크래시) 하면 그 반쪽짜리 배치가 VimLeavePre 를 타고 멀쩡한
 -- 세션을 덮어쓴다. 실제로 시제품 시험 중에 당한 사고다.
 local restoring = false
+-- 되살리기 표시가 영영 켜진 채로 남는 길이 있다(사이드카가 깨졌거나 예전
+-- 형식이면 QueuePanels 가 검사에서 먼저 빠져나가 restoring 을 못 내린다).
+-- 그러면 세션 저장도, 이 표시를 보는 다른 규칙도 통째로 죽는다.
+-- 넉넉히 기다린 뒤 강제로 내린다 - 복원은 몇 초면 끝난다.
+local function restoring_guard()
+  vim.defer_fn(function()
+    if restoring then
+      restoring = false
+    end
+  end, 15000)
+end
 
 -- ---------------------------------------------------------------------------
 -- 어디에 두나
@@ -461,6 +472,14 @@ function M.reopen(p)
     -- 미리보기에도 그 색이 칠해진 채로 뜬다.
     if type(p.marks) == 'table' and not vim.tbl_isempty(p.marks) then
       pcall(fn['mark#Load'], p.marks, 1)
+      -- 색 목록을 통째로 갈아 끼웠다. 점프하며 쌓아 둔 기억은 이제
+      -- 화면의 색과 아무 상관이 없으니 버린다 - 안 그러면 그 뒤의 <C-t> 가
+      -- 복원된 남의 색을 지운다.
+      pcall(function()
+        if _G.vimide_jump_mark_reset then
+          _G.vimide_jump_mark_reset()
+        end
+      end)
     end
 
     -- 미리보기 내용
@@ -494,6 +513,7 @@ function _G.VimIdeSessionQueuePanels()
     return
   end
   restoring = true
+  restoring_guard()
   if vim.v.vim_did_enter == 1 then
     vim.defer_fn(function() M.reopen(p) end, 60)
   else
@@ -536,6 +556,7 @@ function M.restore()
 
   vim.g.vimide_session_restored = 1
   restoring = true
+  restoring_guard()
   -- 세션이 반쯤 열린 채로 나가도 멀쩡한 파일을 덮어쓰지 않게, 여기서부터
   -- reopen 의 꼬리까지 저장을 잠근다.
 
@@ -617,6 +638,7 @@ api.nvim_create_autocmd('VimLeavePre', {
 function M.is_restoring()
   return restoring
 end
+
 
 _G.vimide_session = M
 return M

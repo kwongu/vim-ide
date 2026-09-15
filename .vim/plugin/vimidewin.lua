@@ -215,14 +215,31 @@ local function kind_of(buf)
   return 'other'
 end
 
+-- 이 곁창을 어떻게 다시 세우나. 버퍼가 함께 사라지는 종류가 있어서,
+-- 되돌릴 버퍼가 없을 때는 이 명령으로 새로 연다.
+local REOPEN = {
+  quickfix = 'botright copen',
+  aerial = 'AerialOpen',
+  tagbar = 'TagbarOpen',
+  nerdtree = 'NERDTree',
+}
+
 local function remember(win)
   if not (win and api.nvim_win_is_valid(win)) then
     return
   end
-  local buf = api.nvim_win_get_buf(win)
-  if is_plugin_buf(buf) then
-    guarded[win] = { buf = buf, kind = kind_of(buf) }
+  -- is_plugin_buf(버퍼 기준)만 보면 모자란다. 부동 창과 미리보기 창
+  -- (&previewwindow)은 버퍼가 평범한 파일이라 곁창인 줄 모른다 - 판정이
+  -- 두 갈래로 갈리면 '지키는 목록'과 'EDIT 창 목록'이 어긋난다.
+  if _G.vimide_is_edit_win(win) then
+    return
   end
+  local buf = api.nvim_win_get_buf(win)
+  guarded[win] = {
+    buf = buf,
+    kind = kind_of(buf),
+    reopen = REOPEN[vim.bo[buf].filetype] or REOPEN[kind_of(buf)],
+  }
 end
 
 -- 곁창에 실린 파일을 EDIT 창으로 옮기고 곁창을 되돌린다
@@ -256,6 +273,9 @@ local function rescue(win)
       return
     end
   else
+    -- 버퍼가 창과 함께 사라지는 곁창이 있다(quickfix, aerial 처럼
+    -- bufhidden=wipe). 되돌릴 것이 없으니 창을 닫고, 다시 세울 수 있는
+    -- 종류면 아래에서 그 명령으로 새로 연다.
     guarded[win] = nil
     pcall(api.nvim_win_close, win, false)
   end
@@ -279,14 +299,26 @@ local function rescue(win)
     if not ok or not target then
       return
     end
+    -- :split 은 지금 창의 창 옵션을 물려준다. 곁창에서 갈랐으면 winfixbuf
+    -- 까지 따라와, 정작 그 창에 파일을 못 넣는다.
+    for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight',
+      'previewwindow' }) do
+      pcall(function() vim.wo[target][o] = false end)
+    end
   end
-  pcall(api.nvim_win_set_buf, target, buf)
+  -- 세 번의 pcall 을 따로 두면 안 된다. 버퍼를 못 넣었는데 커서와 포커스만
+  -- 옮기면, 사용자는 열려던 파일 대신 엉뚱한 창에 끌려가 있게 된다.
+  if not pcall(api.nvim_win_set_buf, target, buf) then
+    vim.notify('파일을 EDIT 창으로 옮기지 못했습니다 (g:vimide_win_guard)',
+      vim.log.levels.WARN)
+    return
+  end
   pcall(api.nvim_win_set_cursor, target, pos)
   pcall(api.nvim_set_current_win, target)
 
-  -- 닫아 버린 quickfix 는 다시 세워 준다. 목록을 보던 중이었을 테니까.
-  if g.kind == 'quickfix' and not api.nvim_win_is_valid(win) then
-    pcall(vim.cmd, 'botright copen')
+  -- 닫아 버린 곁창은 다시 세워 준다. 보던 중이었을 테니까.
+  if g.reopen and not api.nvim_win_is_valid(win) then
+    pcall(vim.cmd, 'silent! ' .. g.reopen)
     pcall(api.nvim_set_current_win, target)
   end
 end
