@@ -33,6 +33,14 @@ local function cfg(name, default)
   if v == nil then
     return default
   end
+  -- false / v:false 로 끄는 사람이 있다. tonumber(false) 는 nil 이라
+  -- 그대로 두면 default 로 되돌아가 '껐는데 켜진 채'가 된다.
+  if v == false or v == 0 then
+    return 0
+  end
+  if v == true then
+    return 1
+  end
   return tonumber(v) or default
 end
 
@@ -52,12 +60,18 @@ local PLUGIN_FT = {
   ['DiffviewFiles'] = true, ['DiffviewFileHistory'] = true,
 }
 
--- 곁창임이 확실한 버퍼 이름 조각
+-- 곁창임이 확실한 버퍼 '파일 이름'(경로 말고 마지막 조각) 패턴.
+--
+-- 경로 전체에 대고 찾으면 진짜 소스 파일을 곁창으로 오해한다. 실제로
+-- 이 저장소 안에 .vim/plugged/nerdtree/plugin/NERD_tree.vim 이 있다 -
+-- 그 파일을 열어 고치는 동안 그 창이 EDIT 창이 아니게 되면, 곁창 하나만
+-- 닫아도 'EDIT 0개' 로 계산되어 nvim 이 꺼진다.
 local PLUGIN_NAME = {
-  'RelationView',       -- 패널과 미리보기(작은/큰) 둘 다 이 이름으로 시작한다
-  'NERD_tree',
-  '%[BufExplorer%]',
-  'neo%-tree filesystem',
+  '^RelationView$',          -- 패널
+  '^RelationView%-',         -- 미리보기(작은/큰 둘 다)
+  '^NERD_tree_',             -- NERD_tree_1 / NERD_tree_tab_1
+  '^%[BufExplorer%]$',
+  '^neo%-tree filesystem',
 }
 
 local function is_plugin_buf(buf)
@@ -71,9 +85,9 @@ local function is_plugin_buf(buf)
   if PLUGIN_FT[ft] or ft:match('^Telescope') or ft:match('^Neogit') then
     return true
   end
-  local name = api.nvim_buf_get_name(buf)
+  local base = vim.fn.fnamemodify(api.nvim_buf_get_name(buf), ':t')
   for _, pat in ipairs(PLUGIN_NAME) do
-    if name:match(pat) then
+    if base:match(pat) then
       return true
     end
   end
@@ -104,7 +118,7 @@ function _G.vimide_is_edit_win(win)
   return not is_plugin_buf(api.nvim_win_get_buf(win))
 end
 
---- 지금 탭의 EDIT 창 목록.
+--- 지금 탭의 EDIT 창 목록. '파일을 어디에 열까'는 지금 탭 안에서 고른다.
 --- @param skip integer|nil 세지 않을 창 (닫히는 중인 창을 빼는 데 쓴다)
 function _G.vimide_edit_wins(skip)
   local out = {}
@@ -114,6 +128,50 @@ function _G.vimide_edit_wins(skip)
     end
   end
   return out
+end
+
+--- 모든 탭을 통틀어 EDIT 창이 몇 개인가.
+---
+--- '끝낼까'는 반드시 이쪽으로 센다. 지금 탭만 보면 다른 탭에 편집 창이
+--- 멀쩡히 있어도 nvim 이 통째로 꺼진다 - neogit 은 kind='tab' 이라 늘 새
+--- 탭에 뜨고, 그 탭에는 곁창밖에 없어서 거기서 창 하나만 닫아도 발동한다.
+--- @param skip integer|nil 세지 않을 창
+function _G.vimide_edit_win_count_all(skip)
+  local n = 0
+  local cur = api.nvim_get_current_tabpage()
+  for _, tab in ipairs(api.nvim_list_tabpages()) do
+    for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+      -- is_edit_win 은 '지금 탭' 조건을 달고 있어 남의 탭을 못 센다.
+      -- 여기서는 그 조건만 빼고 같은 잣대를 쓴다.
+      if w ~= skip and api.nvim_win_is_valid(w) then
+        local ok, conf = pcall(api.nvim_win_get_config, w)
+        local floating = ok and conf and conf.relative and conf.relative ~= ''
+        if not floating and not vim.wo[w].previewwindow
+            and not is_plugin_buf(api.nvim_win_get_buf(w)) then
+          n = n + 1
+        end
+      end
+    end
+  end
+  local _ = cur
+  return n
+end
+
+--- 살아 있는 터미널 작업이 붙은 창이 있는가.
+--- 빌드나 ssh 를 돌려 두고 편집 창을 닫았을 뿐인데 20분짜리 작업이
+--- 말없이 죽으면 안 된다.
+function _G.vimide_has_live_terminal()
+  for _, tab in ipairs(api.nvim_list_tabpages()) do
+    for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+      if api.nvim_win_is_valid(w) then
+        local b = api.nvim_win_get_buf(w)
+        if api.nvim_buf_is_valid(b) and vim.bo[b].buftype == 'terminal' then
+          return true
+        end
+      end
+    end
+  end
+  return false
 end
 
 -- 나가는 중이거나 세션을 되살리는 중인가. 둘 다일 때는 아무 규칙도 돌면 안 된다.
@@ -187,7 +245,16 @@ local function rescue(win)
   -- 이미 무효). 그때는 되살릴 것이 없으니 그 창을 닫는다 - 같은 파일이
   -- 두 창에 뜬 채 남는 것보다 낫다.
   if g.buf and api.nvim_buf_is_valid(g.buf) then
-    pcall(api.nvim_win_set_buf, win, g.buf)
+    local ok = pcall(api.nvim_win_set_buf, win, g.buf)
+    if not ok or api.nvim_win_get_buf(win) ~= g.buf then
+      -- 되돌리지 못했다(winfixbuf 가 걸린 창에 :b!N 을 직접 친 경우 등).
+      -- 여기서 포기하지 않으면 창을 옮길 때마다 rescue 가 다시 깨어나
+      -- 매번 포커스를 빼앗는다. 한 번만 알리고 그 창은 놓아준다.
+      guarded[win] = nil
+      vim.notify('이 창은 원래대로 되돌리지 못했습니다 (g:vimide_win_guard)',
+        vim.log.levels.WARN)
+      return
+    end
   else
     guarded[win] = nil
     pcall(api.nvim_win_close, win, false)
@@ -309,8 +376,13 @@ local pending = false
 local function dirty_bufs()
   local out = {}
   for _, b in ipairs(api.nvim_list_bufs()) do
+    -- acwrite 도 센다. fugitive 의 커밋 버퍼, 원격 편집(scp://), diffview 가
+    -- 그것을 쓰는데 vim 은 이것도 '저장 안 함' 으로 치고 :qa 를 E37 로 막는다.
+    -- 안 세면 pcall 이 그 오류를 삼켜, 나갈 수도 없고 보여 줄 창도 없는
+    -- 상태로 남는다.
+    local bt = vim.bo[b].buftype
     if api.nvim_buf_is_loaded(b) and vim.bo[b].modified
-        and vim.bo[b].buftype == '' then
+        and (bt == '' or bt == 'acwrite') then
       out[#out + 1] = b
     end
   end
@@ -323,8 +395,9 @@ api.nvim_create_autocmd('WinClosed', {
     if cfg('min_edit_win', 1) == 0 or pending or busy() then
       return
     end
-    -- WinClosed 는 창이 아직 목록에 있을 때 뜬다: 닫히는 창은 빼고 센다
-    if #_G.vimide_edit_wins(tonumber(a.match)) > 0 then
+    -- WinClosed 는 창이 아직 목록에 있을 때 뜬다: 닫히는 창은 빼고 센다.
+    -- 세는 것은 반드시 탭 전체다(지금 탭만 보면 남의 탭까지 끄게 된다).
+    if _G.vimide_edit_win_count_all(tonumber(a.match)) > 0 then
       return
     end
     pending = true
@@ -335,8 +408,15 @@ api.nvim_create_autocmd('WinClosed', {
       if cfg('min_edit_win', 1) == 0 or busy() then
         return
       end
-      if #_G.vimide_edit_wins() > 0 then
+      if _G.vimide_edit_win_count_all() > 0 then
         return -- 누가 도로 열어 주었다
+      end
+      -- 돌아가는 터미널이 있으면 끝내지 않는다. 사용자는 편집 창 하나를
+      -- 닫았을 뿐인데 빌드나 ssh 가 말없이 죽으면 안 된다.
+      if _G.vimide_has_live_terminal() then
+        vim.notify('EDIT 창이 없지만 터미널 창이 있어 끝내지 않았습니다',
+          vim.log.levels.WARN)
+        return
       end
       local dirty = dirty_bufs()
       if #dirty > 0 then

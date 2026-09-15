@@ -2520,6 +2520,8 @@ ensure_ctx = function()
         -- the stack belongs to that window: a reopened preview must not
         -- inherit jumps (and origins) from the closed one
         s.ctx_last = nil
+        -- 그 칸들에 딸린 색도 같이 푼다: 창이 사라지면 되짚을 길이 없다
+        pcall(_G.vimide_jump_mark_clear, #s.ctx_stack)
         s.ctx_stack = {}
       end
     end,
@@ -3006,6 +3008,9 @@ ctx_tag_jump = function(from_mouse)
       -- 그래도 자리는 쌓는다 - ctx_stack 한 칸 = jump_marks 한 칸 이어야
       -- <C-t> 를 여러 번 눌러도 짝이 어긋나지 않는다.
       pcall(_G.vimide_jump_mark_push, nil)
+      if not ctx_visible() then
+        return
+      end
       table.insert(s.ctx_stack,
         { path = file, line = pos[1] + off, col = pos[2] })
       s.ctx_last = nil
@@ -3030,6 +3035,11 @@ ctx_tag_jump = function(from_mouse)
     -- 'msg->cmd' first: the member belongs to the base variable's struct,
     -- not to whatever else carries that name (a local, say)
     local taken = member_jump(fbuf, here, pos[2], function(loc)
+      -- 색인에 없는 멤버는 파일을 색인에 넣고 몇 초 뒤 다시 온다.
+      -- 그 사이 미리보기가 닫혔으면 칸도 색도 남기지 않는다.
+      if not ctx_visible() then
+        return
+      end
       pcall(_G.vimide_jump_mark_push, sym)
       table.insert(s.ctx_stack,
         { path = file, line = here, col = pos[2], sym = sym })
@@ -3177,9 +3187,8 @@ ctx_enter_from = function(win, loc, sym)
   -- the way back instead of stacking another dead C-t on top of it
   local top = s.ctx_stack[#s.ctx_stack]
   if top and top.origin and top.origin.win == win then
-    -- 이 칸을 버리므로 거기 딸린 색도 놓아준다. 방금 s:RvMarkCword() 가
-    -- 이번 심볼로 맨 위에 하나 쌓았으니, 버릴 것은 그 바로 아래다.
-    pcall(_G.vimide_jump_mark_pop_at, 2)
+    -- 이 칸을 버리므로 거기 딸린 색도 놓아준다
+    pcall(_G.vimide_jump_mark_pop_under, sym)
     s.ctx_stack[#s.ctx_stack] = entry
   else
     table.insert(s.ctx_stack, entry)
@@ -5972,6 +5981,7 @@ function A.close()
   end
   s.ctx_win = nil
   s.ctx_last = nil
+  pcall(_G.vimide_jump_mark_clear, #s.ctx_stack)
   s.ctx_stack = {}
   if target and api.nvim_win_is_valid(target) then
     api.nvim_win_close(target, false)
@@ -5994,6 +6004,7 @@ function A.toggle_ctx()
     api.nvim_win_close(s.ctx_win, false)
     s.ctx_win = nil
     s.ctx_last = nil
+    pcall(_G.vimide_jump_mark_clear, #s.ctx_stack)
     s.ctx_stack = {}
   elseif ensure_ctx() then
     update_context()
@@ -6439,6 +6450,23 @@ end
 -- (실측: DoMark -> mark-1/alpha, 한 번 더 -> mark-1 cleared).
 -- 점프할 때마다 칠하는 길에서는 같은 심볼로 두 번 뛰면 색이 사라지는
 -- 셈이라, 미리 번호를 물어보고 이미 있으면 건드리지 않는다.
+-- vim-mark 가 쓰는 모양으로 낱말을 패턴으로 바꾼다.
+--
+-- F4(<Plug>MarkSet)는 mark#MarkCurrentWord 를 거치며 낱말을 \<...\> 로
+-- 감싼다. 여기서 맨 foo 를 쓰면 mark#GetMarkNumber 의 정확 비교(==#)가
+-- 어긋나, 이미 칠해 둔 심볼을 '안 칠해졌다'고 보고 같은 낱말에 색을 하나
+-- 더 얹는다. 그래서 낱말이면 같은 모양으로 감싼다.
+--
+-- 낱말이 아니면(\fr 로 찾은 아무 글자) 감싸지 않는다 - \<...\> 는 낱말
+-- 경계라서 그런 글자에는 뜻이 없고, 붙이면 오히려 안 맞는다.
+local function mark_pat(word)
+  local pat = (vim.fn.escape(word, '\\^$.*[~'):gsub('\n', '\\n'))
+  if word:match('^[%a_][%w_]*$') then
+    return '\\<' .. pat .. '\\>'
+  end
+  return pat
+end
+
 function _G.vimide_mark_text(text, keep)
   if type(text) ~= 'string' or text == '' then
     return false
@@ -6446,7 +6474,10 @@ function _G.vimide_mark_text(text, keep)
   if (tonumber(vim.g.vimide_lookup_mark) or 1) == 0 then
     return false
   end
-  local pat = (vim.fn.escape(text, '\\^$.*[~'):gsub('\n', '\\n'))
+  -- 점프 쪽(mark_pat)과 같은 모양이어야 서로를 알아본다. 예전에는 이쪽만
+  -- 앵커가 없어서, \fr 로 칠한 낱말 위에서 <C-]> 를 누르면 '안 칠해졌다'로
+  -- 보고 같은 낱말에 색을 한 겹 더 얹었다.
+  local pat = mark_pat(text)
   if keep then
     local okn, n = pcall(vim.fn['mark#GetMarkNumber'], pat, 0, 1)
     if okn and type(n) == 'number' and n > 0 then
@@ -6465,18 +6496,6 @@ end
 -- 짝이 어긋나지 않는다.
 local jump_marks = {}
 
-local function mark_pat(word)
-  local pat = (vim.fn.escape(word, '\\^$.*[~'):gsub('\n', '\\n'))
-  -- F4(<Plug>MarkSet)는 mark#MarkCurrentWord 를 거치며 낱말을 \<...\> 로
-  -- 감싼다. 이쪽이 맨 foo 를 쓰면 mark#GetMarkNumber 의 정확 비교(==#)가
-  -- 어긋나, 사용자가 F4 로 칠해 둔 심볼 위에서 점프할 때 '이미 칠해졌다'를
-  -- 못 알아보고 같은 낱말에 색을 하나 더 얹는다. 같은 모양으로 맞춘다.
-  -- (낱말일 때만이다. \fr 처럼 아무 글자나 찾는 길은 이 함수를 안 쓴다.)
-  if word:match('^[%a_][%w_]*$') then
-    return '\\<' .. pat .. '\\>'
-  end
-  return pat
-end
 
 local function mark_number(pat)
   local ok, n = pcall(vim.fn['mark#GetMarkNumber'], pat, 0, 1)
@@ -6533,6 +6552,39 @@ end
 
 function _G.vimide_jump_mark_pop()
   return _G.vimide_jump_mark_pop_at(1)
+end
+
+-- origin 칸이 교체될 때, 버려지는 옛 칸의 색만 놓아준다.
+--
+-- '맨 위가 이번 것' 이라고 단정하면 안 된다. .vimrc 의 s:RvMarkCword() 는
+-- g:vimide_jump_mark=0 이거나 커서 밑이 식별자가 아니거나 곁창이면 push 를
+-- 아예 건너뛴다. 그때 2번째를 빼면 엉뚱한 색이 지워진다.
+--
+-- 그래서 맨 위가 정말 이번 낱말로 칠한 칸일 때만 그 아래를 빼고, 아니면
+-- 맨 위를 뺀다(자리표시자이므로 색은 안 지워진다). 색 하나가 남는 쪽이
+-- 남의 색을 지우는 쪽보다 낫다.
+function _G.vimide_jump_mark_pop_under(word)
+  local n = 1
+  if type(word) == 'string' and word ~= '' and #jump_marks > 1
+      and jump_marks[#jump_marks] == mark_pat(word) then
+    n = 2
+  end
+  return _G.vimide_jump_mark_pop_at(n)
+end
+
+-- 맨 위 n 칸을 한꺼번에 푼다.
+--
+-- 미리보기가 닫히면 ctx_stack 이 통째로 비워지는데, 그 칸들에 딸린 색은
+-- 되짚어 풀 방법이 사라진다. 그대로 두면 색이 화면에 영영 남고, 게다가
+-- 다음 <C-t> 가 스택에 남은 그 칸을 뽑아 '남의 색'을 지운다.
+function _G.vimide_jump_mark_clear(n)
+  n = tonumber(n) or 0
+  for _ = 1, n do
+    if #jump_marks == 0 then
+      break
+    end
+    _G.vimide_jump_mark_pop_at(1)
+  end
 end
 
 local function lookup_to_qf(root, pat, refs)
@@ -6808,6 +6860,7 @@ local function apply_mode(m)
   s.ctx_alone = false
   if m == 'relation' and ctx_visible() then
     api.nvim_win_close(s.ctx_win, false)
+    pcall(_G.vimide_jump_mark_clear, #s.ctx_stack)
     s.ctx_win, s.ctx_last, s.ctx_stack = nil, nil, {}
   end
   if not panel_visible() then
@@ -6955,6 +7008,9 @@ local function show_results(title, sym, results, truncated, origin)
   -- leave a way back to where the search was started (C-t)
   if origin and api.nvim_win_is_valid(origin) and #results > 0 then
     if ctx_visible() then
+      -- 칸을 하나 늘리므로 색도 하나 칠한다. 안 그러면 그 뒤 <C-t> 가
+      -- 한 칸씩 밀려 엉뚱한 색을 지운다.
+      pcall(_G.vimide_jump_mark_push, sym)
       ctx_enter_from(origin, nil, sym)
     else
       -- no preview: show the first hit in the edit window instead, the way

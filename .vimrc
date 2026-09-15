@@ -1307,6 +1307,14 @@ func! s:RvMarkCword(...) abort
 	if !get(g:, 'vimide_jump_mark', 1) || (!l:always && !s:RvPanelOn())
 		return
 	endif
+	" 곁창에서는 칠하지 않는다.
+	"
+	" 점프 자체가 아래 buftype 가드에서 막히는데 색칠만 먼저 일어나면,
+	" quickfix 나 NERDTree 에서 <C-]> 를 눌렀을 때 아무 일도 안 일어난 채
+	" 색만 남고 스택도 한 칸 늘어난다(그 칸은 풀 길이 없다).
+	if &buftype !=# '' && &buftype !=# 'help'
+		return
+	endif
 	let l:w = expand('<cword>')
 	if l:w !~# '^[A-Za-z_][A-Za-z0-9_]*$'
 		return
