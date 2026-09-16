@@ -3537,6 +3537,23 @@ nnoremap <silent> <Leader>bt :call <SID>InEditWin('ToggleBufExplorer')<CR>
 nnoremap <silent> <Leader>bs :call <SID>InEditWin('BufExplorerHorizontalSplit')<CR>
 nnoremap <silent> <Leader>bv :call <SID>InEditWin('BufExplorerVerticalSplit')<CR>
 
+" netrw 목록에서 .h 를 다른 파일과 같이 이름순으로.
+"
+" netrw 기본 정렬 순서는 .h 를 .bak .o .swp .obj 와 한 묶음으로 보고 목록
+" 맨 끝으로 보낸다. 실측(drivers/char, 항목 53개):
+"
+"   기본  : [\/]$,*,\(\.bak\|\~\|\.o\|\.h\|\.info\|\.swp\|\.obj\)[*@]\=$
+"   결과  : ... tcc_ecid.c  tcc_mem.c ... virtio_console.c   <- .c 가 끝나고
+"           applicom.h  nwbutton.h                           <- .h 는 맨 아래
+"
+" C 소스를 읽는 동안 헤더는 .c 만큼 자주 여는 파일이라, 목록 끝까지
+" 내려가야 보이면 '안 나온다' 로 보인다. .h 만 그 묶음에서 뺀다 - 그러면
+" '*'(나머지 전부) 에 들어가 이름순으로 섞인다. 디렉터리가 먼저인 것과
+" 진짜 부산물(.o .swp .bak ~)이 끝으로 가는 것은 그대로다.
+"
+"   let g:netrw_sort_sequence = '[\/]$,*'   " 부산물도 섞으려면
+let g:netrw_sort_sequence = '[\/]$,*,\(\.bak\|\~\|\.o\|\.info\|\.swp\|\.obj\)[*@]\=$'
+
 " :Ex / :Explore (netrw, 또는 그것을 가로챈 nvim-tree) 도 EDIT 창에서.
 "
 " 명령을 덮어쓰면 그 안에서 원래 명령을 부를 때 제 자신을 다시 부른다.
