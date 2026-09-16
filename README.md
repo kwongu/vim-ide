@@ -155,14 +155,15 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 :GtagsIndex / :GtagsIndexUpdate / :GtagsIndexStatus: GTAGS index by hand
 :GutentagsUpdate!: rebuild the ctags index of this project by hand
 
-Ctrl+g: Fill the command line with the word under the cursor (or, in visual
-        mode, with the selected text) and grep for it under the current file's
-        directory when you press Enter. Edit the text first to search for
-        something else, or press Esc to drop it.
+Ctrl+g: Asks twice, then greps. First the command line is filled with the word
+        under the cursor (or, in visual mode, with the selected text; on blank
+        space it starts empty) - edit it and press Enter. Then the directory to
+        search is offered, starting at the one holding the current file - edit
+        it (Tab completes) and press Enter to run. Esc at either step drops it.
         The hits go to the RelationView list while the panel is up, and to the
         quickfix window otherwise. Uses ripgrep when it is on $PATH.
-        (:VimIdeGrep <text> does the same directly. :Grep is still the old
-        interactive grep of grep.vim.)
+        (:VimIdeGrep <text> does the same. g:relationview_grep_ask_dir = 0
+        skips the directory question. :Grep is still grep.vim's own prompt.)
 Ctrl+n: Go to the next item in the list, and put the cursor in the window that
         shows it (the RelationView preview, or the edit window)
 Ctrl+p: The same, backwards

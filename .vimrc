@@ -2698,6 +2698,10 @@ let g:relationview_wide_width = 0
 let g:relationview_step_focus = 1
 " 1 (기본) <C-g> 의 grep 을 낱말 경계로 찾는다(struct 가 structure 에 안 걸린다).
 let g:relationview_grep_word = 1
+" 1 (기본) <C-g> 로 찾을 말을 정한 뒤, 찾을 경로를 한 번 더 보여준다.
+"          기본값은 지금 파일이 있는 디렉터리. <Tab> 으로 완성할 수 있고,
+"          비우거나 Esc 면 그만둔다. 0 이면 묻지 않고 그 디렉터리에서 찾는다.
+let g:relationview_grep_ask_dir = 1
 " 0 (기본) rg 가 숨은 디렉터리와 .gitignore 에 걸린 곳을 건너뛴다.
 "
 "          소스를 읽을 때는 이편이 낫다 - 커널 트리에서 .gitignore 에 든
@@ -3190,9 +3194,9 @@ func! s:GrepPrompt(text) abort
 	if !s:GrepHere()
 		return
 	endif
-	if empty(a:text)
-		return
-	endif
+	" 낱말이 비어 있어도(빈칸 위에서 눌렀어도) 명령줄은 띄운다. 거기서
+	" 찾을 말을 쳐 넣으면 된다. 그대로 Enter 면 :VimIdeGrep 이 인자 없이
+	" 불려 조용히 끝난다(-nargs=?).
 	call feedkeys(':VimIdeGrep ' . a:text, 'n')
 endfunc
 
@@ -3218,6 +3222,31 @@ func! s:RunGrep(word) abort
 	endif
 	let l:f = expand('%:p')
 	let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
+	" 찾을 경로를 한 번 더 보여준다.
+	"
+	" 기본은 지금 파일이 있는 디렉터리다. 그대로 Enter 면 거기서 찾고,
+	" 고쳐 치면 그 경로에서 찾는다. <Tab> 으로 디렉터리를 완성할 수 있고,
+	" 비우거나 Esc 면 그만둔다.
+	"
+	"   let g:relationview_grep_ask_dir = 0   " 묻지 않고 바로 찾는다
+	if get(g:, 'relationview_grep_ask_dir', 1)
+		echohl Question
+		let l:in = input('Grep "' . l:w . '" 에서 찾을 곳: ', l:d, 'dir')
+		echohl None
+		redraw
+		if empty(trim(l:in))
+			return
+		endif
+		let l:d = fnamemodify(expand(trim(l:in)), ':p')
+		" 끝의 '/' 는 떼어 둔다. rg 는 상관없지만 결과에 '//' 가 섞인다.
+		let l:d = substitute(l:d, '/\+$', '', '')
+		if !isdirectory(l:d)
+			echohl WarningMsg
+			echo 'vim-ide: 그런 디렉터리가 없습니다 - ' . l:d
+			echohl None
+			return
+		endif
+	endif
 	if has('nvim') && exists('*luaeval')
 				\ && luaeval('_G.relationview_grep ~= nil')
 		call luaeval('(function() _G.relationview_grep(_A[1], _A[2]) return 1 end)()',
@@ -3253,9 +3282,10 @@ func! s:RunGrep(word) abort
 		botright copen
 	endif
 endfunc
-" -nargs=1 은 '인자 하나' 이지 '빈칸에서 자른다' 가 아니다. 빈칸이 든 말도
+" -nargs=? 는 '없거나 하나' 이지 '빈칸에서 자른다' 가 아니다. 빈칸이 든 말도
 " 통째로 하나로 온다. -bar 를 안 붙여서 '|' 도 찾을 말의 일부로 남는다.
-command! -nargs=1 VimIdeGrep call s:RunGrep(<q-args>)
+" 인자가 없으면(빈칸 위에서 <C-g> 를 누르고 그대로 Enter) 조용히 끝난다.
+command! -nargs=? VimIdeGrep call s:RunGrep(<q-args>)
 
 " <C-u> 로 카운트를 먹는다. 없으면 2<C-g> 가 ':.,.+1call ...' 이 되어
 " E481(범위를 받지 않는다)로 죽는다 - vim 본래의 2<C-g>(전체 경로) 손버릇이
