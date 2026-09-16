@@ -2665,10 +2665,19 @@ let g:relationview_list_min_height = 12
 let g:relationview_right_stack = 1
 let g:relationview_big_width = 0
 " 'w' (또는 \lw) 를 누를 때마다 도는 단계. 화면의 몇 %까지 넓힐지.
-"   1/3 -> 1/2 -> 2/3 -> 기본 크기 -> (다시 1/3)
-let g:relationview_wide_steps = [33, 50, 67]
+"   1/2 -> 3/4 -> 기본 크기 -> (다시 1/2)
+" 예전 기본은 [33, 50, 67] 이었다. 세 단계는 한 바퀴가 길어서 둘로 줄였다.
+let g:relationview_wide_steps = [50, 75]
 " 칸수를 박아 두면 위 단계 대신 그 한 단계만 돈다(기본 0 = 단계를 쓴다).
 let g:relationview_wide_width = 0
+" 20 (기본) 넓힐 때 편집 영역에 최소한 남겨 둘 칸수. 0 이면 안 지킨다.
+"
+"           곁창(aerial, quickfix ...)은 'w' 로 크기가 바뀌지 않는다. 그
+"           몫을 편집 창이 전부 떠안으므로, 단계를 크게 잡으면 편집 창이
+"           쓸 수 없게 눌린다(실측 178칸, aerial 35칸, 75% 단계: 편집 창이
+"           8칸). 그만큼 패널을 도로 물려서 이 칸수는 지킨다.
+"           'bottom' 배치에서는 줄수로 읽고 기본값은 5 다.
+let g:relationview_wide_min_edit = 20
 " 'bottom' 배치에서 같은 뜻의 줄수.
 let g:relationview_wide_height = 0
 

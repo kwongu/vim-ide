@@ -6364,7 +6364,8 @@ end
 
 -- 'w' 를 누를 때마다 도는 단계. 화면의 몇 %까지 넓힐지.
 --
---   let g:relationview_wide_steps = [33, 50, 67]   " 기본
+--   let g:relationview_wide_steps = [50, 75]       " 기본 (.vimrc 가 이걸 준다)
+--   let g:relationview_wide_steps = [33, 50, 67]   " 세 단계로
 --   let g:relationview_wide_steps = [50]           " 한 단계만
 --
 -- g:relationview_wide_width 를 칸수로 박아 두면 그 한 단계만 돈다.
@@ -6382,35 +6383,96 @@ local function wide_steps()
       return t
     end
   end
-  return { 33, 50, 67 }
+  return { 50, 75 }
 end
 
--- 패널이 자리를 차지하고 남은 폭을, 편집 창들이 '원래 비율대로' 나눠 갖게 한다.
+-- 이 창을 편집 창으로 볼까. 판정은 정본(vimidewin.lua)에 맡긴다.
+-- 그것이 없으면(진짜 vim, 적재 순서) 예전처럼 전부 한 묶음으로 본다.
+local function win_is_edit(w)
+  if type(_G.vimide_is_edit_win) == 'function' then
+    local ok, r = pcall(_G.vimide_is_edit_win, w)
+    if ok then
+      return r and true or false
+    end
+  end
+  return true
+end
+
+-- 지금 편집 창들이 쓰고 있는 폭(또는 높이)의 합.
+-- 'w' 로 넓힌 뒤 편집 영역이 쓸 수 없게 눌렸는지 재는 데 쓴다.
+local function edit_extent(sizes, axis)
+  local n = 0
+  for _, e in ipairs(sizes or {}) do
+    if api.nvim_win_is_valid(e.win) and not is_column_win(e.win)
+        and api.nvim_win_get_tabpage(e.win) == api.nvim_get_current_tabpage()
+        and win_is_edit(e.win) then
+      n = n + ((axis == 'h') and api.nvim_win_get_height(e.win)
+        or api.nvim_win_get_width(e.win))
+    end
+  end
+  return n
+end
+
+-- 패널이 자리를 차지하고 남은 폭을 나눈다.
+--
+-- 곁창(aerial, quickfix, NERDTree ...)은 건드리지 않고 원래 크기 그대로
+-- 돌려 놓는다. 늘고 주는 것은 편집 창들뿐이고, 그것들끼리는 '원래 비율대로'
+-- 나눈다.
+--
+-- 예전에는 오른쪽 열이 아닌 창을 전부 한 묶음으로 보고 같이 줄였다. 그래서
+-- 'w' 를 누를 때마다 aerial 까지 따라 줄었다(실측 178칸:
+-- aerial 35 -> 43 -> 31 -> 20). 아웃라인 폭은 패널을 넓히는 일과 아무
+-- 상관이 없다 - 편집 영역에서만 가져오는 것이 맞다.
 --
 -- 그냥 두면 vim 이 패널 바로 옆 창에서만 폭을 뺏어 그 창이 1칸으로 뭉개진다
 -- (실측: 200칸에서 편집 창 둘이 37/1). 'wincmd =' 로 고르게 펴는 방법도
 -- 있지만 그러면 사용자가 일부러 다르게 잡아 둔 비율이 사라진다.
 local function spread_others(sizes, axis)
-  local others, base_sum, now_sum = {}, 0, 0
+  local edits, fixed, base_sum = {}, {}, 0
   for _, e in ipairs(sizes or {}) do
     if api.nvim_win_is_valid(e.win) and not is_column_win(e.win)
         and api.nvim_win_get_tabpage(e.win) == api.nvim_get_current_tabpage() then
       local base = (axis == 'h') and e.h or e.w
       if base > 0 then
-        others[#others + 1] = { win = e.win, base = base }
-        base_sum = base_sum + base
-        now_sum = now_sum + ((axis == 'h') and api.nvim_win_get_height(e.win)
-          or api.nvim_win_get_width(e.win))
+        if win_is_edit(e.win) then
+          edits[#edits + 1] = { win = e.win, base = base }
+          base_sum = base_sum + base
+        else
+          fixed[#fixed + 1] = { win = e.win, base = base }
+        end
       end
     end
   end
-  if #others < 2 or base_sum <= 0 or now_sum < #others then
+
+  -- 1) 곁창을 원래 크기로 되돌린다.
+  --    한 창을 늘리면 이웃이 그만큼 줄어드는 탓에 한 바퀴로는 앞쪽이
+  --    다시 어긋난다(apply_sizes 와 같은 사정).
+  for _ = 1, 2 do
+    for _, e in ipairs(fixed) do
+      if api.nvim_win_is_valid(e.win) then
+        if axis == 'h' then
+          pcall(api.nvim_win_set_height, e.win, e.base)
+        else
+          pcall(api.nvim_win_set_width, e.win, e.base)
+        end
+      end
+    end
+  end
+
+  -- 2) 남은 것을 편집 창들이 원래 비율대로 나눈다.
+  --    편집 창이 하나면 나눌 것이 없다 - 남은 폭이 저절로 그 창에 간다.
+  local now_sum = 0
+  for _, e in ipairs(edits) do
+    now_sum = now_sum + ((axis == 'h') and api.nvim_win_get_height(e.win)
+      or api.nvim_win_get_width(e.win))
+  end
+  if #edits < 2 or base_sum <= 0 or now_sum < #edits then
     return
   end
   local used = 0
-  for i, e in ipairs(others) do
+  for i, e in ipairs(edits) do
     local v
-    if i == #others then
+    if i == #edits then
       v = now_sum - used
     else
       v = math.max(1, math.floor(now_sum * e.base / base_sum))
@@ -6573,6 +6635,40 @@ function A.toggle_wide()
   end
   -- 남은 자리를 편집 창들이 '원래 비율대로' 나눠 갖게 한다
   spread_others(sv.sizes, sv.axis)
+
+  -- 편집 영역이 쓸 수 없게 눌렸으면 그만큼 패널을 물린다.
+  --
+  -- 곁창(aerial, quickfix ...)은 건드리지 않기로 했으니, 그 몫을 편집 창이
+  -- 전부 떠안는다. 실측(178칸, aerial 35칸, 단계 75%): 편집 창이 8칸까지
+  -- 눌렸다. 되돌려 줄 수 있는 것은 패널뿐이다.
+  --
+  -- 미리 계산하지 않고 재서 고친다. '패널과 같은 줄에 있는 창' 이 어느
+  -- 것인지는 창 배치를 봐야 알 수 있는데(quickfix 는 오른쪽 배치에서
+  -- 화면 폭을 통째로 쓰면서도 같은 줄이 아니다), 그것을 짐작하느니 한 번
+  -- 넓혀 보고 남은 폭을 직접 재는 편이 확실하다.
+  --
+  --   let g:relationview_wide_min_edit = 0    " 이 물리기를 끈다
+  --   let g:relationview_wide_min_edit = 40   " 편집 영역을 더 넓게 지킨다
+  local floor_e = tonumber(cfg('wide_min_edit', right and 20 or 5)) or 0
+  if floor_e > 0 then
+    local have = edit_extent(sv.sizes, sv.axis)
+    if have > 0 and have < floor_e then
+      local cut = floor_e - have
+      if right then
+        local w2 = api.nvim_win_get_width(s.win) - cut
+        if w2 >= 20 then
+          pcall(api.nvim_win_set_width, s.win, w2)
+          spread_others(sv.sizes, sv.axis)
+        end
+      else
+        local h2 = api.nvim_win_get_height(s.win) - cut
+        if h2 >= 5 then
+          pcall(api.nvim_win_set_height, s.win, h2)
+          spread_others(sv.sizes, sv.axis)
+        end
+      end
+    end
+  end
 end
 
 function A.pin()
