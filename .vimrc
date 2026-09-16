@@ -103,6 +103,18 @@ set loadplugins
 
 filetype off                   " required!
 
+" NERDTree 를 쓸까.
+"
+" nvim 에서는 기본으로 끈다. 같은 일을 neo-tree(F9)가 하고 있고, NERDTree 는
+" NERDTreeHijackNetrw 로 디렉터리를 가로채는 탓에 :e . 한 번에 곁창이
+" 없어지는 사고의 근원이었다(실측: aerial 창이 통째로 사라졌다).
+" 진짜 vim 8.1(개발서버)에는 neo-tree 가 없으므로 거기서는 그대로 쓴다.
+"
+"   let g:vimide_nerdtree = 1   " nvim 에서도 NERDTree 를 쓴다
+if !exists('g:vimide_nerdtree')
+	let g:vimide_nerdtree = has('nvim') ? 0 : 1
+endif
+
 " set the runtime path to include Vundle and initialize
 if has('nvim')
 
@@ -130,8 +142,10 @@ Plug 'vim-scripts/AutoComplPop'
 "Plug 'vim-scripts/Tagbar'
 "Plug 'ryanoasis/vim-devicons'
 "Plug 'kyazdani42/nvim-web-devicons'
-Plug 'preservim/nerdtree'
-Plug 'Xuyuanp/nerdtree-git-plugin'
+if get(g:, 'vimide_nerdtree', 1)
+	Plug 'preservim/nerdtree'
+	Plug 'Xuyuanp/nerdtree-git-plugin'
+endif
 Plug 'preservim/tagbar'
 Plug 'vim-utils/vim-troll-stopper'
 Plug 'Raimondi/delimitMate'
@@ -2301,6 +2315,9 @@ let g:NERDTreeShowIcons = 1
 "let g:NERDTreeDirArrowExpandable = '→'
 "let g:NERDTreeDirArrowCollapsible = '▼'
 function! AutoLoadNERDTree()
+	if exists(':NERDTree') != 2
+		return
+	endif
 	exe 'NERDTree'
 endfunction
 "autocmd VimEnter * call AutoLoadNERDTree()
@@ -3165,7 +3182,20 @@ func! Deltags()
 	exe "!time rm -f cscope.files cscope.out GPATH GRTAGS GTAGS tags" . l:extra
 endfunc
 
+" NERDTree 가 꺼져 있으면(g:vimide_nerdtree = 0, nvim 기본) 조용히 실패하는
+" 대신 어디를 켜면 되는지 알려 준다.
+func! s:NoNERDTree() abort
+	if exists(':NERDTreeToggle') == 2
+		return 0
+	endif
+	echohl WarningMsg
+	echo 'vim-ide: NERDTree 를 끈 상태입니다 (let g:vimide_nerdtree = 1 로 켭니다). 트리는 F9 / F11 의 neo-tree 를 쓰세요'
+	echohl None
+	return 1
+endfunc
+
 func! NERDTreeOnlyLeft()
+	if s:NoNERDTree() | return | endif
 	:TagbarClose
 	:AerialClose
 	let g:NERDTreeWinPos="left"
@@ -3173,6 +3203,7 @@ func! NERDTreeOnlyLeft()
 endfunc
 
 func! NERDTreeOnlyRight()
+	if s:NoNERDTree() | return | endif
 	let g:NERDTreeWinPos="right"
 	:NERDTreeToggle
 	call VimIdeBalanceSoon()
@@ -3384,6 +3415,7 @@ function! VimIdeNERDTreeExplore(node) abort
 endfunction
 
 func! NERDTreeOnly()
+	if s:NoNERDTree() | return | endif
 	:TagbarClose
 	:NERDTreeToggle
 	call VimIdeBalanceSoon()
@@ -3417,14 +3449,15 @@ func! s:OutlineToggle() abort
 endfunc
 
 func! TagbarOnly()
-	:NERDTreeClose
+	" NERDTree 는 nvim 에서 꺼 둘 수 있다(g:vimide_nerdtree). 없으면 조용히 넘어간다.
+	silent! NERDTreeClose
 	:Neotree close
 	call s:OutlineToggle()
 	call VimIdeBalanceSoon()
 endfunc
 
 func! NERDTree_and_Tagbar_Toggle()
-	:NERDTreeClose
+	silent! NERDTreeClose
 	:TagbarToggle
 endfunc
 
@@ -3771,7 +3804,11 @@ map <F9> :call NeoTreeOnlyLeft()<CR>
 "map <F9> :call NeoTreeOnlyRight()<CR>
 map <F10> :call TagbarOnly()<CR>
 "map <F11> :call NERDTreeOnlyLeft()<CR>
-map <F11> :call NERDTreeOnlyRight()<CR>
+" F11: 오른쪽 트리. 예전에는 NERDTree 였는데 neo-tree 로 바꿨다 - nvim 에서는
+" NERDTree 를 아예 끄기 때문이다(g:vimide_nerdtree). 예전 것이 필요하면
+" 그 옵션을 1 로 두고 아래 줄을 살리면 된다.
+"map <F11> :call NERDTreeOnlyRight()<CR>
+map <F11> :call NeoTreeOnlyRight()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
 " <F12> 는 이제 RelationView 를 켜고 끈다(예전 <F3>). relationview.lua 가

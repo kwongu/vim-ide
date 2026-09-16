@@ -190,6 +190,8 @@ echo "              / '곁창에서 시작하면 안 되는 명령'"
 VIMIDE_OPTS=$(grep -c '^let g:\(vimide\|relationview\|overview\)_' ${HOME}/.vimrc 2>/dev/null || echo 0)
 echo "     (지금 ${VIMIDE_OPTS}개. 값을 고치고 nvim 을 다시 띄우면 바로 먹습니다)"
 echo "tip: 마우스가 이상하면  :VimIdeMouseCheck  /  :VimIdeMouseOff  로 가릅니다."
+echo "tip: nvim 에서는 NERDTree 를 끄고 neo-tree 를 씁니다 (F9 왼쪽 / F11 오른쪽)."
+echo "     다시 쓰려면  let g:vimide_nerdtree = 1  (진짜 vim 8.1 은 원래 켬)"
 echo "tip: RelationView 에서 w 로 넓혀도 aerial/quickfix 폭은 그대로입니다."
 echo "     늘고 주는 것은 편집 창뿐이고, 편집 영역은 최소 20칸을 지킵니다"
 echo "     (let g:relationview_wide_steps / g:relationview_wide_min_edit)"
