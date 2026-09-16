@@ -326,6 +326,23 @@ local function remember(win)
       and is_plugin_buf(buf) and vim.bo[buf].filetype ~= g.ft then
     return
   end
+  -- '편집 자리를 잠시 빌려 쓰는' 플러그인이 든 창은 아예 지키지 않는다.
+  --
+  -- :Ex 를 EDIT 창에서 치면 그 창이 netrw 버퍼를 든다. buftype 이 nofile
+  -- 이라 곁창처럼 보이지만, 그 창은 원래 EDIT 창이고 고르고 나면 바로
+  -- 그 자리에 파일을 연다. 그것을 '곁창에 파일이 실렸다' 고 보면 안 된다.
+  --
+  -- 실측(이 줄이 없을 때): EDIT 창에서 :Ex -> 파일 선택 -> 지킴이가 netrw
+  -- 버퍼를 도로 집어넣고 파일을 딴 창으로 빼냈다. 게다가 되돌려 넣은 netrw
+  -- 버퍼는 이름이 디렉터리라, divert_dir 이 그것을 다시 편집 자리로 넘겨
+  -- NERDTree 가 가로챘다 - 편집 창이 통째로 사라졌다.
+  --
+  -- 이미 적어 둔 곁창(aerial 등)에 netrw 가 들어앉은 경우는 바로 위
+  -- 검사가 그 기록을 지켜 주므로, 그때는 여전히 되돌린다.
+  if not g and BORROWED_FT[vim.bo[buf].filetype] then
+    guarded[win] = nil
+    return
+  end
   -- 폭도 같이 적는다. 찌그러진 값은 적지 않고 전에 적어 둔 것을 지킨다 -
   -- 되돌릴 기준이 1칸이 되어 버리면 되돌릴 방법이 없어진다.
   local floor = cfg('side_min_width', 8)
