@@ -2687,6 +2687,11 @@ let g:relationview_big_width = 0
 let g:relationview_wide_steps = [50, 75]
 " 칸수를 박아 두면 위 단계 대신 그 한 단계만 돈다(기본 0 = 단계를 쓴다).
 let g:relationview_wide_width = 0
+" 1 (기본) <C-g> 의 grep 을 낱말 경계로 찾는다(struct 가 structure 에 안 걸린다).
+let g:relationview_grep_word = 1
+" 1000 (기본) <C-g> 의 grep 이 이 줄 수를 넘으면 거기서 끊는다.
+"            커널 트리에서 흔한 낱말 하나가 수만 줄이 되는 것을 막는다.
+let g:relationview_grep_max = 1000
 " 20 (기본) 넓힐 때 편집 영역에 최소한 남겨 둘 칸수. 0 이면 안 지킨다.
 "
 "           곁창(aerial, quickfix ...)은 'w' 로 크기가 바뀌지 않는다. 그
@@ -3128,7 +3133,55 @@ let g:Grep_Skip_Dirs='.svn'
 let Grep_Path = '/usr/bin/grep'
 let Grep_OpenQuickfixWindow = 1
 let Grep_Default_Options = '--exclude="*svn*" --exclude="cscope.out" --exclude="*tags*" --exclude="*.lst" --exclude="*.o.*" --exclude="*.o" --exclude="_.*" -nRI'
-nnoremap <silent> <C-g> :Grep<CR>
+" <C-g> : 지금 파일이 있는 디렉터리 이하에서 커서 밑 낱말을 찾는다.
+"
+"   RelationView 패널이 떠 있으면  -> 패널 목록에
+"   떠 있지 않으면                 -> quickfix 창에
+"
+" 색인(gtags)이 아니라 글자 그대로 찾는 길이다. 주석, 문자열, 매크로 조각,
+" 아직 색인하지 않은 파일처럼 :Gtags 가 모르는 것을 찾을 때 쓴다.
+" ripgrep(rg)이 있으면 그것을, 없으면 grep -rnI 를 쓴다.
+"
+" 예전에는 이 키가 grep.vim 의 :Grep(패턴과 경로를 하나씩 되묻는 대화식)
+" 이었다. 그 명령은 그대로 남아 있으니 필요하면 :Grep 으로 부르면 된다.
+"
+"   let g:relationview_grep_word = 0    " 낱말 경계 없이 (부분 일치)
+"   let g:relationview_grep_max = 1000  " 이 줄 수를 넘으면 끊는다
+func! s:DirGrep() abort
+	" 곁창에서는 하지 않는다. 거기 커서 밑 낱말은 목록의 글자이지
+	" 소스의 심볼이 아니다 - <C-]>/g]/gf 와 같은 잣대다.
+	if !s:JumpHere()
+		return
+	endif
+	let l:w = expand('<cword>')
+	if empty(l:w)
+		return
+	endif
+	let l:f = expand('%:p')
+	let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
+	if has('nvim') && exists('*luaeval')
+				\ && luaeval('_G.relationview_grep ~= nil')
+		call luaeval('(function() _G.relationview_grep(_A[1], _A[2]) return 1 end)()',
+					\ [l:w, l:d])
+		return
+	endif
+	" 진짜 vim 8.1: 패널도 lua 도 없다. quickfix 로 보낸다.
+	let l:save = &grepprg
+	try
+		let &grepprg = executable('rg')
+					\ ? 'rg --vimgrep --no-heading --color=never -F -w $*'
+					\ : 'grep -rnI -F -w --exclude-dir=.git --exclude-dir=.tags $*'
+		execute 'silent grep! ' . shellescape(l:w) . ' ' . fnameescape(l:d)
+	finally
+		let &grepprg = l:save
+	endtry
+	if empty(getqflist())
+		echohl WarningMsg | echo 'Grep ' . l:w . ' : 결과 없음' | echohl None
+	else
+		botright copen
+	endif
+endfunc
+nnoremap <silent> <C-g> :call <SID>DirGrep()<CR>
 "map <Leader>r <ESC>:Rgrep <C-R>=expand("<cword>")<CR>
 "map <Leader>jj :Grep -R --include=*.java --include=*.xml --include=*.aidl <C-R>=expand("<cword>")<CR>
 "map <Leader>jc :Grep -R --include=*.c --include=*.cc --include=*.cpp --include=*.h <C-R>=expand("<cword>")<CR>

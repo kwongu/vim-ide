@@ -7622,6 +7622,147 @@ local function show_results(title, sym, results, truncated, origin)
   end
 end
 
+-- ---------------------------------------------------------------------------
+-- <C-g>: 지금 파일이 있는 디렉터리 이하를 grep
+-- ---------------------------------------------------------------------------
+-- 색인(gtags)이 아니라 글자 그대로 찾는다. 색인에 없는 것 - 주석, 문자열,
+-- 매크로 조각, 아직 색인 안 한 파일 - 을 찾을 때 쓴다.
+--
+-- 도우미를 이 함수 안에 둔 이유: 이 파일의 최상위 지역 변수가 이미 200개
+-- (lua 한 청크의 한계)에 닿아 있다. 밖에 빼면 'main function has more than
+-- 200 local variables' 로 적재 자체가 실패한다.
+--
+--   let g:relationview_grep_word = 0    " 낱말 경계 없이 찾는다
+--   let g:relationview_grep_max = 1000  " 이 줄 수를 넘으면 끊는다
+function A.grep(pattern, dir, origin)
+  pattern = tostring(pattern or '')
+  if pattern == '' then
+    return
+  end
+  dir = (dir and dir ~= '') and dir or vim.fn.getcwd()
+  local word = cfg('grep_word', 1) ~= 0
+  local cap = tonumber(cfg('grep_max', 1000)) or 1000
+
+  -- ripgrep(rg)이 있으면 그것을 쓴다. 커널 트리에서 grep 과 차이가 크고
+  -- .git 같은 곳을 알아서 건너뛴다. 없으면 grep -rnI 로 떨어진다.
+  local argv, has_col
+  local rg = vim.fn.exepath('rg')
+  if rg ~= '' then
+    argv = { rg, '--vimgrep', '--no-heading', '--color=never', '-F' }
+    if word then
+      argv[#argv + 1] = '-w'
+    end
+    vim.list_extend(argv, { '--', pattern, dir })
+    has_col = true -- --vimgrep 은 칸 번호가 붙는다
+  else
+    local g = vim.fn.exepath('grep')
+    if g == '' then
+      vim.notify('rg 도 grep 도 $PATH 에 없습니다', vim.log.levels.WARN)
+      return
+    end
+    argv = { g, '-rnI', '-F' }
+    if word then
+      argv[#argv + 1] = '-w'
+    end
+    for _, d in ipairs({ '.git', '.svn', '.tags', 'node_modules' }) do
+      argv[#argv + 1] = '--exclude-dir=' .. d
+    end
+    vim.list_extend(argv, { '--', pattern, dir })
+    has_col = false
+  end
+
+  local title = 'Grep ' .. pattern .. '  (' .. vim.fn.fnamemodify(dir, ':~') .. ')'
+
+  -- 결과를 받아 패널이나 quickfix 에 싣는다
+  local function done(lines, err)
+    if not lines then
+      if panel_visible() then
+        render_msg(pattern, err or 'grep: no result')
+      else
+        vim.notify(err or 'grep: 결과 없음', vim.log.levels.WARN)
+      end
+      return
+    end
+    local results, qf = {}, {}
+    for _, l in ipairs(lines) do
+      local path, lno, rest = l:match('^(.-):(%d+):(.*)$')
+      local col, text = nil, rest
+      if path and has_col then
+        col, text = rest:match('^(%d+):(.*)$')
+      end
+      if path then
+        text = (text or ''):gsub('^%s+', '')
+        results[#results + 1] = { name = pattern, path = path,
+          line = tonumber(lno), text = text }
+        qf[#qf + 1] = { filename = path, lnum = tonumber(lno),
+          col = tonumber(col) or 1, text = text }
+      end
+      if #results >= cap then
+        break
+      end
+    end
+    if panel_visible() then
+      show_results(title, pattern, results, math.max(0, #lines - #results),
+        origin)
+      return
+    end
+    -- 패널이 없으면 quickfix 로. 여는 방법은 이 설정의 관행을 따른다
+    -- (botright copen). <CR> 은 after/ftplugin/qf.vim 이 직전 EDIT 창으로
+    -- 보낸다.
+    vim.fn.setqflist({}, ' ', { title = title, items = qf })
+    if #qf == 0 then
+      vim.notify(title .. ' : 결과 없음', vim.log.levels.INFO)
+      return
+    end
+    pcall(vim.cmd, 'botright copen')
+  end
+
+  -- run_global 과 같은 모양이다. 줄 수가 cap 을 넘으면 프로세스를 끊는다 -
+  -- 커널 트리에서 흔한 낱말 하나에 수만 줄이 나오면 화면도 메모리도 버텨야 한다.
+  local chunks, nlines, delivered = {}, 0, false
+  local obj
+  local function deliver(lines, err)
+    if delivered then
+      return
+    end
+    delivered = true
+    done(lines, err)
+  end
+  local ok, ret = pcall(vim.system, argv, { cwd = dir, text = true,
+    stdout = function(e, chunk)
+      if e or not chunk then
+        return
+      end
+      chunks[#chunks + 1] = chunk
+      local _, c = chunk:gsub('\n', '')
+      nlines = nlines + c
+      if nlines > cap + 200 and obj then
+        pcall(function() obj:kill(15) end)
+      end
+    end },
+    function(o)
+      vim.schedule(function()
+        local out = table.concat(chunks)
+        -- grep 은 '못 찾았다' 를 1 로 낸다. 그것은 오류가 아니다.
+        if out == '' and o.code and o.code > 1 then
+          deliver(nil, 'grep: ' .. ((o.stderr or ''):gsub('%s+$', '')))
+          return
+        end
+        deliver(vim.split(out, '\n', { trimempty = true }))
+      end)
+    end)
+  if not ok then
+    deliver(nil, tostring(ret))
+    return
+  end
+  obj = ret
+end
+
+--- .vimrc 의 <C-g> 가 부른다.
+function _G.relationview_grep(pattern, dir)
+  A.grep(pattern, dir, api.nvim_get_current_win())
+end
+
 function A.gtags(args, retried)
   local flags, pat = {}, {}
   for w in tostring(args):gmatch('%S+') do
