@@ -2698,6 +2698,13 @@ let g:relationview_wide_width = 0
 let g:relationview_step_focus = 1
 " 1 (기본) <C-g> 의 grep 을 낱말 경계로 찾는다(struct 가 structure 에 안 걸린다).
 let g:relationview_grep_word = 1
+" 0 (기본) rg 가 숨은 디렉터리와 .gitignore 에 걸린 곳을 건너뛴다.
+"
+"          소스를 읽을 때는 이편이 낫다 - 커널 트리에서 .gitignore 에 든
+"          빌드 산출물(*.o, *.cmd, 생성 헤더)까지 나오면 결과가 파묻힌다.
+"          1 로 두면 rg 에 --hidden --no-ignore 를 붙여 전부 뒤진다
+"          (그러면 rg 가 없을 때의 grep 갈래와 결과가 더 가까워진다).
+let g:relationview_grep_hidden = 0
 " 1000 (기본) <C-g> 의 grep 이 이 줄 수를 넘으면 거기서 끊는다.
 "            커널 트리에서 흔한 낱말 하나가 수만 줄이 되는 것을 막는다.
 let g:relationview_grep_max = 1000
@@ -3157,16 +3164,29 @@ let Grep_Default_Options = '--exclude="*svn*" --exclude="cscope.out" --exclude="
 "   let g:relationview_grep_word = 0    " 낱말 경계 없이 (부분 일치)
 "   let g:relationview_grep_max = 1000  " 이 줄 수를 넘으면 끊는다
 func! s:DirGrep() abort
-	" 곁창에서는 하지 않는다. 거기 커서 밑 낱말은 목록의 글자이지
-	" 소스의 심볼이 아니다 - <C-]>/g]/gf 와 같은 잣대다.
-	if !s:JumpHere()
+	" 도움말 창에서는 하지 않는다.
+	"
+	" s:JumpHere() 는 help 를 통과시킨다(<C-]> 가 |태그| 점프라서). 그런데
+	" 여기서 통과시키면 vim 런타임의 doc 디렉터리를 뒤지게 되고, 패널이
+	" 떠 있는데 미리보기가 닫혀 있으면 첫 결과로 편집 창이 도움말 텍스트로
+	" 바뀐다. 도움말에서 낱말을 찾는 일은 :helpgrep 이 한다.
+	if &buftype ==# 'help'
 		return
 	endif
 	let l:w = expand('<cword>')
+	let l:f = expand('%:p')
+	" 곁창에서는 하지 않는다. 거기 커서 밑 낱말은 목록의 글자이지
+	" 소스의 심볼이 아니다 - <C-]>/g]/gf 와 같은 잣대다.
+	"
+	" 다만 미리보기 창(\p)은 진짜 파일을 보여주는 자리라 낱말도 경로도
+	" 뜻이 있다. 거기서는 한다 - <C-]>/gf 가 s:JumpFromPeek 으로 해 주는
+	" 것과 같은 대접이다.
+	if !s:JumpHere() && !(&buftype ==# '' && !empty(l:f))
+		return
+	endif
 	if empty(l:w)
 		return
 	endif
-	let l:f = expand('%:p')
 	let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
 	if has('nvim') && exists('*luaeval')
 				\ && luaeval('_G.relationview_grep ~= nil')
@@ -3175,14 +3195,27 @@ func! s:DirGrep() abort
 		return
 	endif
 	" 진짜 vim 8.1: 패널도 lua 도 없다. quickfix 로 보낸다.
-	let l:save = &grepprg
+	"
+	" 옵션은 nvim 쪽과 같은 것을 본다. 예전에는 -w 를 늘 붙이고 상한도
+	" 없어서, 같은 키가 machine 마다 다르게 굴었다.
+	" grepformat 도 같이 바꾼다 - rg --vimgrep 의 칸 번호가 기본 형식에는
+	" 없어서, 안 바꾸면 그 숫자가 메시지 글자에 섞여 보인다.
+	let l:save = [&grepprg, &grepformat]
+	let l:wordf = get(g:, 'relationview_grep_word', 1) ? ' -w' : ''
+	let l:hid = get(g:, 'relationview_grep_hidden', 0)
 	try
-		let &grepprg = executable('rg')
-					\ ? 'rg --vimgrep --no-heading --color=never -F -w $*'
-					\ : 'grep -rnI -F -w --exclude-dir=.git --exclude-dir=.tags $*'
+		if executable('rg')
+			let &grepprg = 'rg --vimgrep --no-heading --color=never -F'
+						\ . l:wordf . (l:hid ? ' --hidden --no-ignore' : '') . ' $*'
+			let &grepformat = '%f:%l:%c:%m'
+		else
+			let &grepprg = 'grep -rnI -F' . l:wordf
+						\ . ' --exclude-dir=.git --exclude-dir=.svn --exclude-dir=.tags $*'
+			let &grepformat = '%f:%l:%m'
+		endif
 		execute 'silent grep! ' . shellescape(l:w) . ' ' . fnameescape(l:d)
 	finally
-		let &grepprg = l:save
+		let [&grepprg, &grepformat] = l:save
 	endtry
 	if empty(getqflist())
 		echohl WarningMsg | echo 'Grep ' . l:w . ' : 결과 없음' | echohl None

@@ -7665,6 +7665,13 @@ function A.grep(pattern, dir, origin)
     if word then
       argv[#argv + 1] = '-w'
     end
+    -- rg 는 숨은 디렉터리와 .gitignore 에 걸린 곳을 말없이 건너뛴다.
+    -- 소스를 읽을 때는 그편이 낫지만(빌드 산출물이 결과를 파묻지 않는다),
+    -- 그 탓에 rg 가 없는 곳의 grep 갈래와 결과가 달라진다. 전부 보려면:
+    --   let g:relationview_grep_hidden = 1
+    if cfg('grep_hidden', 0) ~= 0 then
+      vim.list_extend(argv, { '--hidden', '--no-ignore' })
+    end
     vim.list_extend(argv, { '--', pattern, dir })
     has_col = true -- --vimgrep 은 칸 번호가 붙는다
   else
