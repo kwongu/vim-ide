@@ -3181,7 +3181,10 @@ func! s:DirGrep() abort
 		botright copen
 	endif
 endfunc
-nnoremap <silent> <C-g> :call <SID>DirGrep()<CR>
+" <C-u> 로 카운트를 먹는다. 없으면 2<C-g> 가 ':.,.+1call ...' 이 되어
+" E481(범위를 받지 않는다)로 죽는다 - vim 본래의 2<C-g>(전체 경로) 손버릇이
+" 남아 있는 사람이 바로 만나는 자리다.
+nnoremap <silent> <C-g> :<C-u>call <SID>DirGrep()<CR>
 "map <Leader>r <ESC>:Rgrep <C-R>=expand("<cword>")<CR>
 "map <Leader>jj :Grep -R --include=*.java --include=*.xml --include=*.aidl <C-R>=expand("<cword>")<CR>
 "map <Leader>jc :Grep -R --include=*.c --include=*.cc --include=*.cpp --include=*.h <C-R>=expand("<cword>")<CR>
