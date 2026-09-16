@@ -3230,9 +3230,19 @@ func! s:RunGrep(word) abort
 	"
 	"   let g:relationview_grep_ask_dir = 0   " 묻지 않고 바로 찾는다
 	if get(g:, 'relationview_grep_ask_dir', 1)
-		echohl Question
-		let l:in = input('Grep "' . l:w . '" 에서 찾을 곳: ', l:d, 'dir')
-		echohl None
+		" try/finally 로 감싸는 이유: <C-c> 로 그만두면 input() 이 인터럽트를
+		" 올려 이 함수가 그 자리에서 끝난다. 그러면 echohl None 이 안 돌아
+		" 그 뒤 메시지가 전부 Question 색으로 나온다(실측: vim 9.1, nvim 0.12
+		" 둘 다). :help :echohl 도 '되돌려 놓는 것을 잊지 말라' 고 적고 있다.
+		let l:in = ''
+		try
+			echohl Question
+			let l:in = input('Grep "' . l:w . '" 에서 찾을 곳: ', l:d, 'dir')
+		catch /^Vim:Interrupt$/
+			return
+		finally
+			echohl None
+		endtry
 		redraw
 		if empty(trim(l:in))
 			return
@@ -3272,7 +3282,29 @@ func! s:RunGrep(word) abort
 						\ . ' --exclude-dir=.git --exclude-dir=.svn --exclude-dir=.tags $*'
 			let &grepformat = '%f:%l:%m'
 		endif
-		execute 'silent grep! ' . shellescape(l:w) . ' ' . fnameescape(l:d)
+		" escape(..., '%#|') 가 왜 필요한가.
+		"
+		" :grep 은 :make 와 같아서 인자의 '%' 와 '#' 을 파일 이름으로 펼친다
+		" (:help :make - "Characters '%' and '#' are expanded as usual").
+		" shellescape 의 작은따옴표는 셸 단계의 방어라 그보다 뒤에 와서 소용이
+		" 없다 - 따옴표 '안'에서 치환이 일어난다. 실측(가짜 rg 로 셸 인자를
+		" 찍어서, vim 9.1):
+		"   '#define'  -> '<대체파일경로>define'   조용히 0건
+		"   '100%'     -> '100<현재파일경로>'
+		"   대체 파일이 없으면 E194 로 죽는다
+		" 이 기능의 존재 이유가 '색인이 모르는 매크로 조각' 인데 정작
+		" #define/#include/#ifdef 가 통째로 안 되던 셈이다.
+		"
+		" '|' 도 같이 막는다. :grep 은 :bar 목록에 없어서 '|' 에서 명령이
+		" 잘리고, 셸은 따옴표가 안 닫힌 조각을 받아 E40 으로 죽는다
+		" (실측: 'a || b', 'FLAG|MASK'). 아래 -bar 주석이 ':VimIdeGrep 까지는
+		" 참' 이라는 말의 나머지 절반이 이것이다.
+		"
+		" shellescape 바깥에 씌워야 한다. 안쪽에 넣으면 역슬래시가 찾을 말
+		" 자체에 섞인다. shellescape(l:w, 1) 도 쓰면 안 된다 - '!' 앞 역슬래시를
+		" :grep 은 안 지워서 a!b 가 'a\!b' 로 넘어간다(:! 만 지운다).
+		execute 'silent grep! ' . escape(shellescape(l:w), '%#|')
+					\ . ' ' . fnameescape(l:d)
 	finally
 		let [&grepprg, &grepformat] = l:save
 	endtry
@@ -3283,7 +3315,9 @@ func! s:RunGrep(word) abort
 	endif
 endfunc
 " -nargs=? 는 '없거나 하나' 이지 '빈칸에서 자른다' 가 아니다. 빈칸이 든 말도
-" 통째로 하나로 온다. -bar 를 안 붙여서 '|' 도 찾을 말의 일부로 남는다.
+" 통째로 하나로 온다. -bar 를 안 붙여서 '|' 도 찾을 말의 일부로 남는다 -
+" 다만 그것은 여기까지만 참이고, 그 말을 :grep 에 넘길 때는 위에서처럼
+" '\' 를 덧대야 한다(cmdline.txt 의 :bar - :grep 은 그 목록에 없다).
 " 인자가 없으면(빈칸 위에서 <C-g> 를 누르고 그대로 Enter) 조용히 끝난다.
 command! -nargs=? VimIdeGrep call s:RunGrep(<q-args>)
 
