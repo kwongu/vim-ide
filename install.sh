@@ -193,7 +193,7 @@ echo "tip: 마우스가 이상하면  :VimIdeMouseCheck  /  :VimIdeMouseOff  로
 echo "tip: <C-g> 는 지금 파일의 디렉터리 이하에서 커서 밑 낱말을 찾습니다."
 echo "     RelationView 가 떠 있으면 패널에, 아니면 quickfix 에 목록이 뜹니다"
 echo "     (rg 가 있으면 그것을 씁니다. 예전 대화식 grep 은 :Grep 로 남아 있습니다)"
-echo "tip: nvim 에서는 NERDTree 를 끄고 neo-tree 를 씁니다 (F9 왼쪽 / F11 오른쪽)."
+echo "tip: nvim 에서는 NERDTree 를 끄고 neo-tree 를 씁니다 (F9 왼쪽 / F11 뜬 창)."
 echo "     다시 쓰려면  let g:vimide_nerdtree = 1  (진짜 vim 8.1 은 원래 켬)"
 echo "tip: RelationView 에서 w 로 넓혀도 aerial/quickfix 폭은 그대로입니다."
 echo "     늘고 주는 것은 편집 창뿐이고, 편집 영역은 최소 20칸을 지킵니다"

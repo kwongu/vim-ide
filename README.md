@@ -159,8 +159,10 @@ Ctrl+g: Grep the keyword under the cursor under the current file's directory.
         The hits go to the RelationView list while the panel is up, and to the
         quickfix window otherwise. Uses ripgrep when it is on $PATH.
         (:Grep is still the old interactive grep that asks for a pattern.)
-Ctrl+n: Go to the next error in the quickfix window
-Ctrl+p: Go to the previous error in the quickfix window
+Ctrl+n: Go to the next item in the list, and put the cursor in the window that
+        shows it (the RelationView preview, or the edit window)
+Ctrl+p: The same, backwards
+        (Ctrl+0 / Ctrl+9 step the same list but only peek - the cursor stays)
 ```
 
 To perform cscope searching, use `cs find` command below.

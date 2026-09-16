@@ -6713,7 +6713,7 @@ end
 -- focus stays where it was, so the key can be pressed again.
 -- Returns false when there is no list to walk, which is what makes the
 -- mapping fall through to quickfix.
-function A.step(dir)
+function A.step(dir, focus)
   if not (s.win and api.nvim_win_is_valid(s.win)
       and s.buf and api.nvim_buf_is_valid(s.buf)
       and api.nvim_win_get_buf(s.win) == s.buf) then
@@ -6753,6 +6753,17 @@ function A.step(dir)
   end
   pcall(api.nvim_win_set_cursor, s.win, { found, 0 })
   hl_cursor_row()
+  -- focus: '그 자리를 보여주는 창' 으로 커서를 옮길까.
+  --
+  -- <C-n>/<C-p> 는 옮긴다(목록을 훑으며 그 자리를 바로 읽는다).
+  -- <C-0>/<C-9> 는 안 옮긴다 - 그 둘은 '엿보기' 용으로 둔 키다.
+  -- 옮겨도 다시 <C-n> 을 누르면 그만이다. 그 키는 전역 매핑이라 미리보기
+  -- 창에서도 이 함수로 돌아온다.
+  --
+  --   let g:relationview_step_focus = 0   " <C-n>/<C-p> 도 엿보기만
+  if focus and cfg('step_focus', 1) == 0 then
+    focus = false
+  end
   if ctx_visible() then
     -- the panel's own CursorMoved does this on a timer; we are moving
     -- another window's cursor, so do it here and now - and force it,
@@ -6760,10 +6771,12 @@ function A.step(dir)
     -- took the focus there
     s.ctx_last = nil
     update_context(true)
+    if focus and ctx_visible() then
+      pcall(api.nvim_set_current_win, s.ctx_win)
+    end
   else
-    -- no preview window: the edit window is where you read, so show it
-    -- there instead (peek: the focus stays where the key was pressed)
-    jump_to(s.items[found].loc, true)
+    -- no preview window: the edit window is where you read, so show it there
+    jump_to(s.items[found].loc, not focus)
   end
   return true
 end
@@ -7567,8 +7580,8 @@ end
 
 -- One key for "next item in whatever list is in front of me": the relation
 -- list when the panel holds one, the quickfix list otherwise.
-local function step_or_qf(dir)
-  if A.step(dir) then
+local function step_or_qf(dir, focus)
+  if A.step(dir, focus) then
     return
   end
   local ok, err = pcall(vim.cmd, dir > 0 and 'cnext' or 'cprevious')
@@ -7928,10 +7941,12 @@ api.nvim_create_user_command('RelationViewJump', function()
   end
 end, { desc = 'Jump the edit window to the item under the panel cursor' })
 
-api.nvim_create_user_command('RelationViewNext', function() step_or_qf(1) end,
-  { desc = 'Next item in the relation list (falls back to :cnext)' })
-api.nvim_create_user_command('RelationViewPrev', function() step_or_qf(-1) end,
-  { desc = 'Previous item in the relation list (falls back to :cprevious)' })
+-- ! 를 붙이면 그 자리를 보여주는 창으로 커서까지 옮긴다.
+-- <C-n>/<C-p> 가 ! 를 붙여 부르고, 엿보기용인 <C-0>/<C-9> 는 안 붙인다.
+api.nvim_create_user_command('RelationViewNext', function(o) step_or_qf(1, o.bang) end,
+  { bang = true, desc = 'Next item in the relation list (! also moves the focus there)' })
+api.nvim_create_user_command('RelationViewPrev', function(o) step_or_qf(-1, o.bang) end,
+  { bang = true, desc = 'Previous item in the relation list (! also moves the focus there)' })
 
 api.nvim_create_user_command('RelationViewGraph', function()
   A.graph()

@@ -887,7 +887,7 @@ do
   vim.api.nvim_create_user_command('NeotreeGuarded', function(o)
     pcall(apply, nil)
     vim.cmd('Neotree ' .. (o.args ~= '' and o.args or 'toggle'))
-  end, { nargs = '?', desc = 'Neotree, with the git-status size guard applied' })
+  end, { nargs = '*', desc = 'Neotree, with the git-status size guard applied' })
 
   -- 스캔 중에 처음 보는 worktree(중첩 repo 등)가 나타나면 그때도 판단한다.
   -- 이 훅은 status 명령이 나가기 직전에 불리므로, 여기서 끄면 다음 스캔부터
@@ -1290,9 +1290,15 @@ let g:Gtags_OpenQuickfixWindow = 1
 "
 " 판단 기준은 '패널이 떠 있는가'(s:RvPanelOn)다. 명령이 있는지로만 보면
 " 뷰를 꺼 둔 상태에서도 패널 쪽으로 가려 해서 quickfix 가 안 움직인다.
+" <C-n>/<C-p> 는 목록을 한 칸 옮기고, '그 자리를 보여주는 창' 으로 커서까지
+" 간다(명령 뒤의 ! 이 그 뜻이다). 패널이 있으면 미리보기 창, 없으면 편집 창.
+" quickfix 쪽은 vimide#qf#Step 이 이미 편집 창으로 옮겨 준다.
+"
+" 엿보기만 하고 싶으면 <C-0>/<C-9> 를 쓴다 - 그 둘은 커서를 그대로 둔다.
+"   let g:relationview_step_focus = 0   " <C-n>/<C-p> 도 엿보기만
 func! s:ListStep(dir) abort
 	if s:RvPanelOn() && exists(':RelationViewNext') == 2
-		exe a:dir > 0 ? 'RelationViewNext' : 'RelationViewPrev'
+		exe a:dir > 0 ? 'RelationViewNext!' : 'RelationViewPrev!'
 		return
 	endif
 	call vimide#qf#Step(a:dir)
@@ -2687,6 +2693,9 @@ let g:relationview_big_width = 0
 let g:relationview_wide_steps = [50, 75]
 " 칸수를 박아 두면 위 단계 대신 그 한 단계만 돈다(기본 0 = 단계를 쓴다).
 let g:relationview_wide_width = 0
+" 1 (기본) <C-n>/<C-p> 로 목록을 옮길 때 그 자리를 보여주는 창으로 커서까지 간다.
+"          0 이면 미리보기만 하고 커서는 그대로 (엿보기용 <C-0>/<C-9> 와 같아진다).
+let g:relationview_step_focus = 1
 " 1 (기본) <C-g> 의 grep 을 낱말 경계로 찾는다(struct 가 structure 에 안 걸린다).
 let g:relationview_grep_word = 1
 " 1000 (기본) <C-g> 의 grep 이 이 줄 수를 넘으면 거기서 끊는다.
@@ -3877,11 +3886,19 @@ map <F9> :call NeoTreeOnlyLeft()<CR>
 "map <F9> :call NeoTreeOnlyRight()<CR>
 map <F10> :call TagbarOnly()<CR>
 "map <F11> :call NERDTreeOnlyLeft()<CR>
-" F11: 오른쪽 트리. 예전에는 NERDTree 였는데 neo-tree 로 바꿨다 - nvim 에서는
-" NERDTree 를 아예 끄기 때문이다(g:vimide_nerdtree). 예전 것이 필요하면
-" 그 옵션을 1 로 두고 아래 줄을 살리면 된다.
+" F11: neo-tree 를 telescope 처럼 '떠 있는 창' 으로 연다.
+"
+" 곁창으로 세우면 배치가 밀리는데, 파일을 하나 고르러 잠깐 여는 트리는
+" 그럴 이유가 없다. 부동 창은 배치를 건드리지 않고 뜨고, 곁창 지킴이도
+" 부동 창은 애초에 지키지 않는다(vimidewin.lua 의 remember).
+"
+" 옆에 세워 두고 쓰고 싶으면 F9(왼쪽) 를 쓰거나 아래 줄을 살리면 된다.
+"map <F11> :call NeoTreeOnlyRight()<CR>
 "map <F11> :call NERDTreeOnlyRight()<CR>
-map <F11> :call NeoTreeOnlyRight()<CR>
+func! NeoTreeFloat() abort
+	NeotreeGuarded toggle float
+endfunc
+map <F11> :call NeoTreeFloat()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
 "map <F12> :!time ctags -R;time gtags;time mktags.sh<CR>
 " <F12> 는 이제 RelationView 를 켜고 끈다(예전 <F3>). relationview.lua 가
