@@ -3163,30 +3163,60 @@ let Grep_Default_Options = '--exclude="*svn*" --exclude="cscope.out" --exclude="
 "
 "   let g:relationview_grep_word = 0    " 낱말 경계 없이 (부분 일치)
 "   let g:relationview_grep_max = 1000  " 이 줄 수를 넘으면 끊는다
-func! s:DirGrep() abort
-	" 도움말 창에서는 하지 않는다.
-	"
-	" s:JumpHere() 는 help 를 통과시킨다(<C-]> 가 |태그| 점프라서). 그런데
-	" 여기서 통과시키면 vim 런타임의 doc 디렉터리를 뒤지게 되고, 패널이
-	" 떠 있는데 미리보기가 닫혀 있으면 첫 결과로 편집 창이 도움말 텍스트로
-	" 바뀐다. 도움말에서 낱말을 찾는 일은 :helpgrep 이 한다.
+" 이 창에서 <C-g> 를 받아도 되나.
+"
+" 도움말 창은 뺀다. s:JumpHere() 는 help 를 통과시키는데(<C-]> 가 |태그|
+" 점프라서), 여기서 통과시키면 vim 런타임의 doc 디렉터리를 뒤지게 되고,
+" 패널이 떠 있는데 미리보기가 닫혀 있으면 첫 결과로 편집 창이 도움말
+" 텍스트로 바뀐다. 도움말에서 낱말을 찾는 일은 :helpgrep 이 한다.
+"
+" 곁창도 뺀다 - 거기 커서 밑 낱말은 목록의 글자이지 소스의 심볼이 아니다.
+" 다만 미리보기 창(\p)은 진짜 파일을 보여주는 자리라 낱말도 경로도 뜻이
+" 있어서 받는다. <C-]>/gf 가 s:JumpFromPeek 으로 해 주는 것과 같은 대접이다.
+func! s:GrepHere() abort
 	if &buftype ==# 'help'
+		return 0
+	endif
+	return s:JumpHere() || (&buftype ==# '' && !empty(expand('%:p')))
+endfunc
+
+" 찾을 말을 명령줄에 채워 보여준다. Enter 를 누르면 찾고, 고쳐 치면 고친
+" 말을 찾고, Esc 면 그만둔다.
+"
+" 왜 input() 이 아니라 명령줄인가: 명령줄이면 지우고 고치는 손버릇이 그대로
+" 통하고, ':' <Up> 으로 방금 찾은 것을 다시 불러 쓸 수 있다. :VimIdeGrep 은
+" -nargs=1 이라 빈칸이 든 말도 통째로 하나로 받는다.
+func! s:GrepPrompt(text) abort
+	if !s:GrepHere()
 		return
 	endif
-	let l:w = expand('<cword>')
-	let l:f = expand('%:p')
-	" 곁창에서는 하지 않는다. 거기 커서 밑 낱말은 목록의 글자이지
-	" 소스의 심볼이 아니다 - <C-]>/g]/gf 와 같은 잣대다.
-	"
-	" 다만 미리보기 창(\p)은 진짜 파일을 보여주는 자리라 낱말도 경로도
-	" 뜻이 있다. 거기서는 한다 - <C-]>/gf 가 s:JumpFromPeek 으로 해 주는
-	" 것과 같은 대접이다.
-	if !s:JumpHere() && !(&buftype ==# '' && !empty(l:f))
+	if empty(a:text)
 		return
 	endif
+	call feedkeys(':VimIdeGrep ' . a:text, 'n')
+endfunc
+
+" 고른 글자를 읽는다. 레지스터는 건드린 뒤 되돌려 놓는다.
+" 여러 줄을 골랐으면 첫 줄만 쓴다 - grep 은 한 줄 안에서 찾는다.
+func! s:VisualText() abort
+	let l:reg = getreg('"')
+	let l:type = getregtype('"')
+	silent normal! gvy
+	let l:t = getreg('"')
+	call setreg('"', l:reg, l:type)
+	return trim(get(split(l:t, "\n"), 0, ''))
+endfunc
+
+" 실제로 찾는다. <C-g> 로 채운 명령줄에서 Enter 를 누르면 여기로 온다.
+func! s:RunGrep(word) abort
+	if !s:GrepHere()
+		return
+	endif
+	let l:w = a:word
 	if empty(l:w)
 		return
 	endif
+	let l:f = expand('%:p')
 	let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
 	if has('nvim') && exists('*luaeval')
 				\ && luaeval('_G.relationview_grep ~= nil')
@@ -3223,10 +3253,17 @@ func! s:DirGrep() abort
 		botright copen
 	endif
 endfunc
+" -nargs=1 은 '인자 하나' 이지 '빈칸에서 자른다' 가 아니다. 빈칸이 든 말도
+" 통째로 하나로 온다. -bar 를 안 붙여서 '|' 도 찾을 말의 일부로 남는다.
+command! -nargs=1 VimIdeGrep call s:RunGrep(<q-args>)
+
 " <C-u> 로 카운트를 먹는다. 없으면 2<C-g> 가 ':.,.+1call ...' 이 되어
 " E481(범위를 받지 않는다)로 죽는다 - vim 본래의 2<C-g>(전체 경로) 손버릇이
 " 남아 있는 사람이 바로 만나는 자리다.
-nnoremap <silent> <C-g> :<C-u>call <SID>DirGrep()<CR>
+nnoremap <silent> <C-g> :<C-u>call <SID>GrepPrompt(expand('<cword>'))<CR>
+" 비주얼: 고른 글자를 채워 보여준다. :<C-u> 로 '<,'> 범위를 지우고, 레지스터를
+" 쓰는 s:VisualText 안에서 gv 로 그 선택을 되살린다.
+xnoremap <silent> <C-g> :<C-u>call <SID>GrepPrompt(<SID>VisualText())<CR>
 "map <Leader>r <ESC>:Rgrep <C-R>=expand("<cword>")<CR>
 "map <Leader>jj :Grep -R --include=*.java --include=*.xml --include=*.aidl <C-R>=expand("<cword>")<CR>
 "map <Leader>jc :Grep -R --include=*.c --include=*.cc --include=*.cpp --include=*.h <C-R>=expand("<cword>")<CR>
