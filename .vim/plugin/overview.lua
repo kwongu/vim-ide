@@ -46,6 +46,8 @@ local goto_row   -- 아래에서 정의
 -- 잡아 둔다 - 없으면 goto_row 안의 이름이 전역(nil)으로 잡힌다.
 local set_top
 local mouse_row  -- 아래에서 정의
+-- 부동 창에 'mouse' 를 따로 줄 수 있는 판인가 (nvim 0.11+)
+local HAS_WIN_MOUSE = vim.fn.has('nvim-0.11') == 1
 
 -- g:overview_debug = '<파일>' 이면 마우스 이벤트를 그 파일에 적는다.
 -- 부동 창의 getmousepos() 값을 눈으로 확인해야 할 때가 있다.
@@ -290,10 +292,24 @@ local function render()
     col = tw,
     width = width,
     height = height,
-    focusable = true,
+    -- 막대는 초점을 받지 않는다.
+    --
+    -- focusable 이면 이 부동 창이 winnr('$') 에 세어지고 wincmd w 순환
+    -- 맨 끝에 낀다. 그래서 <C-w>w 를 누르면 막대에 들어갔다가 updatetime
+    -- (0.1초) 뒤 CursorHold 구조대에 튕겨 나온다 - 눈에는 '커서가 훅
+    -- 갔다가 돌아온다'로 보이고, 창이 여럿이면 순환이 거기서 끊겨 다른
+    -- EDIT 창에 영영 못 간다(실측: a.c -> quickfix -> 막대 -> a.c 만 되풀이).
+    --
+    -- nvim 0.11 부터는 'mouse' 가 따로 있어서 '초점은 못 받고 마우스만
+    -- 받는' 창을 만들 수 있다(:help nvim_open_win). 그 판이 아니면 예전처럼
+    -- focusable 로 둔다 - 안 그러면 클릭조차 못 받는다.
+    focusable = not HAS_WIN_MOUSE,
     style = 'minimal',
     zindex = 40,
   }
+  if HAS_WIN_MOUSE then
+    wcfg.mouse = true
+  end
   if s.win and api.nvim_win_is_valid(s.win) then
     -- 배치가 그대로면 건드리지 않는다 (win_set_config 는 매번 창을 다시
     -- 잡는다 - 끄는 동안 이것이 눈에 띄게 쌓인다)
@@ -377,8 +393,12 @@ end
 -- ---------------------------------------------------------------------------
 -- 마우스
 -- ---------------------------------------------------------------------------
--- 막대에서 클릭한 줄로 편집 창을 옮긴다. 부동 창이 클릭을 받으려면
--- focusable 이어야 하므로, 처리한 뒤 초점을 편집 창으로 되돌린다.
+-- 막대에서 클릭한 줄로 편집 창을 옮긴다.
+--
+-- 예전에는 부동 창이 클릭을 받으려면 focusable 이어야 해서, 클릭이 초점을
+-- 막대로 끌고 갔고 그것을 매번 편집 창으로 되돌려야 했다. 이제는 창을
+-- focusable=false + mouse=true 로 연다(nvim 0.11+): 초점은 못 받고 마우스만
+-- 받는다. 그래서 아래의 되돌리기는 '어쩌다 초점이 남았을 때'의 그물이다.
 goto_row = function(row, center)
   if not (s.target and api.nvim_win_is_valid(s.target)) then
     dbg('goto: target 없음 (' .. tostring(s.target) .. ')')
@@ -403,13 +423,16 @@ goto_row = function(row, center)
   -- 표시 밖을 클릭한 것도 미끄러져 간다 - 같은 손짓인데 클릭만 순간이동
   -- 하면 그것대로 튄다.
   set_top(top, true)
-  -- 누르고 있는 동안에는 초점을 막대에 둔다.
+  -- 초점이 막대에 남아 있으면 편집 창으로 되돌린다.
   --
-  -- 부동 창이 클릭을 받으려면 focusable 이어야 하고, 클릭은 그 창으로
-  -- 초점을 옮긴다. 여기서 바로 편집 창으로 되돌리면 그 다음 <LeftDrag> 이
-  -- 편집 창으로 가 버려서 막대의 매핑이 불리지 않는다 - 드래그가 통째로
-  -- 죽는다(실측: 아래에서 위로 끌어도 첫 클릭 자리에 머물렀다).
-  -- 그래서 <LeftRelease> 에서만 되돌린다.
+  -- focusable=false 가 된 지금은 여기서 되돌릴 일이 거의 없다. 남겨 두는
+  -- 것은 mouse 옵션이 없는 판(nvim 0.10 이하)에서 focusable 로 떨어질 때와,
+  -- 무슨 수로든 초점이 막대에 들어간 경우를 위해서다.
+  --
+  -- 끄는 동안에는 되돌리지 않는다. 예전에 focusable 이던 시절, 누르자마자
+  -- 되돌리면 다음 <LeftDrag> 이 편집 창으로 가 버려 드래그가 통째로 죽었다
+  -- (실측: 아래에서 위로 끌어도 첫 클릭 자리에 머물렀다). 그 조건은 그대로
+  -- 둔다.
   if not s.dragging and api.nvim_get_current_win() ~= s.target then
     pcall(api.nvim_set_current_win, s.target)
   end
