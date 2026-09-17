@@ -2756,6 +2756,17 @@ let g:vimide_balance_on_toggle = 1
 "          토글이 일부러 줄이는 폭이 그 위(실측: 35 -> 43 -> 31 -> 20)다.
 let g:vimide_side_min_width = 8
 
+" 0 (기본) 초점이 어느 창으로 왜 옮겨 갔는지 적어 둘지.
+"
+"          '커서가 다른 창으로 갔다가 돌아온다' 처럼 가끔 나는 일을 잡을 때
+"          켠다. 창이 바뀔 때마다 어디서 어디로, 그리고 그것을 부른 lua
+"          스택을 남긴다 - 스택이 비면 사람이 옮긴 것이다. 메모리에만
+"          쌓이고 마지막 g:vimide_focus_log_max 줄만 남는다.
+"            :VimIdeFocusLog     적힌 것을 아래 창에 펼친다
+"            :VimIdeFocusLog!    지우고 다시 시작한다
+let g:vimide_focus_log = 0
+let g:vimide_focus_log_max = 400
+
 " ------------------------------------
 " 마우스를 매핑으로 가로챌지 (터미널에 따라 탈이 날 수 있는 자리다)
 "

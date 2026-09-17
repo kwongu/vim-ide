@@ -2914,7 +2914,7 @@ local function tree_follow_now()
   if not tree_visible() then
     return
   end
-  local file, win = follow_file()
+  local file = follow_file()
   if not file or s.tree_last == file then
     return
   end
@@ -2932,7 +2932,14 @@ local function tree_follow_now()
     return
   end
   s.tree_last = file
-  local prev = win or api.nvim_get_current_win()
+  -- 초점은 '사용자가 지금 있는 창'으로 돌아가야 한다.
+  --
+  -- 예전에는 follow_file() 이 고른 창으로 돌려보냈다. 그 창은 '어느 파일을
+  -- 트리에서 펼칠까'를 정하는 값일 뿐이고, 사용자가 패널이나 미리보기에
+  -- 있으면 pick_src_win() 의 EDIT 창이 된다. 그대로 쓰면 읽고 있던 사람을
+  -- 엉뚱한 EDIT 창으로 끌어간다 - 다시 패널로 돌아오면 WinEnter 가 또
+  -- 따라오기를 걸어서, 커서가 갔다 왔다를 반복한다.
+  local prev = api.nvim_get_current_win()
   st.current_position = 'current'
   pcall(function()
     mgr.navigate(st, force_cwd and vim.fn.fnamemodify(file, ':h') or root, file,

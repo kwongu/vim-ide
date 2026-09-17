@@ -898,3 +898,91 @@ api.nvim_create_autocmd('WinClosed', {
   end,
   desc = 'EDIT 창이 0개가 되면 vim 을 끝낸다',
 })
+
+-- ---------------------------------------------------------------------------
+-- 초점이 어디로, 누가 옮겼는지 적어 둔다 (기본 꺼짐)
+-- ---------------------------------------------------------------------------
+-- '커서가 다른 창으로 갔다가 돌아온다' 같은 것은 가끔 일어나서 그 순간을
+-- 붙잡기 어렵다. 켜 두고 평소처럼 쓰다가 그 일이 나면 :VimIdeFocusLog 로
+-- 보면 된다. 창이 바뀔 때마다 '어디서 어디로' 와 그것을 부른 lua 스택을
+-- 적는다 - 스택이 비어 있으면 사람이 옮긴 것이고, 파일 이름과 줄 번호가
+-- 찍혀 있으면 그 코드가 옮긴 것이다.
+--
+-- 적는 것은 메모리 안이고 마지막 g:vimide_focus_log_max 개만 남는다.
+-- 파일에 쓰지 않으므로 켜 둔 채로 두어도 디스크를 건드리지 않는다.
+--
+--   let g:vimide_focus_log = 1        " 켜기 (기본 0)
+--   let g:vimide_focus_log_max = 400  " 남길 줄 수
+--   :VimIdeFocusLog                   " 적힌 것을 새 창에 펼친다
+--   :VimIdeFocusLog!                  " 지우고 다시 시작한다
+local focus_log = {}
+local focus_prev = nil
+
+local function win_tag(w)
+  if not (w and api.nvim_win_is_valid(w)) then
+    return tostring(w) .. '(없음)'
+  end
+  local b = api.nvim_win_get_buf(w)
+  local ft = vim.bo[b].filetype
+  local name = vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':t')
+  return ('%d[%s%s]'):format(w, ft ~= '' and ft or (vim.bo[b].buftype ~= ''
+    and vim.bo[b].buftype or 'edit'), name ~= '' and (' ' .. name) or '')
+end
+
+api.nvim_create_autocmd('WinEnter', {
+  group = api.nvim_create_augroup('VimIdeFocusLog', { clear = true }),
+  callback = function()
+    if cfg('focus_log', 0) == 0 then
+      return
+    end
+    local now = api.nvim_get_current_win()
+    if now == focus_prev then
+      return
+    end
+    -- 스택에서 이 콜백 자신과 nvim 다리는 빼고, 한 줄로 눕힌다
+    local tb = debug.traceback('', 2) or ''
+    tb = tb:gsub('^%s*stack traceback:%s*', ''):gsub('%s*\n%s*', ' < ')
+    tb = tb:gsub('%[C%]: in function ', ''):gsub('/home/[^/]+/', '~/')
+    if tb:find('^%s*$') then
+      tb = '(사람이 옮김)'
+    end
+    focus_log[#focus_log + 1] = ('%8.2f  %s -> %s   %s'):format(
+      (vim.uv or vim.loop).now() / 1000, win_tag(focus_prev), win_tag(now),
+      tb:sub(1, 400))
+    focus_prev = now
+    local max = tonumber(cfg('focus_log_max', 400)) or 400
+    while #focus_log > max do
+      table.remove(focus_log, 1)
+    end
+  end,
+  desc = '초점이 옮겨간 자취 (g:vimide_focus_log)',
+})
+
+api.nvim_create_user_command('VimIdeFocusLog', function(a)
+  if a.bang then
+    focus_log = {}
+    vim.notify('초점 기록을 지웠습니다')
+    return
+  end
+  if cfg('focus_log', 0) == 0 then
+    vim.notify("꺼져 있습니다: let g:vimide_focus_log = 1 로 켜세요",
+      vim.log.levels.WARN)
+  end
+  if #focus_log == 0 then
+    vim.notify('적힌 것이 없습니다')
+    return
+  end
+  local lines = { '초점이 옮겨간 자취 (최근 ' .. #focus_log .. '줄)', '' }
+  for _, l in ipairs(focus_log) do
+    lines[#lines + 1] = l
+  end
+  -- EDIT 창을 빼앗지 않도록 아래에 가로로 연다
+  vim.cmd('botright new')
+  local b = api.nvim_get_current_buf()
+  api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  vim.bo[b].buftype = 'nofile'
+  vim.bo[b].bufhidden = 'wipe'
+  vim.bo[b].swapfile = false
+  vim.bo[b].modifiable = false
+  pcall(api.nvim_buf_set_name, b, 'VimIde-FocusLog')
+end, { bang = true, desc = '초점이 옮겨간 자취를 보여준다' })
