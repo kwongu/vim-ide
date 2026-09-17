@@ -2852,6 +2852,19 @@ nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
 nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
 nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
+" 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.
+"
+"          이미 목록에 있는 파일은 autoindex.lua 가 저장할 때마다 그 파일
+"          하나만 갱신한다(global --single-update, 몇 ms). 함수를 넣거나
+"          지우면 바로 반영되므로 이 옵션과 상관없이 늘 최신이다.
+"          이 옵션이 메우는 것은 '목록에 없는 파일'뿐이다 - preset 의
+"          디렉터리 항목 아래에 새로 만든 파일이 그렇다. 그때만 목록을
+"          다시 펴고(0.36초) 그 파일 하나를 넣는다(0.04초). 전체 재색인은
+"          하지 않는다. 디렉터리 항목 밖이면 아무 것도 하지 않는다.
+"          잇달아 저장해도 마지막 저장 뒤 한 번만 돈다.
+let g:projectfiles_index_new_on_save = 1
+" 1000 (기본) 저장이 멈추고 이만큼(ms) 지나면 확인한다.
+let g:projectfiles_index_new_on_save_delay = 1000
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 " Source Insight 의 Lookup References: 색인된 파일 '안에서만' 글자를 찾는다.
 " relation window 가 떠 있으면 거기에 파일별로 묶어서, 아니면 quickfix 로.

@@ -3911,6 +3911,102 @@ api.nvim_create_user_command('ProjectFilesReindex', function()
   notify('재색인 시작')
 end, { desc = 'Rebuild the index for the current file list' })
 
+-- 새로 만든 파일을 저장하면 그것만 색인에 넣는다
+--
+-- 이미 목록에 있는 파일은 autoindex.lua 의 BufWritePost 가 저장할 때마다
+-- 'global --single-update' 로 갱신한다(그 파일 하나, 몇 ms). 함수를 넣거나
+-- 지우면 바로 반영되므로 여기서 할 일이 없다 - 그냥 돌아간다.
+--
+-- 남는 것은 '목록에 없는 파일'이다. 새로 만든 파일이 대표적인데,
+-- autoindex 는 목록 밖이라 일부러 건너뛴다. preset 의 디렉터리 항목 아래에
+-- 생긴 파일이라면 목록에 들어가야 맞다. 그래서 그때만:
+--   1) 목록을 다시 편다 (디렉터리 항목을 다시 훑는다)
+--   2) 그 파일 하나만 'global --single-update' 로 넣는다
+-- 전체 재색인('gtags -i')은 하지 않는다. 실측(개발서버, 목록 273개):
+-- 다시 펴기 0.36초, 한 파일 넣기 0.04초.
+--
+-- 디렉터리 항목 아래가 아니면 다시 펴 봐야 목록에 들어갈 수 없다. 그건
+-- 경로만 보고 미리 걸러서 아무 것도 하지 않는다 - 임시 파일을 저장할
+-- 때마다 find 가 도는 일이 없어야 한다.
+--
+-- 묶어서 한 번만 돈다. :wa 처럼 잇달아 저장해도 마지막 저장 뒤 한 번이다.
+--
+--   let g:projectfiles_index_new_on_save = 0     " 끈다
+--   let g:projectfiles_index_new_on_save_delay = 1000
+local save_gen = 0
+api.nvim_create_autocmd('BufWritePost', {
+  group = group,
+  callback = function(a)
+    if tonumber(cfg('index_new_on_save', 1)) == 0 then
+      return
+    end
+    if not (a.buf and api.nvim_buf_is_valid(a.buf))
+        or vim.bo[a.buf].buftype ~= '' then
+      return
+    end
+    local path = a.match ~= '' and vim.fn.fnamemodify(a.match, ':p') or nil
+    if not path then
+      return
+    end
+    save_gen = save_gen + 1
+    local mine = save_gen
+    local delay = tonumber(cfg('index_new_on_save_delay', 1000)) or 1000
+    vim.defer_fn(function()
+      if mine ~= save_gen then
+        return -- 그 사이 또 저장했다. 마지막 것이 한다.
+      end
+      local root = root_of(path)
+      if not root or root == '' then
+        return
+      end
+      -- '색인하지 않는 모드' 는 사용자가 그렇게 고른 것이다. 건드리지 않는다.
+      if type(_G.projectfiles_should_index) == 'function'
+          and not _G.projectfiles_should_index(root) then
+        return
+      end
+      local list = root .. '/' .. (dbdir() or '.tags') .. '/files'
+      if not uv.fs_stat(list) then
+        return -- auto 모드(목록이 없다): autoindex 가 이미 넣었다
+      end
+      local rel = rel_to(root, path)
+      local c = s.cache[root]
+      local function listed(files)
+        for _, f in ipairs(files or {}) do
+          if f == rel then
+            return true
+          end
+        end
+        return false
+      end
+      if listed(c and c.files) then
+        return -- 이미 목록에 있다: autoindex 가 방금 갱신했다
+      end
+      -- 아직 한 번도 펴 본 적이 없으면 목록 파일을 직접 본다
+      if not (c and c.files) and listed(vim.fn.readfile(list)) then
+        return
+      end
+      -- 디렉터리 항목 아래인가. 아니면 다시 펴도 들어갈 수 없다.
+      local under = false
+      for _, e in ipairs((c and c.entries) or {}) do
+        local p = tostring(e.path or '')
+        if p ~= '' and rel:sub(1, #p + 1) == p .. '/' then
+          under = true
+          break
+        end
+      end
+      if not under then
+        return
+      end
+      local ok, files = pcall(materialize, root)
+      if not (ok and listed(files)) then
+        return -- 목록에 못 들어갔다: 색인은 그대로 둔다
+      end
+      pcall(single_update, root, { rel })
+    end, delay)
+  end,
+  desc = '새 파일을 저장하면 목록에 넣고 그것만 색인 (g:projectfiles_index_new_on_save)',
+})
+
 -- a preset is applied as soon as the session knows which project it is in
 -- as early as possible (the indexer may start on the first BufReadPost),
 -- and again once the session is up and the real project is known

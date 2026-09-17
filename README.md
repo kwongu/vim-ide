@@ -300,6 +300,18 @@ behind it: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
 `:ProjectFilesReindex` (each takes an optional argument to skip the picker),
 plus `:ProjectFilesPresetShare` (below).
 
+**Saving keeps the index current.** Writing a file the list already knows
+updates the database for that one file (`global --single-update`, a few
+milliseconds, in the background), so a function added or removed is
+searchable the moment `:w` returns - no re-index and nothing to wait for. A
+file the list does not know yet is the only case that needs more: if it was
+created under a *directory* entry of the preset, the list is expanded again
+and that single file is added (0.36 s + 0.04 s on this kernel index, once, a
+second after the last save). Created anywhere else, nothing runs at all -
+expanding the list could not have brought it in, so there is no point paying
+for a `find`. `g:projectfiles_index_new_on_save = 0` switches that second
+half off; the per-file update is autoindex's and stays.
+
 `\fs` (`:ProjectSymbols [name]`) is the symbol half of the same idea: every
 definition the database holds - `global -x -d` answers with all 31k of them in
 about ten milliseconds on this kernel index - goes into one telescope picker,
