@@ -335,6 +335,7 @@ local s = {
   tree_off = false,   -- 사용자가 neo-tree 를 직접 껐다 (F3 으로도 안 되살린다)
   wide = nil,         -- 탭마다: 넓히기 전의 창별 크기 (창 id 기준)
   tree_last = nil,    -- 트리가 마지막으로 펼쳐 보여준 파일 (같으면 다시 안 그린다)
+  tree_gen = nil,     -- 따라가기 세대. 낡은 navigate 콜백을 가려낸다
   last_edit = nil,    -- 직전에 포커스가 있던 편집 창 (여기에 파일을 연다)
   edit_hist = {},     -- 최근 편집 창 (새 것이 앞). 곁창이 만들어지는 찰나에
                       -- last_edit 이 오염되면 그 다음 것으로 되돌린다.
@@ -2932,19 +2933,36 @@ local function tree_follow_now()
     return
   end
   s.tree_last = file
-  -- 초점은 '사용자가 지금 있는 창'으로 돌아가야 한다.
-  --
-  -- 예전에는 follow_file() 이 고른 창으로 돌려보냈다. 그 창은 '어느 파일을
-  -- 트리에서 펼칠까'를 정하는 값일 뿐이고, 사용자가 패널이나 미리보기에
-  -- 있으면 pick_src_win() 의 EDIT 창이 된다. 그대로 쓰면 읽고 있던 사람을
-  -- 엉뚱한 EDIT 창으로 끌어간다 - 다시 패널로 돌아오면 WinEnter 가 또
-  -- 따라오기를 걸어서, 커서가 갔다 왔다를 반복한다.
+  -- 이 따라가기가 몇 번째인지. neo-tree 의 스캔은 비동기이고 앞선 것을
+  -- 취소하지 않아서 여러 개가 겹쳐 돈다. 낡은 콜백은 손을 떼야 한다.
+  s.tree_gen = (s.tree_gen or 0) + 1
+  local gen = s.tree_gen
   local prev = api.nvim_get_current_win()
   st.current_position = 'current'
   pcall(function()
     mgr.navigate(st, force_cwd and vim.fn.fnamemodify(file, ':h') or root, file,
       function()
-        if api.nvim_win_is_valid(prev) and api.nvim_get_current_win() ~= prev then
+        if gen ~= s.tree_gen then
+          return -- 그 사이 더 새 따라가기가 걸렸다. 저쪽이 맡는다.
+        end
+        -- 되돌리기는 '트리가 제 창으로 초점을 끌어갔을 때'만 한다.
+        --
+        -- 예전에는 '지금 창이 prev 가 아니면' 되돌렸다. 그런데 스캔이
+        -- 도는 동안(실측: 트리를 150개쯤 펼쳐 두면 740ms, 겹치면 2.7초까지
+        -- 늘어난다) 초점이 움직였다면 그건 사람 뜻이거나 먼저 건 따라가기의
+        -- 콜백이다. 어느 쪽이든 덮으면 안 된다. 실제로 그 조건은 '되돌릴
+        -- 것이 없을 때만' 참이 되는 오발이었고, 되돌림이 다시 WinEnter 를
+        -- 쏘아 따라가기를 걸어서, EDIT 창 둘이 서로 다른 파일을 물고 있으면
+        -- 사람 손 없이 왕복을 계속했다(실측 10.6초에 11번).
+        --
+        -- 트리가 이미 떠 있고 position='current' 이면 neo-tree 는 초점을
+        -- 건드리지 않는다: acquire_window 가 창이 있으면 곧장 돌아와
+        -- (neo-tree/ui/renderer.lua) new_win 이 nil 이라 nvim_set_current_win
+        -- 갈래를 타지 않고, 위치 복원도 do_not_focus_window 다. 그래서 이
+        -- 조건에서 되돌릴 일은 거의 없고, 없는 것이 정상이다.
+        if s.tree_win and api.nvim_win_is_valid(s.tree_win)
+            and api.nvim_get_current_win() == s.tree_win
+            and api.nvim_win_is_valid(prev) then
           pcall(api.nvim_set_current_win, prev)
         end
       end, false)
