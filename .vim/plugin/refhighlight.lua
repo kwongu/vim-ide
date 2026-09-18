@@ -78,6 +78,11 @@ local function in_string_or_comment(buf, row, col)
 end
 
 local function paint()
+  -- 단축키 색칠 전체를 끄는 한 스위치 (\C, :VimIdeAutoColor)
+  if (tonumber(vim.g.vimide_auto_color) or 1) == 0 then
+    clear()
+    return
+  end
   if vim.g.refhighlight == 0 then
     return
   end

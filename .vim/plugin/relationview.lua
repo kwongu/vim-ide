@@ -7102,6 +7102,10 @@ function _G.vimide_mark_text(text, keep)
   if type(text) ~= 'string' or text == '' then
     return false
   end
+  -- 단축키 색칠 전체를 끄는 한 스위치 (\C, :VimIdeAutoColor)
+  if (tonumber(vim.g.vimide_auto_color) or 1) == 0 then
+    return false
+  end
   if (tonumber(vim.g.vimide_lookup_mark) or 1) == 0 then
     return false
   end
@@ -7116,6 +7120,12 @@ function _G.vimide_mark_text(text, keep)
     end
   end
   local ok = pcall(vim.fn['mark#DoMark'], 0, pat)
+  if ok then
+    -- 자동으로 칠한 것만 적어 둔다. 색칠을 끌 때 이것만 벗기고, 사용자가
+    -- F4 로 손수 칠한 색은 건드리지 않는다.
+    s.auto_marks = s.auto_marks or {}
+    s.auto_marks[pat] = true
+  end
   return ok
 end
 
@@ -7144,7 +7154,8 @@ function _G.vimide_jump_mark_push(word)
   if type(word) ~= 'string' or word == '' then
     return skip()
   end
-  if (tonumber(vim.g.vimide_lookup_mark) or 1) == 0
+  if (tonumber(vim.g.vimide_auto_color) or 1) == 0
+      or (tonumber(vim.g.vimide_lookup_mark) or 1) == 0
       or (tonumber(vim.g.vimide_jump_mark) or 1) == 0 then
     return skip()
   end
@@ -7225,6 +7236,27 @@ function _G.vimide_jump_mark_clear(n)
     end
     _G.vimide_jump_mark_pop_at(1)
   end
+end
+
+-- 자동으로 칠한 색만 벗긴다 (:VimIdeAutoColor off / \C).
+--
+-- 손으로 칠한 것은 그대로 둔다: 점프 색은 jump_marks 가 '우리가 칠한 것'만
+-- 들고 있고, 찾기 색은 s.auto_marks 에 적어 둔 것만 벗긴다. vim-mark 은 같은
+-- 패턴에 두 번 부르면 지우는 쪽이라, 칠할 때 쓴 mark#DoMark 를 그대로 다시
+-- 부르면 된다 - 다만 그 사이 사용자가 지웠을 수 있으니 번호부터 확인한다.
+function _G.vimide_auto_color_clear()
+  local n = 0
+  pcall(_G.vimide_jump_mark_clear, 1000) -- 스택이 비면 알아서 멈춘다
+  for pat in pairs(s.auto_marks or {}) do
+    local ok, num = pcall(vim.fn['mark#GetMarkNumber'], pat, 0, 1)
+    if ok and type(num) == 'number' and num > 0 then
+      if pcall(vim.fn['mark#DoMark'], 0, pat) then
+        n = n + 1
+      end
+    end
+  end
+  s.auto_marks = {}
+  return n
 end
 
 local function lookup_to_qf(root, pat, refs)

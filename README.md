@@ -85,6 +85,7 @@ F2: Source files under the current path are indexed; `cscope.files` is written t
 F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
+\C: Turn the automatic colouring on and off (`:VimIdeAutoColor`, `g:vimide_auto_color`). This covers only what a shortcut paints by itself - the jump colour of `<C-]>`/`<C-t>`, the colour `\\c` and `<C-/>` (`:LookupReferences`) put on what they searched for, and the shading of the symbol under the cursor. What you paint by hand, `<F4>` and `<F8>`, is never touched: switching the automatic colouring off strips only the colours it put there itself
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)

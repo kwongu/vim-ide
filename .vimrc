@@ -1350,6 +1350,48 @@ nnoremap <silent> <C-CR> :call <SID>RvJump()<CR>
 " Ctrl+t 로 돌아오면 그만큼만 풀린다.
 let g:vimide_jump_mark = 1
 
+" 단축키가 자동으로 칠하는 색을 통째로 켜고 끄는 한 스위치.
+"
+" 여기에 딸린 것:
+"   <C-]> / g] / f] / <C-t>   점프한 심볼의 F4 색  (g:vimide_jump_mark)
+"   \\c                        caller 찾기가 칠하는 색 (g:vimide_lookup_mark)
+"   <C-/> / <C-_> / \fr / \fF  :LookupReferences 가 칠하는 색  (같은 옵션)
+"   커서 밑 심볼 음영          refhighlight        (g:refhighlight)
+"
+" 손으로 칠하는 것은 이 스위치와 상관없이 늘 동작한다:
+"   <F4> vim-mark,  <F8> 노란 표시(yellowmark)
+"
+" 끄면 '자동으로 칠한 색'만 벗겨진다 - 손으로 칠해 둔 색은 그대로 남는다.
+"
+"   \C                        켜고 끄기
+"   :VimIdeAutoColor          켜고 끄기
+"   :VimIdeAutoColor on|off   직접 정하기
+"
+" 기능별로 따로 끄고 싶으면 이것 말고 위 괄호 안의 옵션을 쓴다.
+let g:vimide_auto_color = 1
+
+func! s:AutoColor(arg) abort
+    let l:a = substitute(a:arg, '^\s*\|\s*$', '', 'g')
+    if l:a ==? 'on' || l:a ==# '1'
+        let g:vimide_auto_color = 1
+    elseif l:a ==? 'off' || l:a ==# '0'
+        let g:vimide_auto_color = 0
+    else
+        let g:vimide_auto_color = get(g:, 'vimide_auto_color', 1) ? 0 : 1
+    endif
+    " 끌 때는 자동으로 칠해 둔 것을 벗긴다. 손으로 칠한 것은 남는다.
+    " (nvim 전용 - 칠하는 쪽이 relationview.lua 라 vim 8.1 에는 없다)
+    if !g:vimide_auto_color && has('nvim') && exists('*luaeval')
+        silent! call luaeval('_G.vimide_auto_color_clear ~= nil and (function() _G.vimide_auto_color_clear() return 1 end)() or 0')
+    endif
+    echohl ModeMsg
+    echo '단축키 자동 색칠: ' . (g:vimide_auto_color ? '켬' : '끔')
+    echohl None
+endfunc
+command! -nargs=? VimIdeAutoColor call s:AutoColor(<q-args>)
+" \c 는 NERDCommenter 가 쓰고 있어서 대문자 \C 를 쓴다.
+nnoremap <silent> <Leader>C :VimIdeAutoColor<CR>
+
 " f] 도 g] 와 같이 '지금 EDIT 창에서 그 심볼로' 가게 할지.
 " 0 으로 두면 f] 는 vim 본래의 '이 줄에서 다음 ] 로' 가 된다.
 let g:vimide_edit_jump_fkey = 1
