@@ -61,7 +61,7 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Smooth scrolling: moves smoothly the screen when exploring source code.
 
-* Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs (`<leader>v`).
+* Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs and 3-way merges (`<leader>v`) and `gitsigns.nvim` for the gutter of the buffer you are editing - `<leader>ha` stages the hunk under the cursor (or, from visual mode, just the lines you selected), `<leader>hr` reverts it, `<leader>hu` unstages, `<leader>hv` previews it, `<leader>ht` toggles the blame of the current line, and `]h`/`[h` walk the hunks. That is partial staging without leaving the file, which is the half of Magit a status window cannot give you. The gutter is gitsigns' in nvim and `vim-signify`'s in real vim 8.1 (the dev server); running both draws the same column twice, so nvim turns signify off (`g:vimide_signify_in_nvim = 1` puts it back). Line blame is **off by default**: it runs `git blame` on the file every time the cursor rests, and this setup lives on 60k-file kernel trees, some of them over SMB - `<leader>ht` turns it on when you want it, `g:gitsigns_blame_on = 1` from the start.
 
 * Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (F10 or `<leader>o`, and only when you press it), built on treesitter so it needs no language server. `:Tagbar` stays as it was.
 
@@ -201,6 +201,10 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 <leader><leader>a: Find the assignments under the cursor, and disaplys the results via quickfix window
 
 <leader>s: Neogit - Magit style git status in a new tab (s stage, u unstage, c commit, P push, ? help)
+<leader>ha / <leader>hr: stage / revert the hunk under the cursor, or the selected lines in visual mode (gitsigns, nvim only)
+<leader>hu / <leader>hv: unstage that hunk / show it in a float
+<leader>ht: toggle the blame of the current line (off by default - it runs git blame on every cursor rest)
+]h / [h: next / previous hunk (]c and [c stay vim's own diff-mode motions)
 <leader>v: DiffviewOpen - side by side diff of the working tree
 <leader>o: Toggle the aerial symbol outline of the current file
 <leader>t: Toggle the neo-tree file tree, same as F9 (a add, d delete, r rename)

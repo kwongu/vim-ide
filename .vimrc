@@ -171,6 +171,13 @@ endif
 Plug 'preservim/tagbar'
 Plug 'vim-utils/vim-troll-stopper'
 Plug 'Raimondi/delimitMate'
+" nvim 에서는 gitsigns 가 왼쪽 기둥을 맡는다. 둘 다 켜면 같은 자리에 두 번
+" 그리고, 한쪽이 지운 표시를 다른 쪽이 되살려 깜빡인다. 진짜 vim 8.1(개발
+" 서버)에는 gitsigns(lua)가 없으므로 거기서는 signify 가 그대로 맡는다.
+"   let g:vimide_signify_in_nvim = 1   " 예전처럼 nvim 에서도 signify 를
+if has('nvim') && !get(g:, 'vimide_signify_in_nvim', 0)
+    let g:signify_disable_by_default = 1
+endif
 Plug 'mhinz/vim-signify'
 Plug 'terryma/vim-smooth-scroll'
 "Plug 'ctrlpvim/ctrlp.vim'
@@ -206,6 +213,7 @@ Plug 'ronakg/quickr-preview.vim'
 " Magit 스타일 git UI + diff 뷰어
 Plug 'NeogitOrg/neogit'
 Plug 'sindrets/diffview.nvim'
+Plug 'lewis6991/gitsigns.nvim'
 " Source Insight 스타일: ctags 자동 색인 / 심볼 아웃라인 / 파일 트리
 Plug 'ludovicchabant/vim-gutentags'
 Plug 'stevearc/aerial.nvim'
@@ -391,10 +399,25 @@ require'telescope'.load_extension'fzf'
 EOF
 
 " ------------------------------------
-" Neogit (Magit for nvim) + diffview
+" Neogit (Magit for nvim) + diffview + gitsigns
+"
+" Emacs 의 Magit 과 같은 흐름을 셋이 나눠 맡는다.
+"   Neogit    상태 화면, 스테이징, 커밋, 푸시 (Magit 의 팝업 메뉴)
+"   Diffview  파일별 변경점을 나란히, 충돌은 3-way 로
+"   gitsigns  편집 중인 창의 왼쪽 기둥에 실시간 표시 + 헝크 단위 조작
+"
 "   <leader>s : Neogit 상태 화면(새 탭)  -  s/u 스테이징, cc 커밋, P 푸시
 "   <leader>v : DiffviewOpen (작업 트리 전체 diff)
-"   (<leader>m 은 vim-mark 가 이미 쓰고 있어 s(tatus) 로 두었다)
+"   <leader>ha: 커서 헝크를 스테이징       (비주얼로 고른 줄만도 된다)
+"   <leader>hr: 커서 헝크를 되돌린다       (비주얼도 같다)
+"   <leader>hv: 커서 헝크를 띄워 본다
+"   <leader>ht: 이 줄 blame 을 켜고 끈다
+"   ]h / [h   : 다음 / 이전 헝크
+"   (<leader>m 은 vim-mark 가, <leader>g 는 :Gtags 가 이미 쓰고 있다.
+"    \h* 는 예전 gitgutter 용으로 주석만 남아 있던 자리를 되살린 것이다)
+"
+" 왼쪽 기둥 표시는 nvim 에서 gitsigns 가, 진짜 vim 8.1 에서는 vim-signify 가
+" 맡는다. 둘을 같이 켜면 같은 자리에 두 번 그린다 - 아래에서 갈라 둔다.
 " ------------------------------------
 lua << EOF
 -- 아직 :PlugInstall 을 돌리지 않은 상태에서도 startup 이 깨지지 않게 한다
@@ -412,9 +435,40 @@ rv_setup('neogit', {
   disable_insert_on_commit = 'auto',
 })
 rv_setup('diffview', {})
+
+-- gitsigns: 편집 중인 창의 왼쪽 기둥과 헝크 단위 조작
+--
+-- 이 줄 blame(current_line_blame)은 기본으로 꺼 둔다. 커서가 멈출 때마다
+-- 'git blame -L' 을 그 파일에 돌리는데, 이 설정이 다루는 트리는 커널
+-- (6만 파일)이고 더러 SMB/OneDrive 위에 있다. 예전에 nerdtree-git-plugin 의
+-- git status 폭주로 맥이 뜨거워진 전례가 있어(50GB 읽기) 기본값으로 켜지
+-- 않는다. \ht 로 언제든 켠다.
+--   let g:gitsigns_blame_on = 1    " 처음부터 켜 두고 싶으면
+rv_setup('gitsigns', {
+  current_line_blame = (tonumber(vim.g.gitsigns_blame_on) or 0) ~= 0,
+  current_line_blame_opts = { delay = 500, virt_text_pos = 'eol' },
+  -- 큰 파일에서는 손을 뗀다 (커널에는 1만 줄짜리 헤더가 흔하다)
+  max_file_length = tonumber(vim.g.gitsigns_max_lines) or 40000,
+  attach_to_untracked = false,
+})
 EOF
 nnoremap <silent> <Leader>s <Cmd>Neogit<CR>
 nnoremap <silent> <Leader>v <Cmd>DiffviewOpen<CR>
+
+" 헝크 단위 조작. nvim 에서만 - gitsigns 가 없으면 아무 일도 하지 않는다.
+if has('nvim')
+    nnoremap <silent> <Leader>ha <Cmd>Gitsigns stage_hunk<CR>
+    nnoremap <silent> <Leader>hr <Cmd>Gitsigns reset_hunk<CR>
+    " 비주얼로 고른 줄만 스테이징/되돌리기 (헝크 전체가 아니라)
+    xnoremap <silent> <Leader>ha :Gitsigns stage_hunk<CR>
+    xnoremap <silent> <Leader>hr :Gitsigns reset_hunk<CR>
+    nnoremap <silent> <Leader>hv <Cmd>Gitsigns preview_hunk<CR>
+    nnoremap <silent> <Leader>hu <Cmd>Gitsigns undo_stage_hunk<CR>
+    nnoremap <silent> <Leader>ht <Cmd>Gitsigns toggle_current_line_blame<CR>
+    " ]c / [c 는 vim 의 diff 모드가 쓰는 자리라 ]h / [h 로 둔다
+    nnoremap <silent> ]h <Cmd>Gitsigns next_hunk<CR>
+    nnoremap <silent> [h <Cmd>Gitsigns prev_hunk<CR>
+endif
 
 " ------------------------------------
 " aerial: 현재 파일의 심볼 아웃라인(Source Insight 의 Symbol Window)
