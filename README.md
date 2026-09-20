@@ -85,6 +85,15 @@ F2: Source files under the current path are indexed; `cscope.files` is written t
 F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
+Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
+A float shows `Old` and takes the `New` text; Enter then offers **ALL**, one
+by one (`Yes`/`No`), or cancel. One-by-one hands over to vim's own `:s///gc`
+prompt - `y` replaces, `n` skips, `a` takes the rest, `q` stops - and the
+whole thing is a single `:s`, so one `u` undoes it. `Esc` cancels anywhere.
+Word boundaries are on (`g:vimide_replace_word`), so renaming `old_name`
+leaves `old_names` alone. `Ctrl+h` used to be "go to the window on the left";
+`<C-w>h` still is, and `g:vimide_replace_ctrl_h = 0` gives the old key back
+(`,ch` keeps working either way)
 \C: Turn the automatic colouring on and off (`:VimIdeAutoColor`, `g:vimide_auto_color`). This covers only what a shortcut paints by itself - the jump colour of `<C-]>`/`<C-t>`, the colour `\\c` and `<C-/>` (`:LookupReferences`) put on what they searched for, and the shading of the symbol under the cursor. What you paint by hand, `<F4>` and `<F8>`, is never touched: switching the automatic colouring off strips only the colours it put there itself
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`

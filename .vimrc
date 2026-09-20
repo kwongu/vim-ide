@@ -2352,7 +2352,11 @@ nmap <S-k> <C-W>-
 nmap <S-l> <C-W>>
 
 "===== Move between split windows
-map <C-h> :wincmd h<cr>
+" <C-h> 는 창 이동이 아니라 '찾아 바꾸기'다 (아래 g:vimide_replace_ctrl_h).
+" 왼쪽 창으로 가는 길은 <C-w>h 가 그대로 있다.
+if !get(g:, 'vimide_replace_ctrl_h', 1)
+	map <C-h> :wincmd h<cr>
+endif
 map <C-l> :wincmd l<cr>
 map <C-k> :wincmd k<cr>
 map <C-j> :wincmd j<cr>
@@ -2398,6 +2402,68 @@ endfunc
 nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
 
 " 다음 / 이전 / 지금 버퍼 닫기
+" 찾아 바꾸기 - 커서 밑 심볼을 이 파일 안에서 바꾼다
+"
+"   <C-h>  또는  ,ch
+"
+" 떠 있는 창이 Old(커서 밑 심볼)를 보여주고 New 를 받는다. Enter 를 치면
+" '한 번에 모두 / 하나씩 Yes,No / 취소' 를 고르는 창이 뜬다. 하나씩은 vim 의
+" :s///gc 그대로다 - y 바꾼다, n 건너뛴다, a 여기서부터 전부, q 그만둔다.
+" 어디서든 <Esc> 는 취소. 바꾼 뒤 u 한 번이면 통째로 되돌아온다.
+"
+"   let g:vimide_replace_word = 0     " 낱말 경계로 찾지 않는다
+"                                     " (1 이면 struct 가 structure 에 안 걸린다)
+"   let g:vimide_replace_ctrl_h = 0   " <C-h> 를 예전처럼 창 왼쪽 이동으로
+"                                     " (그래도 ,ch 는 그대로 쓴다)
+"   :VimIdeReplace [찾을말]           " 명령으로도
+"
+" nvim 은 떠 있는 창(findreplace.lua), vim 8.1 은 물음 두 번 + confirm() 이다.
+let g:vimide_replace_word = 1
+let g:vimide_replace_ctrl_h = 1
+
+func! s:Replace(...) abort
+	let l:old = a:0 > 0 && !empty(a:1) ? a:1 : expand('<cword>')
+	if has('nvim') && exists('*luaeval')
+		call luaeval('_G.vimide_replace ~= nil and (function() _G.vimide_replace(_A) return 1 end)() or 0', l:old)
+		return
+	endif
+	" vim 8.1: 떠 있는 창이 없다. 같은 차례를 물음으로 받는다.
+	if empty(l:old)
+		echohl WarningMsg | echo '커서 밑에 바꿀 말이 없습니다' | echohl None
+		return
+	endif
+	let l:new = ''
+	try
+		echohl Question
+		let l:new = input('Old: ' . l:old . '   New: ')
+	catch /^Vim:Interrupt$/
+		return
+	finally
+		echohl None
+	endtry
+	if empty(l:new) || l:new ==# l:old
+		return
+	endif
+	let l:pat = '\V' . escape(l:old, '\/')
+	if get(g:, 'vimide_replace_word', 1) && l:old =~# '^\w\+$'
+		let l:pat = '\<' . l:pat . '\>'
+	endif
+	let l:rep = escape(l:new, '\/&~')
+	redraw
+	let l:c = confirm(printf("'%s' -> '%s'", l:old, l:new),
+				\ "한 번에 모두(&A)\n하나씩 물어보기(&O)\n취소(&C)", 1)
+	if l:c == 1
+		execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/g'
+	elseif l:c == 2
+		execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/gc'
+	endif
+endfunc
+command! -nargs=? VimIdeReplaceVim call s:Replace(<q-args>)
+nnoremap <silent> ,ch :call <SID>Replace()<CR>
+if get(g:, 'vimide_replace_ctrl_h', 1)
+	nnoremap <silent> <C-h> :call <SID>Replace()<CR>
+endif
+
 map ,r :call <SID>BufCycle('bn!')<CR>
 map ,e :call <SID>BufCycle('bp!')<CR>
 map ,w :call <SID>BufCycle('bw!')<CR>
