@@ -1201,23 +1201,30 @@ local function materialize(root)
   end
   -- 크기/바이너리로 뺀 것을 한 번만 말한다. 조용히 빼면 '왜 이 파일이
   -- \fo 에 없지'가 된다.
+  --
+  -- 한 줄을 넘기지 않는다. 예전에는 가장 큰 파일 이름과 옵션 두 개를 모두
+  -- 적어서 110자가 넘었고, 그러면 vim 이 'Press ENTER or type command to
+  -- continue' 로 멈춰 선다. 이 알림은 시작할 때 뜨므로, 매번 키를 한 번씩
+  -- 더 눌러야 했다 - 사용자에게는 '시작이 느려졌다'로 보인다.
+  -- 자세한 것은 :ProjectFilesSkipped 로 본다.
   if (skipped.big + skipped.binary) > 0 then
     local key = ('%s\0%d\0%d'):format(root, skipped.big, skipped.binary)
+    s.skip_detail = {
+      root = root, big = skipped.big, binary = skipped.binary,
+      worst = skipped.worst,
+      max = tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0,
+    }
     if s.skip_told ~= key then
       s.skip_told = key
       local parts = {}
       if skipped.binary > 0 then
-        parts[#parts + 1] = ('바이너리 %d개'):format(skipped.binary)
+        parts[#parts + 1] = ('바이너리 %d'):format(skipped.binary)
       end
       if skipped.big > 0 then
-        local w = skipped.worst
-        parts[#parts + 1] = ('%s 초과 %d개%s'):format(
-          ('%.0fMB'):format((tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0) / 1048576),
-          skipped.big,
-          w and (' (최대 %s, %.0fMB)'):format(vim.fs.basename(w.path), w.size / 1048576) or '')
+        parts[#parts + 1] = ('%.0fMB 초과 %d'):format(
+          (tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0) / 1048576, skipped.big)
       end
-      notify('색인에서 뺐습니다: ' .. table.concat(parts, ', ')
-        .. '  (g:projectfiles_max_bytes / _skip_binary 로 조절)')
+      notify('색인 제외: ' .. table.concat(parts, ', ') .. '  (:ProjectFilesSkipped)')
     end
   end
   if dropped > 0 and s.nested_told ~= (root .. '\0' .. dropped) then
@@ -4035,6 +4042,27 @@ end, { nargs = '?', complete = function(arg)
   end
   return out
 end, desc = 'Find a symbol in the index and jump to its definition' })
+
+-- 무엇을 왜 색인에서 뺐는지. 시작할 때 뜨는 한 줄짜리 알림의 자세한 판이다
+-- (그 알림을 길게 두면 vim 이 'Press ENTER' 로 멈춰 서므로 갈라 두었다).
+api.nvim_create_user_command('ProjectFilesSkipped', function()
+  local d = s.skip_detail
+  if not d or (d.big + d.binary) == 0 then
+    notify('색인에서 뺀 파일이 없습니다')
+    return
+  end
+  local out = {
+    ('%s 에서 색인에서 뺀 파일'):format(vim.fn.fnamemodify(d.root, ':~')),
+    ('  바이너리      %d개  (g:projectfiles_skip_binary = 0 으로 끕니다)'):format(d.binary),
+    ('  %.0fMB 초과    %d개  (g:projectfiles_max_bytes 로 조절합니다)'):format(
+      d.max / 1048576, d.big),
+  }
+  if d.worst then
+    out[#out + 1] = ('  가장 큰 것   %s  (%.1fMB)'):format(
+      vim.fn.fnamemodify(d.worst.path, ':~:.'), d.worst.size / 1048576)
+  end
+  vim.api.nvim_echo({ { table.concat(out, '\n') } }, true, {})
+end, { desc = '색인에서 뺀 파일과 그 이유' })
 
 api.nvim_create_user_command('ProjectFilesReindex', function()
   local root = cur_root()

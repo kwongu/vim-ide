@@ -2527,7 +2527,8 @@ nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
 " 찾아 바꾸기 - 커서 밑 심볼을 이 파일 안에서 바꾼다
 "
 "   <C-h>   떠 있는 창 (nvim). Old 를 보여주고 New 를 받는다.
-"   ,ch     명령행에서 직접 친다. Old 와 New 를 차례로 묻는다.
+"   ,ch     예전 그대로 :.,$s/<낱말>/ 을 명령줄에 띄운다 (아래 참고).
+"           묻는 방식이 필요하면 :VimIdeReplaceCmd
 "
 " 둘 다 커서 밑 심볼을 Old 에 채워 두되 고칠 수 있다. 빈 곳에서 불렀으면
 " Old 가 비어 있고 찾을 말부터 직접 치면 된다.
@@ -2551,7 +2552,10 @@ nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
 "   :VimIdeReplaceCmd [찾을말]        " 명령으로도 (명령행)
 let g:vimide_replace_word = 1
 let g:vimide_replace_ctrl_h = 1
-let g:vimide_replace_preview = 0
+" 1 (기본) :s 미리보기(nvim 의 inccommand)를 그대로 둔다.
+"          0 이면 시작할 때 아예 꺼서 ,ch 로 바꾸는 동안 원래 내용이
+"          가려지지 않게 한다.
+let g:vimide_replace_preview = 1
 
 " 치는 동안 미리보기를 끈다. 되돌리는 것까지 한 쌍이다.
 func! s:ReplaceNoPreview() abort
@@ -2647,7 +2651,25 @@ func! s:ReplaceFloat(...) abort
 	endif
 endfunc
 
-nnoremap <silent> ,ch :call <SID>ReplaceCmd()<CR>
+" ,ch 는 예전 그대로 명령어모드다 (요청).
+"
+"   ,ch  ->  :.,$s/<커서 밑 낱말>/      여기서 바꿀 말과 플래그를 직접 친다
+"
+" 물어보는 방식(찾을 말 -> 바꿀 말 -> 한 번에/하나씩)은 <C-h> 에 있다.
+" 명령으로도 부를 수 있다: :VimIdeReplaceCmd
+"
+" 치는 동안 화면이 실시간으로 바뀌는 것(nvim 의 inccommand)에 대하여
+"   이 한 자리에서만 껐다 켜려고 CmdlineLeave 로 되돌리는 것을 만들어 봤는데
+"   값이 제대로 돌아오지 않았다(실측: Esc 뒤 inccommand 가 빈 채로 남았다).
+"   눈에 안 띄게 망가지는 장치를 두느니 손잡이를 하나 두는 편이 낫다.
+"   거슬리면 아래 한 줄을 켜면 :s 미리보기가 통째로 꺼진다.
+"
+"     set inccommand=            " 미리보기 끔 (원래 내용이 안 가려진다)
+"     set inccommand=nosplit     " nvim 기본 (치는 대로 미리 보여준다)
+if exists('&inccommand') && get(g:, 'vimide_replace_preview', 1) == 0
+	set inccommand=
+endif
+nmap ,ch :.,$s/<C-R>=expand("<cword>")<CR>/
 if get(g:, 'vimide_replace_ctrl_h', 1)
 	nnoremap <silent> <C-h> :call <SID>ReplaceFloat()<CR>
 endif
