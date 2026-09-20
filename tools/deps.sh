@@ -94,14 +94,21 @@ ver_ge() {
 REQS='
 git|2.31|must|diffview 의 나란히 보기와 3-way 병합 (leader v). 낡으면 "Not a repo" 만 남기고 아무 일도 안 한다|git --version|
 nvim|0.9|must|RelationView, Neogit, neo-tree, 색인 자동화 - lua 로 된 것 전부|nvim --version|
-global|6.6|must|심볼 색인(gtags/global). <C-]> 와 관계 목록의 바탕|global --version|
-ctags|5.9|want|Tagbar/aerial 의 심볼 목록. Universal Ctags 라야 C11 익명 구조체를 본다|ctags --version|Universal Ctags
+global|6.6|must|심볼 색인을 읽는 쪽. <C-]>(tagfunc), RelationView, \fs, SiHlIndex 가 전부 이것을 거친다|global --version|
+gtags|6.6|must|색인을 만드는 쪽. global 과 같은 꾸러미지만 따로 확인한다 - 하나만 있으면 찾기는 되는데 갱신이 안 되는 상태가 된다|gtags --version|
+ctags|5.9|want|Tagbar/aerial 의 심볼 목록. Universal Ctags 라야 한다 - autoindex 가 --tag-relative=never 를 넘기는데 Exuberant 5.8 은 yes/no 만 받는다|ctags --version|Universal Ctags
 rg|11|want|<C-g> 의 경로 검색. 없으면 grep 으로 떨어진다(느리다)|rg --version|
 curl|7|must|vim-plug 부트스트랩과 플러그인 내려받기|curl --version|
-make|3.8|want|telescope-fzf-native 와 소스 빌드|make --version|
-node|16|want|coc.nvim 의 언어 서버|node --version|
-python3|3.6|want|일부 플러그인과 :pyx|python3 --version|
+make|3.8|want|telescope-fzf-native 빌드와 소스 설치|make --version|
+cc|4|want|위와 같다. 소스로 빌드할 때만 쓴다|cc --version|
+python3|3.6|want|install.sh 가 vim 을 python 지원으로 빌드할 때만 쓴다|python3 --version|
 '
+
+# node 는 넣지 않는다.
+#   coc.nvim 이 .vimrc:194 에서 주석으로 꺼져 있다. 남아 있는 coc-explorer 는
+#   coc 없이는 아무 일도 하지 않으므로 node 도 필요 없다. 있으면 좋은 것이
+#   아니라 '쓰지 않는 것'이라, 목록에 두면 없는 사람에게 헛일을 시킨다.
+#   coc 를 다시 켠다면 그때 node|16|want 를 넣으면 된다.
 
 # 이름 -> 패키지 이름 (배급판마다 다르다)
 pkg_for() {
@@ -250,6 +257,28 @@ if [ -s /tmp/vimide-deps-missing.$$ ]; then
 	MISSING=$(cat /tmp/vimide-deps-missing.$$)
 fi
 rm -f /tmp/vimide-deps-missing.$$
+
+# 저장소가 들고 다니는 도우미가 ~/.local/bin 에 왔는지도 본다.
+#
+# indexfiles.sh 가 없으면 autoindex 는 아무것도 만들지 않는다 - 조용히.
+# '무엇을 색인할까'를 정하는 단 한 곳이라, 없으면 ctags_build 가 그냥
+# 돌아 나간다. install.sh 가 복사하지만, 복사가 안 됐는지는 눈에 안 띈다.
+for _h in indexfiles.sh ctags-nice; do
+	if [ -x "${LOCAL}/bin/${_h}" ]; then
+		printf '  %-10s %-10s %-8s %s\n' "${_h}" '-' '-' 'ok (저장소 것)'
+	elif [ -r "${VIMIDE}/.local/bin/${_h}" ]; then
+		if [ "${MODE}" = check ]; then
+			printf '  %-10s %-10s %-8s %s\n' "${_h}" '-' '-' 'MISS (복사하면 된다)'
+		else
+			mkdir -p "${LOCAL}/bin"
+			cp -f "${VIMIDE}/.local/bin/${_h}" "${LOCAL}/bin/${_h}"
+			chmod +x "${LOCAL}/bin/${_h}"
+			printf '  %-10s %-10s %-8s %s\n' "${_h}" '-' '-' '넣었음'
+		fi
+	else
+		printf '  %-10s %-10s %-8s %s\n' "${_h}" '-' '-' '저장소에도 없음'
+	fi
+done
 
 if [ -z "${MISSING}" ]; then
 	say "### 의존성 모두 충족 ###"
