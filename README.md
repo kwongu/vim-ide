@@ -1591,8 +1591,8 @@ nvim -u NONE -c 'set mouse=a' -c 'nnoremap <X1Mouse> :echo "back OK"<CR>' -c 'nn
 The way through is to make the button send a *key* instead. Back and forward
 are therefore also on `Ctrl+o` / `Ctrl+i` everywhere (the panel and preview
 learned those here; the edit window always had them) and on a configurable
-alias pair: `<F17>`/`<F18>`, `<S-F5>`/`<S-F6>`, `<A-Left>`/`<A-Right>` and
-`<C-RightMouse>`/`<S-RightMouse>` by default. The two function-key names are
+alias pair: `<F17>`/`<F18>`, `<S-F5>`/`<S-F6>`, `<A-Left>`/`<A-Right>`,
+`<M-b>`/`<M-f>` and `<C-RightMouse>`/`<S-RightMouse>` by default. The two function-key names are
 both bound because the same bytes - `ESC [15;2~` and `ESC [17;2~` - are read
 as a high function key by some builds and as a shifted one by others; only
 one ever arrives.
@@ -1621,8 +1621,17 @@ a browser and in Explorer too, so leaving it global costs nothing.
 ([`vim-ide-mouse-v1.ahk`](tools/vim-ide-mouse-v1.ahk) is the same thing for
 AutoHotkey v1, whose syntax v2 will not run.)
 
-Then run `:JumpKeyTest` and press the button once: `<A-Left>` on screen means
-it is done. Nothing at all means the button still has not been turned into a
+Windows Terminal has also been measured delivering the side buttons as
+**`Alt+b` / `Alt+f`** - `:JumpKeyTest` read them as `<M-b>` and `<M-f>`, raw
+`<80><fc>^Hb` and `<80><fc>^Hf`. That is readline's back-a-word /
+forward-a-word pair, which a mouse utility or the terminal itself may be
+sending on its own, so the buttons can turn out to work there with nothing
+installed. Both are in the default alias list, so it costs nothing either
+way. They are normal-mode maps only; `Alt+b`/`Alt+f` in insert mode are
+untouched.
+
+Then run `:JumpKeyTest` and press the button once: `<A-Left>` or `<M-b>` on
+screen means it is done. Nothing at all means the button still has not been turned into a
 key on the Windows side, which is not something vim can fix. If Alt is being
 eaten by a window menu, use the escape-sequence or `Ctrl+O`/`Ctrl+I` route
 below instead.

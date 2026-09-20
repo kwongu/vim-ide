@@ -1808,9 +1808,11 @@ local function alias_keys(which)
     -- <A-Left>/<A-Right> 는 윈도우 터미널(Windows Terminal, PuTTY,
     -- MobaXterm, TeraTerm) 용이다 - 넷 다 마우스 옆 버튼을 보내지 못해서
     -- 마우스 유틸리티나 AutoHotkey 로 이 키에 묶어 쓴다.
+    -- <M-b>/<M-f> 는 Windows Terminal 이 옆 버튼을 보내는 모양이다
+    -- (:JumpKeyTest 로 잰 값: 원시 <80><fc>^Hb / ^Hf).
     return which == 'back'
-        and { '<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>' }
-        or { '<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>' }
+        and { '<F17>', '<S-F5>', '<A-Left>', '<M-b>', '<C-RightMouse>' }
+        or { '<F18>', '<S-F6>', '<A-Right>', '<M-f>', '<S-RightMouse>' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}

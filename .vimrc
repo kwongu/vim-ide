@@ -2065,6 +2065,11 @@ nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 "        XButton2::SendInput "{Esc}[17;2~"
 "      로 두어도 된다. 그쪽은 <F17>/<F18>(또는 <S-F5>/<S-F6>)로 들어온다.
 "
+"   Windows Terminal 은 옆 버튼을 Alt+b / Alt+f 로 보낸다.
+"     :JumpKeyTest 로 잰 값 - 뒤로 <M-b> (원시 <80><fc>^Hb), 앞으로 <M-f>.
+"     readline 의 '낱말 단위로 뒤/앞' 자리라 터미널이 그리로 흘려보낸다.
+"     기본 목록에 넣어 두었으니 그대로 쓰면 된다.
+"
 "   먹는지 확인: :JumpKeyTest 를 치고 그 버튼을 한 번 누른다.
 "     <A-Left> 라고 나오면 끝이다. 아무 반응이 없으면 윈도우 쪽에서 아직
 "     버튼이 키로 바뀌지 않은 것이다 - vim 을 더 고칠 일이 아니다.
@@ -2081,13 +2086,14 @@ nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 " 쪽에 아무것도 설치하지 않고 바로 쓸 수 있다 - Ctrl+우클릭은 vim 이 원래
 " <C-t>(태그 되돌리기)로 쓰는 자리이기도 해서 뜻도 맞는다.
 "
-"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>']
-"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>']
+"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<A-Left>', '<M-b>', '<C-RightMouse>']
+"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<A-Right>', '<M-f>', '<S-RightMouse>']
 "   let g:vimide_jump_back_key    = []     " 이 대체 키를 쓰지 않는다
 func! s:MapJumpAlias(which, rhs) abort
 	let l:v = get(g:, 'vimide_jump_' . a:which . '_key',
-				\ a:which ==# 'back' ? ['<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>']
-				\                   : ['<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>'])
+				\ a:which ==# 'back'
+				\   ? ['<F17>', '<S-F5>', '<A-Left>', '<M-b>', '<C-RightMouse>']
+				\   : ['<F18>', '<S-F6>', '<A-Right>', '<M-f>', '<S-RightMouse>'])
 	if type(l:v) == type('')
 		let l:v = empty(l:v) ? [] : [l:v]
 	endif
