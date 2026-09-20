@@ -2004,12 +2004,15 @@ nnoremap <silent> <4-LeftMouse> :call <SID>RvMouseJump()<CR>
 " (RelationView 패널과 context 창은 자기 버퍼 지역 매핑이 먼저라 그대로다)
 func! s:JumpList(dir) abort
 	call s:GotoEditSlot(0)
+	" feedkeys 로 보낸다. execute 'normal!' 로는 앞으로 가기가 안 된다.
+	"
+	" <C-i> 는 탭 문자(0x09)다. ':normal! ' 뒤에 그것만 오면 명령과 인자를
+	" 가르는 공백으로 먹혀 사라진다 - 인자가 빈 채로 돈다. 뒤로 가기(<C-o>)는
+	" 보통 글자라 멀쩡했고, 그래서 '뒤로는 되는데 앞으로는 안 되는' 모양이
+	" 됐다. 실측: 같은 자리에서 날 Tab 키는 158 -> 80 으로 갔는데
+	" execute "normal! \<C-i>" 는 제자리였다(둘 다 jumplist idx 29).
 	try
-		if a:dir ==# 'back'
-			execute "normal! \<C-o>"
-		else
-			execute "normal! \<C-i>"
-		endif
+		call feedkeys(a:dir ==# 'back' ? "\<C-o>" : "\<C-i>", 'nx')
 	catch /^Vim\%((\a\+)\)\=:E/
 	endtry
 endfunc
