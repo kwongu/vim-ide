@@ -177,46 +177,54 @@ end
 
 -- 1단계: Old 와 New 를 받는다
 --
--- Old 는 커서 밑 심볼로 채워 두지만 고칠 수 있다. 빈 곳에서 불렀으면 비어
--- 있고, 그때는 커서가 Old 에서 시작한다 - 찾을 말부터 쳐야 하기 때문이다.
+-- 'Old' / 'New' 라는 글자는 버퍼에 넣지 않는다.
+--
+-- 예전에는 '  Old   이름' 을 통째로 한 줄로 넣었다. 그러면 지우다가 이름표까지
+-- 지워진다 - 백스페이스 몇 번이면 'Old' 가 사라지고, 그 줄이 무엇을 담는
+-- 칸인지 알 수 없게 된다. 이제 이름표는 extmark 의 inline 가상 텍스트다.
+-- 화면에는 같은 자리에 보이지만 버퍼 글자가 아니라서 지울 수가 없고, 커서는
+-- 자연히 그 오른쪽(칸의 시작)에 선다.
+--
+-- 그래서 줄의 내용이 곧 값이다 - 뜯어낼 것이 없다.
 local function ask_new(old)
-  local P = '  Old   '
-  local Q = '  New   '
-  local buf, win = float({ P .. old, Q }, {
+  local LAB = { '  Old   ', '  New   ' }
+  local buf, win = float({ old, '' }, {
     width = math.max(46, #old + 22),
     title = ' 찾아 바꾸기 ',
     footer = ' Tab 칸 이동 · Enter 다음 · Esc 취소 ',
   })
   vim.bo[buf].filetype = 'vimide-replace'
-  vim.bo[buf].complete = ''       -- 이 버퍼에서는 <C-n> 후보도 만들지 않는다
+  vim.bo[buf].complete = ''
   acp(false)
+
+  local NS = api.nvim_create_namespace('vimide_replace_labels')
+  for i, lab in ipairs(LAB) do
+    pcall(api.nvim_buf_set_extmark, buf, NS, i - 1, 0, {
+      virt_text = { { lab, 'Question' } },
+      virt_text_pos = 'inline',
+      right_gravity = false, -- 앞에 글자를 넣어도 이름표는 맨 앞에 남는다
+    })
+  end
 
   local function goto_line(n)
     local l = api.nvim_buf_get_lines(buf, n - 1, n, false)[1] or ''
     api.nvim_win_set_cursor(win, { n, #l })
     vim.cmd('startinsert!')
   end
-  -- 찾을 말이 이미 있으면 바로 New 로, 없으면 Old 부터
   goto_line(old == '' and 1 or 2)
 
-  local function field(tag)
-    for _, line in ipairs(api.nvim_buf_get_lines(buf, 0, -1, false)) do
-      local m = line:match('^%s*' .. tag .. '%s*(.-)%s*$')
-      if m then
-        return m
-      end
-    end
-    return ''
+  local function field(n)
+    local l = api.nvim_buf_get_lines(buf, n - 1, n, false)[1] or ''
+    return (l:gsub('^%s+', ''):gsub('%s+$', ''))
   end
-  -- Old 줄에서 <CR> 은 'New 로 넘어가기', New 줄에서는 '확인'이다.
-  -- <Tab> 도 같은 자리를 오가지만, 손에 익은 것은 Enter 쪽이다.
   local function done()
+    -- 아직 바꿀 말을 안 썼으면 Enter 는 'New 로 넘어가기'다
     if api.nvim_win_is_valid(win) and api.nvim_win_get_cursor(win)[1] == 1
-        and (api.nvim_buf_get_lines(buf, 1, 2, false)[1] or ''):match('^%s*New%s*$') then
-      goto_line(2) -- 아직 바꿀 말을 안 썼다: 거기로 넘어간다
+        and field(2) == '' then
+      goto_line(2)
       return
     end
-    local o, n = field('Old'), field('New')
+    local o, n = field(1), field(2)
     close(win)
     acp(true)
     vim.cmd('stopinsert')
@@ -255,6 +263,27 @@ local function ask_new(old)
     vim.keymap.set(m, '<S-Tab>', other, { buffer = buf, nowait = true })
     vim.keymap.set(m, '<Esc>', cancel, { buffer = buf, nowait = true })
     vim.keymap.set(m, '<C-c>', cancel, { buffer = buf, nowait = true })
+  end
+  -- 칸은 둘 뿐이다. 줄을 늘리거나 합치는 키는 막는다.
+  --
+  -- 특히 <BS>: 칸 맨 앞에서 한 번 더 누르면 vim 은 윗줄과 합친다
+  -- ('backspace' 에 eol 이 있으면). 그러면 New 칸이 Old 줄로 끌려 올라가고
+  -- 이름표 둘이 한 줄에 겹친다(실측: 백스페이스 스무 번에 그렇게 됐다).
+  -- 칸 맨 앞에서는 아무 일도 하지 않는다.
+  -- expr 매핑은 돌려준 글자의 <BS> 를 스스로 키로 바꾼다(replace_keycodes).
+  -- 여기서 미리 nvim_replace_termcodes 를 거치면 두 번 바뀌어 '<80>kb' 가
+  -- 글자로 들어간다(실측). 문자열 그대로 돌려준다.
+  vim.keymap.set('i', '<BS>', function()
+    return api.nvim_win_get_cursor(win)[2] == 0 and '' or '<BS>'
+  end, { buffer = buf, expr = true, replace_keycodes = true, nowait = true })
+  -- <Del> 은 반대쪽이다. 줄 끝에서 누르면 아랫줄을 끌어올린다.
+  vim.keymap.set('i', '<Del>', function()
+    local c = api.nvim_win_get_cursor(win)
+    local l = api.nvim_buf_get_lines(buf, c[1] - 1, c[1], false)[1] or ''
+    return c[2] >= #l and '' or '<Del>'
+  end, { buffer = buf, expr = true, replace_keycodes = true, nowait = true })
+  for _, k in ipairs({ 'o', 'O', 'dd', 'J', 'gJ' }) do
+    vim.keymap.set('n', k, '<Nop>', { buffer = buf, nowait = true })
   end
 end
 
