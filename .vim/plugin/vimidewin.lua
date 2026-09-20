@@ -398,7 +398,59 @@ local function unsquash(win)
 end
 
 -- 곁창에 실린 파일을 EDIT 창으로 옮기고 곁창을 되돌린다
+-- 이 탭은 남의 것인가.
+--
+-- Diffview 와 Neogit 은 탭 하나를 통째로 받아 제 배치를 직접 짠다. 거기에
+-- 우리 규칙을 들이대면 안 된다 - 실측:
+--
+--   지킴이 끔:  [패널 35] [d.c 21] [d.c 22]              (제대로)
+--   지킴이 켬:  [d.c 20] [패널 35] [null 11] [null 11]   (망가짐)
+--
+-- Diffview 는 tab split 으로 탭을 열고, 그 창들을 차례로 제 것으로 바꾼다.
+-- 그 중간 상태를 보고 rescue() 가 '곁창에 파일이 실렸다'고 판단해 EDIT
+-- 창을 하나 만들어 끼워 넣었다(vimidewin.lua 의 noautocmd topleft vertical
+-- split). 그 바람에 패널이 오른쪽으로 밀리고, diff 창 둘은 내용도 못 싣고
+-- null 인 채 11칸으로 쪼그라들었다. 닫을 때도 그 여분 창이 남아 탭이
+-- 사라지지 않는다.
+--
+-- 판정은 이름으로도 한다. 우리 규칙이 끼어드는 시점에는 패널(DiffviewFiles)
+-- 이 아직 없고 diffview:// 버퍼만 있다 - filetype 만 보면 늦는다.
+local FOREIGN_FT = {
+  DiffviewFiles = true, DiffviewFileHistory = true, DiffviewFileStatus = true,
+  NeogitStatus = true, NeogitPopup = true, NeogitCommitView = true,
+  NeogitLogView = true, NeogitDiffView = true, NeogitCommitMessage = true,
+  NeogitRebaseTodo = true, NeogitConsole = true,
+}
+
+local function foreign_tab()
+  local ok, wins = pcall(api.nvim_tabpage_list_wins, 0)
+  if not ok then
+    return false
+  end
+  for _, w in ipairs(wins) do
+    local okb, b = pcall(api.nvim_win_get_buf, w)
+    if okb then
+      if FOREIGN_FT[vim.bo[b].filetype] then
+        return true
+      end
+      local n = api.nvim_buf_get_name(b)
+      if n:find('^diffview://') or n:find('^Neogit') then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- 밖에서도 물을 수 있게 (진단용: :lua print(vim.inspect(_G.vimide_foreign_tab())))
+function _G.vimide_foreign_tab()
+  return foreign_tab()
+end
+
 local function rescue(win)
+  if foreign_tab() then
+    return -- Diffview/Neogit 탭: 제 배치는 저쪽이 짠다
+  end
   local g = guarded[win]
   if not g then
     return
@@ -660,6 +712,9 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
     if cfg('win_guard', 1) == 0 then
       return
     end
+    if foreign_tab() then
+      return -- Diffview/Neogit 탭은 통째로 남의 것이다
+    end
     -- 디렉터리 가로채기는 여기서 막는다. 뒤로 미루면 늦는다.
     if not sweeping then
       sweeping = true
@@ -681,7 +736,7 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
     -- 그렇다). 그 찰나에 판정하면 멀쩡한 곁창을 '파일이 실렸다'고
     -- 오해한다.
     vim.schedule(function()
-      if cfg('win_guard', 1) == 0 then
+      if cfg('win_guard', 1) == 0 or foreign_tab() then
         return
       end
       sweep()

@@ -434,7 +434,23 @@ rv_setup('neogit', {
   integrations = { diffview = true, telescope = true },
   disable_insert_on_commit = 'auto',
 })
-rv_setup('diffview', {})
+-- diffview 는 q 를 option_panel 과 help_panel 에만 걸어 둔다. 정작 파일
+-- 패널과 diff 창에는 없어서, 이 IDE 의 다른 패널처럼 q 를 눌러도 아무 일도
+-- 일어나지 않는다(눌러도 매크로 기록이 시작될 뿐이다). 여기 셋에 걸어 준다 -
+-- RelationView 패널, quickfix, aerial 이 모두 q 로 닫히므로 손이 그걸 기억한다.
+rv_setup('diffview', {
+  keymaps = {
+    view = {
+      { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+    },
+    file_panel = {
+      { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+    },
+    file_history_panel = {
+      { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+    },
+  },
+})
 
 -- gitsigns: 편집 중인 창의 왼쪽 기둥과 헝크 단위 조작
 --
@@ -466,6 +482,17 @@ func! s:Diffview() abort
 		let s:diffview_ok = len(l:p) >= 2 &&
 					\ (str2nr(l:p[0]) > 2 ||
 					\  (str2nr(l:p[0]) == 2 && str2nr(l:p[1]) >= 31))
+	endif
+	" 이미 떠 있으면 닫는다. 같은 키로 열고 닫는 편이 손에 맞고, 'q 가
+	" 안 먹는다' 로 헤맬 일도 없다.
+	if has('nvim') && exists('*luaeval')
+		let l:open = luaeval('(function() local ok, l = pcall(require, "diffview.lib") '
+					\ . 'if not ok or type(l.views) ~= "table" then return 0 end '
+					\ . 'return #l.views > 0 and 1 or 0 end)()')
+		if l:open == 1
+			DiffviewClose
+			return
+		endif
 	endif
 	if !s:diffview_ok
 		echohl WarningMsg
