@@ -137,6 +137,23 @@ if !exists('g:vimide_nerdtree')
 	let g:vimide_nerdtree = has('nvim') ? 0 : 1
 endif
 
+" 아이콘을 ASCII 로 내릴지. 여기서 정한다 - 진짜 vim 도 지나는 자리다.
+"
+" 예전에는 이 판정이 아래 'if has(\'nvim\')' 블록 안(702줄)에 있었다. 그런데
+" 쓰는 쪽(airline 구분자)은 그 블록 밖이라, 진짜 vim 에서는 변수가 없는 채로
+" 읽혔다:
+"   E121: Undefined variable: g:vimide_ascii_icons
+" vim 은 시작 중에 에러를 보이면 2초를 멈춰 서서 보여 준다(startuptime 의
+" 'Warning delay' 2005ms). vim 시작이 2.3초였던 것의 거의 전부가 이것이었다.
+" 정의만 앞으로 올린다 - 아래 702줄은 !exists 로 감싸 있어 그대로 두어도
+" 아무 일도 하지 않는다.
+"
+"   let g:vimide_ascii_icons = 1   " 늘 ASCII 로
+"   let g:vimide_ascii_icons = 0   " 늘 Nerd Font 로
+if !exists('g:vimide_ascii_icons')
+    let g:vimide_ascii_icons = ($TERM ==# 'xterm-color')
+endif
+
 " set the runtime path to include Vundle and initialize
 if has('nvim')
 
@@ -4530,3 +4547,82 @@ botright cwindow
 
 
 
+
+" ------------------------------------
+" :Restore - 진짜 vim 에서도 세션을 연다
+" ------------------------------------
+" 세션을 저장하는 쪽은 .vim/plugin/vimidesession.lua 이고 그것은 nvim 전용이다
+" (vim 은 .vim/plugin/*.lua 를 읽지 않는다). 그래서 진짜 vim 에서 'vim +Restore'
+" 를 치면 이렇게 됐다:
+"
+"   E492: Not an editor command: Restore
+"   Press ENTER or type command to continue
+"
+" 느린 것이 아니라 키를 기다리고 있는 것인데, 시작이 멈춰 선 것처럼 보인다.
+" 실측: exists(':Restore') 가 vim 에서 0 이었다.
+"
+" 세션 파일 자체는 :mksession 이 쓴 평범한 vimscript 라 vim 이 그대로 읽는다
+" (실측: 44버퍼짜리를 source 해서 에러 0). 이름 규칙만 같이 맞춰 주면 된다 -
+" '<경로를 +로 바꾼 꼬리 80자>-<sha256 앞 12자>.vim', nvim 의 stdpath('state')
+" 아래. vim 에도 sha256() 이 있다(확인함).
+if !has('nvim')
+	func! s:VimIdeSessRoot() abort
+		let l:d = getcwd()
+		while !empty(l:d) && l:d !=# '/'
+			if isdirectory(l:d . '/.tags') || isdirectory(l:d . '/.git')
+				return l:d
+			endif
+			let l:p = fnamemodify(l:d, ':h')
+			if l:p ==# l:d
+				break
+			endif
+			let l:d = l:p
+		endwhile
+		return getcwd()
+	endfunc
+
+	func! s:VimIdeSessFile() abort
+		let l:root = substitute(fnamemodify(s:VimIdeSessRoot(), ':p'), '/\+$', '', '')
+		let l:tail = substitute(l:root, '[^0-9A-Za-z._-]', '+', 'g')
+		if strlen(l:tail) > 80
+			let l:tail = strpart(l:tail, strlen(l:tail) - 80)
+		endif
+		let l:dir = get(g:, 'vimide_session_dir',
+					\ $HOME . '/.local/state/nvim/vim-ide/sessions')
+		if !exists('*sha256')
+			return ''
+		endif
+		return expand(l:dir) . '/' . l:tail . '-' . strpart(sha256(l:root), 0, 12) . '.vim'
+	endfunc
+
+	func! s:VimIdeRestore() abort
+		let l:f = s:VimIdeSessFile()
+		if empty(l:f)
+			echohl WarningMsg
+			echo '이 vim 에는 sha256() 이 없어 세션 이름을 맞출 수 없습니다'
+			echohl None
+			return
+		endif
+		if !filereadable(l:f)
+			echohl WarningMsg
+			echo '저장된 세션이 없습니다: ' . fnamemodify(l:f, ':t')
+			echohl None
+			echo '(세션은 nvim 이 :qa 로 나갈 때 저장합니다)'
+			return
+		endif
+		try
+			execute 'silent source ' . fnameescape(l:f)
+			echo '세션 복원: ' . fnamemodify(l:f, ':t')
+		catch
+			echohl WarningMsg
+			echo '세션을 여는 중 멈췄습니다: ' . v:exception
+			echohl None
+		endtry
+	endfunc
+
+	" 세션을 쓰는 쪽은 nvim 이다. 여기서는 읽기만 한다 - vim 이 덮어쓰면
+	" nvim 쪽 패널 상태(x.vim)와 어긋난다.
+	" -bar 를 준다. 없으면 ':Restore | 다른명령' 이 E488 로 깨진다
+	" (사용자 명령은 -bar 가 없으면 줄의 나머지를 통째로 삼킨다).
+	command! -bar Restore call s:VimIdeRestore()
+endif
