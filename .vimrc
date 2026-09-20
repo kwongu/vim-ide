@@ -3465,8 +3465,25 @@ function! s:LookupCword() abort
     return (l:ch =~# '\k') ? expand('<cword>') : ''
 endfunction
 
-nnoremap <C-_> :LookupReferences <C-R>=<SID>LookupCword()<CR>
-nnoremap <C-/> :LookupReferences <C-R>=<SID>LookupCword()<CR>
+" <C-/> 도 떠 있는 창에서 받는다 (askform.lua). 찾을 말 한 칸이다 -
+" 룩업은 색인에 든 파일 전체가 대상이라 경로를 물을 것이 없다.
+"   let g:vimide_lookup_float = 0   " 예전처럼 명령줄로
+func! s:LookupPrompt() abort
+	if has('nvim') && exists('*luaeval') && get(g:, 'vimide_lookup_float', 1)
+				\ && luaeval('_G.vimide_ask ~= nil')
+		call luaeval('(function(a)'
+					\ . ' _G.vimide_ask({ title = " 룩업 레퍼런스 ",'
+					\ . '   fields = { { label = "찾을 말", value = a } },'
+					\ . '   footer = " Enter 찾기 · Esc 취소 " },'
+					\ . '  function(v) if v[1] ~= "" then'
+					\ . '    vim.cmd("LookupReferences " .. vim.fn.escape(v[1], " \\\\"))'
+					\ . '  end end) return 1 end)(_A)', s:LookupCword())
+		return
+	endif
+	call feedkeys(':LookupReferences ' . s:LookupCword(), 'n')
+endfunc
+nnoremap <silent> <C-_> :call <SID>LookupPrompt()<CR>
+nnoremap <silent> <C-/> :call <SID>LookupPrompt()<CR>
 " visual 에서는 고른 글자에 F4 와 같은 색도 입힌다.
 "
 " 찾은 것을 목록에서 훑는 동안 '무엇을 찾고 있었는지'가 본문에도 남아
@@ -3758,6 +3775,34 @@ endfunc
 " -nargs=1 이라 빈칸이 든 말도 통째로 하나로 받는다.
 func! s:GrepPrompt(text) abort
 	if !s:GrepHere()
+		return
+	endif
+	" 떠 있는 창에서 두 칸을 받는다 - 찾을 말, 찾을 곳 (askform.lua).
+	"
+	" 예전에는 명령줄이었다: ':VimIdeGrep <말>' 을 띄우고, Enter 뒤에
+	" input() 으로 경로를 다시 물었다. 두 물음이 화면 맨 아래 한 줄에서
+	" 차례로 지나가서, 지금 무엇을 묻는 중인지 놓치기 쉬웠다. 두 칸을
+	" 한 창에 같이 보여주면 고칠 것을 보고 고칠 수 있다.
+	"
+	"   let g:vimide_grep_float = 0   " 예전처럼 명령줄로
+	if has('nvim') && exists('*luaeval') && get(g:, 'vimide_grep_float', 1)
+				\ && luaeval('_G.vimide_ask ~= nil')
+		let l:f = expand('%:p')
+		let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
+		call luaeval('(function(a)'
+					\ . ' _G.vimide_ask({ title = " 찾기 (grep) ",'
+					\ . '   fields = { { label = "찾을 말", value = a[1] },'
+					\ . '              { label = "찾을 곳", value = a[2], file = true } },'
+					\ . '   footer = " Tab 칸 이동 · Enter 찾기 · Esc 취소 · <C-x><C-f> 경로 완성 " },'
+					\ . '  function(v)'
+					\ . '   if v[1] == "" then return end'
+					\ . '   local d = vim.fn.fnamemodify(vim.fn.expand(v[2] == "" and a[2] or v[2]), ":p")'
+					\ . '   d = d:gsub("/+$", "")'
+					\ . '   if vim.fn.isdirectory(d) ~= 1 then'
+					\ . '     vim.notify("그런 디렉터리가 없습니다 - " .. d, vim.log.levels.WARN) return'
+					\ . '   end'
+					\ . '   _G.relationview_grep(v[1], d)'
+					\ . '  end) return 1 end)(_A)', [a:text, l:d])
 		return
 	endif
 	" 낱말이 비어 있어도(빈칸 위에서 눌렀어도) 명령줄은 띄운다. 거기서

@@ -153,6 +153,17 @@ sharing one file would pair a layout with the wrong panels. A layout with no
 file in any window is never written over an existing session - that is how
 the kernel tree's session ended up as 44 buffers and no windows.
 
+Ctrl+g and Ctrl+/ ask in a float instead of on the command line. `Ctrl+g`
+shows both fields at once - what to look for and where - so you can see the
+path you are about to search before you commit to it; the old flow put the
+two questions on the bottom line one after the other, and it was easy to lose
+track of which one was on screen. `Ctrl+/` asks for the text only, since a
+lookup covers every indexed file. `Tab` moves between fields, `Enter`
+searches, `Esc` gives up, and the labels are inline virtual text so
+backspacing cannot eat them. Results land where they always did: the relation
+panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
+`g:vimide_lookup_float = 0` put the command line back.
+
 Ctrl+m: The marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
 (`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
