@@ -3355,6 +3355,30 @@ nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 "   :ProjectFilesImport [이름]
 " (\fi 는 Telescope git_commits 가 쓰고 있어서 \fm 옆자리인 \fM 이다)
 nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
+
+" 북마크: 찍어 둔 마크를 텔레스코프로 골라서 그 자리로 (marksjump.lua)
+"
+"   <C-m>          마크 목록.  <CR> 가기,  d 지우기
+"   :VimIdeMarks   같은 것
+"
+" 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
+" 0-9 와 ' " ^ . 같은 자동 표시는 뺀다. 특히 0-9 는 '최근에 닫은 파일'이라
+" 이 설정에서는 .tags/files 같은 색인 내부 파일이 올라온다
+" (g:vimide_marks_auto = 1 이면 같이 보여준다).
+"
+" <C-m> 을 쓰는 대가를 알고 쓴다
+"   터미널에서 <C-m> 은 <CR> 과 같은 바이트(0x0D)다. 확인했다 - 이 설정에서
+"   둘은 구별되지 않는다. 그러니 이 매핑은 '노멀 모드의 Enter' 를 가져간다.
+"   Enter 는 원래 '다음 줄 첫 글자로' 인데 그 자리를 내준다(j 와 ^ 로 같은
+"   일을 한다). 패널·quickfix·트리처럼 자기 <CR> 을 가진 창은 그쪽이 먼저라
+"   영향이 없다 - 바뀌는 것은 보통 편집 창뿐이다.
+"
+"   let g:vimide_marks_key = '<Leader>mm'   " 다른 키로
+"   let g:vimide_marks_key = ''             " 키를 걸지 않는다 (:VimIdeMarks 만)
+let g:vimide_marks_key = '<C-m>'
+if has('nvim') && !empty(get(g:, 'vimide_marks_key', '<C-m>'))
+    execute 'nnoremap <silent> ' . g:vimide_marks_key . ' :VimIdeMarks<CR>'
+endif
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 " 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.
 "
