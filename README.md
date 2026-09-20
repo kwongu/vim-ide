@@ -171,7 +171,7 @@ Ctrl+] Ctrl+]: open that definition in the context window and focus it
      default, `'ctx'` for the old behaviour; the double press always does the
      other one). Binding both costs a little: after `Ctrl+]` vim waits
      `'timeoutlen'` (1000 ms by default) to see whether a second `Ctrl+]`
-     follows. That wait is `g:vimide_map_timeoutlen`, 500 ms here; `let g:vimide_ctx_jump_seq = 0` drops the two-key binding
+     follows. That wait is `g:vimide_map_timeoutlen`, 800 ms here; `let g:vimide_ctx_jump_seq = 0` drops the two-key binding
      and the wait with it, and the double click still goes to the context
      window. The same wait now applies to every leader sequence (`\fr`, `\lt`),
      so raise it to 400-600 if your hand feels rushed - this setup used to wait
