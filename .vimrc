@@ -4622,19 +4622,78 @@ if !has('nvim')
 		return expand(l:dir) . '/' . l:tail . '-' . strpart(sha256(l:root), 0, 12) . '.vim'
 	endfunc
 
-	func! s:VimIdeRestore() abort
+	" vim 은 제 세션을 따로 쓴다.
+	"
+	" nvim 쪽 파일을 같이 쓰면 서로 덮는다 - nvim 세션에는 패널 상태를 담은
+	" x.vim 이 딸려 있는데 vim 은 그것을 만들 수 없어서, vim 이 저장한 뒤
+	" nvim 으로 열면 배치와 패널이 어긋난 짝이 된다. 파일을 갈라 두면 각자
+	" 마지막 상태로 돌아간다.
+	func! s:VimIdeSessFileVim() abort
 		let l:f = s:VimIdeSessFile()
+		return empty(l:f) ? '' : substitute(l:f, '\.vim$', '-vim.vim', '')
+	endfunc
+
+	" 나갈 때 적어 둔다. 이것이 없어서 'vim +Restore 가 이전 상태로 안
+	" 돌아온다'가 났다 - 세션을 쓰는 쪽(vimidesession.lua)이 nvim 전용이라,
+	" vim 으로 끝낸 상태는 어디에도 기록되지 않았다.
+	func! s:VimIdeSessSave() abort
+		if get(g:, 'vimide_session_save', 1) == 0
+			return
+		endif
+		let l:f = s:VimIdeSessFileVim()
+		if empty(l:f)
+			return
+		endif
+		" 파일을 담은 창이 하나도 없으면 덮지 않는다. 빈 배치를 적으면
+		" :mksession 이 edit 줄을 하나도 안 남겨 창 배치가 통째로 사라진다
+		" (nvim 쪽에서 실제로 그렇게 잃었다).
+		let l:has = 0
+		for l:w in range(1, winnr('$'))
+			if empty(getwinvar(l:w, '&buftype')) && !empty(bufname(winbufnr(l:w)))
+				let l:has = 1
+				break
+			endif
+		endfor
+		if !l:has && filereadable(l:f)
+			return
+		endif
+		call mkdir(fnamemodify(l:f, ':h'), 'p')
+		if filereadable(l:f)
+			call rename(l:f, l:f . '.bak')
+		endif
+		let l:so = &sessionoptions
+		" options/localoptions 는 넣지 않는다 - 세션이 .vimrc 를 이겨서
+		" 설정을 고쳐도 반영이 안 된다. nvim 쪽과 같은 생각이다.
+		set sessionoptions=buffers,curdir,folds,help,tabpages,winsize
+		try
+			execute 'mksession! ' . fnameescape(l:f)
+		catch
+		finally
+			let &sessionoptions = l:so
+		endtry
+	endfunc
+	augroup VimIdeSessionVim
+		autocmd!
+		autocmd VimLeavePre * call s:VimIdeSessSave()
+	augroup END
+
+	func! s:VimIdeRestore() abort
+		" vim 이 적어 둔 것이 있으면 그것을, 없으면 nvim 것을 읽는다.
+		let l:f = s:VimIdeSessFileVim()
+		if empty(l:f) || !filereadable(l:f)
+			let l:f = s:VimIdeSessFile()
+		endif
 		if empty(l:f)
 			echohl WarningMsg
 			echo '이 vim 에는 sha256() 이 없어 세션 이름을 맞출 수 없습니다'
 			echohl None
 			return
 		endif
-		if !filereadable(l:f)
+		if empty(l:f) || !filereadable(l:f)
 			echohl WarningMsg
-			echo '저장된 세션이 없습니다: ' . fnamemodify(l:f, ':t')
+			echo '저장된 세션이 없습니다: ' . (empty(l:f) ? '?' : fnamemodify(l:f, ':t'))
 			echohl None
-			echo '(세션은 nvim 이 :qa 로 나갈 때 저장합니다)'
+			echo '(vim 과 nvim 모두 :qa 로 나갈 때 저장합니다)'
 			return
 		endif
 		try
@@ -4647,8 +4706,7 @@ if !has('nvim')
 		endtry
 	endfunc
 
-	" 세션을 쓰는 쪽은 nvim 이다. 여기서는 읽기만 한다 - vim 이 덮어쓰면
-	" nvim 쪽 패널 상태(x.vim)와 어긋난다.
+	" vim 은 제 파일(-vim.vim)에 쓰고 읽는다. nvim 것은 없을 때만 읽는다.
 	" -bar 를 준다. 없으면 ':Restore | 다른명령' 이 E488 로 깨진다
 	" (사용자 명령은 -bar 가 없으면 줄의 나머지를 통째로 삼킨다).
 	command! -bar Restore call s:VimIdeRestore()

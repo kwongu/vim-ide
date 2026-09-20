@@ -137,6 +137,17 @@ is named the same way in both lists. A file outside that root keeps its
 absolute path, since shortening it to `../../..` reads worse. nvim only:
 `'quickfixtextfunc'` arrived in vim 8.2.
 
+`vim +Restore` picks up where you left off, in real vim too. The session
+plugin is nvim-only (vim does not read `.vim/plugin/*.lua`), so vim had
+nothing writing a session at all - `+Restore` could only ever open whatever
+nvim had last saved, which is why it looked broken. vim now writes its own
+file on exit (`<session>-vim.vim`, beside nvim's) and reads that first,
+falling back to nvim's when it has none. Kept apart on purpose: nvim's
+session carries a sidecar with the panel state that vim cannot produce, so
+sharing one file would pair a layout with the wrong panels. A layout with no
+file in any window is never written over an existing session - that is how
+the kernel tree's session ended up as 44 buffers and no windows.
+
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
 `Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
 with the word under the cursor and let you edit it, and on blank space `Old`
