@@ -73,9 +73,10 @@ filetype plugin indent on
 " 시간을 짧게 둔다.
 "
 " 대가: \fr \lt 같은 리더 매핑도 키 사이 간격이 이 시간을 넘으면 안 된다.
-" 손이 느리게 느껴지면 400~600 으로 올리는 편이 낫다.
+" 500ms 면 리더 매핑이 쫓기지 않으면서 <C-]> 한 번이 반 박자 안에 뛴다.
+" (250 으로 시작했다가 리더 쪽이 빠듯해서 올렸다)
 "
-"   let g:vimide_map_timeoutlen = 500   " 넉넉하게
+"   let g:vimide_map_timeoutlen = 250   " <C-]> 를 더 빨리
 "   let g:vimide_map_timeout = 0        " 예전처럼 영원히 기다린다
 "                                       " (<C-]> 를 한 번만 쓰고 싶으면
 "                                       "  g:vimide_ctx_jump_seq = 0 과 함께)
@@ -96,7 +97,7 @@ set ttimeout
 " 여유는 남겨야 오작동이 없다. 25ms 는 실측 RTT(11.8ms)의 두 배다.
 "   let g:vimide_esc_wait = 100   " 예전 동작으로 되돌리기
 let &timeoutlen = get(g:, 'vimide_map_timeoutlen',
-			\ get(g:, 'vimide_map_timeout', 1) ? 250 : 3000)
+			\ get(g:, 'vimide_map_timeout', 1) ? 500 : 3000)
 let &ttimeoutlen = get(g:, 'vimide_esc_wait', 25)
 
 " Not redraw while executing macros, and commands.
