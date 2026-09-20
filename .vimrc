@@ -453,7 +453,31 @@ rv_setup('gitsigns', {
 })
 EOF
 nnoremap <silent> <Leader>s <Cmd>Neogit<CR>
-nnoremap <silent> <Leader>v <Cmd>DiffviewOpen<CR>
+" diffview 는 git 2.31 이상이 필요하다.
+"
+" 개발서버의 git 은 2.25.1 이라 :DiffviewOpen 이 'Not a repo (or any parent),
+" or no supported VCS adapter!' 만 남기고 아무 일도 하지 않는다. 저장소가
+" 아니어서가 아니라 git 이 낡아서인데, 그 말로는 알 수가 없다. 대신 말해 준다.
+" (맥은 2.54 라 그냥 열린다. Neogit 과 gitsigns 는 낡은 git 에서도 된다)
+func! s:Diffview() abort
+	if !exists('s:diffview_git')
+		let s:diffview_git = matchstr(system('git --version'), '\d\+\.\d\+\(\.\d\+\)\?')
+		let l:p = split(s:diffview_git, '\.')
+		let s:diffview_ok = len(l:p) >= 2 &&
+					\ (str2nr(l:p[0]) > 2 ||
+					\  (str2nr(l:p[0]) == 2 && str2nr(l:p[1]) >= 31))
+	endif
+	if !s:diffview_ok
+		echohl WarningMsg
+		echo printf('diffview 는 git 2.31 이상이 필요합니다 (여기는 %s). '
+					\ . 'Neogit(\s)과 gitsigns(\ha \hv)는 그대로 됩니다.',
+					\ empty(s:diffview_git) ? '알 수 없음' : s:diffview_git)
+		echohl None
+		return
+	endif
+	DiffviewOpen
+endfunc
+nnoremap <silent> <Leader>v :call <SID>Diffview()<CR>
 
 " 헝크 단위 조작. nvim 에서만 - gitsigns 가 없으면 아무 일도 하지 않는다.
 if has('nvim')

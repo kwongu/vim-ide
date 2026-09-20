@@ -62,6 +62,10 @@ echo '' >> ${HOME}/.profile <br/>
 * Smooth scrolling: moves smoothly the screen when exploring source code.
 
 * Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs and 3-way merges (`<leader>v`) and `gitsigns.nvim` for the gutter of the buffer you are editing - `<leader>ha` stages the hunk under the cursor (or, from visual mode, just the lines you selected), `<leader>hr` reverts it, `<leader>hu` unstages, `<leader>hv` previews it, `<leader>ht` toggles the blame of the current line, and `]h`/`[h` walk the hunks. That is partial staging without leaving the file, which is the half of Magit a status window cannot give you. The gutter is gitsigns' in nvim and `vim-signify`'s in real vim 8.1 (the dev server); running both draws the same column twice, so nvim turns signify off (`g:vimide_signify_in_nvim = 1` puts it back). Line blame is **off by default**: it runs `git blame` on the file every time the cursor rests, and this setup lives on 60k-file kernel trees, some of them over SMB - `<leader>ht` turns it on when you want it, `g:gitsigns_blame_on = 1` from the start.
+  Diffview needs git 2.31 or newer: on the dev server (2.25.1) `:DiffviewOpen`
+  used to print `Not a repo (or any parent)` and do nothing, which reads as
+  "this is not a repository" when the real answer is "this git is too old", so
+  `<leader>v` now says that instead. Neogit and gitsigns work on the old git.
 
 * Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (F10 or `<leader>o`, and only when you press it), built on treesitter so it needs no language server. `:Tagbar` stays as it was.
 
