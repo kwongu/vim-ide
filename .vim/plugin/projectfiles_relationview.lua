@@ -80,6 +80,43 @@ local function mark(buf)
   end
 end
 
+-- 여러 프로젝트에 걸친 선택을 나눈다.
+--
+-- projectfiles_add/remove 는 paths[1] 의 프로젝트만 보고, 다른 프로젝트의
+-- 경로는 경고만 내고 버린다(projectfiles.lua 의 tree_apply). 이 목록은
+-- 프로젝트를 넘나드는 것이 예사라(헤더 하나가 다른 트리에서 온다) 여기서
+-- 미리 갈라 프로젝트마다 한 번씩 부른다.
+local function by_project(paths)
+  local groups, order = {}, {}
+  for _, p in ipairs(paths) do
+    local ok, r = pcall(_G.projectfiles_root_of, p)
+    local key = (ok and r) or ''
+    if not groups[key] then
+      groups[key] = {}
+      order[#order + 1] = key
+    end
+    table.insert(groups[key], p)
+  end
+  return groups, order
+end
+
+-- 많이 뺄 때는 한 번 묻는다.
+--
+-- 마지막 항목까지 빠지면 preset 사본이 지워지고 그 프로젝트는 '색인하지
+-- 않음'이 된다(projectfiles.lua 의 save_entries). 목록 전체를 골라 '-' 를
+-- 누르는 것은 한 손짓이라, 그 한 손짓으로 색인이 통째로 꺼질 수 있다.
+-- projectfiles 안쪽에도 확인이 있지만 배치로 부르면 경고만 하고 지나간다.
+local function ok_to_drop(n)
+  local lim = tonumber(vim.g.projectfiles_confirm_drop) or 20
+  if lim <= 0 or n < lim then
+    return true
+  end
+  return vim.fn.confirm(
+    ('%d개를 색인 목록에서 뺍니다.\n'):format(n)
+    .. '목록이 비면 preset 이 지워지고 이 프로젝트는 색인하지 않게 됩니다.',
+    "빼기(&Y)\n그만두기(&N)", 2) == 1
+end
+
 local function act(buf, a, b, fn, label)
   local paths = paths_in_range(a, b)
   if #paths == 0 then
@@ -90,8 +127,15 @@ local function act(buf, a, b, fn, label)
     vim.notify('projectfiles 가 없습니다', vim.log.levels.WARN)
     return
   end
-  pcall(fn, paths)
-  vim.notify(('색인 %s: %d개'):format(label, #paths))
+  if label == '제거' and not ok_to_drop(#paths) then
+    return
+  end
+  local groups, order = by_project(paths)
+  for _, key in ipairs(order) do
+    pcall(fn, groups[key])
+  end
+  vim.notify(('색인 %s: %d개%s'):format(label, #paths,
+    #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''))
   vim.defer_fn(function()
     if api.nvim_buf_is_valid(buf) then
       pcall(_G.projectfiles_tree_invalidate)

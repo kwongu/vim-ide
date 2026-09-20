@@ -28,6 +28,7 @@ end
 
 local api = vim.api
 local NS = api.nvim_create_namespace('projectfiles_quickfix')
+local watched = {}   -- buf -> true (nvim_buf_attach 을 한 번만 건다)
 
 local function on()
   local v = vim.g.projectfiles_quickfix
@@ -99,6 +100,43 @@ local function mark(buf, win)
   end
 end
 
+-- 여러 프로젝트에 걸친 선택을 나눈다.
+--
+-- projectfiles_add/remove 는 paths[1] 의 프로젝트만 보고, 다른 프로젝트의
+-- 경로는 경고만 내고 버린다(projectfiles.lua 의 tree_apply). 이 목록은
+-- 프로젝트를 넘나드는 것이 예사라(헤더 하나가 다른 트리에서 온다) 여기서
+-- 미리 갈라 프로젝트마다 한 번씩 부른다.
+local function by_project(paths)
+  local groups, order = {}, {}
+  for _, p in ipairs(paths) do
+    local ok, r = pcall(_G.projectfiles_root_of, p)
+    local key = (ok and r) or ''
+    if not groups[key] then
+      groups[key] = {}
+      order[#order + 1] = key
+    end
+    table.insert(groups[key], p)
+  end
+  return groups, order
+end
+
+-- 많이 뺄 때는 한 번 묻는다.
+--
+-- 마지막 항목까지 빠지면 preset 사본이 지워지고 그 프로젝트는 '색인하지
+-- 않음'이 된다(projectfiles.lua 의 save_entries). 목록 전체를 골라 '-' 를
+-- 누르는 것은 한 손짓이라, 그 한 손짓으로 색인이 통째로 꺼질 수 있다.
+-- projectfiles 안쪽에도 확인이 있지만 배치로 부르면 경고만 하고 지나간다.
+local function ok_to_drop(n)
+  local lim = tonumber(vim.g.projectfiles_confirm_drop) or 20
+  if lim <= 0 or n < lim then
+    return true
+  end
+  return vim.fn.confirm(
+    ('%d개를 색인 목록에서 뺍니다.\n'):format(n)
+    .. '목록이 비면 preset 이 지워지고 이 프로젝트는 색인하지 않게 됩니다.',
+    "빼기(&Y)\n그만두기(&N)", 2) == 1
+end
+
 local function act(buf, win, a, b, fn, label)
   local paths = paths_in_range(items_of(win), a, b)
   if #paths == 0 then
@@ -109,8 +147,15 @@ local function act(buf, win, a, b, fn, label)
     vim.notify('projectfiles 가 없습니다', vim.log.levels.WARN)
     return
   end
-  pcall(fn, paths)
-  vim.notify(('색인 %s: %d개'):format(label, #paths))
+  if label == '제거' and not ok_to_drop(#paths) then
+    return
+  end
+  local groups, order = by_project(paths)
+  for _, key in ipairs(order) do
+    pcall(fn, groups[key])
+  end
+  vim.notify(('색인 %s: %d개%s'):format(label, #paths,
+    #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''))
   vim.defer_fn(function()
     if api.nvim_buf_is_valid(buf) and api.nvim_win_is_valid(win) then
       pcall(_G.projectfiles_tree_invalidate)
@@ -156,6 +201,33 @@ local function attach(buf, win)
     '색인 목록에 추가')
   bmap('-', ranged(function() return _G.projectfiles_remove end, '제거'),
     '색인 목록에서 제거')
+  -- 목록이 바뀌어도 TextChanged 는 오지 않는다.
+  --
+  -- quickfix 버퍼는 사람이 고치는 것이 아니라 vim 이 쓴다. QuickFixCmdPost
+  -- 도 :make/:grep 갈래에서만 오고, lua 에서 setqflist() 로 갈아 끼우면
+  -- (relationview 의 lookup_to_qf 가 그렇다) 아무 신호가 없다. 창이 이미
+  -- 열려 있는 채로 목록만 바뀌면 표시가 옛것으로 남는다. 줄이 바뀌는 것을
+  -- 직접 듣는 것이 유일하게 확실한 길이다.
+  if not watched[buf] then
+    watched[buf] = true
+    api.nvim_buf_attach(buf, false, {
+      on_lines = function()
+        vim.schedule(function()
+          if not api.nvim_buf_is_valid(buf) then
+            watched[buf] = nil
+            return
+          end
+          for _, w in ipairs(api.nvim_list_wins()) do
+            if api.nvim_win_is_valid(w) and api.nvim_win_get_buf(w) == buf then
+              mark(buf, w)
+              return
+            end
+          end
+        end)
+      end,
+      on_detach = function() watched[buf] = nil end,
+    })
+  end
   bmap('=', function()
     local p = path_at(items_of(api.nvim_get_current_win()), vim.fn.line('.'))
     if not p then
