@@ -7268,6 +7268,16 @@ function _G.vimide_auto_color_clear()
   return n
 end
 
+-- quickfix 창(qfpath.lua)이 경로를 줄일 때 쓰는 기준. 패널이 쓰는 것과
+-- 같은 답을 주어야 같은 파일이 두 목록에서 같은 이름으로 보인다.
+function _G.relationview_display_root(path)
+  local dir = path and vim.fs.dirname(path) or nil
+  if not dir or dir == '' then
+    return nil
+  end
+  return outer_root(dir)
+end
+
 local function lookup_to_qf(root, pat, refs)
   local items = {}
   for _, r in ipairs(refs) do

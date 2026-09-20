@@ -85,6 +85,16 @@ F2: Source files under the current path are indexed; `cscope.files` is written t
 F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
+The quickfix list shows paths from the project root, not from `/`
+(`g:vimide_qf_path`, `:VimIdeQfPath root|pwd|abs`). A `:Gtags` or `Ctrl+g`
+result used to spend sixty columns on the same prefix on every line, pushing
+the filename and the code itself off the right edge; now it reads
+`kernel/common/drivers/char/tcc_ecid.c|80 col 5| ...`. The root is the one the
+relation panel uses - the outermost directory with an index - so the same file
+is named the same way in both lists. A file outside that root keeps its
+absolute path, since shortening it to `../../..` reads worse. nvim only:
+`'quickfixtextfunc'` arrived in vim 8.2.
+
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
 `Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
 with the word under the cursor and let you edit it, and on blank space `Old`

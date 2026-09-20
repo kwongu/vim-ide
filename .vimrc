@@ -2896,6 +2896,20 @@ let g:relationview_height = 16
 "   'pwd'         :pwd 기준 (켠 위치에 따라 달라진다)
 "   'abs'         절대 경로
 let g:relationview_path_base = 'root'
+
+" quickfix 창의 경로를 무엇 기준으로 보여줄지 (qfpath.lua, nvim 전용)
+"
+"   'root' (기본) 프로젝트 루트 기준.  drivers/char/tcc_ecid.c|80| ...
+"   'pwd'         :pwd 기준
+"   'abs'         손대지 않는다 (예전 동작, 절대 경로 그대로)
+"
+" 기준이 되는 루트는 위 relationview_path_base 와 같은 것을 쓴다 - 색인이
+" 있는 가장 바깥 디렉터리다. 그래야 패널과 quickfix 에서 같은 파일이 같은
+" 이름으로 보인다. 루트 밖의 파일은 줄이지 않고 절대 경로로 둔다
+" (../../.. 로 줄이면 절대 경로보다 읽기 나쁘다).
+"
+"   :VimIdeQfPath root|pwd|abs    지금 바로 바꿔 보기
+let g:vimide_qf_path = 'root'
 let g:relationview_full_path = 0
 let g:relationview_startup = 'both'
 "let g:relationview_cycle = ['context', 'off']          " 미리보기만 켜고 끄기
