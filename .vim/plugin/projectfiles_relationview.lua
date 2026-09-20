@@ -111,9 +111,10 @@ local function ok_to_drop(n)
   if lim <= 0 or n < lim then
     return true
   end
+  -- confirm() 의 물음은 한 줄로 둔다. 줄바꿈을 넣었더니 한글이 잘려 나왔다
+  -- (실측: '목록이 비면' 이 '목록이 비' 로).
   return vim.fn.confirm(
-    ('%d개를 색인 목록에서 뺍니다.\n'):format(n)
-    .. '목록이 비면 preset 이 지워지고 이 프로젝트는 색인하지 않게 됩니다.',
+    ('색인 목록에서 %d개를 뺍니다. 목록이 비면 preset 이 지워지고 이 프로젝트는 색인하지 않게 됩니다.'):format(n),
     "빼기(&Y)\n그만두기(&N)", 2) == 1
 end
 

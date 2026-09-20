@@ -365,6 +365,26 @@ expanding the list could not have brought it in, so there is no point paying
 for a `find`. `g:projectfiles_index_new_on_save = 0` switches that second
 half off; the per-file update is autoindex's and stays.
 
+**A new SDK checkout starts from an old preset.** `\fM`
+(`:ProjectFilesImport`) lists every preset you have next to the number that
+matters when you move trees - how many of its entries actually exist *here*:
+
+```
+  qnx_hypervisor_ivi_sdk_d5      246항목 중  145개가 이 트리에 있음  (58%)
+  kernel_common                  102항목 중  102개가 이 트리에 있음  (100%)
+```
+
+A preset is a list of project-relative paths, so it applies to any checkout
+of the same tree and the index is rebuilt from the new root. What `\fm` does
+not tell you is that count, and the entries that are not in the new tree drop
+out silently - measured: 101 of 246 on a sibling checkout, which leaves you
+wondering why the index came out small. After you pick, it asks whether to
+share the preset (both projects read the same file, so an edit in one shows
+up in the other) or copy it under a new name (`..._d5` and `..._d5_A14` are
+the same list that grew apart). Verified on a throwaway tree: importing
+`kernel_common` into a fresh project wrote its `.tags/preset`, expanded the
+list to the 14 entries that existed there, and indexed those 14 files.
+
 `\fs` (`:ProjectSymbols [name]`) is the symbol half of the same idea: every
 definition the database holds - `global -x -d` answers with all 31k of them in
 about ten milliseconds on this kernel index - goes into one telescope picker,

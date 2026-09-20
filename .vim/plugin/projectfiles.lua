@@ -3809,6 +3809,138 @@ end, { nargs = '?', complete = function()
   return n
 end, desc = 'Use a preset (auto = whole project)' })
 
+-- 다른 프로젝트의 preset 을 이 프로젝트로 가져온다 (:ProjectFilesImport)
+--
+-- 새 SDK 를 받으면 색인할 파일 목록은 거의 그대로다 - 트리 경로만 다르다.
+-- preset 은 프로젝트 상대 경로 목록이라 그대로 쓸 수 있고, 색인은 이 트리의
+-- 경로로 새로 만들어진다.
+--
+-- :ProjectFilesPreset 과 무엇이 다른가
+--   그쪽은 '이 preset 을 쓴다'만 한다. 새 SDK 로 옮길 때 정작 알고 싶은
+--   것은 '그 목록 중 몇 개가 이 트리에 실제로 있나'인데, 그걸 말해 주지
+--   않는다. 실측: 246항목짜리 preset 을 다른 체크아웃에 걸었더니 101개는
+--   그 트리에 없는 경로였다 - 조용히 빠졌다.
+--   여기서는 고르기 전에 그 수를 보여주고, 고른 뒤에 '공유할지 복사할지'를
+--   묻는다.
+--
+--   공유  두 프로젝트가 같은 preset 파일을 본다. 한쪽에서 파일을 넣으면
+--         다른 쪽 목록도 같이 바뀐다.
+--   복사  새 이름으로 떠서 따로 관리한다. SDK 판마다 목록이 갈리기
+--         시작하면 이쪽이다 (qnx_..._d5 와 qnx_..._d5_A14 처럼).
+local function pick_import()
+  local root = cur_root()
+  if not root or root == '' then
+    notify('프로젝트를 찾지 못했습니다', vim.log.levels.WARN)
+    return
+  end
+  local cur = active_preset(root)
+  local items = {}
+  for _, n in ipairs(preset_list()) do
+    local p = read_preset_file(preset_path(n)) or read_preset_file(shared_path(n))
+    local es = p and p.entries or {}
+    local here = 0
+    for _, e in ipairs(es) do
+      local abs = e.path:sub(1, 1) == '/' and e.path or (root .. '/' .. e.path)
+      if uv.fs_stat(abs) then
+        here = here + 1
+      end
+    end
+    local pct = #es > 0 and math.floor(here * 100 / #es) or 0
+    items[#items + 1] = {
+      name = n, entries = es, here = here,
+      label = ('%s%-46s %4d항목 중 %4d개가 이 트리에 있음  (%d%%)')
+          :format(cur == n and '● ' or '  ', n, #es, here, pct),
+    }
+  end
+  if #items == 0 then
+    notify('가져올 preset 이 없습니다', vim.log.levels.WARN)
+    return
+  end
+
+  local function apply(name)
+    set_active(root, name)
+    local files = materialize(root)
+    reindex(root)
+    notify(("preset '%s' 을 가져왔습니다  →  파일 %d개  →  %s")
+      :format(name, files and #files or 0, target_label(root)))
+  end
+
+  local function use(it)
+    if it.here == 0 then
+      notify(("'%s' 의 경로가 이 트리에는 하나도 없습니다 - 다른 체크아웃의 preset 입니다")
+        :format(it.name), vim.log.levels.WARN)
+      return
+    end
+    local c = vim.fn.confirm(
+      ("'%s' (%d/%d 항목이 이 트리에 있음)"):format(it.name, it.here, #it.entries),
+      "그대로 쓴다 - 목록을 공유(&S)\n새 이름으로 복사(&C)\n취소(&Q)", 1)
+    if c == 1 then
+      apply(it.name)
+    elseif c == 2 then
+      local suggest = it.name .. '_' .. vim.fn.fnamemodify(root, ':t')
+      local ok, nm = pcall(vim.fn.input, '새 preset 이름: ', suggest)
+      nm = ok and vim.trim(nm or '') or ''
+      if nm == '' then
+        return
+      end
+      preset_write(nm, it.entries)
+      apply(nm)
+    end
+  end
+
+  local t = telescope()
+  if not t then
+    local labels = {}
+    for _, it in ipairs(items) do
+      labels[#labels + 1] = it.label
+    end
+    return fallback_select(labels, '가져올 preset', function(_, idx)
+      if idx then
+        use(items[idx])
+      end
+    end)
+  end
+  t.pickers.new({}, {
+    prompt_title = 'preset 가져오기  <CR> 고르기',
+    finder = t.finders.new_table({
+      results = items,
+      entry_maker = function(e)
+        return { value = e, display = e.label, ordinal = e.label }
+      end,
+    }),
+    sorter = t.conf.generic_sorter({}),
+    attach_mappings = function(bufnr)
+      t.actions.select_default:replace(function()
+        local e = t.state.get_selected_entry()
+        t.actions.close(bufnr)
+        if e then
+          vim.schedule(function() use(e.value) end)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
+api.nvim_create_user_command('ProjectFilesImport', function(o)
+  if o.args == '' then
+    pick_import()
+    return
+  end
+  local root = cur_root()
+  local p = read_preset_file(preset_path(o.args)) or read_preset_file(shared_path(o.args))
+  if not p then
+    notify(("preset '%s' 을 찾지 못했습니다"):format(o.args), vim.log.levels.WARN)
+    return
+  end
+  set_active(root, o.args)
+  local files = materialize(root)
+  reindex(root)
+  notify(("preset '%s' 을 가져왔습니다  →  파일 %d개  →  %s")
+    :format(o.args, files and #files or 0, target_label(root)))
+end, { nargs = '?', complete = function() return preset_list() end,
+  desc = '다른 프로젝트의 preset 목록을 이 프로젝트로 가져온다' })
+
 api.nvim_create_user_command('ProjectFilesSave', function(o)
   local root = cur_root()
   local entries, _, bad = entries_of(root)

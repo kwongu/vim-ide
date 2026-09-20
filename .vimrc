@@ -3132,6 +3132,7 @@ endif
 "     <leader>fd  추가할 디렉터리 고르기  (그 아래 전부)
 "     <leader>fx  등록 항목 제거
 "     <leader>fm  preset 선택/전환        (^d 내 사본 삭제, auto 포함)
+"     <leader>fM  preset 가져오기        (새 SDK 로 목록을 옮긴다)
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
@@ -3173,6 +3174,18 @@ nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
 nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
 nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
 nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
+" 새 SDK 를 받았을 때: 다른 프로젝트의 preset 목록을 이 트리로 가져온다.
+"
+" preset 은 프로젝트 상대 경로 목록이라 그대로 쓸 수 있고, 색인은 이 트리의
+" 경로로 새로 만들어진다. \fm 과 다른 점은 고르기 전에 '그 목록 중 몇 개가
+" 이 트리에 실제로 있나'를 보여준다는 것이다 - 다른 체크아웃의 preset 을
+" 걸면 없는 경로는 조용히 빠지는데(실측: 246항목 중 101개), 그 수를 모르면
+" 색인이 왜 작은지 알 수가 없다. 고른 뒤에는 공유할지(두 프로젝트가 같은
+" 파일을 본다) 새 이름으로 복사할지 묻는다.
+"
+"   :ProjectFilesImport [이름]
+" (\fi 는 Telescope git_commits 가 쓰고 있어서 \fm 옆자리인 \fM 이다)
+nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 " 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.
 "
