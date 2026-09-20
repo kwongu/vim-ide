@@ -64,9 +64,29 @@ set nobackup
 " Turn on plugin and indent, depending on file type
 filetype plugin indent on
 
-" Wait for a key code forever.
-" Wait for a mapped key sequence to complete within ttimeoutlen.
-set notimeout ttimeout
+" 매핑 두 키짜리를 얼마나 기다릴까.
+"
+" 예전에는 notimeout 이었다 - '\fr' 처럼 두 키짜리 매핑에서 다음 키를
+" 영원히 기다린다는 뜻이다. 느긋해서 좋았지만, <C-]> 처럼 '한 번 눌러도
+" 되고 두 번 눌러도 되는' 키가 생기면서 탈이 났다: 한 번만 누르면 vim 이
+" 두 번째 키를 기다리느라 아무 일도 하지 않는다. 그래서 timeout 을 켜고
+" 시간을 짧게 둔다.
+"
+" 대가: \fr \lt 같은 리더 매핑도 키 사이 간격이 이 시간을 넘으면 안 된다.
+" 손이 느리게 느껴지면 400~600 으로 올리는 편이 낫다.
+"
+"   let g:vimide_map_timeoutlen = 500   " 넉넉하게
+"   let g:vimide_map_timeout = 0        " 예전처럼 영원히 기다린다
+"                                       " (<C-]> 를 한 번만 쓰고 싶으면
+"                                       "  g:vimide_ctx_jump_seq = 0 과 함께)
+"
+" ttimeout 은 따로다 - 아래 ttimeoutlen 은 키 코드(방향키 등)용이다.
+if get(g:, 'vimide_map_timeout', 1)
+	set timeout
+else
+	set notimeout
+endif
+set ttimeout
 
 " In Milliseconds
 " ttimeoutlen 은 Esc 를 눌렀을 때 '이게 방향키 같은 이스케이프 시퀀스의
@@ -75,7 +95,8 @@ set notimeout ttimeout
 " 0 으로 두지 않는 이유: 방향키의 ESC 시퀀스가 TCP 세그먼트로 쪼개져 도착할
 " 여유는 남겨야 오작동이 없다. 25ms 는 실측 RTT(11.8ms)의 두 배다.
 "   let g:vimide_esc_wait = 100   " 예전 동작으로 되돌리기
-set timeoutlen=3000
+let &timeoutlen = get(g:, 'vimide_map_timeoutlen',
+			\ get(g:, 'vimide_map_timeout', 1) ? 250 : 3000)
 let &ttimeoutlen = get(g:, 'vimide_esc_wait', 25)
 
 " Not redraw while executing macros, and commands.
