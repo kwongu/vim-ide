@@ -4,6 +4,26 @@ echo "### vim install start ###"
 
 VIMIDE=${HOME}/.vim-ide
 
+# ---------------------------------------------------------------------------
+# 필요한 프로그램부터 본다 (tools/deps.sh)
+# ---------------------------------------------------------------------------
+# 예전에는 'command -v <이름>' 으로 있는지만 봤다. 그러면 낡은 것이 통과한다 -
+# 개발서버의 git 2.25.1 이 그랬고, diffview 는 2.31 이상이라 \v 가 아무 말
+# 없이 아무 일도 하지 않았다. 없는 것보다 낡은 것이 알아내기 어렵다.
+#
+# 이제 판까지 보고, 모자라면 이 기계에 맞는 길로 채운다:
+#   맥      brew
+#   우분투  암호 없이 sudo 가 되면 apt, 안 되면 홈($HOME/.local)에만
+#   그 밖   무엇을 치면 되는지만 적는다
+#
+#   VIMIDE_DEPS=0 ./install.sh     확인만 하고 설치하지 않는다
+#   tools/deps.sh --check          설치 없이 확인만
+#   tools/deps.sh --list           무엇이 왜 필요한지
+if [ -x "${VIMIDE}/tools/deps.sh" ]; then
+	"${VIMIDE}/tools/deps.sh" || true
+	echo
+fi
+
 if [ -e ${HOME}/.vimrc -o -e ${HOME}/.vim ]; then
 	echo "note: 설치를 진행하려면 ${HOME}/.vim/ 디렉토리와 ${HOME}/.vimrc 기존 파일이 없어야 합니다."
 	echo "Note:  ${HOME}/.vim/ 디렉토리와 ${HOME}/.vimrc 파일을 ${HOME}/.oldvim 디렉토리로 백업합니다."
@@ -210,7 +230,13 @@ echo "     :find :h :tag 와 <C-t> / <C-^> / 마우스 뒤로·앞으로 버튼�
 echo "     옮겨서 실행합니다. 끄려면  let g:vimide_edit_route = 0"
 echo "     아무 명령이나 그렇게 돌리려면  :VimIdeInEdit <명령>"
 
-pip install pathlib
+# pip install pathlib 는 하지 않는다.
+#
+# pathlib 는 python 3.4 부터 표준 라이브러리다. PyPI 의 'pathlib' 는 그
+# 시절 백포트이고, 지금 python 에 깔면 표준 것을 가리면서 오히려 깨진다
+# (setuptools 가 'pathlib is obsolete' 로 막기도 한다). 남겨는 둔다 -
+# 예전에 무엇을 했는지 알 수 있어야 하기 때문이다.
+#pip install pathlib
 
 echo "### vim install end ###"
 
