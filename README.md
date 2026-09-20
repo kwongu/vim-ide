@@ -86,8 +86,14 @@ F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
-A float shows `Old` and takes the `New` text; Enter then offers **ALL**, one
-by one (`Yes`/`No`), or cancel. One-by-one hands over to vim's own `:s///gc`
+`Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
+with the word under the cursor and let you edit it, and on blank space `Old`
+starts empty and the cursor starts there, so you can type what to look for.
+Then Enter offers **ALL**, one by one (`Yes`/`No`), or cancel.
+Nothing in the edit window changes while you type: nvim previews `:s` live
+(`inccommand`) by default, which hides the very text you are replacing, so
+this turns it off for the duration and puts it back
+(`g:vimide_replace_preview = 1` keeps the preview). One-by-one hands over to vim's own `:s///gc`
 prompt - `y` replaces, `n` skips, `a` takes the rest, `q` stops - and the
 whole thing is a single `:s`, so one `u` undoes it. `Esc` cancels anywhere.
 Word boundaries are on (`g:vimide_replace_word`), so renaming `old_name`

@@ -2404,64 +2404,130 @@ nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
 " 다음 / 이전 / 지금 버퍼 닫기
 " 찾아 바꾸기 - 커서 밑 심볼을 이 파일 안에서 바꾼다
 "
-"   <C-h>  또는  ,ch
+"   <C-h>   떠 있는 창 (nvim). Old 를 보여주고 New 를 받는다.
+"   ,ch     명령행에서 직접 친다. Old 와 New 를 차례로 묻는다.
 "
-" 떠 있는 창이 Old(커서 밑 심볼)를 보여주고 New 를 받는다. Enter 를 치면
-" '한 번에 모두 / 하나씩 Yes,No / 취소' 를 고르는 창이 뜬다. 하나씩은 vim 의
+" 둘 다 커서 밑 심볼을 Old 에 채워 두되 고칠 수 있다. 빈 곳에서 불렀으면
+" Old 가 비어 있고 찾을 말부터 직접 치면 된다.
+"
+" 그 다음 '한 번에 모두 / 하나씩 Yes,No / 취소' 를 고른다. 하나씩은 vim 의
 " :s///gc 그대로다 - y 바꾼다, n 건너뛴다, a 여기서부터 전부, q 그만둔다.
-" 어디서든 <Esc> 는 취소. 바꾼 뒤 u 한 번이면 통째로 되돌아온다.
+" 어디서든 <Esc>(또는 <C-c>) 는 취소. 바꾸기는 한 번의 :s 라서 u 한 번이면
+" 통째로 되돌아온다.
+"
+" 치는 동안 EDIT 창이 실시간으로 바뀌지 않는다. nvim 의 inccommand 는 기본이
+" nosplit 이라 :s 를 치는 사이 화면을 미리 바꿔 버리는데, 그러면 원래 내용이
+" 뭐였는지 알 수가 없다. 이 기능이 도는 동안만 꺼 두었다가 되돌린다
+" (평소의 :s 미리보기는 그대로 둔다).
 "
 "   let g:vimide_replace_word = 0     " 낱말 경계로 찾지 않는다
 "                                     " (1 이면 struct 가 structure 에 안 걸린다)
 "   let g:vimide_replace_ctrl_h = 0   " <C-h> 를 예전처럼 창 왼쪽 이동으로
 "                                     " (그래도 ,ch 는 그대로 쓴다)
-"   :VimIdeReplace [찾을말]           " 명령으로도
-"
-" nvim 은 떠 있는 창(findreplace.lua), vim 8.1 은 물음 두 번 + confirm() 이다.
+"   let g:vimide_replace_preview = 1  " 치는 동안 미리보기를 끄지 않는다
+"   :VimIdeReplace [찾을말]           " 명령으로도 (떠 있는 창)
+"   :VimIdeReplaceCmd [찾을말]        " 명령으로도 (명령행)
 let g:vimide_replace_word = 1
 let g:vimide_replace_ctrl_h = 1
+let g:vimide_replace_preview = 0
 
-func! s:Replace(...) abort
-	let l:old = a:0 > 0 && !empty(a:1) ? a:1 : expand('<cword>')
-	if has('nvim') && exists('*luaeval')
-		call luaeval('_G.vimide_replace ~= nil and (function() _G.vimide_replace(_A) return 1 end)() or 0', l:old)
-		return
+" 치는 동안 미리보기를 끈다. 되돌리는 것까지 한 쌍이다.
+func! s:ReplaceNoPreview() abort
+	if get(g:, 'vimide_replace_preview', 0) || !exists('&inccommand')
+		return ''
 	endif
-	" vim 8.1: 떠 있는 창이 없다. 같은 차례를 물음으로 받는다.
-	if empty(l:old)
-		echohl WarningMsg | echo '커서 밑에 바꿀 말이 없습니다' | echohl None
-		return
-	endif
-	let l:new = ''
-	try
-		echohl Question
-		let l:new = input('Old: ' . l:old . '   New: ')
-	catch /^Vim:Interrupt$/
-		return
-	finally
-		echohl None
-	endtry
-	if empty(l:new) || l:new ==# l:old
-		return
-	endif
-	let l:pat = '\V' . escape(l:old, '\/')
-	if get(g:, 'vimide_replace_word', 1) && l:old =~# '^\w\+$'
-		let l:pat = '\<' . l:pat . '\>'
-	endif
-	let l:rep = escape(l:new, '\/&~')
-	redraw
-	let l:c = confirm(printf("'%s' -> '%s'", l:old, l:new),
-				\ "한 번에 모두(&A)\n하나씩 물어보기(&O)\n취소(&C)", 1)
-	if l:c == 1
-		execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/g'
-	elseif l:c == 2
-		execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/gc'
+	let l:save = &inccommand
+	set inccommand=
+	return l:save
+endfunc
+func! s:ReplacePreviewBack(save) abort
+	if exists('&inccommand') && type(a:save) == type('') && !empty(a:save)
+		let &inccommand = a:save
 	endif
 endfunc
-command! -nargs=? VimIdeReplaceVim call s:Replace(<q-args>)
-nnoremap <silent> ,ch :call <SID>Replace()<CR>
+
+" 명령행 쪽 (,ch). vim 8.1 에서도 이 길을 쓴다 - 거기엔 떠 있는 창이 없다.
+func! s:ReplaceCmd(...) abort
+	if &buftype !=# '' || !&modifiable || &readonly
+		echohl WarningMsg | echo '여기서는 바꿀 수 없습니다' | echohl None
+		return
+	endif
+	let l:seed = a:0 > 0 && !empty(a:1) ? a:1 : expand('<cword>')
+	let l:save = s:ReplaceNoPreview()
+	try
+		let l:old = ''
+		let l:new = ''
+		try
+			echohl Question
+			let l:old = input('찾을 말  Old: ', l:seed)
+			if empty(l:old)
+				return
+			endif
+			echo " "
+			let l:new = input(printf("바꿀 말  '%s' -> New: ", l:old))
+		catch /^Vim:Interrupt$/
+			return
+		finally
+			echohl None
+		endtry
+		if empty(l:new) || l:new ==# l:old
+			return
+		endif
+		let l:pat = '\V' . escape(l:old, '\/')
+		if get(g:, 'vimide_replace_word', 1) && l:old =~# '^\w\+$'
+			let l:pat = '\<' . l:pat . '\>'
+		endif
+		let l:rep = escape(l:new, '\/&~')
+		" 몇 곳인지 먼저 세어 보여준다. 없으면 묻지 않는다.
+		let l:n = 0
+		try
+			let l:out = execute('keeppatterns %s/' . l:pat . '//gn')
+			let l:n = str2nr(matchstr(l:out, '\d\+'))
+		catch
+		endtry
+		if l:n == 0
+			redraw
+			echohl WarningMsg | echo printf("'%s' 를 이 파일에서 찾지 못했습니다", l:old) | echohl None
+			return
+		endif
+		redraw
+		let l:c = confirm(printf("'%s' -> '%s'   (%d곳)", l:old, l:new, l:n),
+					\ "한 번에 모두(&A)\n하나씩 Yes,No(&O)\n취소(&C)", 1)
+		if l:c == 1
+			execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/g'
+			echo printf("'%s' -> '%s'  %d곳 바꿈", l:old, l:new, l:n)
+		elseif l:c == 2
+			echohl Question
+			echo '바꿀까요?  y 예  n 아니오  a 여기서부터 전부  q 그만'
+			echohl None
+			execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/gc'
+		endif
+	finally
+		call s:ReplacePreviewBack(l:save)
+	endtry
+endfunc
+command! -nargs=? VimIdeReplaceCmd call s:ReplaceCmd(<q-args>)
+
+" 떠 있는 창 쪽 (<C-h>). nvim 이 아니면 명령행 길로 떨어진다.
+func! s:ReplaceFloat(...) abort
+	let l:seed = a:0 > 0 ? a:1 : ''
+	if !(has('nvim') && exists('*luaeval'))
+		call s:ReplaceCmd(l:seed)
+		return
+	endif
+	let l:save = s:ReplaceNoPreview()
+	" 떠 있는 창은 비동기라 여기서 바로 되돌리면 안 된다. 창이 닫힐 때
+	" 되돌리도록 한 박자 뒤로 미룬다 - 바꾸기까지 끝나고 나서다.
+	call luaeval('_G.vimide_replace ~= nil and (function() _G.vimide_replace(_A) return 1 end)() or 0',
+				\ empty(l:seed) ? expand('<cword>') : l:seed)
+	if !empty(l:save)
+		call timer_start(50, {-> s:ReplacePreviewBack(l:save)})
+	endif
+endfunc
+
+nnoremap <silent> ,ch :call <SID>ReplaceCmd()<CR>
 if get(g:, 'vimide_replace_ctrl_h', 1)
-	nnoremap <silent> <C-h> :call <SID>Replace()<CR>
+	nnoremap <silent> <C-h> :call <SID>ReplaceFloat()<CR>
 endif
 
 map ,r :call <SID>BufCycle('bn!')<CR>
@@ -2483,7 +2549,9 @@ map ,0 :call <SID>BufCycle('b!0')<CR>
 
 "===== text change
 nmap ,H :%s/<C-R>=expand("<cword>")<CR>/
-nmap ,ch :.,$s/<C-R>=expand("<cword>")<CR>/
+" ,ch 는 위쪽 s:ReplaceCmd() 가 쓴다 - 찾을 말과 바꿀 말을 차례로 묻고
+" '한 번에 모두 / 하나씩 / 취소' 를 고르게 한다. 예전 매핑은 남겨 둔다:
+"nmap ,ch :.,$s/<C-R>=expand("<cword>")<CR>/
 
 "===== make bootloader
 let startbootdir = getcwd()

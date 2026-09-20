@@ -1,11 +1,15 @@
 -- findreplace.lua - 커서 밑 심볼을 이 파일 안에서 찾아 바꾼다
 --
--- <C-h> 또는 ,ch 를 누르면 떠 있는 창이 뜬다.
+-- <C-h> 를 누르면 떠 있는 창이 뜬다. (,ch 는 명령행 쪽이다 - .vimrc 참고)
 --
 --   ╭─ 찾아 바꾸기 ──────────────────╮
 --   │  Old   IO_UTIL_ReadECID        │
 --   │  New   ▊                       │
 --   ╰────────────────────────────────╯
+--
+-- Old 는 커서 밑 심볼로 채워 두지만 고칠 수 있다. 빈 곳에서 불렀으면 Old 가
+-- 비어 있고 커서가 거기서 시작한다 - 찾을 말부터 직접 치면 된다.
+-- Tab 으로 두 칸을 오간다.
 --
 -- 바꿀 말을 치고 Enter 를 누르면 어떻게 바꿀지 고르는 창이 뜬다.
 --
@@ -73,6 +77,18 @@ end
 local function close(win)
   if win and api.nvim_win_is_valid(win) then
     pcall(api.nvim_win_close, win, true)
+  end
+end
+
+-- 자동완성을 잠깐 재운다.
+--
+-- 이 창에서는 두 글자만 치면 되는데 AutoComplPop 이 목록을 띄우고,
+-- 그 상태의 <Tab>/<CR> 은 우리 매핑이 아니라 '후보 고르기'로 먹힌다.
+-- 실측: Old 에 old_name 을 치고 <Tab> 을 눌렀더니 그 낱말이 통째로
+-- 후보로 갈려 나갔다.
+local function acp(on)
+  if vim.fn.exists(':AcpEnable') == 2 then
+    pcall(vim.cmd, on and 'AcpEnable' or 'AcpDisable')
   end
 end
 
@@ -159,53 +175,84 @@ local function ask_how(old, new, hits)
   end
 end
 
--- 1단계: Old 를 보여주고 New 를 받는다
+-- 1단계: Old 와 New 를 받는다
+--
+-- Old 는 커서 밑 심볼로 채워 두지만 고칠 수 있다. 빈 곳에서 불렀으면 비어
+-- 있고, 그때는 커서가 Old 에서 시작한다 - 찾을 말부터 쳐야 하기 때문이다.
 local function ask_new(old)
-  local buf, win = float({ '  Old   ' .. old, '  New   ' }, {
+  local P = '  Old   '
+  local Q = '  New   '
+  local buf, win = float({ P .. old, Q }, {
     width = math.max(46, #old + 22),
     title = ' 찾아 바꾸기 ',
-    footer = ' Enter 다음 · Esc 취소 ',
+    footer = ' Tab 칸 이동 · Enter 다음 · Esc 취소 ',
   })
   vim.bo[buf].filetype = 'vimide-replace'
-  api.nvim_win_set_cursor(win, { 2, #'  New   ' })
-  vim.cmd('startinsert!')
+  vim.bo[buf].complete = ''       -- 이 버퍼에서는 <C-n> 후보도 만들지 않는다
+  acp(false)
 
-  local function done()
-    local l = api.nvim_buf_get_lines(buf, 0, -1, false)
-    local new
-    for _, line in ipairs(l) do
-      local m = line:match('^%s*New%s+(.*)$')
+  local function goto_line(n)
+    local l = api.nvim_buf_get_lines(buf, n - 1, n, false)[1] or ''
+    api.nvim_win_set_cursor(win, { n, #l })
+    vim.cmd('startinsert!')
+  end
+  -- 찾을 말이 이미 있으면 바로 New 로, 없으면 Old 부터
+  goto_line(old == '' and 1 or 2)
+
+  local function field(tag)
+    for _, line in ipairs(api.nvim_buf_get_lines(buf, 0, -1, false)) do
+      local m = line:match('^%s*' .. tag .. '%s*(.-)%s*$')
       if m then
-        new = m
-        break
+        return m
       end
     end
-    new = new or ''
+    return ''
+  end
+  -- Old 줄에서 <CR> 은 'New 로 넘어가기', New 줄에서는 '확인'이다.
+  -- <Tab> 도 같은 자리를 오가지만, 손에 익은 것은 Enter 쪽이다.
+  local function done()
+    if api.nvim_win_is_valid(win) and api.nvim_win_get_cursor(win)[1] == 1
+        and (api.nvim_buf_get_lines(buf, 1, 2, false)[1] or ''):match('^%s*New%s*$') then
+      goto_line(2) -- 아직 바꿀 말을 안 썼다: 거기로 넘어간다
+      return
+    end
+    local o, n = field('Old'), field('New')
     close(win)
+    acp(true)
     vim.cmd('stopinsert')
-    if new == '' then
+    if o == '' then
+      vim.notify('찾을 말이 비어 있습니다', vim.log.levels.WARN)
+      return
+    end
+    if n == '' then
       vim.notify('바꿀 말이 비어 있습니다', vim.log.levels.WARN)
       return
     end
-    if new == old then
+    if n == o then
       vim.notify('같은 말입니다', vim.log.levels.WARN)
       return
     end
     vim.schedule(function()
-      local hits = count_hits(search_pat(old))
+      local hits = count_hits(search_pat(o))
       if hits == 0 then
-        vim.notify(("'%s' 를 이 파일에서 찾지 못했습니다"):format(old), vim.log.levels.WARN)
+        vim.notify(("'%s' 를 이 파일에서 찾지 못했습니다"):format(o), vim.log.levels.WARN)
         return
       end
-      ask_how(old, new, hits)
+      ask_how(o, n, hits)
     end)
   end
   local function cancel()
     close(win)
+    acp(true)
     vim.cmd('stopinsert')
+  end
+  local function other()
+    goto_line(api.nvim_win_get_cursor(win)[1] == 1 and 2 or 1)
   end
   for _, m in ipairs({ 'n', 'i' }) do
     vim.keymap.set(m, '<CR>', done, { buffer = buf, nowait = true })
+    vim.keymap.set(m, '<Tab>', other, { buffer = buf, nowait = true })
+    vim.keymap.set(m, '<S-Tab>', other, { buffer = buf, nowait = true })
     vim.keymap.set(m, '<Esc>', cancel, { buffer = buf, nowait = true })
     vim.keymap.set(m, '<C-c>', cancel, { buffer = buf, nowait = true })
   end
@@ -220,12 +267,9 @@ function _G.vimide_replace(old)
     vim.notify('이 파일은 고칠 수 없습니다', vim.log.levels.WARN)
     return
   end
+  -- 빈 곳에서 불러도 창은 뜬다. Old 가 비어 있고 거기서부터 친다.
   old = (old and old ~= '') and old or vim.fn.expand('<cword>')
-  if not old or old == '' then
-    vim.notify('커서 밑에 바꿀 말이 없습니다', vim.log.levels.WARN)
-    return
-  end
-  ask_new(old)
+  ask_new(old or '')
 end
 
 api.nvim_create_user_command('VimIdeReplace', function(a) _G.vimide_replace(a.args) end,
