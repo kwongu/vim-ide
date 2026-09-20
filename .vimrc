@@ -3187,6 +3187,31 @@ nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 let g:projectfiles_index_new_on_save = 1
 " 1000 (기본) 저장이 멈추고 이만큼(ms) 지나면 확인한다.
 let g:projectfiles_index_new_on_save_delay = 1000
+
+" 색인 목록을 '보는 자리에서 바로' 고치는 창들.
+"
+" 넷 다 같은 손버릇이다 - 커서 줄이나 고른 영역의 파일을 넣고(+) 빼고(-)
+" 지금 들어 있는지 본다(=). 들어 있는 파일에는 줄 끝에 빨간 ● 가 붙는다.
+"
+"   NERDTree / neo-tree   +  -  =
+"   netrw (:Ex)           +  -  =     g:projectfiles_netrw
+"   BufExplorer (F6)      +  -  =     g:projectfiles_bufexplorer
+"   quickfix (:copen)     +  -  =     g:projectfiles_quickfix
+"   RelationView 패널     i+ i- i=    g:projectfiles_relationview
+"
+" 패널만 'i' 가 붙는 이유: 거기서 + 와 - 는 이미 트리 펼치기/접기다. 그
+" 자리를 빼앗으면 관계 목록을 읽는 손버릇이 통째로 바뀐다. 앞머리는
+" g:projectfiles_relationview_prefix 로 바꿀 수 있다.
+"
+" quickfix 와 패널은 한 파일이 여러 줄에 나오는 것이 예사다(한 파일에서 열
+" 곳을 찾으면 열 줄). 영역을 골라도 같은 파일은 한 번만 넘긴다.
+"
+"   let g:projectfiles_quickfix = 0        " quickfix 쪽을 끈다
+"   let g:projectfiles_relationview = 0    " 패널 쪽을 끈다
+"   let g:projectfiles_relationview_prefix = 'g'   " g+ g- g= 로
+"   let g:projectfiles_quickfix_mark = '*'         " 표시 문자를 바꾼다
+let g:projectfiles_quickfix = 1
+let g:projectfiles_relationview = 1
 nnoremap <silent> <leader>fR :ProjectFilesReindex<CR>
 " Source Insight 의 Lookup References: 색인된 파일 '안에서만' 글자를 찾는다.
 " relation window 가 떠 있으면 거기에 파일별로 묶어서, 아니면 quickfix 로.

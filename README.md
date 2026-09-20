@@ -85,6 +85,20 @@ F2: Source files under the current path are indexed; `cscope.files` is written t
 F3: Toggle RelationView, Source Insight style relation window (nvim only)
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
+The quickfix list and the relation panel both say whether a file is in the
+index and let you change it on the spot - `+` adds the file on the cursor
+line (or every file in the visual selection), `-` drops it, `=` says where it
+stands, and a file that is in the list carries a red `●` at the end of its
+line. This is the same set of keys NERDTree, neo-tree, netrw and BufExplorer
+already had, for the same reason: the files a `:Gtags` or `Ctrl+g` result
+just put in front of you are exactly the ones worth indexing, and walking
+back down a tree to find them again is doing the work twice. In the relation
+panel the keys are `i+` `i-` `i=`, because `+` and `-` there already expand
+and collapse the tree (`g:projectfiles_relationview_prefix` moves them). One
+file usually appears on several lines in these lists, so a selection hands
+each file over once. Switches: `g:projectfiles_quickfix`,
+`g:projectfiles_relationview`.
+
 The quickfix list shows paths from the project root, not from `/`
 (`g:vimide_qf_path`, `:VimIdeQfPath root|pwd|abs`). A `:Gtags` or `Ctrl+g`
 result used to spend sixty columns on the same prefix on every line, pushing

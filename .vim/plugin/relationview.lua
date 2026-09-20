@@ -5788,6 +5788,22 @@ function A.jump_here(peek)
   return true
 end
 
+-- 패널의 n 번째 줄이 가리키는 파일. 색인 표시(projectfiles_relationview.lua)가
+-- 쓴다. 파일이 없는 줄(머리글, 빈 줄, 트리 가지)이면 nil 이다.
+function _G.relationview_path_at(lnum)
+  local item = s.items[tonumber(lnum) or 0]
+  local p = item and item.loc and item.loc.path
+  if type(p) ~= 'string' or p == '' then
+    return nil
+  end
+  return vim.fn.fnamemodify(p, ':p')
+end
+
+-- 패널 버퍼 번호 (없으면 nil)
+function _G.relationview_bufnr()
+  return (s.buf and vim.api.nvim_buf_is_valid(s.buf)) and s.buf or nil
+end
+
 function A.jump(peek)
   local lnum = api.nvim_win_get_cursor(0)[1]
   local item = s.items[lnum]
