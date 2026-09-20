@@ -89,7 +89,7 @@ F5: Clear all marks
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
-F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left)
+F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left). Inside the tree, `w` widens it a step at a time and then snaps back to its normal width, the same key and the same feel as `w` in the relation panel - the steps are percentages of the screen (`g:neotree_wide_steps`, `[25, 40]`), and the other sidebars keep their width; the edit window pays for it
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
 F11: Toggle NERDTree on the right (F9 used to be this one)
@@ -1446,10 +1446,33 @@ nvim -u NONE -c 'set mouse=a' -c 'nnoremap <X1Mouse> :echo "back OK"<CR>' -c 'nn
 The way through is to make the button send a *key* instead. Back and forward
 are therefore also on `Ctrl+o` / `Ctrl+i` everywhere (the panel and preview
 learned those here; the edit window always had them) and on a configurable
-alias pair, `<F17>`/`<F18>` plus `<S-F5>`/`<S-F7>` by default. Both names are
-bound because the same bytes - `ESC [15;2~` and `ESC [17;2~` - are read as a
-high function key by some builds and as a shifted one by others; only one
-ever arrives.
+alias pair: `<F17>`/`<F18>`, `<S-F5>`/`<S-F6>`, `<A-Left>`/`<A-Right>` and
+`<C-RightMouse>`/`<S-RightMouse>` by default. The two function-key names are
+both bound because the same bytes - `ESC [15;2~` and `ESC [17;2~` - are read
+as a high function key by some builds and as a shifted one by others; only
+one ever arrives.
+
+**Windows Terminal, PuTTY and MobaXterm are in the same boat as Tera Term** -
+none of the three reads the side buttons at all, and none has a setting to
+bind them, so no terminal-side configuration exists to find. Send
+`Alt+Left` / `Alt+Right` instead: it is what a browser's back and forward are
+bound to, so a mouse vendor's utility usually has that mapping ready, all
+four terminals pass the keys straight through, and vim-ide binds them out of
+the box. With no vendor utility, two AutoHotkey v2 lines do it:
+
+```ahk
+#HotIf WinActive("ahk_exe WindowsTerminal.exe") or WinActive("ahk_exe putty.exe")
+    or WinActive("ahk_exe MobaXterm.exe") or WinActive("ahk_exe ttermpro.exe")
+XButton1::Send("!{Left}")
+XButton2::Send("!{Right}")
+#HotIf
+```
+
+Then run `:JumpKeyTest` and press the button once: `<A-Left>` on screen means
+it is done. Nothing at all means the button still has not been turned into a
+key on the Windows side, which is not something vim can fix. If Alt is being
+eaten by a window menu, use the escape-sequence or `Ctrl+O`/`Ctrl+I` route
+below instead.
 
 **iTerm2** - Settings → Pointer → *Mouse Button and Trackpad Gesture
 Actions* → `+`, click the side button to record it, Action = **Send Escape

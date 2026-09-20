@@ -679,6 +679,10 @@ _G.rv_setup('neo-tree', {
       ['I'] = 'toggle_hidden',
       ['K'] = function(state) _G.neotree_sibling(state, 'first') end,
       ['J'] = function(state) _G.neotree_sibling(state, 'last') end,
+      -- 'w' 로 트리 폭을 넓혔다 줄인다 (RelationView 패널의 'w' 와 같다).
+      -- 단계는 g:neotree_wide_steps, 하는 일은 neotree_nerd.lua 에 있다.
+      -- neo-tree 기본의 open_with_window_picker 자리를 넘겨받는다.
+      ['w'] = function() _G.neotree_toggle_wide() end,
     },
   },
   -- 파일을 열 때 이 창들은 고르지 않는다.
@@ -1815,13 +1819,45 @@ nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 "            'Mouse Button and Trackpad Gesture Actions' 에 버튼 4/5 를
 "            추가하고 Action = 'Send Escape Sequence',
 "            Text = '[15;2~' (뒤로) / '[17;2~' (앞으로)
-"   TeraTerm 마우스 버튼 바인딩 기능이 없다. AutoHotkey 로 보낸다:
-"              #IfWinActive ahk_exe ttermpro.exe
-"              XButton1::SendInput {Esc}[15;2~
-"              XButton2::SendInput {Esc}[17;2~
-"              #IfWinActive
-"            (마우스 제조사 유틸리티로 XButton1/2 를 Ctrl+O / Ctrl+I 에
-"             묶어도 된다 - 패널과 context 창도 그 두 키를 받는다)
+"
+"   ---- 윈도우 터미널들 ----
+"
+"   Windows Terminal, PuTTY, MobaXterm, TeraTerm 은 넷 다 '마우스 옆 버튼을
+"   어떤 시퀀스로 보내라'는 설정이 없다. 터미널이 그 버튼을 아예 읽지 않고
+"   창 관리자에게 넘긴다. 그래서 터미널 설정으로는 풀 수 없고, 윈도우 쪽에서
+"   그 버튼을 '키'로 바꿔 줘야 한다. 바꿀 키는 <A-Left>/<A-Right> 가 가장
+"   쉽다 - 브라우저의 뒤로/앞으로와 같은 키라 마우스 유틸리티가 대개 그
+"   자리를 이미 갖고 있고, 넷 다 그 키를 그대로 흘려보낸다.
+"
+"   1) 마우스 제조사 유틸리티 (로지텍 Options+, 마우스 드라이버 ...)
+"      가장 간단하다. 아무것도 설치하지 않아도 되는 경우가 많다.
+"        옆 버튼 뒤로  ->  Alt+Left        (또는 Ctrl+O)
+"        옆 버튼 앞으로 ->  Alt+Right       (또는 Ctrl+I)
+"
+"   2) AutoHotkey v2 (유틸리티가 없을 때). 터미널 창에서만 바꾼다:
+"        #HotIf WinActive("ahk_exe WindowsTerminal.exe")
+"           or WinActive("ahk_exe putty.exe")
+"           or WinActive("ahk_exe MobaXterm.exe")
+"           or WinActive("ahk_exe ttermpro.exe")
+"        XButton1::Send "!{Left}"
+"        XButton2::Send "!{Right}"
+"        #HotIf
+"      (v1 이면 #IfWinActive ... XButton1::SendInput !{Left})
+"
+"   3) 이스케이프 시퀀스를 직접 보내고 싶으면 위 자리에
+"        XButton1::SendInput "{Esc}[15;2~"
+"        XButton2::SendInput "{Esc}[17;2~"
+"      로 두어도 된다. 그쪽은 <F17>/<F18>(또는 <S-F5>/<S-F6>)로 들어온다.
+"
+"   먹는지 확인: :JumpKeyTest 를 치고 그 버튼을 한 번 누른다.
+"     <A-Left> 라고 나오면 끝이다. 아무 반응이 없으면 윈도우 쪽에서 아직
+"     버튼이 키로 바뀌지 않은 것이다 - vim 을 더 고칠 일이 아니다.
+"
+"   <A-Left> 가 안 올 때: 터미널이 Alt 를 창 메뉴로 먹고 있는 것이다.
+"     PuTTY/MobaXterm 은 기본으로 Alt+키를 ESC 를 앞에 붙여 그대로 보낸다
+"     (그래서 따로 손댈 것이 없다). 그래도 안 오면 Alt 를 쓰지 말고 위 2)의
+"     이스케이프 시퀀스 쪽이나 Ctrl+O / Ctrl+I 로 바꾸면 된다 - 그 둘은
+"     패널과 미리보기 창도 같이 받는다.
 "
 " 마우스 조합도 같이 둔다. Tera Term 은 옆 버튼은 못 보내지만 수식키는
 " 마우스 보고에 실어 보낸다(vtterm.c 의 MouseReport 는 Shift=4, Alt=8,
@@ -1829,13 +1865,13 @@ nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 " 쪽에 아무것도 설치하지 않고 바로 쓸 수 있다 - Ctrl+우클릭은 vim 이 원래
 " <C-t>(태그 되돌리기)로 쓰는 자리이기도 해서 뜻도 맞는다.
 "
-"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<C-RightMouse>']
-"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<S-RightMouse>']
+"   let g:vimide_jump_back_key    = ['<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>']
+"   let g:vimide_jump_forward_key = ['<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>']
 "   let g:vimide_jump_back_key    = []     " 이 대체 키를 쓰지 않는다
 func! s:MapJumpAlias(which, rhs) abort
 	let l:v = get(g:, 'vimide_jump_' . a:which . '_key',
-				\ a:which ==# 'back' ? ['<F17>', '<S-F5>', '<C-RightMouse>']
-				\                   : ['<F18>', '<S-F6>', '<S-RightMouse>'])
+				\ a:which ==# 'back' ? ['<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>']
+				\                   : ['<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>'])
 	if type(l:v) == type('')
 		let l:v = empty(l:v) ? [] : [l:v]
 	endif
@@ -2735,6 +2771,20 @@ let g:relationview_big_width = 0
 let g:relationview_wide_steps = [50, 75]
 " 칸수를 박아 두면 위 단계 대신 그 한 단계만 돈다(기본 0 = 단계를 쓴다).
 let g:relationview_wide_width = 0
+
+" F9 의 왼쪽 neo-tree 도 'w' 로 폭을 넓혔다 줄인다.
+"
+" 트리 창 안에서 'w' 를 누를 때마다 도는 단계(화면 폭의 %).
+" 마지막 단계에서 한 번 더 누르면 처음 폭(window.width, 32칸)으로 돌아온다.
+" 다른 곁창(aerial, RelationView 패널)의 폭은 건드리지 않는다 - 늘어난
+" 만큼은 EDIT 창이 낸다. RelationView 의 'w' 와 같은 규칙이다.
+"
+"   let g:neotree_wide_steps = [20, 35, 50]   " 세 단계로
+"   let g:neotree_wide_steps = []             " 이 기능을 쓰지 않는다
+"
+" neo-tree 기본에서 'w' 는 open_with_window_picker 다. 이 설정은 창
+" 고르개를 쓰지 않으므로(파일은 늘 직전 EDIT 창에 연다) 그 자리를 쓴다.
+let g:neotree_wide_steps = [25, 40]
 " 1 (기본) <C-n>/<C-p> 로 목록을 옮길 때 그 자리를 보여주는 창으로 커서까지 간다.
 "          0 이면 미리보기만 하고 커서는 그대로 (엿보기용 <C-0>/<C-9> 와 같아진다).
 let g:relationview_step_focus = 1

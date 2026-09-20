@@ -1804,9 +1804,13 @@ end
 local function alias_keys(which)
   local v = vim.g['vimide_jump_' .. which .. '_key']
   if v == nil then
+    -- .vimrc 의 s:MapJumpAlias 와 같은 목록이어야 한다.
+    -- <A-Left>/<A-Right> 는 윈도우 터미널(Windows Terminal, PuTTY,
+    -- MobaXterm, TeraTerm) 용이다 - 넷 다 마우스 옆 버튼을 보내지 못해서
+    -- 마우스 유틸리티나 AutoHotkey 로 이 키에 묶어 쓴다.
     return which == 'back'
-        and { '<F17>', '<S-F5>', '<C-RightMouse>' }
-        or { '<F18>', '<S-F6>', '<S-RightMouse>' }
+        and { '<F17>', '<S-F5>', '<A-Left>', '<C-RightMouse>' }
+        or { '<F18>', '<S-F6>', '<A-Right>', '<S-RightMouse>' }
   end
   if type(v) == 'string' then
     return v ~= '' and { v } or {}
@@ -2279,10 +2283,15 @@ local function ctx_buf()
     { buffer = b, nowait = true,
       desc = 'RelationView context: open this line in the edit window' })
   -- in the preview the back button walks the same stack as <C-t>
-  vim.keymap.set('n', '<X1Mouse>', function() ctx_tag_back() end,
-    { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
-  vim.keymap.set('n', '<X2Mouse>', function() ctx_tag_forward() end,
-    { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
+  -- 옆 버튼을 못 보내는 터미널용 대체 키도 같이 받는다 (패널 쪽과 같다)
+  for _, k in ipairs({ '<X1Mouse>', unpack(alias_keys('back')) }) do
+    pcall(vim.keymap.set, 'n', k, function() ctx_tag_back() end,
+      { buffer = b, nowait = true, desc = 'RelationView context: jump back' })
+  end
+  for _, k in ipairs({ '<X2Mouse>', unpack(alias_keys('forward')) }) do
+    pcall(vim.keymap.set, 'n', k, function() ctx_tag_forward() end,
+      { buffer = b, nowait = true, desc = 'RelationView context: jump forward' })
+  end
   s.ctx_ph = b
   return b
 end
