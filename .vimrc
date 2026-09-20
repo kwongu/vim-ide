@@ -4593,17 +4593,44 @@ botright cwindow
 " '<경로를 +로 바꾼 꼬리 80자>-<sha256 앞 12자>.vim', nvim 의 stdpath('state')
 " 아래. vim 에도 sha256() 이 있다(확인함).
 if !has('nvim')
+	" 프로젝트 루트. nvim 쪽(projectfiles.lua 의 root_from_dir)과 같은 판정을
+	" 써야 한다 - 다르면 세션 파일 이름이 갈려서 'vim 으로 저장한 것을 vim 이
+	" 못 찾는' 일이 난다.
+	"
+	" 실측으로 한 번 당했다: 처음에는 isdirectory('.tags') 만 봤더니 GTAGS 도
+	" 없는 빈 /tmp/.tags 에 걸려 /tmp 를 루트로 잡았다. 순서는 이렇다.
+	"   1) 색인이 있는 가장 가까운 위 (<d>/.tags/GTAGS 또는 <d>/GTAGS)
+	"   2) 없으면 표식 (.git / .project / .root)
+	"   3) 그것도 없으면 지금 디렉터리
 	func! s:VimIdeSessRoot() abort
 		let l:d = getcwd()
-		while !empty(l:d) && l:d !=# '/'
-			if isdirectory(l:d . '/.tags') || isdirectory(l:d . '/.git')
-				return l:d
+		" '<root>/.tags' 안에서 띄웠으면 거기서 나온다
+		while l:d =~# '/\.tags$'
+			let l:d = fnamemodify(l:d, ':h')
+		endwhile
+		let l:x = l:d
+		while !empty(l:x)
+			if filereadable(l:x . '/.tags/GTAGS') || filereadable(l:x . '/GTAGS')
+				return l:x
 			endif
-			let l:p = fnamemodify(l:d, ':h')
-			if l:p ==# l:d
+			let l:p = fnamemodify(l:x, ':h')
+			if l:p ==# l:x
 				break
 			endif
-			let l:d = l:p
+			let l:x = l:p
+		endwhile
+		let l:x = l:d
+		while !empty(l:x)
+			for l:m in ['.git', '.project', '.root']
+				if isdirectory(l:x . '/' . l:m) || filereadable(l:x . '/' . l:m)
+					return l:x
+				endif
+			endfor
+			let l:p = fnamemodify(l:x, ':h')
+			if l:p ==# l:x
+				break
+			endif
+			let l:x = l:p
 		endwhile
 		return getcwd()
 	endfunc
@@ -4710,4 +4737,16 @@ if !has('nvim')
 	" -bar 를 준다. 없으면 ':Restore | 다른명령' 이 E488 로 깨진다
 	" (사용자 명령은 -bar 가 없으면 줄의 나머지를 통째로 삼킨다).
 	command! -bar Restore call s:VimIdeRestore()
+
+	" 어느 파일을 보고 있는지. nvim 쪽 :VimIdeSessionWhere 와 짝이다 -
+	" vim 과 nvim 이 프로젝트 루트를 다르게 보면 세션이 갈리는데, 그것을
+	" 눈으로 맞춰 볼 데가 있어야 한다.
+	func! s:VimIdeSessWhere() abort
+		let l:v = s:VimIdeSessFileVim()
+		let l:n = s:VimIdeSessFile()
+		echo 'root = ' . s:VimIdeSessRoot()
+		echo 'vim  = ' . l:v . (filereadable(l:v) ? '' : '   (없음)')
+		echo 'nvim = ' . l:n . (filereadable(l:n) ? '' : '   (없음)')
+	endfunc
+	command! -bar VimIdeSessionWhere call s:VimIdeSessWhere()
 endif
