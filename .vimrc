@@ -1570,7 +1570,7 @@ endif
 " 그래서 실제로 쓰는 길은 g] 다. 터미널 쪽 배정을 풀면(iTerm2 는
 " Settings > Pointer) 이 매핑이 그때부터 살아난다. 지워 두면 그때 다시
 " 만들어야 하므로 남겨 둔다 - 걸려 있어도 해가 없다.
-nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvEditJump()<CR>
+nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvJumpPrimary()<CR>
 
 func! s:RvCtxJump() abort
 	let l:marked = s:RvMarkCword(1)
@@ -1657,19 +1657,23 @@ func! s:RvCtxJump() abort
 endfunc
 " <C-]> 가 어디로 뛸까 - EDIT 창이냐, 미리보기(context)냐.
 "
-"   'edit' (기본)  <C-]>   EDIT 창에서 정의로 (g] / f] 와 같은 자리)
-"                  <C-]>]  미리보기 창에서 정의로
+"   'edit' (기본)  <C-]>        EDIT 창에서 정의로 (g] / f] 와 같은 자리)
+"                  <C-]><C-]>   미리보기 창에서 정의로
 "   'ctx'          그 반대. 예전 동작이다.
+"
+" 마우스도 같은 짝이다:
+"   Ctrl+왼쪽클릭  = <C-]>        (EDIT 창)
+"   더블클릭       = <C-]><C-]>   (미리보기 창)
 "
 " 릴레이션 뷰가 꺼져 있으면 둘 다 EDIT 창으로 간다 - RvCtxJump 가 패널이
 " 없을 때는 평범한 태그 점프로 떨어진다.
 let g:vimide_jump_target = 'edit'
 
-" 두 키짜리(<C-]>]) 배정을 쓸지.
+" 두 키짜리(<C-]><C-]>) 배정을 쓸지.
 "
-" 대가가 하나 있다: 두 키를 걸어 두면 vim 은 <C-]> 만 눌렀을 때 '뒤에 ]
-" 가 더 올까' 하고 'timeoutlen'(기본 1000ms)만큼 기다렸다가 뛴다. 한 번
-" 누르는 쪽이 그만큼 늦어진다는 뜻이다.
+" 대가가 하나 있다: 두 키를 걸어 두면 vim 은 <C-]> 를 한 번 눌렀을 때
+" '뒤에 <C-]> 가 더 올까' 하고 'timeoutlen'(기본 1000ms)만큼 기다렸다가
+" 뛴다. 한 번 누르는 쪽이 그만큼 늦어진다는 뜻이다.
 "
 "   set timeoutlen=250              " 기다림을 짧게 (거의 안 느껴진다)
 "   let g:vimide_ctx_jump_seq = 0   " 두 키를 아예 안 쓴다 (기다림도 없다)
@@ -1695,7 +1699,7 @@ func! s:RvJumpSecondary() abort
 endfunc
 nnoremap <silent> <C-]> :call <SID>RvJumpPrimary()<CR>
 if get(g:, 'vimide_ctx_jump_seq', 1)
-	nnoremap <silent> <C-]>] :call <SID>RvJumpSecondary()<CR>
+	nnoremap <silent> <C-]><C-]> :call <SID>RvJumpSecondary()<CR>
 endif
 
 " gf : #include 줄에서는 relationview 의 헤더 해석기(포함한 파일 옆 →
@@ -1759,7 +1763,7 @@ endif
 " 'global command failed' 만 났다. F6 과 같은 길로 EDIT 창에서 돌린다.
 nnoremap <silent> <C-\><C-]> :VimIdeInEdit GtagsCursor<CR>
 " <C-]> 는 위쪽 s:RvJumpPrimary() 매핑을 쓴다(기본은 EDIT 창 점프,
-" <C-]>] 가 미리보기 쪽 - g:vimide_jump_target 참고). 예전 매핑은 남겨둔다:
+" <C-]><C-]> 가 미리보기 쪽 - g:vimide_jump_target 참고). 예전 매핑은:
 "nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
 " <C-t> : 태그 스택으로 되돌아간다. 비어 있으면 점프 목록으로 되돌아간다.
 "
@@ -1809,13 +1813,15 @@ function! s:RvMouseJump() abort
 		endif
 		return
 	endif
-	" 더블클릭은 <C-]> 와 똑같이 동작한다(g:vimide_jump_target 을 따른다):
+	" 더블클릭 = <C-]><C-]> 다. 키와 마우스의 짝을 맞춘다:
+	"   Ctrl+왼쪽클릭 = <C-]>       -> EDIT 창의 정의로
+	"   더블클릭      = <C-]><C-]>  -> 미리보기(context) 창의 정의로
+	" (g:vimide_jump_target = 'ctx' 면 둘이 맞바뀐다)
 	"   #include        -> 그 헤더를 EDIT 창에서 연다
 	"   파라미터/지역변수 -> 이 함수 안의 선언으로 (EDIT 창)
-	"   그 밖의 심볼     -> 기본은 EDIT 창의 정의로. 'ctx' 로 두면 패널+
-	"                      미리보기가 켜져 있을 때 context view 로 간다.
+	" 패널+미리보기가 꺼져 있으면 미리보기 쪽도 EDIT 창/quickfix 로 떨어진다.
 	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-		call s:RvJumpPrimary()
+		call s:RvJumpSecondary()
 	else
 		execute "normal! \<2-LeftMouse>"
 	endif
