@@ -1834,15 +1834,17 @@ nnoremap <silent> <X2Mouse> :call <SID>JumpList('forward')<CR>
 "        옆 버튼 뒤로  ->  Alt+Left        (또는 Ctrl+O)
 "        옆 버튼 앞으로 ->  Alt+Right       (또는 Ctrl+I)
 "
-"   2) AutoHotkey v2 (유틸리티가 없을 때). 터미널 창에서만 바꾼다:
-"        #HotIf WinActive("ahk_exe WindowsTerminal.exe")
-"           or WinActive("ahk_exe putty.exe")
-"           or WinActive("ahk_exe MobaXterm.exe")
-"           or WinActive("ahk_exe ttermpro.exe")
-"        XButton1::Send "!{Left}"
-"        XButton2::Send "!{Right}"
-"        #HotIf
-"      (v1 이면 #IfWinActive ... XButton1::SendInput !{Left})
+"   2) AutoHotkey (유틸리티가 없을 때)
+"      ~/.vim-ide/tools/vim-ide-mouse.ahk 를 윈도우로 복사해 더블클릭하면
+"      끝이다. 알맹이는 세 줄이다:
+"        #Requires AutoHotkey v2.0
+"        XButton1::Send("!{Left}")
+"        XButton2::Send("!{Right}")
+"      (v1 이 깔려 있으면 tools/vim-ide-mouse-v1.ahk 쪽을 쓴다 - v1 과 v2 는
+"       문법이 달라 서로의 스크립트를 못 돌린다)
+"      창 조건(#HotIf)은 일부러 걸지 않았다. 실행 파일 이름이 제각각이라
+"      (MobaXterm_Personal_24.2.exe) 조건이 조용히 안 맞는 일이 잦고,
+"      Alt+화살표는 브라우저에서도 뒤로/앞으로라 전역이어도 손해가 없다.
 "
 "   3) 이스케이프 시퀀스를 직접 보내고 싶으면 위 자리에
 "        XButton1::SendInput "{Esc}[15;2~"

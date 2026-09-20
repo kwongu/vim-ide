@@ -1458,15 +1458,23 @@ bind them, so no terminal-side configuration exists to find. Send
 `Alt+Left` / `Alt+Right` instead: it is what a browser's back and forward are
 bound to, so a mouse vendor's utility usually has that mapping ready, all
 four terminals pass the keys straight through, and vim-ide binds them out of
-the box. With no vendor utility, two AutoHotkey v2 lines do it:
+the box. With no vendor utility, [`tools/vim-ide-mouse.ahk`](tools/vim-ide-mouse.ahk)
+is ready to run - install AutoHotkey v2, double-click the file, done. It is
+three lines:
 
 ```ahk
-#HotIf WinActive("ahk_exe WindowsTerminal.exe") or WinActive("ahk_exe putty.exe")
-    or WinActive("ahk_exe MobaXterm.exe") or WinActive("ahk_exe ttermpro.exe")
+#Requires AutoHotkey v2.0
 XButton1::Send("!{Left}")
 XButton2::Send("!{Right}")
-#HotIf
 ```
+
+It deliberately does not restrict itself to terminal windows. Scoping it with
+`#HotIf WinActive("ahk_exe ...")` looks tidier and then quietly fails to
+match, because the executable names vary - MobaXterm ships as
+`MobaXterm_Personal_24.2.exe`. Alt+Left and Alt+Right are back and forward in
+a browser and in Explorer too, so leaving it global costs nothing.
+([`vim-ide-mouse-v1.ahk`](tools/vim-ide-mouse-v1.ahk) is the same thing for
+AutoHotkey v1, whose syntax v2 will not run.)
 
 Then run `:JumpKeyTest` and press the button once: `<A-Left>` on screen means
 it is done. Nothing at all means the button still has not been turned into a
