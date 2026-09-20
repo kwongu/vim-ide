@@ -302,7 +302,30 @@ end
 -- 저장할 값어치가 있나.
 -- 같은 프로젝트에서 'nvim 파일하나' 를 10초 열었다 닫는 일이 제일 흔한데,
 -- 그때 애써 짜 둔 배치가 창 하나짜리로 덮이면 안 된다.
+-- 파일을 담은 창이 하나라도 있는가.
+--
+-- 없는 상태를 저장하면 :mksession 이 'edit <파일>' 을 한 줄도 안 적는다 -
+-- 버퍼 목록(badd)만 남고 창 배치가 통째로 사라진다.
+local function has_file_window()
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local okb, b = pcall(api.nvim_win_get_buf, w)
+    if okb and vim.bo[b].buftype == '' and api.nvim_buf_get_name(b) ~= '' then
+      return true
+    end
+  end
+  return false
+end
+
 local function worth_saving(p, spath)
+  -- 파일 창이 하나도 없으면 이미 있는 세션을 덮지 않는다.
+  --
+  -- 실측: 커널 트리 세션이 badd 44줄에 edit 0줄이었다. 나가는 순간 창이
+  -- 이름 없는 하나뿐이어서, 그 빈 상태가 멀쩡하던 배치를 덮어쓴 것이다.
+  -- 'vim +Restore 해도 이전 상태가 안 돌아온다'가 여기서 났다.
+  -- had_panels 만 보던 예전 검사는 이 경우를 그대로 통과시켰다.
+  if not has_file_window() then
+    return fn.filereadable(spath) == 0
+  end
   if #api.nvim_tabpage_list_wins(0) > 1 then
     return true
   end

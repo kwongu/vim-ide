@@ -2672,6 +2672,11 @@ endif
 nmap ,ch :.,$s/<C-R>=expand("<cword>")<CR>/
 if get(g:, 'vimide_replace_ctrl_h', 1)
 	nnoremap <silent> <C-h> :call <SID>ReplaceFloat()<CR>
+	" 블록(또는 문자/줄)으로 고른 뒤 <C-h> 면 고른 글자가 Old 로 들어간다.
+	" 여러 줄을 골랐으면 첫 줄만 쓴다 - <C-g> 와 같은 규칙이고, 찾아 바꾸기는
+	" 한 줄짜리 낱말을 다루는 일이라 그 편이 맞다.
+	" :<C-u> 로 범위를 지운다. 안 지우면 함수가 범위를 받아 E481 이 난다.
+	xnoremap <silent> <C-h> :<C-u>call <SID>ReplaceFloat(<SID>VisualText())<CR>
 endif
 
 map ,r :call <SID>BufCycle('bn!')<CR>
