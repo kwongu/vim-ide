@@ -73,6 +73,15 @@ echo '' >> ${HOME}/.profile <br/>
   It fills gaps the way the machine allows: `brew` on macOS; `apt` on Debian/Ubuntu **only if sudo needs no password**, and otherwise into `$HOME/.local` alone, because the dev server is shared by 800+ people and an unattended `sudo` there is not mine to run; anywhere else it just prints the command to type. Git has a home-directory route (extracting the git-core PPA `.deb`, with a wrapper for `GIT_EXEC_PATH` - the Debian build hardcodes `/usr/lib/git-core` and would otherwise drive the old helpers). Universal Ctags built from a snapshot calls itself `0.0.0`, so ctags is judged by what it says it *is*, not by the number. `VIMIDE_DEPS=0 ./install.sh` skips installing, `VIMIDE_DEPS_SUDO=0` never tries sudo.
 
 * Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs and 3-way merges (`<leader>v`) and `gitsigns.nvim` for the gutter of the buffer you are editing - `<leader>ha` stages the hunk under the cursor (or, from visual mode, just the lines you selected), `<leader>hr` reverts it, `<leader>hu` unstages, `<leader>hv` previews it, `<leader>ht` toggles the blame of the current line, and `]h`/`[h` walk the hunks. That is partial staging without leaving the file, which is the half of Magit a status window cannot give you. The gutter is gitsigns' in nvim and `vim-signify`'s in real vim 8.1 (the dev server); running both draws the same column twice, so nvim turns signify off (`g:vimide_signify_in_nvim = 1` puts it back). Line blame is **off by default**: it runs `git blame` on the file every time the cursor rests, and this setup lives on 60k-file kernel trees, some of them over SMB - `<leader>ht` turns it on when you want it, `g:gitsigns_blame_on = 1` from the start.
+  Measured, because it gets asked: the git stack is not what costs you time.
+  Opening 20 files in the kernel tree takes 419 ms with everything on, 406 ms
+  with gitsigns off (13 ms, 3%), and 31 ms with no config at all - so the git
+  plugins are 3% of a cost that is mostly everything else. Startup is
+  identical with and without them: neogit and diffview only load when you run
+  their commands, and gitsigns attaches to a buffer asynchronously, off the
+  path that opens the file. When this setup did feel slow it was never these -
+  it was startup errors and an over-long message parking vim on `Press ENTER`.
+
   `<leader>v` toggles: pressing it again closes the view. Inside it, `q`
   closes too - diffview binds `q` only in its option and help panels, so in
   the file panel and the diff windows it did nothing at all (it started
