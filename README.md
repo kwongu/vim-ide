@@ -123,7 +123,17 @@ gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
 \fo: Find a file among the indexed ones and open it (^d drop, ^a add)
 \fp / \fd: Pick files / directories to add to the project files list
 \fx: Remove entries    \fm: Choose the preset    \fS: Save it    \fR: Reindex
-Ctrl+]: Open the definition in the context window and focus it; Ctrl+t back
+Ctrl+]: Open the definition in the EDIT window, the same as `g]` and `f]`;
+     Ctrl+t back
+Ctrl+] then ]: open that definition in the context window and focus it
+     instead. Which of the two the single press does is `g:vimide_jump_target`
+     (`'edit'` by default, `'ctx'` for the old behaviour; the double-press
+     always does the other one, and a double click follows the single press).
+     Binding both costs a little: after `Ctrl+]` vim waits `'timeoutlen'`
+     (1000 ms by default) to see whether a `]` follows, so the single press
+     lands that much later. `set timeoutlen=250` makes it hard to notice, and
+     `let g:vimide_ctx_jump_seq = 0` drops the two-key binding and the wait
+     with it
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the

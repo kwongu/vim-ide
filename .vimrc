@@ -1655,7 +1655,48 @@ func! s:RvCtxJump() abort
 	endif
 	execute "normal! \<C-]>"
 endfunc
-nnoremap <silent> <C-]> :call <SID>RvCtxJump()<CR>
+" <C-]> 가 어디로 뛸까 - EDIT 창이냐, 미리보기(context)냐.
+"
+"   'edit' (기본)  <C-]>   EDIT 창에서 정의로 (g] / f] 와 같은 자리)
+"                  <C-]>]  미리보기 창에서 정의로
+"   'ctx'          그 반대. 예전 동작이다.
+"
+" 릴레이션 뷰가 꺼져 있으면 둘 다 EDIT 창으로 간다 - RvCtxJump 가 패널이
+" 없을 때는 평범한 태그 점프로 떨어진다.
+let g:vimide_jump_target = 'edit'
+
+" 두 키짜리(<C-]>]) 배정을 쓸지.
+"
+" 대가가 하나 있다: 두 키를 걸어 두면 vim 은 <C-]> 만 눌렀을 때 '뒤에 ]
+" 가 더 올까' 하고 'timeoutlen'(기본 1000ms)만큼 기다렸다가 뛴다. 한 번
+" 누르는 쪽이 그만큼 늦어진다는 뜻이다.
+"
+"   set timeoutlen=250              " 기다림을 짧게 (거의 안 느껴진다)
+"   let g:vimide_ctx_jump_seq = 0   " 두 키를 아예 안 쓴다 (기다림도 없다)
+"
+" 0 으로 두면 미리보기 점프는 g:vimide_jump_target = 'ctx' 로 바꾸거나
+" 패널의 <CR>, \lc 로 연다.
+let g:vimide_ctx_jump_seq = 1
+
+" 한 번 누르는 쪽 / 두 번 누르는 쪽. 더블클릭도 '한 번 누르는 쪽'을 따른다.
+func! s:RvJumpPrimary() abort
+	if get(g:, 'vimide_jump_target', 'edit') ==# 'ctx'
+		call s:RvCtxJump()
+	else
+		call s:RvEditJump()
+	endif
+endfunc
+func! s:RvJumpSecondary() abort
+	if get(g:, 'vimide_jump_target', 'edit') ==# 'ctx'
+		call s:RvEditJump()
+	else
+		call s:RvCtxJump()
+	endif
+endfunc
+nnoremap <silent> <C-]> :call <SID>RvJumpPrimary()<CR>
+if get(g:, 'vimide_ctx_jump_seq', 1)
+	nnoremap <silent> <C-]>] :call <SID>RvJumpSecondary()<CR>
+endif
 
 " gf : #include 줄에서는 relationview 의 헤더 해석기(포함한 파일 옆 →
 "      GTAGS 경로 색인 → 'path')로 그 헤더를 편집창에 연다. 그 밖에는
@@ -1717,8 +1758,8 @@ endif
 " 곁창에서 누르면 그 창의 파일 이름(NERD_tree_1 ...)으로 global 을 돌려
 " 'global command failed' 만 났다. F6 과 같은 길로 EDIT 창에서 돌린다.
 nnoremap <silent> <C-\><C-]> :VimIdeInEdit GtagsCursor<CR>
-" <C-]> 는 위쪽 s:RvCtxJump() 매핑을 쓴다(정의를 context view 에 열고
-" 포커스 이동, 패널이 없으면 tagfunc 로 편집창 점프). 예전 매핑은 남겨둔다:
+" <C-]> 는 위쪽 s:RvJumpPrimary() 매핑을 쓴다(기본은 EDIT 창 점프,
+" <C-]>] 가 미리보기 쪽 - g:vimide_jump_target 참고). 예전 매핑은 남겨둔다:
 "nmap <C-]> :Gtags -d <C-R>=expand("<cword>") <CR><CR>
 " <C-t> : 태그 스택으로 되돌아간다. 비어 있으면 점프 목록으로 되돌아간다.
 "
@@ -1768,13 +1809,13 @@ function! s:RvMouseJump() abort
 		endif
 		return
 	endif
-	" 더블클릭은 <C-]> 와 똑같이 동작한다:
+	" 더블클릭은 <C-]> 와 똑같이 동작한다(g:vimide_jump_target 을 따른다):
 	"   #include        -> 그 헤더를 EDIT 창에서 연다
 	"   파라미터/지역변수 -> 이 함수 안의 선언으로 (EDIT 창)
-	"   그 밖의 심볼     -> 패널+미리보기가 켜져 있으면 context view 로,
-	"                      아니면 예전처럼 EDIT 창/quickfix
+	"   그 밖의 심볼     -> 기본은 EDIT 창의 정의로. 'ctx' 로 두면 패널+
+	"                      미리보기가 켜져 있을 때 context view 로 간다.
 	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
-		call s:RvCtxJump()
+		call s:RvJumpPrimary()
 	else
 		execute "normal! \<2-LeftMouse>"
 	endif
