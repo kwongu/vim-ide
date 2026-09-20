@@ -82,7 +82,12 @@ echo '' >> ${HOME}/.profile <br/>
   path that opens the file. When this setup did feel slow it was never these -
   it was startup errors and an over-long message parking vim on `Press ENTER`.
 
-  `<leader>v` toggles: pressing it again closes the view. Inside it, `q`
+  Inside the diff, `Ctrl+n` and `Ctrl+p` step through the changes - the same
+  thing `]c` and `[c` do, on the keys the relation list already uses for
+  next/previous, so the hand does not have to switch. They are bound on
+  diffview's buffers only, so outside the diff those keys still walk the
+  relation list; in the file panel they move to the next and previous file's
+  diff. `<leader>v` toggles: pressing it again closes the view. Inside it, `q`
   closes too - diffview binds `q` only in its option and help panels, so in
   the file panel and the diff windows it did nothing at all (it started
   recording a macro), while every other panel in this setup closes with `q`.

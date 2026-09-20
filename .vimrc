@@ -455,13 +455,33 @@ rv_setup('neogit', {
 -- 패널과 diff 창에는 없어서, 이 IDE 의 다른 패널처럼 q 를 눌러도 아무 일도
 -- 일어나지 않는다(눌러도 매크로 기록이 시작될 뿐이다). 여기 셋에 걸어 준다 -
 -- RelationView 패널, quickfix, aerial 이 모두 q 로 닫히므로 손이 그걸 기억한다.
+local dv_actions = (function()
+  local ok, a = pcall(require, 'diffview.actions')
+  return ok and a or nil
+end)()
 rv_setup('diffview', {
   keymaps = {
     view = {
       { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+      -- <C-n>/<C-p> 를 ]c / [c 와 같은 자리로 (요청).
+      --
+      -- 이 두 키는 평소 RelationView 목록 이동이지만, diffview 의 keymaps 는
+      -- 그 버퍼에만 걸리므로 밖에서는 예전 그대로다. ]c / [c 도 살아 있다.
+      --
+      -- 하는 일은 ]c / [c 그대로다. 마지막(처음) 변경에서 한 번 더 눌러도
+      -- 거기 머문다 - vim 의 본래 동작이고, 한 바퀴 돌게 만들면 '끝인 줄
+      -- 알았는데 처음으로 튀는' 놀람이 생긴다. pcall 은 에러가 나는 판에서
+      -- 조용히 지나가려는 것뿐이다(실측: 이 판은 에러 없이 머문다).
+      { 'n', '<C-n>', function() pcall(vim.cmd, 'normal! ]c') end,
+        { desc = '다음 변경 (]c 와 같다)' } },
+      { 'n', '<C-p>', function() pcall(vim.cmd, 'normal! [c') end,
+        { desc = '이전 변경 ([c 와 같다)' } },
     },
     file_panel = {
       { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+      -- 패널에서는 '다음 변경'이 곧 '다음 파일'이다. 같은 키로 이어지게 한다.
+      { 'n', '<C-n>', dv_actions and dv_actions.select_next_entry, { desc = '다음 파일의 diff' } },
+      { 'n', '<C-p>', dv_actions and dv_actions.select_prev_entry, { desc = '이전 파일의 diff' } },
     },
     file_history_panel = {
       { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
