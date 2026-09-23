@@ -102,6 +102,7 @@ curl|7|must|vim-plug 부트스트랩과 플러그인 내려받기|curl --version
 make|3.8|want|telescope-fzf-native 빌드와 소스 설치|make --version|
 cc|4|want|위와 같다. 소스로 빌드할 때만 쓴다|cc --version|
 python3|3.6|want|install.sh 가 vim 을 python 지원으로 빌드할 때만 쓴다|python3 --version|
+tmux|3.2|want|tmux 안에서 nvim 을 쓸 때 Ctrl+작은따옴표 같은 확장 키를 넘긴다(extended-keys, 3.2 부터). 모자라면 GitHub 의 최신 릴리스를 올린다|tmux -V|
 '
 
 # node 는 넣지 않는다.
@@ -171,12 +172,90 @@ EOF
 	return 0
 }
 
+# tmux 는 소스로 홈에 올린다. 개발서버(Ubuntu 20.04)의 apt 판은 3.0a 라
+# extended-keys(3.2+)가 없고, sudo 도 막혀 있다. 받는 것은 공식 릴리스뿐이다:
+#   tmux      github.com/tmux/tmux/releases       (최신 태그를 물어서)
+#   libevent  github.com/libevent/libevent/releases (헤더가 없을 때만, 정적으로)
+# libevent 를 정적으로 묶어 두면 실행할 때 LD_LIBRARY_PATH 가 필요 없다.
+# ncurses 헤더는 기계에 있어야 한다(개발서버에는 있다). 없으면 멈추고 알린다.
+# 결과: ${LOCAL}/tmux-<판>/ 에 설치하고 ${LOCAL}/bin/tmux 가 그것을 가리킨다.
+#   VIMIDE_TMUX_VERSION=3.5a  최신 대신 이 판으로
+install_tmux_local() {
+	for _c in curl cc make; do
+		command -v "${_c}" >/dev/null 2>&1 || { note "${_c} 가 없어 tmux 를 빌드할 수 없습니다"; return 1; }
+	done
+	if ! { [ -r /usr/include/ncurses.h ] || [ -r /usr/include/curses.h ] ||
+			pkg-config --exists ncurses tinfo 2>/dev/null; }; then
+		note "ncurses 헤더가 없어 tmux 를 빌드할 수 없습니다 (libncurses-dev)"
+		return 1
+	fi
+	_tag=${VIMIDE_TMUX_VERSION:-$(curl -s --max-time 30 \
+		https://api.github.com/repos/tmux/tmux/releases/latest |
+		sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)}
+	[ -n "${_tag}" ] || { note "tmux 최신 판을 GitHub 에서 알아내지 못했습니다"; return 1; }
+	_w=$(mktemp -d "${TMPDIR:-/tmp}/vimide-tmux.XXXXXX") || return 1
+	_j=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+	[ "${_j}" -gt 4 ] && _j=4 # 함께 쓰는 서버다 - 코어를 다 쓰지 않는다
+	_ev=${LOCAL}/tmux-deps
+	_evflags=''
+	# 빌드 출력(컴파일러 경고가 수십 줄)은 파일로 받고, 실패했을 때만 끝을 보여 준다
+	_log=${_w}/build.log
+	fail_log() { note "$1 (기록: ${_log})"; tail -15 "${_log}" 2>/dev/null | sed 's/^/        /'; }
+	if ! pkg-config --exists libevent 2>/dev/null && [ ! -r "${_ev}/lib/libevent.a" ]; then
+		say "      libevent 2.1.12 를 ${_ev} 에 정적으로 빌드합니다 (시스템에 헤더가 없음)"
+		curl -sL --max-time 300 -o "${_w}/ev.tgz" \
+			https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz &&
+			tar -xzf "${_w}/ev.tgz" -C "${_w}" &&
+			( cd "${_w}/libevent-2.1.12-stable" &&
+				./configure --prefix="${_ev}" --disable-shared --enable-static \
+					--disable-openssl --disable-samples --disable-libevent-regress &&
+				make -j"${_j}" && make install ) >>"${_log}" 2>&1 ||
+			{ fail_log "libevent 빌드 실패 (${_w} 에 남겨 둠)"; return 1; }
+	fi
+	if [ -r "${_ev}/lib/libevent.a" ]; then
+		_evflags="LIBEVENT_CFLAGS=-I${_ev}/include LIBEVENT_LIBS=-L${_ev}/lib -levent"
+	fi
+	say "      tmux ${_tag} 를 ${LOCAL}/tmux-${_tag} 에 빌드합니다 (sudo 없이, 내 홈에만)"
+	curl -sL --max-time 300 -o "${_w}/tmux.tgz" \
+		"https://github.com/tmux/tmux/releases/download/${_tag}/tmux-${_tag}.tar.gz" &&
+		tar -xzf "${_w}/tmux.tgz" -C "${_w}" || { note "tmux ${_tag} 을 받지 못했습니다"; return 1; }
+	if ! ( cd "${_w}/tmux-${_tag}" &&
+			if [ -n "${_evflags}" ]; then
+				./configure --prefix="${LOCAL}/tmux-${_tag}" \
+					LIBEVENT_CFLAGS="-I${_ev}/include" LIBEVENT_LIBS="-L${_ev}/lib -levent"
+			else
+				./configure --prefix="${LOCAL}/tmux-${_tag}"
+			fi &&
+			make -j"${_j}" && make install ) >>"${_log}" 2>&1; then
+		fail_log "tmux 빌드 실패 (${_w} 에 남겨 둠)"
+		return 1
+	fi
+	rm -rf "${_w}"
+	mkdir -p "${LOCAL}/bin"
+	ln -sfn "${LOCAL}/tmux-${_tag}/bin/tmux" "${LOCAL}/bin/tmux"
+	note "${LOCAL}/bin/tmux -> tmux ${_tag}"
+	# 이미 돌고 있는 tmux 서버는 옛 판이다. 새 클라이언트는 거기 붙지 못한다
+	# ('protocol version mismatch'). 서버를 대신 끄지 않는다 - 남은 세션이
+	# 그 사람의 작업이다.
+	if tmux_old=$(command -v -p tmux 2>/dev/null) && [ -n "${tmux_old}" ] &&
+			"${tmux_old}" ls >/dev/null 2>&1; then
+		note "이미 떠 있는 tmux 세션은 옛 판 서버에 있습니다. 그 세션에는 ${tmux_old} attach 로"
+		note "붙고, 다 쓰면 그 서버를 끈 뒤(${tmux_old} kill-server) 새 tmux 로 여세요."
+	fi
+	return 0
+}
+
 install_one() {
 	_t=$1; _min=$2
 	_pkg=$(pkg_for "${_t}")
 	case "${OS}" in
 		darwin)
 			if command -v brew >/dev/null 2>&1; then
+				# 이미 깔려 있고 낡았으면 install 은 아무것도 안 한다 - upgrade 로
+				if brew list --formula "${_pkg}" >/dev/null 2>&1; then
+					say "      brew upgrade ${_pkg}"
+					brew upgrade "${_pkg}" && return 0
+				fi
 				say "      brew install ${_pkg}"
 				brew install "${_pkg}" && return 0
 			fi
@@ -186,10 +265,20 @@ install_one() {
 		debian)
 			if can_sudo; then
 				say "      sudo apt-get install -y ${_pkg}"
-				sudo apt-get install -y "${_pkg}" && return 0
+				if sudo apt-get install -y "${_pkg}"; then
+					# apt 판이 모자랄 수 있다 (Ubuntu 20.04 의 tmux 는 3.0a)
+					_now=$(ver_of "${_t}" -V 2>/dev/null)
+					if [ "${_t}" != tmux ] || ver_ge "${_now}" "${_min}"; then
+						return 0
+					fi
+					note "apt 의 tmux ${_now} 는 ${_min} 보다 낮습니다 - 홈에 새 판을 빌드합니다"
+				fi
 			fi
-			# sudo 가 안 된다: 홈에 올릴 길이 있으면 그걸로
+			# sudo 가 안 된다(또는 apt 판이 모자라다): 홈에 올릴 길이 있으면 그걸로
 			if [ "${_t}" = git ] && install_git_local; then
+				return 0
+			fi
+			if [ "${_t}" = tmux ] && install_tmux_local; then
 				return 0
 			fi
 			note "sudo 에 암호가 필요해 시스템에 설치하지 않았습니다."
