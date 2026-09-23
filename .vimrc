@@ -3388,7 +3388,7 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 
 " 북마크: 찍어 둔 마크를 텔레스코프로 골라서 그 자리로 (marksjump.lua)
 "
-"   <C-m>          마크 목록.  <CR> 가기,  d 지우기
+"   \'             마크 목록 (<Leader>').  <CR> 가기,  d 지우기
 "   :VimIdeMarks   같은 것
 "
 " 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
@@ -3396,17 +3396,22 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 " 이 설정에서는 .tags/files 같은 색인 내부 파일이 올라온다
 " (g:vimide_marks_auto = 1 이면 같이 보여준다).
 "
-" <C-m> 을 쓰는 대가를 알고 쓴다
-"   터미널에서 <C-m> 은 <CR> 과 같은 바이트(0x0D)다. 확인했다 - 이 설정에서
-"   둘은 구별되지 않는다. 그러니 이 매핑은 '노멀 모드의 Enter' 를 가져간다.
-"   Enter 는 원래 '다음 줄 첫 글자로' 인데 그 자리를 내준다(j 와 ^ 로 같은
-"   일을 한다). 패널·quickfix·트리처럼 자기 <CR> 을 가진 창은 그쪽이 먼저라
-"   영향이 없다 - 바뀌는 것은 보통 편집 창뿐이다.
 "
-"   let g:vimide_marks_key = '<Leader>mm'   " 다른 키로
-"   let g:vimide_marks_key = ''             " 키를 걸지 않는다 (:VimIdeMarks 만)
-let g:vimide_marks_key = '<C-m>'
-if has('nvim') && !empty(get(g:, 'vimide_marks_key', '<C-m>'))
+" 왜 <C-m> 이 아닌가
+"   처음에는 <C-m> 이었다. 그런데 터미널에서 <C-m> 은 <CR> 과 같은 바이트
+"   (0x0D)라 nvim 이 둘을 구별하지 못한다 - 이 매핑이 편집 창의 Enter 를
+"   통째로 가져가서, Enter 를 칠 때마다 마크 창이 떴다. 그래서 Enter 와
+"   겹치지 않는 자리로 옮겼다. ' 는 vim 에서 '마크로 가기' 키다.
+"   <Leader>m 은 vim-mark 가 쓰고, Alt 조합은 일부 윈도 터미널이 창 메뉴로
+"   먹는다.
+"
+"   터미널이 Ctrl+M 을 따로 보내 준다면(kitty 키보드 프로토콜, CSI u) 그때는
+"   <C-m> 으로 되돌려도 Enter 와 부딪치지 않는다. 아니면 되돌리지 않는다.
+"
+"   let g:vimide_marks_key = '<C-m>'   " (Ctrl+M 을 구별하는 터미널에서만)
+"   let g:vimide_marks_key = ''        " 키를 걸지 않는다 (:VimIdeMarks 만)
+let g:vimide_marks_key = "<Leader>'"
+if has('nvim') && !empty(get(g:, 'vimide_marks_key', "<Leader>'"))
     execute 'nnoremap <silent> ' . g:vimide_marks_key . ' :VimIdeMarks<CR>'
 endif
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>

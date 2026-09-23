@@ -3,7 +3,7 @@
 -- vim 의 :marks 는 표를 한 번 뿌리고 끝이라, 스무 개쯤 쌓이면 눈으로 찾는
 -- 일이 된다. 파일 이름이나 그 줄의 글자로 걸러 고를 수 있어야 쓸 만하다.
 --
---   <C-m>            마크 목록 (g:vimide_marks_key 로 바꾼다)
+--   \'               마크 목록 (<Leader>', g:vimide_marks_key 로 바꾼다)
 --   :VimIdeMarks     같은 것
 --
 -- 목록에 무엇이 뜨나
@@ -21,7 +21,9 @@
 --                검색창에서 d 를 치는 것은 글자 입력이어야 한다.
 --
 -- 옵션
---   g:vimide_marks_key   기본 '<C-m>'. '' 이면 키를 걸지 않는다.
+--   g:vimide_marks_key   기본 "<Leader>'". '' 이면 키를 걸지 않는다.
+--                        <C-m> 은 터미널에서 <CR> 과 같은 바이트라 편집 창의
+--                        Enter 를 가져간다 (.vimrc 설명)
 --   g:vimide_marks_auto  1 이면 자동 표시(' " ^ . 등)도 보여준다
 
 if vim.g.loaded_vimide_marks then

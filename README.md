@@ -165,7 +165,7 @@ backspacing cannot eat them. Results land where they always did: the relation
 panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 `g:vimide_lookup_float = 0` put the command line back.
 
-Ctrl+m: The marks you set, in a telescope picker - filter by mark, by file
+\' (Leader, then '): The marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
 (`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
@@ -173,11 +173,13 @@ job. Automatic marks are left out - `'`, `"`, `^`, `.` and especially `0`-`9`,
 which vim fills with recently closed files and which here means the index's
 own `.tags/files` and `.tags/preset` turn up (measured: six of the first ten
 rows). `g:vimide_marks_auto = 1` shows them anyway, and marks pointing at a
-directory are dropped since selecting one opens a tree, not a file. Note what
-`Ctrl+m` costs: in a terminal it is the same byte as `<CR>` (0x0D, verified
-here), so this takes over Enter in normal mode - the windows with their own
-`<CR>` (panel, quickfix, trees) are unaffected, and `g:vimide_marks_key`
-moves or removes the binding.
+directory are dropped since selecting one opens a tree, not a file. This used
+to be `Ctrl+m`, but in a terminal that is the same byte as `<CR>` (0x0D,
+verified here), so the picker opened on every Enter in the edit window. `'` is
+vim's own jump-to-mark key; `<Leader>m` belongs to vim-mark. On a terminal that
+reports Ctrl+M separately (the kitty keyboard protocol, CSI u) you can have it
+back with `let g:vimide_marks_key = '<C-m>'`; `g:vimide_marks_key = ''` removes
+the binding.
 
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
 `Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
