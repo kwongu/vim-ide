@@ -229,7 +229,8 @@ local function root_from_dir(dir)
     end
     d = parent
   end
-  local found = vim.fs.find({ '.git', '.project', '.root' },
+  -- '.repo' 는 repo 로 받은 SDK 의 루트 (autoindex.lua 의 marker_root 설명)
+  local found = vim.fs.find({ '.git', '.repo', '.project', '.root' },
     { path = dir, upward = true })[1]
   return found and vim.fs.dirname(found) or vim.fn.getcwd()
 end
@@ -246,7 +247,7 @@ local function marked_root(dir)
       or uv.fs_stat(r .. '/GTAGS') then
     return r
   end
-  for _, m in ipairs({ '.git', '.project', '.root' }) do
+  for _, m in ipairs({ '.git', '.repo', '.project', '.root' }) do
     if uv.fs_stat(r .. '/' .. m) then
       return r
     end

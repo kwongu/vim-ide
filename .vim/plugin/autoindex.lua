@@ -609,10 +609,22 @@ local function gtags_root(dir, cb)
 end
 
 -- project root by marker, for the case where no index exists yet
+--
+-- '.repo' 는 repo 로 받은 SDK 의 루트다. SDK 루트에는 .git 이 없고(.git 은
+-- kernel/common 같은 하위 프로젝트마다 있다) .repo 만 있어서, 예전에는 처음
+-- 여는 SDK 에서 이 검색이 SDK 를 지나쳐 위로 올라갔다. 그 위에 SDK 여러 개를
+-- 담아 둔 디렉터리가 있고 거기 빈 .git 이 하나 있으면(실제로 있었다:
+-- ~/work1/tsnd/dev/tsnd_2.0, 커밋 0개) 그 디렉터리 전체 - 파일 496만 개 -
+-- 가 '새 프로젝트'가 되어 첫 실행마다 목록 만들기(캐시가 식었을 때 find
+-- 35초)와 ctags/gtags 전체 빌드를 시작했다. 가까운 표시가 이기므로 하위
+-- 프로젝트(.git) 안에서는 예전과 같다. 이미 색인이 있는 SDK 는 GTAGS 가
+-- 먼저 잡혀 여기까지 오지 않는다.
+-- projectfiles.lua 의 root_from_dir/marked_root, .vimrc 의
+-- g:gutentags_project_root 와 s:VimIdeSessRoot 가 같은 목록을 쓴다.
 local function marker_root(path)
-  local found = vim.fs.find({ '.git', '.project', '.root' },
+  local found = vim.fs.find({ '.git', '.repo', '.project', '.root' },
     { path = path, upward = true, type = 'directory' })[1]
-      or vim.fs.find({ '.git', '.project', '.root', '.indexfiles',
+      or vim.fs.find({ '.git', '.repo', '.project', '.root', '.indexfiles',
         'cscope.files' }, { path = path, upward = true })[1]
   return found and vim.fs.dirname(found) or nil
 end

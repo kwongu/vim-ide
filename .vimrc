@@ -1098,7 +1098,9 @@ nnoremap <silent> <Leader>t <Cmd>NeotreeGuarded toggle<CR>
 " ------------------------------------
 let g:gutentags_modules = ['ctags']
 let g:gutentags_define_advanced_commands = 1
-let g:gutentags_project_root = ['.git', '.project', '.root']
+" '.repo' 는 repo 로 받은 SDK 의 루트다 - 없으면 처음 여는 SDK 에서 위로
+" 올라가 SDK 여러 개를 담은 디렉터리를 루트로 잡는다 (autoindex.lua marker_root).
+let g:gutentags_project_root = ['.git', '.repo', '.project', '.root']
 let g:gutentags_add_default_project_roots = 0
 let g:gutentags_cache_dir = expand('~/.cache/tags')
 let g:gutentags_generate_on_new = 1
@@ -4738,7 +4740,7 @@ if !has('nvim')
 		endwhile
 		let l:x = l:d
 		while !empty(l:x)
-			for l:m in ['.git', '.project', '.root']
+			for l:m in ['.git', '.repo', '.project', '.root']
 				if isdirectory(l:x . '/' . l:m) || filereadable(l:x . '/' . l:m)
 					return l:x
 				endif
