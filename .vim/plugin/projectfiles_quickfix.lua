@@ -78,7 +78,18 @@ local function paths_in_range(items, a, b)
   return out
 end
 
-local function mark(buf, win)
+local pending = {}   -- buf -> true | 'force' (모아서 한 번)
+local last_tick = {} -- buf -> 마지막으로 칠한 changedtick
+
+-- force: 색인 목록이 바뀌었다(목록 내용은 그대로여도 점이 달라진다)
+local function mark(buf, win, force)
+  -- 목록 내용이 지난번 칠할 때와 같고 색인도 바뀌지 않았으면 다시 칠하지 않는다.
+  -- 목록을 갈아 끼우면 changedtick 이 바뀌므로 놓치는 일은 없다.
+  local okt, tick = pcall(api.nvim_buf_get_changedtick, buf)
+  if not force and okt and last_tick[buf] == tick then
+    return
+  end
+  last_tick[buf] = okt and tick or nil
   pcall(api.nvim_buf_clear_namespace, buf, NS, 0, -1)
   if not on() or not _G.projectfiles_tree_flag then
     return
@@ -98,6 +109,28 @@ local function mark(buf, win)
       end
     end
   end
+end
+
+-- 표시를 잠깐(20ms) 모았다가 한 번 다시 칠한다. 목록을 한 번 갈아 끼우면
+-- FileType, on_lines(여러 번), BufWinEnter, TextChanged 가 따로따로 전체 계산을
+-- 걸어서 같은 목록을 여섯 번 칠했다(실측: 3000줄에 tree_flag 18000번). 다음
+-- 틱으로만 미루면 계기들이 서로 다른 틱에 와서 두 번이 남는다.
+local function remark(buf, win, force)
+  if pending[buf] then
+    if force then
+      pending[buf] = 'force'
+    end
+    return
+  end
+  pending[buf] = force and 'force' or true
+  vim.defer_fn(function()
+    local f = pending[buf] == 'force'
+    pending[buf] = nil
+    if api.nvim_buf_is_valid(buf) and api.nvim_win_is_valid(win)
+        and api.nvim_win_get_buf(win) == buf then
+      mark(buf, win, f)
+    end
+  end, 20)
 end
 
 -- 여러 프로젝트에 걸친 선택을 나눈다.
@@ -148,19 +181,51 @@ local function act(buf, win, a, b, fn, label)
     vim.notify('projectfiles 가 없습니다', vim.log.levels.WARN)
     return
   end
-  if label == '제거' and not ok_to_drop(#paths) then
+  -- 알림에는 '실제로 바뀐 수'를 적는다. 예전에는 고른 파일 수(#paths)를
+  -- 적어서, 이미 들어 있던 파일까지 '추가'로 셌다(실측: 10개를 골라 새로
+  -- 9개가 들어갔는데 '추가: 10개'). 표시(●)를 정하는 같은 판정으로 앞뒤를
+  -- 센다 - neo-tree 쪽은 projectfiles 가 '추가 2개 (항목 1 -> 3)' 처럼 이미
+  -- 바르게 알린다.
+  local function n_indexed()
+    if not _G.projectfiles_tree_flag then
+      return nil
+    end
+    pcall(_G.projectfiles_tree_invalidate)
+    local n = 0
+    for _, p in ipairs(paths) do
+      local ok, f = pcall(_G.projectfiles_tree_flag, p)
+      if ok and f and f ~= '' then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  local before = n_indexed()
+  -- 확인은 '지금 색인에 들어 있어서 실제로 빠질 파일 수'로 한다. 예전에는 고른
+  -- 파일 수로 물어서, 하나만 빠질 때도 '22개를 뺍니다' 라고 물었다.
+  if label == '제거' and not ok_to_drop(before or #paths) then
     return
   end
   local groups, order = by_project(paths)
   for _, key in ipairs(order) do
     pcall(fn, groups[key])
   end
-  vim.notify(('색인 %s: %d개%s'):format(label, #paths,
-    #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''))
+  local where = #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''
   vim.defer_fn(function()
+    local after = n_indexed()
+    if before and after then
+      local changed = label == '추가' and (after - before) or (before - after)
+      changed = math.max(0, changed)
+      local same = #paths - changed
+      vim.notify(('색인 %s: %d개%s%s'):format(label, changed, where,
+        same > 0 and ('  (%d개는 이미 %s)'):format(same,
+          label == '추가' and '들어 있었음' or '없었음') or ''))
+    else
+      vim.notify(('색인 %s: %d개%s'):format(label, #paths, where))
+    end
     if api.nvim_buf_is_valid(buf) and api.nvim_win_is_valid(win) then
       pcall(_G.projectfiles_tree_invalidate)
-      mark(buf, win)
+      mark(buf, win, true)
     end
   end, 120)
 end
@@ -220,7 +285,7 @@ local function attach(buf, win)
           end
           for _, w in ipairs(api.nvim_list_wins()) do
             if api.nvim_win_is_valid(w) and api.nvim_win_get_buf(w) == buf then
-              mark(buf, w)
+              remark(buf, w)
               return
             end
           end
@@ -230,15 +295,36 @@ local function attach(buf, win)
     })
   end
   bmap('=', function()
-    local p = path_at(items_of(api.nvim_get_current_win()), vim.fn.line('.'))
+    local w = api.nvim_get_current_win()
+    local m = vim.fn.mode()
+    if m == 'v' or m == 'V' or m == '\22' then
+      -- 고른 범위: 몇 개 중 몇 개가 들어 있는지. 예전에는 커서 줄 하나만 말하고
+      -- 비주얼 모드에 그대로 머물렀다.
+      local a, b = vim.fn.line('v'), vim.fn.line('.')
+      api.nvim_feedkeys(api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+      local ps = paths_in_range(items_of(w), math.min(a, b), math.max(a, b))
+      local n = 0
+      pcall(_G.projectfiles_tree_invalidate)
+      for _, p in ipairs(ps) do
+        local ok, f = pcall(_G.projectfiles_tree_flag, p)
+        if ok and f and f ~= '' then
+          n = n + 1
+        end
+      end
+      vim.notify(('고른 파일 %d개 중 %d개가 색인에 있습니다'):format(#ps, n))
+      return
+    end
+    local p = path_at(items_of(w), vim.fn.line('.'))
     if not p then
       return
     end
+    -- projectfiles_status 가 이미 경로로 시작한다. 앞에 또 붙이면 두 번 찍힌다.
     local ok, st = pcall(_G.projectfiles_status, p)
-    vim.notify(('%s : %s'):format(vim.fn.fnamemodify(p, ':~:.'),
-      (ok and st and st ~= '') and st or '색인에 없음'))
+    vim.notify((ok and st and st ~= '') and st or (vim.fn.fnamemodify(p, ':~:.') .. ' : 색인에 없음'))
   end, '색인 상태 보기')
-  mark(buf, win)
+  -- 목록을 갈아 끼우면 FileType 이 다시 와서 여기로도 들어온다. on_lines 와
+  -- 같은 틱에 묶이도록 바로 칠하지 않고 remark 로 넘긴다.
+  remark(buf, win)
 end
 
 local group = api.nvim_create_augroup('ProjectFilesQuickfix', { clear = true })
@@ -255,17 +341,20 @@ api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- 목록이 바뀌면(:Gtags 를 다시 돌리면) 표시도 다시
-api.nvim_create_autocmd({ 'QuickFixCmdPost', 'BufWinEnter', 'TextChanged' }, {
+-- 목록이 바뀌면(:Gtags 를 다시 돌리면) 표시도 다시. 색인 목록이 바뀌었을
+-- 때도(projectfiles.lua 가 User ProjectFilesChanged 를 쏜다 - 다른 창이나
+-- 명령에서 바꾼 것) 떠 있는 quickfix/위치 목록을 모두 다시 칠한다.
+api.nvim_create_autocmd({ 'QuickFixCmdPost', 'BufWinEnter', 'TextChanged', 'User' }, {
   group = group,
-  callback = function()
-    vim.schedule(function()
-      for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
-        local b = api.nvim_win_get_buf(w)
-        if vim.bo[b].buftype == 'quickfix' then
-          mark(b, w)
-        end
+  callback = function(a)
+    if a.event == 'User' and a.match ~= 'ProjectFilesChanged' then
+      return
+    end
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local b = api.nvim_win_get_buf(w)
+      if vim.bo[b].buftype == 'quickfix' then
+        remark(b, w, a.event == 'User')
       end
-    end)
+    end
   end,
 })

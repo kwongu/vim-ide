@@ -133,6 +133,19 @@ file usually appears on several lines in these lists, so a selection hands
 each file over once. Switches: `g:projectfiles_quickfix`,
 `g:projectfiles_relationview`.
 
+The marks follow the list wherever it is changed: `+` in the location list
+updates the quickfix window beside it, `:ProjectFilesAdd` from the edit window
+updates both lists, the relation panel and every open neo-tree (F9, F11, the
+RelationView tree) without reopening anything - projectfiles fires
+`User ProjectFilesChanged` and each view repaints. The notice says what really
+changed (`색인 추가: 9개 (1개는 이미 들어 있었음)`), `=` over a visual selection
+says how many of the selected files are in, and a removal asks first only when
+20 or more files that are actually in the index would go
+(`g:projectfiles_confirm_drop`). Removing the last file turns the project to
+`none` - not indexed - rather than back to "everything"; the preset is backed
+up first. Paths inside `.tags`, `.git`, `.repo` and the other always-pruned
+directories are refused, since they could never produce a file.
+
 The quickfix list shows paths from the project root, not from `/`
 (`g:vimide_qf_path`, `:VimIdeQfPath root|pwd|abs`). A `:Gtags` or `Ctrl+g`
 result used to spend sixty columns on the same prefix on every line, pushing

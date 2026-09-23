@@ -1049,10 +1049,20 @@ local function nested_owner(root, rel)
   return nil
 end
 
-local function prune_expr()
-  local prune = {}
+-- find 가 늘 가지치기하는 디렉터리 이름들. add_path 도 본다 - 이 안의 경로는
+-- 담아도 파일이 하나도 나오지 않는다.
+local function pruned_names()
+  local out = {}
   for d in tostring(cfg('prune_dirs',
       '.git .svn .hg .tags node_modules __pycache__ .repo .ccache out')):gmatch('%S+') do
+    out[#out + 1] = d
+  end
+  return out
+end
+
+local function prune_expr()
+  local prune = {}
+  for _, d in ipairs(pruned_names()) do
     prune[#prune + 1] = "-name '" .. d .. "'"
   end
   return "\\( " .. table.concat(prune, ' -o ') .. " \\) -prune -o "
@@ -1396,9 +1406,38 @@ local function add_path(root, path)
     bnotify('없는 경로: ' .. path, vim.log.levels.WARN)
     return
   end
+  -- 아래 두 거절도 모드를 바꾸기 전에 한다. 예전에는 auto/미설정 프로젝트를
+  -- 빈 preset 으로 먼저 바꿔 놓고 거절해서, 담지도 못한 채 그 프로젝트가
+  -- '아무것도 색인하지 않는' 상태가 됐다(반대 심문에서 나온 것).
+  local rel = rel_to(root, abs)
+  -- preset 은 '프로젝트 상대 경로 목록'이다. 그게 다른 체크아웃에서도 쓸 수
+  -- 있게 만드는 유일한 이유이고, vim-ide 로 공유하는 근거이기도 하다.
+  -- 이 프로젝트 밖의 경로는 상대 경로로 적을 수 없으니 절대 경로가 되어
+  -- 버리는데, 그런 항목은 다른 기계에서 무의미하고 지우기도 어렵다
+  -- (상대 경로로 :ProjectFilesRemove 해도 맞지 않는다). 담지 않는다.
+  if rel:sub(1, 1) == '/' then
+    bnotify(('이 프로젝트(%s) 밖의 경로는 담을 수 없습니다: %s'):format(
+      vim.fn.fnamemodify(root, ':~'), rel), vim.log.levels.WARN)
+    return
+  end
+  -- 색인 데이터베이스 자리(.tags)와 find 가 늘 가지치기하는 디렉터리(.git,
+  -- .repo ...)는 담아도 파일이 하나도 나오지 않는다. 빈 항목만 쌓인다.
+  do
+    local skip = { [dbdir() or '.tags'] = true }
+    for _, d in ipairs(pruned_names()) do
+      skip[d] = true
+    end
+    for part in rel:gmatch('[^/]+') do
+      if skip[part] then
+        bnotify(("'%s' 안은 색인에서 늘 빠지는 자리라 담지 않습니다: %s"):format(
+          part, rel), vim.log.levels.WARN)
+        return
+      end
+    end
+  end
   -- 하위 프로젝트 안의 경로라도, 직접 담으라고 한 것은 담는다. 다만 그
   -- 프로젝트가 자기 색인을 따로 갖고 있다는 사실은 알려 준다.
-  local owner = nested_owner(root, rel_to(root, abs))
+  local owner = nested_owner(root, rel)
   if owner then
     if cfg('nested_presets', 0) ~= 0 then
       bnotify(("'%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다 - "):format(owner)
@@ -1409,6 +1448,7 @@ local function add_path(root, path)
   end
   if not name then
     -- auto mode: adding a path means "start a preset here"
+    local was = mode_of(root)
     name = tostring(cfg('preset', 'default'))
     if preset_read(name) then
       -- that name is taken - by one of mine, or by one vim-ide carries.
@@ -1428,22 +1468,19 @@ local function add_path(root, path)
     end
     entries = {}
     set_active(root, name)
-    bnotify("auto -> preset '" .. name .. "'")
-  end
-  local rel = rel_to(root, abs)
-  -- preset 은 '프로젝트 상대 경로 목록'이다. 그게 다른 체크아웃에서도 쓸 수
-  -- 있게 만드는 유일한 이유이고, vim-ide 로 공유하는 근거이기도 하다.
-  -- 이 프로젝트 밖의 경로는 상대 경로로 적을 수 없으니 절대 경로가 되어
-  -- 버리는데, 그런 항목은 다른 기계에서 무의미하고 지우기도 어렵다
-  -- (상대 경로로 :ProjectFilesRemove 해도 맞지 않는다). 담지 않는다.
-  if rel:sub(1, 1) == '/' then
-    bnotify(('이 프로젝트(%s) 밖의 경로는 담을 수 없습니다: %s'):format(
-      vim.fn.fnamemodify(root, ':~'), rel), vim.log.levels.WARN)
-    return
+    -- none 이나 미설정에서 시작해도 'auto ->' 라고 적던 것을 바로잡는다
+    bnotify(("%s -> preset '%s'"):format(
+      was == MODE_NONE and 'none' or (was == MODE_UNSET and '미설정' or 'auto'), name))
   end
   for _, e in ipairs(entries) do
     if e.path == rel then
-      bnotify('이미 있습니다: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+      -- 배치에서는 '추가'로 세지 않는다. 예전에는 완료로 세어서, 이미 있던
+      -- 파일까지 '추가 27개 (항목 2 -> 27)' 처럼 보고했다.
+      if batch then
+        batch.same = (batch.same or 0) + 1
+      else
+        bnotify('이미 있습니다: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+      end
       return
     end
   end
@@ -1485,57 +1522,82 @@ local function remove_path(root, path)
     return
   end
   if not name then
-    bnotify('auto 모드에서는 제거할 목록이 없습니다', vim.log.levels.WARN)
+    local m = mode_of(root)
+    bnotify(m == MODE_NONE and '색인하지 않는(none) 모드라 뺄 목록이 없습니다'
+      or (m == MODE_UNSET and '아직 색인 모드를 정하지 않아 뺄 목록이 없습니다'
+        or 'auto 모드(프로젝트 전체)에서는 뺄 목록이 없습니다'), vim.log.levels.WARN)
     return
   end
   local abs = abs_of(root, path)
   local rel = rel_to(root, abs)
-  local kept, hit, dropped = {}, false, 0
+  local kept, dropped = {}, 0
   for _, e in ipairs(entries) do
     -- removing a directory drops the files under it too
     if e.path == rel or e.path:sub(1, #rel + 1) == rel .. '/' then
-      hit = true
       dropped = dropped + 1
     else
       kept[#kept + 1] = e
     end
   end
-  if not hit then
-    -- the path may be covered by a directory entry: keep the entry, exclude
-    -- the file by rewriting that directory into its remaining files
-    local expanded = {}
-    for _, e in ipairs(entries) do
-      if e.kind == 'dir' and rel:sub(1, #e.path + 1) == e.path .. '/' then
-        hit = true
-        for _, f in ipairs((expand_entry(root, e))) do
-          if f ~= rel then
-            expanded[#expanded + 1] = { path = f, kind = 'file' }
-          end
+  -- 남은 디렉터리 항목이 이 경로를 덮고 있으면(그 위 디렉터리를 담아 두었으면)
+  -- 그 항목을 남은 파일들로 풀어 이 경로만 뺀다.
+  --
+  -- 두 가지를 바로잡았다(반대 심문에서 나온 것):
+  --   * 예전에는 위에서 정확히 맞는 항목을 하나라도 지우면 이 단계를 건너뛰었다.
+  --     neo-tree 에서 디렉터리와 그 안 파일을 함께 담은 뒤 파일을 빼면, 파일
+  --     항목만 지워지고 디렉터리 항목이 여전히 덮어서 색인에 그대로 남았다.
+  --   * 풀 때 'f == rel' 인 것만 걸렀다. rel 이 하위 디렉터리면 같은 파일이
+  --     없으니 아무것도 안 빠지고, 알림은 '항목 -4개' 가 됐다. 그 아래 파일도
+  --     걸러야 한다.
+  local excluded = 0
+  local expanded = {}
+  for _, e in ipairs(kept) do
+    if e.kind == 'dir' and rel:sub(1, #e.path + 1) == e.path .. '/' then
+      local keep_e = {}
+      local n = 0
+      for _, f in ipairs((expand_entry(root, e))) do
+        if f == rel or f:sub(1, #rel + 1) == rel .. '/' then
+          n = n + 1
+        else
+          keep_e[#keep_e + 1] = { path = f, kind = 'file' }
         end
-      else
-        expanded[#expanded + 1] = e
       end
-    end
-    if hit then
-      -- 펼치면서 이미 있던 항목과 겹칠 수 있다. 겹친 것을 그대로 두면
-      -- 목록에 같은 파일이 두 번 남는다.
-      kept = (dedupe_entries(expanded))
+      if n > 0 then
+        excluded = excluded + n
+        vim.list_extend(expanded, keep_e)
+      else
+        expanded[#expanded + 1] = e -- 덮지만 걸린 파일이 없다: 풀지 않는다
+      end
+    else
+      expanded[#expanded + 1] = e
     end
   end
-  if not hit then
+  if excluded > 0 then
+    -- 펼치면서 이미 있던 항목과 겹칠 수 있다. 겹친 것을 그대로 두면
+    -- 목록에 같은 파일이 두 번 남는다.
+    kept = (dedupe_entries(expanded))
+  end
+  if dropped == 0 and excluded == 0 then
     bnotify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
     return
   end
   -- 몇 개가 빠지는지 말한다. 디렉터리에 '-' 를 한 번 누르면 그 아래가 전부
   -- 빠지는데, 예전에는 '제거: <경로>' 한 줄만 나와서 487개가 사라진 것을
   -- 화면에서 알 수 없었다.
-  if not confirm_drop(root, rel, dropped, #entries) then
+  if not confirm_drop(root, rel, dropped + excluded, #entries) then
     bnotify('제거를 취소했습니다: ' .. rel, vim.log.levels.WARN)
     return
   end
   save_entries(root, name, kept)
-  bnotify(('제거: %s (항목 %d개)  →  %s'):format(rel,
-    dropped > 0 and dropped or (#entries - #kept), target_label(root)), nil, true)
+  local parts = {}
+  if dropped > 0 then
+    parts[#parts + 1] = ('항목 %d개'):format(dropped)
+  end
+  if excluded > 0 then
+    parts[#parts + 1] = ('디렉터리 항목에서 파일 %d개 제외'):format(excluded)
+  end
+  bnotify(('제거: %s (%s)  →  %s'):format(rel, table.concat(parts, ', '),
+    target_label(root)), nil, true)
 end
 
 -- 여러 경로를 한 번의 커밋으로 처리한다. fn 안에서는 add_path/remove_path 를
@@ -1567,7 +1629,8 @@ local function in_batch(root, what, fn)
     end
   end
   local after = #(entries_of(root) or {})
-  local head = ('%s %d개 (항목 %d -> %d)  →  %s'):format(what, b.done,
+  local head = ('%s %d개%s (항목 %d -> %d)  →  %s'):format(what, b.done,
+    (b.same or 0) > 0 and (', 이미 있음 %d개'):format(b.same) or '',
     before, after, target_label(root))
   if #warns > 0 then
     local shown = {}
@@ -1877,6 +1940,20 @@ end
 function _G.projectfiles_tree_invalidate()
   flag_cache = {}
   flag_root = {}
+  s.real_cache = nil
+  -- 표시를 가진 곳들(quickfix/위치 목록, RelationView 패널, neo-tree)에
+  -- 알린다. 예전에는 키를 누른 그 창만 다시 칠해서, 다른 곳에서 목록을
+  -- 바꾸면(quickfix 에서 + 하고 트리를 보면, :ProjectFilesAdd 뒤 목록을
+  -- 보면) 표시가 낡은 채 남았다. 한 번의 변경에 여러 번 불려도 한 틱에
+  -- 한 번만 쏜다.
+  if not s.changed_pending then
+    s.changed_pending = true
+    vim.schedule(function()
+      s.changed_pending = false
+      pcall(api.nvim_exec_autocmds, 'User',
+        { pattern = 'ProjectFilesChanged', modeline = false })
+    end)
+  end
 end
 
 -- treeroot: 파일 트리가 열고 있는 디렉터리. 주면 그 프로젝트의 목록으로
@@ -1907,6 +1984,19 @@ function _G.projectfiles_tree_flag(path, treeroot)
   local c = flag_data(root)
   if not c.preset then
     return '' -- auto 모드: 전부 대상이라 표시할 게 없다
+  end
+  -- 추가/제거/상태(=)는 abs_of 로 심볼릭 링크를 풀어 실제 경로로 다룬다. 표시도
+  -- 같은 경로로 판정해야 링크 줄의 점이 = 과 어긋나지 않는다(예전에는 링크를
+  -- 담으면 대상 파일이 들어가고, 누른 링크 줄에는 점이 끝내 붙지 않았다).
+  -- 풀린 경로가 이 프로젝트 안일 때만 쓴다 - 밖이면 담을 수 없으니 점도 없다.
+  s.real_cache = s.real_cache or {}
+  local rp = s.real_cache[path]
+  if rp == nil then
+    rp = uv.fs_realpath(path) or path
+    s.real_cache[path] = rp
+  end
+  if rp ~= path and rp:sub(1, #root + 1) == root .. '/' then
+    path = rp
   end
   if path:sub(1, #root + 1) ~= root .. '/' then
     return ''

@@ -128,16 +128,47 @@ local function act(buf, a, b, fn, label)
     vim.notify('projectfiles 가 없습니다', vim.log.levels.WARN)
     return
   end
-  if label == '제거' and not ok_to_drop(#paths) then
+  -- 알림에는 '실제로 바뀐 수'를 적는다. 예전에는 고른 파일 수(#paths)를
+  -- 적어서, 이미 들어 있던 파일까지 '추가'로 셌다(실측: 10개를 골라 새로
+  -- 9개가 들어갔는데 '추가: 10개'). 표시(●)를 정하는 같은 판정으로 앞뒤를
+  -- 센다 - neo-tree 쪽은 projectfiles 가 '추가 2개 (항목 1 -> 3)' 처럼 이미
+  -- 바르게 알린다.
+  local function n_indexed()
+    if not _G.projectfiles_tree_flag then
+      return nil
+    end
+    pcall(_G.projectfiles_tree_invalidate)
+    local n = 0
+    for _, p in ipairs(paths) do
+      local ok, f = pcall(_G.projectfiles_tree_flag, p)
+      if ok and f and f ~= '' then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  local before = n_indexed()
+  -- 확인은 '지금 색인에 들어 있어서 실제로 빠질 파일 수'로 한다(quickfix 와 같다)
+  if label == '제거' and not ok_to_drop(before or #paths) then
     return
   end
   local groups, order = by_project(paths)
   for _, key in ipairs(order) do
     pcall(fn, groups[key])
   end
-  vim.notify(('색인 %s: %d개%s'):format(label, #paths,
-    #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''))
+  local where = #order > 1 and (' (프로젝트 %d곳)'):format(#order) or ''
   vim.defer_fn(function()
+    local after = n_indexed()
+    if before and after then
+      local changed = label == '추가' and (after - before) or (before - after)
+      changed = math.max(0, changed)
+      local same = #paths - changed
+      vim.notify(('색인 %s: %d개%s%s'):format(label, changed, where,
+        same > 0 and ('  (%d개는 이미 %s)'):format(same,
+          label == '추가' and '들어 있었음' or '없었음') or ''))
+    else
+      vim.notify(('색인 %s: %d개%s'):format(label, #paths, where))
+    end
     if api.nvim_buf_is_valid(buf) then
       pcall(_G.projectfiles_tree_invalidate)
       mark(buf)
@@ -187,9 +218,10 @@ local function attach(buf)
     if not p then
       return
     end
+    -- projectfiles_status 가 이미 경로로 시작한다. 앞에 또 붙이면 두 번 찍힌다.
     local ok, st = pcall(_G.projectfiles_status, p)
-    vim.notify(('%s : %s'):format(vim.fn.fnamemodify(p, ':~:.'),
-      (ok and st and st ~= '') and st or '색인에 없음'))
+    vim.notify((ok and st and st ~= '') and st
+      or (vim.fn.fnamemodify(p, ':~:.') .. ' : 색인에 없음'))
   end, '색인 상태 보기')
 
   -- 패널은 프로그램이 다시 그린다(nvim_buf_set_lines). 사람이 고치는 것이
@@ -213,6 +245,22 @@ local function attach(buf)
 end
 
 local group = api.nvim_create_augroup('ProjectFilesRelationView', { clear = true })
+
+-- 색인 목록이 다른 곳에서 바뀌면(quickfix 의 +, :ProjectFilesAdd, 트리) 떠 있는
+-- 패널의 표시도 다시 칠한다. 예전에는 패널 안의 i+/i- 뒤와 목록이 다시 그려질
+-- 때만 칠해서, 그 사이 표시가 i= 와 어긋났다. projectfiles.lua 가 쏜다.
+api.nvim_create_autocmd('User', {
+  group = group,
+  pattern = 'ProjectFilesChanged',
+  callback = function()
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local b = api.nvim_win_get_buf(w)
+      if vim.bo[b].filetype == 'relationview' then
+        mark(b)
+      end
+    end
+  end,
+})
 api.nvim_create_autocmd({ 'FileType', 'BufWinEnter' }, {
   group = group,
   pattern = { 'relationview', '*' },

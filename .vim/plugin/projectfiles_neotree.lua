@@ -105,6 +105,13 @@ local function paths_in(first, last)
   for l = lo, hi do
     if not (files_only and is_dir(st, l)) then
       local p = path_at(st, l)
+      -- 범위에 트리의 머리줄(트리가 열고 있는 디렉터리)이 끼면 뺀다. 한 줄을
+      -- 콕 집어 누른 것은 그대로 둔다. 트리를 하위 디렉터리에 열어 두면
+      -- ('.' 로 루트를 옮기면) 머리줄이 프로젝트 루트가 아니라서
+      -- projectfiles 의 루트 거르기에 걸리지 않고, 그 디렉터리 전체가 담겼다.
+      if p and hi > lo and st.path and p == st.path then
+        p = nil
+      end
       if p and not seen[p] then
         seen[p] = true
         out[#out + 1] = p
@@ -268,15 +275,44 @@ end
 
 -- 목록이 바뀌면 트리를 다시 그린다. NERDTree 쪽은 렌더를 직접 부르는데,
 -- neo-tree 는 자기 상태를 들고 있으므로 새로 고침을 부탁한다.
+-- 표시만 바뀌었으니 다시 그리기만 한다. 예전에는 manager.refresh 로 트리를
+-- 다시 훑었는데, 커널 트리에서는 그것이 +/- 한 번마다 1~2초짜리 디렉터리
+-- 읽기였다. 표시는 그릴 때 projectfiles_neotree_mark 가 계산하므로(캐시는
+-- projectfiles.lua 가 이미 버렸다) redraw 로 충분하다. 떠 있는 트리만 -
+-- F9, F11, RelationView 의 트리 모두.
 refresh_trees = function()
   local ok, manager = pcall(require, 'neo-tree.sources.manager')
-  if not ok then
+  local okr, renderer = pcall(require, 'neo-tree.ui.renderer')
+  if not (ok and okr) then
     return
   end
-  for _, src in ipairs({ 'filesystem', 'buffers', 'git_status' }) do
-    pcall(manager.refresh, src)
+  local okg, states = pcall(manager._get_all_states)
+  if not (okg and type(states) == 'table') then
+    for _, src in ipairs({ 'filesystem', 'buffers', 'git_status' }) do
+      pcall(manager.refresh, src)
+    end
+    return
+  end
+  for _, st in ipairs(states) do
+    if st.tree and not st.disposed and renderer.window_exists(st) then
+      pcall(renderer.redraw, st)
+    end
   end
 end
+
+-- 색인 목록이 다른 곳에서 바뀌어도(quickfix 의 +, RelationView 의 i+,
+-- :ProjectFilesAdd) 트리의 표시를 따라가게 한다. projectfiles.lua 가 쏜다.
+-- 예전에는 트리에서 누른 +/- 뒤에만 다시 그려서, 다른 데서 바꾸면 표시가
+-- 트리를 다시 열 때까지 낡아 있었다.
+api.nvim_create_autocmd('User', {
+  group = api.nvim_create_augroup('ProjectFilesNeotreeChanged', { clear = true }),
+  pattern = 'ProjectFilesChanged',
+  callback = function()
+    if enabled() then
+      refresh_trees()
+    end
+  end,
+})
 
 -- neo-tree 가 자기 매핑을 건 뒤에 걸어야 우리 것이 이긴다. FileType 이
 -- neo-tree 의 매핑보다 먼저 올 수 있어서 한 틱 미룬다.
