@@ -99,7 +99,12 @@ local function collect()
     if is_auto(name) and (tonumber(vim.g.vimide_marks_auto) or 0) == 0 then
       return
     end
-    local path = m.file and vim.fn.fnamemodify(vim.fn.expand(m.file), ':p')
+    -- expand() 를 거치지 않는다. expand() 는 경로가 'wildignore' 에 걸리면 빈
+    -- 글자를 돌려주는데, 이 설정의 wildignore 에는 */tmp/* 가 있다 - Yocto
+    -- 빌드 경로(build/.../tmp/work/...)의 마크가 빈 경로 -> 지금 디렉터리 ->
+    -- '디렉터리 마크'로 걸러져 목록에서 조용히 사라졌다(실측: 마크 D, Q).
+    -- ~ 는 fnamemodify 의 :p 가 푼다.
+    local path = m.file and vim.fn.fnamemodify(m.file, ':p')
         or api.nvim_buf_get_name(m.pos[1] or 0)
     if not path or path == '' then
       return
