@@ -281,15 +281,26 @@ Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
 :GtagsIndex / :GtagsIndexUpdate / :GtagsIndexStatus: GTAGS index by hand
 :GutentagsUpdate!: rebuild the ctags index of this project by hand
 
-Ctrl+g: Asks twice, then greps. First the command line is filled with the word
-        under the cursor (or, in visual mode, with the selected text; on blank
-        space it starts empty) - edit it and press Enter. Then the directory to
-        search is offered, starting at the one holding the current file - edit
-        it (Tab completes) and press Enter to run. Esc at either step drops it.
+Ctrl+g: Grep. In nvim a floating "찾기 (grep)" box opens with two fields:
+        the text to find, filled with the word under the cursor (or, in visual
+        mode, the selected text; on blank space it starts empty), and the
+        directory to search, starting at the one holding the current file. Tab
+        moves between the fields, Ctrl+x Ctrl+f completes the path, Enter
+        runs, Esc drops it.
         The hits go to the RelationView list while the panel is up, and to the
         quickfix window otherwise. Uses ripgrep when it is on $PATH.
-        (:VimIdeGrep <text> does the same. g:relationview_grep_ask_dir = 0
-        skips the directory question. :Grep is still grep.vim's own prompt.)
+        Inside neo-tree (F9, F11 or the RelationView tree) the same box opens
+        with the directory taken from the cursor instead - see "Searching from
+        the tree" below.
+        (Real vim, and nvim with g:vimide_grep_float = 0, ask the two
+        questions on the command line instead: the text, then the directory.
+        :VimIdeGrep <text> greps that text the same way - no box, the
+        directory asked on the command line. g:relationview_grep_ask_dir = 0
+        skips that directory question in both. :Grep is still grep.vim's own
+        prompt.)
+Ctrl+f: Inside neo-tree only: find files by name under the cursor's directory
+        (see "Searching from the tree"). Everywhere else it is vim's own
+        page-down.
 Ctrl+n: Go to the next item in the list, and put the cursor in the window that
         shows it (the RelationView preview, or the edit window)
 Ctrl+p: The same, backwards
@@ -1054,6 +1065,53 @@ own `/` comes back, along with `n` and `N`, which neo-tree never mapped.
 the key. The fuzzy finder moved to `F`, and `D` (fuzzy find a directory),
 `f` (filter on submit) and `#` (fuzzy sort) are untouched. The same swap is
 applied to the `document_symbols` source, which had `/` on its filter.
+
+### Searching from the tree
+
+`Ctrl+g` and `Ctrl+f` work in all three neo-tree windows - the F9 sidebar, the
+F11 float and the tree inside RelationView - and search *below the line the
+cursor is on*:
+
+| cursor on | searches under |
+|---|---|
+| a directory | that directory |
+| a file | the directory holding it |
+| blank space past the end | the tree's root |
+
+`Ctrl+g` opens the same "찾기 (grep)" box as in the edit window, with the
+directory filled in and the text left empty - what the tree shows are file
+names, not words from the source. `Ctrl+f` opens a "찾기 (find)" box with two
+fields, 찾을 파일 (the name) and 찾을 곳 (the directory). The name is filled
+with the name of the entry under the cursor, and left empty on blank space.
+Both go where the edit window's `Ctrl+g` goes: the RelationView list while the
+panel is up, the quickfix window otherwise. A find result puts the cursor in
+that list to pick a file. The RelationView preview shows whichever file the
+list cursor is on, as it does for any list, but the edit window is left alone
+until you pick one - there is no matching line to jump to.
+
+A row that is not a real file or directory - a terminal or `[No Name]` in the
+buffers source (`<` / `>` switch sources in the same window) - counts as blank
+space: the search starts at the tree's root.
+
+The name is a glob. With no `*`, `?` or `[` in it, it means "contains":
+`uart` finds `tcc_uart.c` and `uart.h`. Type the wildcards yourself for
+anything else - `*.dts`. Matching ignores case
+(`let g:relationview_find_case = 1` to respect it), and the list stops at
+1,000 files (`g:relationview_find_max`).
+
+It runs `find(1)`, not `rg --files`, because ripgrep quietly skips whatever
+`.gitignore` names and anything hidden. In a kernel tree the generated files
+are in `.gitignore`, so a file that is plainly there would not be found - the
+wrong answer when the question is "where is the file called this". The
+arguments are the ones BSD find (macOS) and GNU find (the server) read the
+same way. `.git`, `.svn`, `.tags` and `node_modules` are skipped below the
+starting directory - the same four the grep fallback skips when ripgrep is
+missing - but starting *in* one of them works: `Ctrl+f` on the `.tags` row
+lists what is inside. Links to files are found; links to directories are not
+listed.
+
+`Ctrl+f` in neo-tree was `scroll_preview` (scrolling the preview `P` opens).
+`Ctrl+b` still scrolls it the other way.
 
 ### What `F` finds, stays found
 

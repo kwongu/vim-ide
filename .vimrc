@@ -847,6 +847,19 @@ _G.rv_setup('neo-tree', {
       -- 단계는 g:neotree_wide_steps, 하는 일은 neotree_nerd.lua 에 있다.
       -- neo-tree 기본의 open_with_window_picker 자리를 넘겨받는다.
       ['w'] = function() _G.neotree_toggle_wide() end,
+      -- 커서 자리 이하에서 찾는다. 디렉터리 줄이면 그 디렉터리, 파일 줄이면
+      -- 그 파일이 든 디렉터리, 빈 줄이면 트리 루트 (treesearch.lua).
+      --   <C-g>  찾기 (grep) - 내용에서. 편집 창의 <C-g> 와 같은 창이다
+      --   <C-f>  찾기 (find) - 파일 이름에서. 커서 밑 이름을 채워 준다
+      -- 결과는 RelationView 패널이 떠 있으면 패널 목록, 아니면 quickfix.
+      --
+      -- <C-f> 는 neo-tree 기본의 scroll_preview(P 로 연 미리보기를 올리기)
+      -- 자리를 넘겨받는다. 반대쪽 <C-b> 는 그대로 남는다. 값을 표가 아니라
+      -- 함수로 주어야 한다 - 표로 주면 neo-tree 가 기본값과 깊게 합쳐서
+      -- scroll_preview 의 config = { direction = -10 } 이 따라붙는다.
+      -- 키 글자도 소문자로 쓴다('<C-F>' 는 다른 항목으로 하나 더 생긴다).
+      ['<C-g>'] = function(state) _G.vimide_tree_search(state, 'grep') end,
+      ['<C-f>'] = function(state) _G.vimide_tree_search(state, 'find') end,
     },
   },
   -- 파일을 열 때 이 창들은 고르지 않는다.
@@ -3201,6 +3214,12 @@ let g:relationview_grep_hidden = 0
 " 1000 (기본) <C-g> 의 grep 이 이 줄 수를 넘으면 거기서 끊는다.
 "            커널 트리에서 흔한 낱말 하나가 수만 줄이 되는 것을 막는다.
 let g:relationview_grep_max = 1000
+" 0 (기본) 트리의 <C-f>(파일 이름으로 찾기)가 대소문자를 가리지 않는다.
+"          1 이면 가린다 (find 의 -iname 대신 -name).
+let g:relationview_find_case = 0
+" 1000 (기본) 트리의 <C-f> 가 이 개수를 넘으면 거기서 끊는다.
+"            찾을 곳을 커널 루트로 두고 'c' 한 글자를 치면 수만 개가 된다.
+let g:relationview_find_max = 1000
 " 20 (기본) 넓힐 때 편집 영역에 최소한 남겨 둘 칸수. 0 이면 안 지킨다.
 "
 "           곁창(aerial, quickfix ...)은 'w' 로 크기가 바뀌지 않는다. 그

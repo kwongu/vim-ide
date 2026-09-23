@@ -7873,8 +7873,169 @@ function A.grep(pattern, dir, origin)
 end
 
 --- .vimrc 의 <C-g> 가 부른다.
-function _G.relationview_grep(pattern, dir)
-  A.grep(pattern, dir, api.nvim_get_current_win())
+---
+--- origin 은 결과를 받은 뒤 '돌아갈 편집 창'이다. 주지 않으면 지금 창.
+--- 트리에서 부를 때는 따로 준다(treesearch.lua): 찾기 창이 닫히면 초점이
+--- 트리로 돌아오는데, 트리를 origin 으로 주면 미리보기의 <C-t> 스택에
+--- 'neo-tree filesystem [1]' 같은 버퍼 이름이 파일 경로로 적혀서, 되돌아갈
+--- 때 미리보기에 트리 글자가 채워진다. 0 이나 false 는 '돌아갈 창 없음'.
+function _G.relationview_grep(pattern, dir, origin)
+  if origin == nil then
+    origin = api.nvim_get_current_win()
+  elseif origin == 0 or origin == false then
+    origin = nil
+  end
+  A.grep(pattern, dir, origin)
+end
+
+-- ---------------------------------------------------------------------------
+-- 트리의 <C-f>: 그 디렉터리 이하에서 파일 이름으로 찾는다
+-- ---------------------------------------------------------------------------
+-- A.grep 과 같은 모양이다 - 패널이 떠 있으면 패널 목록에, 아니면 quickfix
+-- 에 싣는다. 도우미를 함수 안에 두는 이유도 같다(최상위 지역 변수 200개).
+--
+-- find(1) 를 쓴다. rg --files 가 빠르긴 한데 .gitignore 와 숨은 곳을 말없이
+-- 건너뛴다. 커널 트리처럼 생성 파일이 .gitignore 에 든 곳에서는 '분명히 있는
+-- 파일이 안 나온다' - 이름으로 파일을 찾을 때 그건 틀린 답이다. find 는
+-- 맥(BSD)에도 서버(GNU)에도 있고, 아래 인자는 둘이 똑같이 읽는다:
+--   -H          찾을 곳 자체가 심볼릭 링크여도 따라간다 (안쪽 링크는 안 탄다)
+--   경로가 먼저 BSD find 는 식 앞에 경로가 와야 한다
+--   ( ) 는 맨 글자 셸을 거치지 않으니 \( 로 쓰면 그 글자를 찾는다
+--   -print      -prune 이 있으면 꼭 적는다. 빠지면 잘라 낸 디렉터리가 결과로 나온다
+--   -mindepth 1 시작점은 식에 넣지 않는다. 안 그러면 .tags 나 .git 디렉터리
+--               줄에서 찾을 때 시작점 자체가 잘려서 늘 0건이 된다
+--               (경로 바로 뒤에 둔다 - GNU 는 뒤에 오면 경고한다)
+--
+-- 와일드카드(* ? [)가 없으면 '이 글자가 든 이름'으로 읽는다: uart -> *uart*.
+-- *.dts 처럼 직접 쓴 패턴은 그대로 둔다.
+--
+--   let g:relationview_find_case = 1    " 대소문자를 가린다 (기본 0: 안 가림)
+--   let g:relationview_find_max = 1000  " 이 개수를 넘으면 끊는다
+function A.find(pattern, dir)
+  pattern = vim.trim(tostring(pattern or ''))
+  if pattern == '' then
+    return
+  end
+  dir = (dir and dir ~= '') and dir or vim.fn.getcwd()
+  if dir ~= '/' then
+    dir = (dir:gsub('/+$', ''))
+  end
+  -- vim.system 은 없는 cwd 에 날것의 ENOENT 를 던진다. 먼저 걸러 말로 알린다.
+  if vim.fn.isdirectory(dir) ~= 1 then
+    vim.notify('그런 디렉터리가 없습니다 - ' .. dir, vim.log.levels.WARN)
+    return
+  end
+  local cap = tonumber(cfg('find_max', 1000)) or 1000
+  local find = vim.fn.exepath('find')
+  if find == '' then
+    vim.notify('find 가 $PATH 에 없습니다', vim.log.levels.WARN)
+    return
+  end
+  local glob = pattern:find('[*?%[]') and pattern or ('*' .. pattern .. '*')
+  -- 파일과 링크를 받고, 링크가 디렉터리를 가리키는지는 받은 뒤에 가린다.
+  -- -type f 만 쓰면 파일을 가리키는 링크가 빠진다(안드로이드 트리에 흔하다).
+  -- GNU 의 -xtype 이면 한 번에 되지만 BSD find 에는 없다.
+  local argv = { find, '-H', dir, '-mindepth', '1',
+    '(', '-type', 'd', '(', '-name', '.git', '-o', '-name', '.svn',
+    '-o', '-name', '.tags', '-o', '-name', 'node_modules', ')', ')', '-prune',
+    '-o', '(', '-type', 'f', '-o', '-type', 'l', ')',
+    cfg('find_case', 0) ~= 0 and '-name' or '-iname', glob, '-print' }
+
+  local title = 'Find ' .. glob .. '  (' .. vim.fn.fnamemodify(dir, ':~') .. ')'
+
+  local function done(paths, err)
+    local results, qf, more = {}, {}, 0
+    for _, p in ipairs(paths or {}) do
+      -- 디렉터리를 가리키는 링크와 끊긴 링크는 여기서 빠진다
+      if p ~= '' and vim.fn.filereadable(p) == 1 then
+        if #results < cap then
+          -- name 은 비워 둔다. 행의 기호 칸은 show_results 의 sym(찾은
+          -- 패턴)으로 채워지고, 점프가 파일 안을 헤매지 않는다: jump_to 와
+          -- 미리보기는 loc.sym(=name)을 locate 로 그 줄 근처 30줄에서
+          -- 찾는데, 파일 이름을 주면 머리 주석의 'foo.c' 로 커서가 끌려간다
+          -- ('.' 도 패턴 글자라 foo_c 같은 것에도 걸린다).
+          results[#results + 1] = { path = p, line = 1, text = '' }
+          qf[#qf + 1] = { filename = p, lnum = 1, col = 1, text = '' }
+        else
+          more = more + 1
+        end
+      end
+    end
+    if #results == 0 then
+      local msg = err or ('find: 결과 없음 - ' .. glob)
+      if panel_visible() then
+        render_msg(pattern, msg)
+      else
+        vim.notify(msg, vim.log.levels.WARN)
+      end
+      return
+    end
+    -- find 는 디렉터리를 읽는 순서대로 내놓는다. 목록은 이름 순이 읽기 쉽다.
+    table.sort(results, function(a, b) return a.path < b.path end)
+    table.sort(qf, function(a, b) return a.filename < b.filename end)
+    if panel_visible() then
+      -- origin 은 주지 않는다. 주면 첫 파일을 미리보기로 열면서 찾은 패턴을
+      -- 편집 창의 점프 색(<C-t> 스택)으로 칠하는데, 파일 이름 조각은
+      -- 소스 안의 낱말이 아니다. 대신 목록으로 들어가 고르게 한다.
+      show_results(title, pattern, results, more, nil)
+      if s.win and api.nvim_win_is_valid(s.win) then
+        pcall(api.nvim_set_current_win, s.win)
+      end
+      return
+    end
+    -- lnum 은 1 이다. 0 이면 quickfix 가 그 항목을 '유효하지 않음'으로
+    -- 보고 <CR> 과 :cnext 가 건너뛴다.
+    vim.fn.setqflist({}, ' ', { title = title, items = qf })
+    pcall(vim.cmd, 'botright copen')
+  end
+
+  local chunks, nlines, delivered = {}, 0, false
+  local obj
+  local function deliver(paths, err)
+    if delivered then
+      return
+    end
+    delivered = true
+    done(paths, err)
+  end
+  local ok, ret = pcall(vim.system, argv, { cwd = dir, text = true,
+    stdout = function(e, chunk)
+      if e or not chunk then
+        return
+      end
+      chunks[#chunks + 1] = chunk
+      local _, c = chunk:gsub('\n', '')
+      nlines = nlines + c
+      if nlines > cap + 200 and obj then
+        pcall(function() obj:kill(15) end)
+      end
+    end },
+    function(o)
+      vim.schedule(function()
+        local out = table.concat(chunks)
+        -- 받은 것이 있으면 종료 코드는 보지 않는다. find 는 읽지 못한
+        -- 디렉터리가 하나만 있어도 1 로 끝나는데, 그래도 나머지 결과는
+        -- 온전하다. 아무것도 못 받았을 때만 stderr 를 알린다.
+        local err
+        if out == '' and o.signal ~= 15 and (o.code or 0) ~= 0 then
+          local first = ((o.stderr or ''):match('[^\n]+') or '')
+          if first ~= '' then
+            err = 'find: ' .. first
+          end
+        end
+        deliver(vim.split(out, '\n', { trimempty = true }), err)
+      end)
+    end)
+  if not ok then
+    deliver(nil, tostring(ret))
+    return
+  end
+  obj = ret
+end
+
+--- 트리의 <C-f> 가 부른다 (treesearch.lua).
+function _G.relationview_find(pattern, dir)
+  A.find(pattern, dir)
 end
 
 function A.gtags(args, retried)
