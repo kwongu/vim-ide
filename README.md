@@ -178,7 +178,7 @@ backspacing cannot eat them. Results land where they always did: the relation
 panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 `g:vimide_lookup_float = 0` put the command line back.
 
-\' (Leader, then '): The marks you set, in a telescope picker - filter by mark, by file
+\' (Leader, then ') or Ctrl+': The marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
 (`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
@@ -192,7 +192,12 @@ verified here), so the picker opened on every Enter in the edit window. `'` is
 vim's own jump-to-mark key; `<Leader>m` belongs to vim-mark. On a terminal that
 reports Ctrl+M separately (the kitty keyboard protocol, CSI u) you can have it
 back with `let g:vimide_marks_key = '<C-m>'`; `g:vimide_marks_key = ''` removes
-the binding.
+the binding. `Ctrl+'` is bound too, but most terminals never send it as its own
+key - they send a plain `'`, or nothing. It arrives only when the terminal
+reports modified keys (CSI u: in iTerm2 turn on *Report modifiers using CSI u*;
+inside tmux also `extended-keys`). Where it does not, the binding costs nothing:
+the `'` that arrives is vim's own jump-to-mark key. `:JumpKeyTest` shows what
+your terminal sends when you press it.
 
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
 `Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`

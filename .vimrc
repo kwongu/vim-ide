@@ -3389,6 +3389,7 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 " 북마크: 찍어 둔 마크를 텔레스코프로 골라서 그 자리로 (marksjump.lua)
 "
 "   \'             마크 목록 (<Leader>').  <CR> 가기,  d 지우기
+"   <C-'>          같은 것 - 터미널이 Ctrl+' 를 따로 보내 줄 때만 (아래)
 "   :VimIdeMarks   같은 것
 "
 " 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
@@ -3408,11 +3409,28 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 "   터미널이 Ctrl+M 을 따로 보내 준다면(kitty 키보드 프로토콜, CSI u) 그때는
 "   <C-m> 으로 되돌려도 Enter 와 부딪치지 않는다. 아니면 되돌리지 않는다.
 "
-"   let g:vimide_marks_key = '<C-m>'   " (Ctrl+M 을 구별하는 터미널에서만)
-"   let g:vimide_marks_key = ''        " 키를 걸지 않는다 (:VimIdeMarks 만)
-let g:vimide_marks_key = "<Leader>'"
-if has('nvim') && !empty(get(g:, 'vimide_marks_key', "<Leader>'"))
-    execute 'nnoremap <silent> ' . g:vimide_marks_key . ' :VimIdeMarks<CR>'
+"
+" <C-'> 에 대해
+"   Ctrl+' 는 전통적인 터미널이 따로 보내 주지 않는 키다. 대개 그냥 ' 가
+"   오거나 아무것도 오지 않는다. 터미널이 확장 키 보고(CSI u, kitty 키보드
+"   프로토콜)를 켜 주면 nvim 이 <C-'> 로 받는다 - iTerm2 는 Profiles > Keys >
+"   'Report modifiers using CSI u', tmux 안이면 extended-keys 도 켜야 한다.
+"   못 보내는 터미널에서도 걸어 두는 해는 없다: ' 가 오면 그건 원래의
+"   ' (마크로 가기) 이고 <C-'> 매핑에 걸리지 않는다. 무엇이 오는지는
+"   :JumpKeyTest 를 치고 Ctrl+' 를 눌러 보면 안다.
+"
+"   let g:vimide_marks_key = ["<Leader>'"]   " \' 만
+"   let g:vimide_marks_key = '<C-m>'         " (Ctrl+M 을 구별하는 터미널에서만)
+"   let g:vimide_marks_key = ''              " 키를 걸지 않는다 (:VimIdeMarks 만)
+let g:vimide_marks_key = ["<Leader>'", "<C-'>"]
+if has('nvim')
+    for s:mk in (type(get(g:, 'vimide_marks_key', '')) == v:t_list
+                \ ? g:vimide_marks_key : [get(g:, 'vimide_marks_key', '')])
+        if !empty(s:mk)
+            execute 'nnoremap <silent> ' . s:mk . ' :VimIdeMarks<CR>'
+        endif
+    endfor
+    unlet! s:mk
 endif
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 " 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.
