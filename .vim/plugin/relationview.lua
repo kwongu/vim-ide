@@ -2841,16 +2841,28 @@ ensure_tree = function()
   if reveal and not reveal_ok(dir, reveal) then
     reveal = nil
   end
-  if reveal then
-    s.tree_last = reveal
-  end
+  -- 새 트리는 아직 아무것도 드러내지 않았다. 옛 트리의 값이 남으면 그 파일로
+  -- 가는 따라가기가 '이미 했다'로 건너뛰어진다.
+  s.tree_last = reveal
+  -- 처음 열기도 따라가기와 같은 경쟁을 겪는다(A.tree_settle 설명). 순번을
+  -- 올리고 스캔 수에 넣어, 열자마자 다른 파일로 옮겨도 늦게 끝난 쪽이
+  -- 커서를 덮지 않게 한다.
+  s.tree_gen = (s.tree_gen or 0) + 1
+  local gen = s.tree_gen
+  s.tree_pending = (s.tree_pending or 0) + 1
   local ok, err = pcall(function()
     local mgr = require('neo-tree.sources.manager')
     local st = mgr.get_state('filesystem', nil, win)
     st.current_position = 'current'
     st._no_focus = true
-    mgr.navigate(st, dir, reveal, back, false)
+    mgr.navigate(st, dir, reveal, function()
+      back()
+      A.tree_settle(st, gen)
+    end, false)
   end)
+  if not ok then
+    s.tree_pending = math.max(0, s.tree_pending - 1)
+  end
   back()
   vim.schedule(back)
   if not ok then
@@ -2922,6 +2934,56 @@ reveal_ok = function(root, file)
   return root ~= nil and root ~= '' and ntutils.is_subpath(root, file)
 end
 
+-- 트리 스캔 하나가 끝났을 때, 커서를 '지금 따라가야 할 파일'로 옮긴다.
+-- 따라가기(tree_follow_now)와 트리 처음 열기(ensure_tree)의 navigate 콜백이
+-- 부른다. 최상위 지역 변수를 늘릴 수 없어서(200개 한계) A 에 단다.
+--
+-- 옮기는 일을 navigate 에 맡기지 않는다. navigate 는 그 일을 position.node_id
+-- 에 맡겨 두는데, 디렉터리를 읽는 동안 트리가 한 번 더 그려지면 그 값이
+-- 사라진다: 그리기마다 position.restore 가 node_id 로 옮겨 보고, 되든 안
+-- 되든 지운다. 커널 트리에서는 navigate 끝에 띄운 git status 가 읽기보다
+-- 먼저 돌아와(git_status_changed -> redraw) 그 사이에 끼어든다. 실측:
+-- fs/ext4/inode.c 를 열면 읽기 1.4초, git 갱신 0.7초 - 0.7초의 그리기에서
+-- 아직 없는 노드로 옮기려다 false 로 끝나며 node_id 를 지웠고, 1.4초의
+-- 마지막 그리기에는 옮길 곳이 없어서 커서가 앞 파일에 그대로 남았다(12초를
+-- 기다려도). ~/.vim-ide 처럼 작은 트리는 읽기가 먼저 끝나서 드러나지
+-- 않았다. neo-tree 자신의 follow_current_file(F9 트리가 타는 길)은 읽기
+-- 콜백에서 focus_node 를 직접 부르고(filesystem/init.lua follow_internal),
+-- 그래서 F9 트리는 같은 조건에서도 따라갔다. 여기서도 그렇게 한다.
+--
+-- 규칙 (반대 심문에서 나온 것들)
+--   * 대상은 콜백이 받은 파일이 아니라 s.tree_last 다. 트리에서 파일을 열면
+--     open 훅이 그 파일로 바꿔 두므로, 그 사이 끝난 앞선 따라가기가 커서를
+--     옛 파일로 끌고 가지 않는다.
+--   * 스캔은 겹치고 neo-tree 는 앞선 것을 취소하지 않는다. 늦게 끝난 옛
+--     스캔은 자기 그림으로 트리를 통째로 다시 그리고 커서를 줄 번호로
+--     돌려놓는다 - 새 스캔이 맞춰 둔 자리가 엉뚱한 노드가 된다. 그래서
+--     돌고 있는 스캔 수(s.tree_pending)를 세어, 최신 스캔이 끝났을 때와
+--     마지막으로 끝난 스캔 뒤에 맞춘다.
+--   * 못 옮겨도 다시 해 보지 않는다. F 로 걸러 둔 트리(keep_filter_on_submit)
+--     에는 그 파일이 영영 없어서, 다시 해 보게 하면 창을 옮길 때마다 전체
+--     navigate 와 외부 검색이 돈다. 걸러 둔 동안은 옮기려 하지도 않는다.
+--   * st 가 지금 트리의 상태가 아니면(그새 닫혔다 다시 열림) 손대지 않는다.
+function A.tree_settle(st, gen)
+  s.tree_pending = math.max(0, (s.tree_pending or 1) - 1)
+  if gen ~= s.tree_gen and s.tree_pending > 0 then
+    return -- 더 새 스캔이 아직 돈다. 그쪽이 끝나며 맞춘다.
+  end
+  local file = s.tree_last
+  if not (file and st and not st.disposed and s.tree_win
+      and st.winid == s.tree_win and api.nvim_win_is_valid(s.tree_win)) then
+    return
+  end
+  local sp = st.search_pattern
+  if type(sp) == 'string' and sp ~= '' then
+    return
+  end
+  local ok_r, R = pcall(require, 'neo-tree.ui.renderer')
+  if ok_r then
+    pcall(R.focus_node, st, file, true)
+  end
+end
+
 local function tree_follow_now()
   if not tree_visible() then
     return
@@ -2950,11 +3012,13 @@ local function tree_follow_now()
   local gen = s.tree_gen
   local prev = api.nvim_get_current_win()
   st.current_position = 'current'
-  pcall(function()
+  s.tree_pending = (s.tree_pending or 0) + 1
+  local okn = pcall(function()
     mgr.navigate(st, force_cwd and vim.fn.fnamemodify(file, ':h') or root, file,
       function()
+        A.tree_settle(st, gen)
         if gen ~= s.tree_gen then
-          return -- 그 사이 더 새 따라가기가 걸렸다. 저쪽이 맡는다.
+          return -- 그 사이 더 새 따라가기가 걸렸다. 초점 되돌리기는 저쪽이 맡는다.
         end
         -- 되돌리기는 '트리가 제 창으로 초점을 끌어갔을 때'만 한다.
         --
@@ -2978,6 +3042,9 @@ local function tree_follow_now()
         end
       end, false)
   end)
+  if not okn then
+    s.tree_pending = math.max(0, s.tree_pending - 1) -- 콜백이 오지 않는다
+  end
 end
 
 -- 커서가 파일 사이를 빠르게 옮겨 다닐 때 트리를 매번 다시 그리지 않는다
