@@ -232,15 +232,52 @@ install_tmux_local() {
 	fi
 	rm -rf "${_w}"
 	mkdir -p "${LOCAL}/bin"
-	ln -sfn "${LOCAL}/tmux-${_tag}/bin/tmux" "${LOCAL}/bin/tmux"
-	note "${LOCAL}/bin/tmux -> tmux ${_tag}"
-	# 이미 돌고 있는 tmux 서버는 옛 판이다. 새 클라이언트는 거기 붙지 못한다
-	# ('protocol version mismatch'). 서버를 대신 끄지 않는다 - 남은 세션이
-	# 그 사람의 작업이다.
-	if tmux_old=$(command -v -p tmux 2>/dev/null) && [ -n "${tmux_old}" ] &&
-			"${tmux_old}" ls >/dev/null 2>&1; then
-		note "이미 떠 있는 tmux 세션은 옛 판 서버에 있습니다. 그 세션에는 ${tmux_old} attach 로"
-		note "붙고, 다 쓰면 그 서버를 끈 뒤(${tmux_old} kill-server) 새 tmux 로 여세요."
+	# 링크가 아니라 래퍼를 둔다. 이미 떠 있는 tmux 서버는 옛 판이고, 새
+	# 클라이언트는 거기 붙지 못한다 - 'tmux -2 a' 가 'server version is too
+	# old for client' 로 끝난다(개발서버 실측). 서버를 대신 끄지 않는다(남은
+	# 세션이 그 사람의 작업이다). 대신 래퍼가 기본 소켓에 옛 서버가 떠 있으면
+	# 옛 클라이언트로 보내고, 그 서버를 다 쓰고 끄면 그때부터 새 판을 쓴다.
+	# -L/-S 로 소켓을 고른 호출은 곧장 새 판으로 간다.
+	_old=$(PATH=/usr/local/bin:/usr/bin:/bin command -v tmux 2>/dev/null || true)
+	rm -f "${LOCAL}/bin/tmux"
+	{
+		echo '#!/bin/sh'
+		echo "# vim-ide/tools/deps.sh 가 만든 tmux 래퍼 (새 판: tmux ${_tag})."
+		echo "NEW=${LOCAL}/tmux-${_tag}/bin/tmux"
+		echo "OLD=${_old}"
+		cat <<'EOF'
+# 새 tmux 를 쓰되, 고른 소켓(기본, -L, -S)에 옛 판 서버가 떠 있으면 옛
+# 클라이언트로 보낸다. 새 클라이언트는 옛 서버에 붙지 못하고('server version
+# is too old for client'), 그런데도 종료 코드는 0 이라 has-session 으로는
+# 가려지지 않는다(실측) - 그 메시지로 가린다. 옛 서버를 다 쓰고 끄면
+# (tmux kill-server) 그다음부터 새 판이 뜬다.
+L=''; S=''; want=''
+for a do
+	if [ -n "$want" ]; then eval "$want=\$a"; want=''; continue; fi
+	case "$a" in
+		-L) want=L ;; -S) want=S ;; -L?*) L=${a#-L} ;; -S?*) S=${a#-S} ;;
+		-c|-f|-T) want=_ ;;
+		-*) ;;
+		*) break ;;
+	esac
+done
+probe() {
+	if [ -n "$S" ]; then "$NEW" -S "$S" "$@"
+	elif [ -n "$L" ]; then "$NEW" -L "$L" "$@"
+	else "$NEW" "$@"; fi
+}
+if [ -n "$OLD" ] && [ -x "$OLD" ] &&
+		probe list-sessions 2>&1 | grep -q 'server version is too old'; then
+	exec "$OLD" "$@"
+fi
+exec "$NEW" "$@"
+EOF
+	} > "${LOCAL}/bin/tmux"
+	chmod +x "${LOCAL}/bin/tmux"
+	note "${LOCAL}/bin/tmux -> tmux ${_tag} (래퍼)"
+	if [ -n "${_old}" ] && "${_old}" has-session 2>/dev/null; then
+		note "지금 떠 있는 tmux 서버는 옛 판(${_old})입니다. 'tmux' 는 그 서버가 떠 있는"
+		note "동안 옛 클라이언트로 붙고, 그 서버를 끄면 그다음부터 새 판으로 엽니다."
 	fi
 	return 0
 }
