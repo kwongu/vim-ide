@@ -3390,6 +3390,7 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 "
 "   \'             마크 목록 (<Leader>').  <CR> 가기,  d 지우기
 "   <C-'>          같은 것 - 터미널이 Ctrl+' 를 따로 보내 줄 때만 (아래)
+"   Ctrl+M 두 번   같은 것 - Enter 두 번이기도 하다 (아래 g:vimide_marks_double)
 "   :VimIdeMarks   같은 것
 "
 " 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
@@ -3431,6 +3432,62 @@ if has('nvim')
         endif
     endfor
     unlet! s:mk
+endif
+
+" Ctrl+M 두 번(= Enter 두 번)으로도 마크 목록을 연다.
+"
+" 터미널에서 Ctrl+M 은 Enter 와 같은 바이트라, 이것은 'Enter 두 번'이다.
+" <CR><CR> 로 매핑하면 Enter 를 한 번만 쳐도 nvim 이 두 번째 키를 기다리느라
+" timeoutlen(0.8초)만큼 늦게 움직이고, quickfix·트리처럼 자기 <CR> 을 가진
+" 창의 Enter 까지 같이 늦어진다(겹치는 매핑이 되므로). 그래서 기다리지 않는다:
+" 첫 Enter 는 곧바로 원래대로(다음 줄 첫 글자로) 움직이고, 같은 창에서
+" g:vimide_marks_double_ms 안에 두 번째 Enter 가 오면 첫 번째가 옮긴 커서를
+" 제자리로 되돌린 뒤 목록을 연다. 숫자를 붙인 Enter(3<CR>)는 원래대로만 한다.
+"
+" 대가: Enter 를 빠르게 연달아 쳐서 줄을 내려가던 손버릇이면 두 번째에서 목록이
+" 뜬다. 그럴 때는 j 를 쓰거나 이 기능을 끈다.
+"
+" 자기 <CR> 매핑을 가진 창(quickfix, RelationView 패널, 트리, telescope)은 그
+" 매핑이 먼저라 영향이 없다. 명령줄 창(q:)의 Enter 는 따로 지킨다.
+"
+"   let g:vimide_marks_double = 0        " 끄기
+"   let g:vimide_marks_double_ms = 300   " 더 빨리 눌러야 목록
+let g:vimide_marks_double = 1
+let g:vimide_marks_double_ms = 400
+if has('nvim') && get(g:, 'vimide_marks_double', 1)
+    func! s:MarksEnter() abort
+        let l:cnt = v:count
+        " 자기 Enter 를 가진 특수 버퍼는 원래 동작 그대로 (매핑이 없는 경우 대비)
+        if &buftype =~# '^\%(quickfix\|terminal\|prompt\)$' || getcmdwintype() !=# ''
+            execute 'normal! ' . (l:cnt ? l:cnt : '') . "\<CR>"
+            return
+        endif
+        let l:now = reltimefloat(reltime()) * 1000.0
+        if l:cnt == 0 && exists('s:marks_cr') && s:marks_cr.win == win_getid()
+                    \ && s:marks_cr.buf == bufnr('%')
+                    \ && l:now - s:marks_cr.t <= get(g:, 'vimide_marks_double_ms', 400)
+            call setpos('.', s:marks_cr.pos)
+            unlet s:marks_cr
+            VimIdeMarks
+            return
+        endif
+        let l:pos = getpos('.')
+        execute 'normal! ' . (l:cnt ? l:cnt : 1) . '+'
+        if l:cnt == 0
+            let s:marks_cr = {'t': l:now, 'pos': l:pos, 'buf': bufnr('%'), 'win': win_getid()}
+        else
+            unlet! s:marks_cr
+        endif
+    endfunc
+    " <CR> 과 <C-m> 둘 다: 보통 터미널에서는 같은 키이고, Ctrl+M 을 따로 보내는
+    " 터미널(CSI u)에서는 다른 키라서.
+    nnoremap <silent> <CR>  :<C-u>call <SID>MarksEnter()<CR>
+    nnoremap <silent> <C-m> :<C-u>call <SID>MarksEnter()<CR>
+    augroup VimIdeMarksEnter
+        autocmd!
+        " 명령줄 창에서 Enter 는 그 줄을 실행하는 키다 - 전역 매핑이 가리면 안 된다
+        autocmd CmdwinEnter * nnoremap <buffer> <CR> <CR>
+    augroup END
 endif
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 " 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.

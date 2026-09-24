@@ -5,6 +5,7 @@
 --
 --   \'               마크 목록 (<Leader>', g:vimide_marks_key 로 바꾼다)
 --   <C-'>            같은 것. 터미널이 Ctrl+' 를 따로 보낼 때만 먹는다 (.vimrc)
+--   Ctrl+M 두 번     같은 것 (= Enter 두 번, 기다림 없이. .vimrc 의 s:MarksEnter)
 --   :VimIdeMarks     같은 것
 --
 -- 목록에 무엇이 뜨나

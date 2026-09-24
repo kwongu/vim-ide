@@ -178,7 +178,7 @@ backspacing cannot eat them. Results land where they always did: the relation
 panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 `g:vimide_lookup_float = 0` put the command line back.
 
-\' (Leader, then ') or Ctrl+': The marks you set, in a telescope picker - filter by mark, by file
+\' (Leader, then '), Ctrl+' or Ctrl+M twice: The marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
 (`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
@@ -198,6 +198,16 @@ reports modified keys (CSI u: in iTerm2 turn on *Report modifiers using CSI u*;
 inside tmux also `extended-keys`). Where it does not, the binding costs nothing:
 the `'` that arrives is vim's own jump-to-mark key. `:JumpKeyTest` shows what
 your terminal sends when you press it.
+Ctrl+M twice opens it too. In a terminal Ctrl+M *is* Enter, so this is Enter
+twice - and it is done without waiting: a `<CR><CR>` mapping would make every
+single Enter hang for `timeoutlen` (0.8 s) and slow down the Enter of the
+quickfix list and the trees as well. Instead the first Enter moves at once, as
+it always did, and a second Enter in the same window within
+`g:vimide_marks_double_ms` (400) puts the cursor back and opens the list. A
+counted `3<CR>` just moves; windows with their own Enter (quickfix, the relation
+panel, the trees, telescope) and the command-line window are untouched. The
+price is that pressing Enter rapidly to walk down now opens the list on the
+second press - use `j`, or `let g:vimide_marks_double = 0`.
 
 Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
 `Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
