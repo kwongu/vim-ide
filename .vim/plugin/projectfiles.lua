@@ -182,8 +182,9 @@ local s = {
 
 local group = api.nvim_create_augroup('ProjectFiles', { clear = true })
 
+-- 폭을 넘는 한 줄 알림은 Press ENTER 가 뜨며 다음 키를 먹는다 (fitmsg.lua)
 local function notify(msg, level)
-  vim.notify('ProjectFiles: ' .. msg, level or vim.log.levels.INFO)
+  (_G.vimide_notify or vim.notify)('ProjectFiles: ' .. msg, level or vim.log.levels.INFO)
 end
 
 -- ---------------------------------------------------------------------------

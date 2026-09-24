@@ -157,9 +157,10 @@ local function dbg(msg)
   end
 end
 
+-- 폭을 넘는 한 줄 알림은 Press ENTER 가 뜨며 다음 키를 먹는다 (fitmsg.lua)
 local function notify(msg, level)
   if cfg('notify', 1) ~= 0 then
-    vim.notify('autoindex: ' .. msg, level or vim.log.levels.INFO)
+    (_G.vimide_notify or vim.notify)('autoindex: ' .. msg, level or vim.log.levels.INFO)
   end
 end
 

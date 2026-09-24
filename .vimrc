@@ -1307,7 +1307,31 @@ let g:gutentags_add_default_project_roots = 0
 " 있다)는 예전 자리 그대로다 - 옮기면 모든 프로젝트의 tags 를 다시 만든다.
 " 격리한 시험이 여기(~/.cache/tags)에 시험 트리의 tags 를 쌓아 48MB 짜리까지
 " 남긴 적이 있다.
-let g:gutentags_cache_dir = empty($XDG_CACHE_HOME) ? expand('~/.cache/tags') : $XDG_CACHE_HOME . '/tags'
+" 단 gutentags 는 tags 파일 이름을 만들 때 경로의 첫 '/-' 를 '/' 로 바꾼다 (자기가
+" 붙인 '/-<루트>' 를 겨냥한 것). 캐시 경로에 '/-' 가 있으면 그쪽이 바뀌어 없는
+" 디렉터리에 쓰다가 파일을 열 때마다 'ctags job failed' 가 떴다 (맥 시험장). 그때는
+" $TMPDIR(없거나 거기도 '/-' 면 /tmp) 아래 내 디렉터리로 - ~/.cache/tags 로 돌아가면
+" 격리가 깨진다. 이름이 뻔하므로 0700 으로 만들고, 내 것(링크 아님·0700·내 uid)일
+" 때만 쓴다 - 여럿이 쓰는 서버에서 남이 먼저 만들어 심볼릭 링크를 심어 두면
+" gutentags 가 그 링크를 따라 내 파일을 덮어쓴다 (반대 심문). 아니면 ~/.cache/tags.
+if empty($XDG_CACHE_HOME)
+  let g:gutentags_cache_dir = expand('~/.cache/tags')
+elseif stridx($XDG_CACHE_HOME, '/-') < 0
+  let g:gutentags_cache_dir = $XDG_CACHE_HOME . '/tags'
+else
+  let s:tmp = substitute(empty($TMPDIR) ? '/tmp' : $TMPDIR, '/\+$', '', '')
+  if stridx(s:tmp, '/-') >= 0
+    let s:tmp = '/tmp'
+  endif
+  let s:tmp .= '/vimide-tags-' . (empty($USER) ? luaeval('vim.uv.getuid()') : $USER)
+  if !isdirectory(s:tmp)
+    silent! call mkdir(s:tmp, 'p', 0700)
+  endif
+  let g:gutentags_cache_dir = getftype(s:tmp) ==# 'dir' && getfperm(s:tmp) ==# 'rwx------'
+        \ && luaeval('(vim.uv.fs_stat(_A) or {}).uid == vim.uv.getuid()', s:tmp)
+        \ ? s:tmp : expand('~/.cache/tags')
+  unlet s:tmp
+endif
 let g:gutentags_generate_on_new = 1
 let g:gutentags_generate_on_missing = 1
 let g:gutentags_generate_on_write = 1
