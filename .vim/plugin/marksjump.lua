@@ -9,7 +9,7 @@
 --   :VimIdeMarks     같은 것
 --
 -- 이름 붙은 북마크
---   목록 맨 앞(프롬프트 바로 위) '＋ 등록' 줄을 고르면 지금 자리를 북마크로
+--   목록 맨 앞(프롬프트 바로 밑) '＋ 등록' 줄을 고르면 지금 자리를 북마크로
 --   담는다. 창을 열면 그 줄이 골라져 있다.
 --     심볼 위에서 열었으면   '＋ 등록: <심볼>'  - 그대로 Enter
 --     빈 곳에서 열었으면     프롬프트에 이름을 치면 '＋ 등록: <친 이름>'
@@ -526,8 +526,36 @@ local function register(pos, name)
   return false
 end
 
+-- 창을 닫지 않고 목록을 갈아 끼운다 (pickerkeep.lua). 친 글자는 그대로 두고,
+-- 선택은 지운 자리에 올라온 줄에 둔다. 항목은 collect() 가 새로 만든 표라
+-- 표끼리 견줄 수 없어서 열쇠(종류·이름·파일·줄)로 다시 찾는다.
+local function entry_key(e)
+  local v = e and e.value
+  if type(v) ~= 'table' then
+    return nil
+  end
+  if v.kind == 'add' then
+    return 'add'
+  end
+  return table.concat({ v.kind or '', v.name or '', v.path or '',
+    tostring(v.bline or v.lnum or '') }, '\0')
+end
+
+local function refresh_keep(picker, finder, title)
+  if type(_G.vimide_picker_keep) == 'function' then
+    return _G.vimide_picker_keep(picker, finder, { title = title, key = entry_key })
+  end
+  pcall(function() picker.layout.prompt.border:change_title(title) end)
+  picker:refresh(finder, { reset_prompt = false })
+end
+
+local function picker_busy(picker)
+  return type(_G.vimide_picker_busy) == 'function' and _G.vimide_picker_busy(picker)
+end
+
 function _G.vimide_marks()
   local pos, sym = here()
+  local origin_buf = api.nvim_get_current_buf()
   local items = collect()
   local t = telescope()
   if not t then
@@ -554,9 +582,12 @@ function _G.vimide_marks()
     p = ok and vim.trim(p or '') or ''
     return p ~= '' and p or sym
   end
-  local results = { add }
-  vim.list_extend(results, items)
-  -- 등록 줄은 무엇을 치든 걸러지지 않고 늘 맨 앞(프롬프트 바로 위)에 있다
+  local function results()
+    local r = { add }
+    vim.list_extend(r, items)
+    return r
+  end
+  -- 등록 줄은 무엇을 치든 걸러지지 않고 늘 맨 앞(프롬프트 바로 밑, 맨 위)에 있다
   local sorter = t.conf.generic_sorter({})
   local score = sorter.scoring_function
   sorter.scoring_function = function(self, prompt, line, entry, ...)
@@ -565,55 +596,66 @@ function _G.vimide_marks()
     end
     return score(self, prompt, line, entry, ...)
   end
-  local nb, nm = 0, 0
-  for _, e in ipairs(items) do
-    if e.kind == 'bookmark' then nb = nb + 1 else nm = nm + 1 end
-  end
-  t.pickers.new({}, {
+  local opts = {
     -- :Telescope resume 이 옛 자리·옛 심볼의 등록 줄을 되살리지 않게
     cache_picker = false,
+    -- 점수가 같으면 모아 온 순서(지금 프로젝트 -> 최근 -> 마크)를 지킨다.
+    -- 기본 tiebreak 는 짧은 글자를 앞으로 올려서, 글자를 치는 순간 최근
+    -- 것이 위라는 순서가 흐트러졌다 (반대 심문).
+    tiebreak = function() return false end,
     -- 담을 자리가 없으면(파일 아닌 창) 등록 줄 대신 첫 항목을 골라 둔다
     default_selection_index = (not pos and #items > 0) and 2 or nil,
-    prompt_title = ('북마크 %d · 마크 %d   <CR> 등록/가기   <Esc>d 지우기'):format(nb, nm),
-    finder = t.finders.new_table({
-      results = results,
-      entry_maker = function(e)
-        if e == add then
-          return {
-            value = add,
-            display = function()
-              if not pos then
-                return '＋ 등록: (파일 창에서 열어야 담을 수 있습니다)'
-              end
-              local nm2 = add_name()
-              local dup = ''
-              for _, it in ipairs(items) do
-                if it.kind == 'bookmark' and it.path == pos.path and it.bline == pos.line
-                    and it.name == vim.trim(nm2) then
-                  dup = '   (이미 있음)'
-                end
-              end
-              return '＋ 등록: ' .. (nm2 ~= '' and nm2 or '(프롬프트에 이름을 치세요)')
-                .. '   ← ' .. vim.fn.fnamemodify(pos.path, ':t') .. ':' .. pos.line .. dup
-            end,
-            ordinal = '',
-            -- 미리보기에 '여기가 담긴다'를 보여 준다. 이것이 없으면 grep 미리보기가
-            -- entry.value(표)를 경로로 읽으려다 오류를 내고, 창을 열자마자
-            -- 'Press ENTER' 로 멈췄다(tmux 화면 실측 - 이 줄이 처음부터 골라져
-            -- 있어서).
-            filename = pos and pos.path or nil,
-            lnum = pos and pos.line or nil,
-          }
-        end
-        return {
-          value = e,
-          display = label(e),
-          ordinal = e.name .. ' ' .. e.short .. ' ' .. e.text,
-          filename = e.path,
-          lnum = e.lnum,
-        }
-      end,
-    }),
+    finder = nil, -- 아래 make_finder() 로 채운다 (지운 뒤 같은 모양으로 다시 만든다)
+  }
+  local function make_entry(e)
+    if e == add then
+      return {
+        value = add,
+        display = function()
+          if not pos then
+            return '＋ 등록: (파일 창에서 열어야 담을 수 있습니다)'
+          end
+          local nm2 = add_name()
+          local dup = ''
+          for _, it in ipairs(items) do
+            if it.kind == 'bookmark' and it.path == pos.path and it.bline == pos.line
+                and it.name == vim.trim(nm2) then
+              dup = '   (이미 있음)'
+            end
+          end
+          return '＋ 등록: ' .. (nm2 ~= '' and nm2 or '(프롬프트에 이름을 치세요)')
+            .. '   ← ' .. vim.fn.fnamemodify(pos.path, ':t') .. ':' .. pos.line .. dup
+        end,
+        ordinal = '',
+        -- 미리보기에 '여기가 담긴다'를 보여 준다. 이것이 없으면 grep 미리보기가
+        -- entry.value(표)를 경로로 읽으려다 오류를 내고, 창을 열자마자
+        -- 'Press ENTER' 로 멈췄다(tmux 화면 실측 - 이 줄이 처음부터 골라져
+        -- 있어서).
+        filename = pos and pos.path or nil,
+        lnum = pos and pos.line or nil,
+      }
+    end
+    return {
+      value = e,
+      display = label(e),
+      ordinal = e.name .. ' ' .. e.short .. ' ' .. e.text,
+      filename = e.path,
+      lnum = e.lnum,
+    }
+  end
+  local function make_finder()
+    return t.finders.new_table({ results = results(), entry_maker = make_entry })
+  end
+  local function title()
+    local b, m = 0, 0
+    for _, e in ipairs(items) do
+      if e.kind == 'bookmark' then b = b + 1 else m = m + 1 end
+    end
+    return ('북마크 %d · 마크 %d   <CR> 등록/가기   <Esc>d 지우기'):format(b, m)
+  end
+  opts.prompt_title = title()
+  opts.finder = make_finder()
+  t.pickers.new({}, vim.tbl_extend('force', opts, {
     sorter = sorter,
     previewer = (function()
       -- 담을 자리가 없는(파일 창이 아닌 곳에서 연) 등록 줄은 미리보기를 건너뛴다
@@ -628,6 +670,12 @@ function _G.vimide_marks()
       return pv
     end)(),
     attach_mappings = function(bufnr, map)
+      -- 바쁨을 재기 시작한다 (pickerkeep.lua) - 창이 다 선 뒤에
+      vim.schedule(function()
+        if type(_G.vimide_picker_track) == 'function' then
+          pcall(_G.vimide_picker_track, t.state.get_current_picker(bufnr))
+        end
+      end)
       -- 등록 줄에서 Ctrl+V / Ctrl+X / Ctrl+T 는 아무것도 하지 않는다 (열 파일이 없다 -
       -- 그대로 두면 파일 아닌 창에서 연 경우 E5108 로 죽었다)
       local function on_add()
@@ -640,6 +688,14 @@ function _G.vimide_marks()
         end
       end
       t.actions.select_default:replace(function()
+        -- 목록이 프롬프트를 따라오지 않았으면 따라온 뒤에 (pickerkeep.lua)
+        local pk0 = t.state.get_current_picker(bufnr)
+        if pk0 and picker_busy(pk0) and type(_G.vimide_picker_ready) == 'function' then
+          _G.vimide_picker_ready(pk0, function()
+            t.actions.select_default(bufnr)
+          end)
+          return
+        end
         local entry = t.state.get_selected_entry()
         if entry and entry.value == add then
           -- 프롬프트는 그 자리에서 읽는다. get_current_line 은 입력보다 한 박자
@@ -664,12 +720,19 @@ function _G.vimide_marks()
       end)
       -- 'd' 는 노멀 모드에서만. 입력 모드에도 걸면 검색창에 d 를 칠 때마다
       -- 지워진다 - 'drivers' 를 치려다 두 개를 잃는다.
+      -- 지워도 창은 그대로 두고 목록만 다시 읽어 갈아 끼운다. 친 글자는 두고,
+      -- 선택은 지운 자리 근처에 둔다 - 여러 개를 이어서 지울 수 있다.
       map('n', 'd', function()
+        local picker = t.state.get_current_picker(bufnr)
+        -- 목록을 갈아 끼우는 중에 온 d 는 버린다 - 그 사이의 선택은 방금 지운 줄이다
+        -- (빨리 친 dd 가 둘을 지우거나, 없는 줄을 지우려 헛돌지 않게)
+        if picker_busy(picker) then
+          return
+        end
         local entry = t.state.get_selected_entry()
         if not entry or entry.value == add then
           return
         end
-        t.actions.close(bufnr)
         local e = entry.value
         if e.kind == 'bookmark' then
           if bm_remove(e) > 0 then
@@ -678,13 +741,22 @@ function _G.vimide_marks()
             vim.notify(("북마크 '%s' 는 그새 없어졌습니다"):format(e.name), vim.log.levels.WARN)
           end
         else
-          pcall(vim.cmd, 'delmarks ' .. e.name)
+          -- 버퍼 마크(a-z)는 그 버퍼에서 지워야 한다. 지금 창은 프롬프트라, 마크를
+          -- 모아 온 원래 버퍼에서 지운다.
+          pcall(api.nvim_buf_call, origin_buf, function()
+            vim.cmd('delmarks ' .. e.name)
+          end)
           vim.notify(("마크 '%s' 를 지웠습니다"):format(e.name))
         end
+        if not picker then
+          return
+        end
+        items = api.nvim_buf_call(origin_buf, collect)
+        refresh_keep(picker, make_finder(), title())
       end)
       return true
     end,
-  }):find()
+  })):find()
 end
 
 api.nvim_create_user_command('VimIdeMarks', function() _G.vimide_marks() end,

@@ -61,7 +61,9 @@ local function target(state)
   if vim.fn.isdirectory(dir) ~= 1 then
     return root, ''
   end
-  return dir, vim.fn.fnamemodify(p, ':t')
+  -- 세 번째 값은 항목 자체의 경로 (reposearch.lua 가 링크를 풀 때 쓴다 -
+  -- 링크 파일의 '든 디렉터리'는 링크 쪽이지 가리키는 쪽이 아니다)
+  return dir, vim.fn.fnamemodify(p, ':t'), p
 end
 
 -- 찾을 곳 칸의 값을 디렉터리로 푼다. 비우면 처음 넣어 준 곳.
@@ -125,6 +127,9 @@ local function ask_find(dir, name)
     end
   end)
 end
+
+-- reposearch.lua(\ff \fg \fi)도 같은 규칙으로 커서 밑 항목을 읽는다
+_G.vimide_tree_target = target
 
 --- .vimrc 의 neo-tree window.mappings 가 부른다. kind = 'grep' | 'find'
 function _G.vimide_tree_search(state, kind)

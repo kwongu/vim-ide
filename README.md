@@ -103,10 +103,10 @@ echo '' >> ${HOME}/.profile <br/>
 * Which directory is the project: the nearest directory above the file that already has an index (`.tags/GTAGS`, or an old root-level `GTAGS`); failing that, the nearest one holding `.git`, `.repo`, `.project` or `.root`. `.repo` is there for SDKs checked out with `repo`: their root has `.repo` but no `.git` (each sub-project such as `kernel/common` has its own `.git`), so without it the first launch in a new SDK walked past the SDK and stopped at whatever `.git` lay above. On the dev server that was an empty `git init` in the directory holding several SDKs - about 5 million files, a 35-second `find` from a cold cache - and every first launch started listing and indexing all of it. Nearest wins, so inside a sub-project with its own `.git` nothing changes, and an SDK that already has an index is found by the first rule.
 * Trees larger than `g:autoindex_ctags_max_files` (5000) get their **ctags file built by `autoindex.lua` instead of gutentags**, once per project in the background (0.9 GB / 47 s for a 69k-file kernel tree) and never on save - gutentags rewrites the entire tags file whenever a file in the project is saved, which costs seconds at that size. It is refreshed when older than `g:autoindex_ctags_max_age` days (7), rebuilt by `:CtagsIndex`, and switched off with `g:autoindex_ctags = 0`. `g:autoindex_ctags_args` chooses the flags: the default `--fields=+n --excmd=number` trades search patterns for line numbers (~30% smaller); drop `--excmd=number` to keep patterns, which survive edits made outside nvim. `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive gtags by hand; `:GtagsIndex`, `:GtagsIndexUpdate` and `:GtagsIndexStatus` drive it by hand.
 
-* Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. NERDTree is still one key away on F11 (right side).
+* Modern file tree (nvim only): `neo-tree.nvim` (F9, or `<leader>t`) shows git status inline and creates/deletes/renames with `a`/`d`/`r`. F11 opens the same tree as a float.
 
-* Project files (nvim only): `<leader>fo` finds and opens a file from what is indexed (a telescope picker, `^d` drops it from the list, `^a` adds more), `<leader>fp` picks files to add. Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Adding a file brings the headers it includes and the files defining the symbols it uses along with it, and the index follows immediately; presets are named, reusable across checkouts, shipped with vim-ide itself so every machine has them, and one can be made the startup default. See "Project files and presets" below.
-* Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F3.
+* Project files (nvim only): `<leader>fo` finds and opens a file from what is indexed (a telescope picker; `^d` or `Esc` `d` drops it - or every `<Tab>`-marked one - from the list and the picker stays open), and files go in from the tree (`+`). Two modes: **auto** - the whole project, as before - and **preset**, where only the files and directories you picked are indexed. Adding a file brings the headers it includes and the files defining the symbols it uses along with it, and the index follows immediately; presets are named, reusable across checkouts, shipped with vim-ide itself so every machine has them, and one can be made the startup default. See "Project files and presets" below.
+* Relation window (nvim only): Source Insight style panel across the bottom of the screen, with the context preview in a column of its own down the right side, showing the definition and an expandable multi-depth caller tree of the symbol under the cursor in real time. The tree can be expanded per node or all at once, and exported as an HTML call graph. It uses the same GTAGS database created with F2. It opens automatically on startup; toggle with F12 (it was F3, which now opens `\fo`).
 
 
 ## Usage (shortcut)
@@ -115,8 +115,8 @@ This section describes mapping keys for Vim IDE.
 
 ```
 F1: Show a man page for the keyword under the cursor.
-F2: Source files under the current path are indexed; `cscope.files` is written to the project root and the GPATH/GRTAGS/GTAGS database into `<root>/.tags/` (F12 removes both). With automatic indexing this is rarely needed.
-F3: Toggle RelationView, Source Insight style relation window (nvim only)
+F2: Source files under the current path are indexed; `cscope.files` is written to the project root and the GPATH/GRTAGS/GTAGS database into `<root>/.tags/` (`:call Deltags()` removes both). With automatic indexing this is rarely needed.
+F3: Find an indexed file and open it, the same as `\fo` (nvim only). RelationView moved to F12
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
 F5: Clear all marks
 The quickfix list and the relation panel both say whether a file is in the
@@ -180,7 +180,7 @@ panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 
 \' (Leader, then '), Ctrl+' or Ctrl+M twice: Named bookmarks and the marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
-(`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
+(`:VimIdeMarks`; `<Esc>` then `d` deletes one and the picker stays open). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
 job. Automatic marks are left out - `'`, `"`, `^`, `.` and especially `0`-`9`,
 which vim fills with recently closed files and which here means the index's
@@ -198,7 +198,7 @@ reports modified keys (CSI u: in iTerm2 turn on *Report modifiers using CSI u*;
 inside tmux also `extended-keys`). Where it does not, the binding costs nothing:
 the `'` that arrives is vim's own jump-to-mark key. `:JumpKeyTest` shows what
 your terminal sends when you press it.
-Named bookmarks live in the same list. Its first row, right above the prompt
+Named bookmarks live in the same list. Its first row, right below the prompt
 and selected when it opens, is `＋ 등록` ("add"): press Enter on it to bookmark
 where you are. Opened with the cursor on a symbol, the row already reads
 `＋ 등록: <symbol>`; opened on blank space, type a name in the prompt and the
@@ -219,7 +219,11 @@ reports that instead of opening an empty buffer. What you type stays with the
 add row, so typing and Enter always registers: to jump to an entry the typing
 filtered, move onto it first. Move with the arrows (or `Ctrl+n`/`Ctrl+p`), or
 `Esc` then `j`/`k`, and Enter jumps in the edit window; `Esc` then `d` removes a
-bookmark or a mark. With the add row selected, the preview shows the spot that
+bookmark or a mark and leaves the picker open: the list is read again in place,
+what you typed stays, and the selection lands on the row that took the deleted
+one's place, so `d` `d` `d` clears three in a row (it used to close the picker
+after every delete). A `d` pressed before the new list is in is ignored, so a
+quick `dd` removes one, not two. With the add row selected, the preview shows the spot that
 would be saved. The file is never rewritten when it cannot be read (bad JSON,
 no permission), writes from several nvim at once take turns through a lock
 file, and a symlinked or restricted `bookmarks.json` keeps its link and mode.
@@ -257,8 +261,30 @@ F8: Stick a yellow mark on the symbol under the cursor, and take it off by press
 F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left). Inside the tree, `w` widens it a step at a time and then snaps back to its normal width, the same key and the same feel as `w` in the relation panel - the steps are percentages of the screen (`g:neotree_wide_steps`, `[25, 40]`), and the other sidebars keep their width; the edit window pays for it
 F10: Toggle tagbar, source code browser on the right side
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
-F11: Toggle NERDTree on the right (F9 used to be this one)
-F12: Delete gtags files created with F2.
+F11: Toggle neo-tree as a float (F9 used to be this one)
+F12: Toggle RelationView, the Source Insight style relation window (nvim only;
+     it was F3). Deleting the gtags files is now `:call Deltags()`
+\z (or \lz): In the RelationView column - neo-tree, the relation list or the
+     context view - give the window you are in the column's whole height; the
+     other two drop to one line each (their status lines stay, so you can see
+     what is there). Press it again and every height goes back to what it was
+     before. Pressed in another of the three, it restores and then zooms that
+     one. Only heights are touched - `w` (width) works alongside - and windows
+     outside the column keep theirs: a quickfix window opened while zoomed
+     gets its full height instead of the zoomed window swallowing it. With
+     `g:relationview_position = 'bottom'` the list at the bottom takes the
+     screen height the same way. `:RelationViewZoom` is the command. A window
+     that already runs the full height (the F9 tree, the `T` context with
+     nothing below it) says so. It works in every tab that has the panel, and
+     `w` in the bottom layout (which also drives the height) unzooms first
+Every telescope list (\ff \fg \fi \fo \fx, the bookmarks ...) reads top down:
+     the prompt is at the top and the first item - the best match, the newest
+     commit in \fi - right under it. Moving past either end stops there; it
+     used to wrap round to the other end (`sorting_strategy = 'ascending'`,
+     `scroll_strategy = 'limit'` in the telescope setup of `.vimrc`). \fb lists
+     the most recently used buffer first, and in \fb, \fi and the bookmarks
+     equal matches keep that order while you type (telescope's default
+     tiebreak moves the shorter line up)
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one (previewed in the
      context window; the edit window does not move), the quickfix list
@@ -285,9 +311,16 @@ line is the one carrying the member's name, not the `struct {` the
 declaration happens to start on.
 gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      including file, then through the GTAGS path index, then 'path')
-\fo: Find a file among the indexed ones and open it (^d drop, ^a add)
-\fp / \fd: Pick files / directories to add to the project files list
-\fx: Remove entries    \fm: Choose the preset    \fS: Save it    \fR: Reindex
+\fo / F3: Find a file among the indexed ones and open it (^d or Esc d drops
+     it, <Tab> marks several; the picker stays open)
+\fx: Remove entries (Enter, ^d or Esc d; <Tab> for several; stays open)
+\fm: Choose the preset    \fS: Save it    \fR: Reindex
+     (\fp / \fd, the add pickers, are off - slow on a big tree. Add from the
+     tree with +, or :ProjectFilesAdd / :ProjectFilesAddDir)
+\ff / \fg / \fi: Find files / live grep / git commits in the git repository
+     that holds the current file - or, in neo-tree, the path under the cursor.
+     No repository: under that file's directory (or that path). See "Searching
+     from the repository" below.
 Ctrl+]: Open the definition in the EDIT window, the same as `g]` and `f]`;
      Ctrl+t back
 Ctrl+] Ctrl+]: open that definition in the context window and focus it
@@ -476,10 +509,8 @@ terminal that does not will make the colours worse, not better.
 window of its own: everything runs through telescope pickers.
 
 ```
-\fo  find an indexed file and open it   (^d drop it, ^a add files)
-\fp  pick files to add                  (<Tab> for several at once)
-\fd  pick directories to add            (everything indexable under them)
-\fx  pick entries to drop               (files and directories)
+\fo  find an indexed file and open it   (^d / Esc d drop it, <Tab> several)
+\fx  pick entries to drop               (Enter / ^d / Esc d, <Tab> several)
 \fm  choose the preset                  (auto included, ^d deletes mine)
 \fS  save the current entries as a preset
 \fR  reindex now
@@ -489,7 +520,31 @@ window of its own: everything runs through telescope pickers.
 
 (`<leader>` is `\` in this setup.) Every one of them is a telescope picker
 with a preview, multi-select where it makes sense, and the same commands
-behind it: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
+behind it.
+
+Dropping from `\fo` (also `F3`) or `\fx` leaves the picker open: the marked
+entries (`<Tab>`), or the one under the cursor when none are marked, go out in
+one commit - one reindex, one line of message - and the list is read again in
+place with what you typed kept and the selection on the row that moved up into
+the gap. `<Esc>` `d` does the same in normal mode; `<Esc>` twice closes it.
+Until the list has caught up with the prompt - just after a removal, or while
+what you just typed is still being filtered - `d` and `^d` are ignored and
+`<CR>` waits and then acts: in that moment the selection is still the entry
+just removed or one the new filter hides, so a quick `dd` removed it twice
+("목록에 없습니다"), `<CR>` opened the file that had just gone, and typing a
+letter and `^d` together removed an entry that was no longer shown. A removal
+that is cancelled (the confirm prompt) or finds nothing leaves the list, the
+selection and the `<Tab>` marks as they were. The
+selection is found again by name, not by position, so dropping a directory
+entry (which takes the file entries under it along) does not push it down.
+`d` is taken in these pickers, so `<Esc>dd` no longer clears the prompt - use
+`Ctrl+u` in insert mode for that.
+`\fp` and `\fd` (pick files / directories to add) are off: both walk the whole
+project to build their list, which is slow on a big tree. The keys now only say
+so - left unmapped, `\f` (`:Gtags -P <word>`, which waits for Enter) would fire
+after the timeout and type the `p` into its command line. The tree's `+` (and
+`V` then `+` for a range) is the way in; the commands still open the pickers
+when you want them: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
 `:ProjectFilesRemove`, `:ProjectFilesPreset`, `:ProjectFilesSave`,
 `:ProjectFilesReindex` (each takes an optional argument to skip the picker),
 plus `:ProjectFilesPresetShare` (below).
@@ -687,7 +742,7 @@ project, and a subdirectory with its own `.tags` is its own project.
 
 Which is why the project is anchored to the directory nvim was started
 in. If the cwd is a project and the path is inside it, that project wins -
-so working in an outer tree keeps `\fo`, `\fp`, `\fd` and the tree on the
+so working in an outer tree keeps `\fo`, `\fx`, `:ProjectFilesAdd` and the tree on the
 outer tree's list even where a subdirectory has an index of its own.
 Without it, adding `child/src/c.c` from the parent went into
 `child/.tags`. NERDTree's marks follow the tree's own root for the same
@@ -983,8 +1038,8 @@ and the picker was reading a different one. It now asks the tree for its
 root first, then a real file buffer in the tab, then the most recently
 used one, and only then the cwd.
 
-Every change reindexes by itself - from the tree, from `\fp` / `\fd` /
-`\fx`, from the commands. It used to go through `:GtagsIndexRefresh!`,
+Every change reindexes by itself - from the tree, from `\fo` / `\fx`,
+from the commands. It used to go through `:GtagsIndexRefresh!`,
 which works out the project from the *current buffer* and falls back to
 the cwd; called from the tree window or a telescope prompt that buffer has
 no name, so the refresh went to whatever project the cwd happened to be
@@ -1170,6 +1225,44 @@ listed.
 `Ctrl+f` in neo-tree was `scroll_preview` (scrolling the preview `P` opens).
 `Ctrl+b` still scrolls it the other way.
 
+### Searching from the repository
+
+`\ff` (find files), `\fg` (live grep) and `\fi` (git commits) search the git
+repository that holds what you are looking at, not the directory nvim started
+in:
+
+| pressed in | starts from | no repository |
+|---|---|---|
+| the edit window | the file | under the file's directory |
+| neo-tree (F9, F11, RelationView tree) | the entry under the cursor, as in the table above | under that path |
+| anywhere else (RelationView list, quickfix) | the file in the last edit window | under its directory |
+
+From the starting directory it walks up to the first `.git` - a directory, or a
+`gitdir:` file (worktrees, submodules) - that has at least one commit, and
+searches from the top of that repository. An empty `.git`, a fresh `git init`
+with no commits (the dev server has one above several SDKs) and a `gitdir:`
+pointing at a directory that is gone do not count; the walk goes on. The walk stops at a
+directory holding `.repo` (the top of an Android `repo` checkout: every project
+below has its own `.git`, and the top one is empty or covers the whole SDK), at
+the home directory and at `/`; stopping means "no repository", so the search
+runs under the starting directory instead of across the whole SDK or home. The
+stops only end the walk up. Starting *at* the SDK top searches under it, as the
+old `\ff` did from the SDK root; starting at home, a directory above it
+(`/Users`, `/home`) or `/` (say `~/.zshrc`) searches that one level only
+(`--max-depth 1`, dotfiles and links to files included) - under the whole home
+`rg` would also read the OneDrive folder in `~/Library/CloudStorage`, which
+makes macOS download the files. Paths are resolved first, so `~/.vimrc`
+(a link into `~/.vim-ide`) searches the vim-ide repository, and a home that is
+itself a link still counts as home; a loop of links is used as it is instead of
+failing. An old version opened with fugitive (`:Gedit HEAD~1:a.c`) searches the
+repository it came from. The prompt title shows where it searches
+and `[git]`, `[저장소 없음: 이 아래]` or `[저장소 없음: 맨 위 한 층만]`.
+`\fi` needs a repository and says so when there is none. In neo-tree the keys
+are neo-tree window mappings, so they read the line the cursor is on
+(`reposearch.lua`, the same rule `Ctrl+g` uses). `:VimIdeRepoSearch
+files|grep|commits` is the same from the command line, and
+`:Telescope find_files` still searches the cwd.
+
 ### What `F` finds, stays found
 
 By default neo-tree throws the result list away the moment you press `<CR>`:
@@ -1247,7 +1340,7 @@ everything is in.
 
 The point is that the file you want to index is usually the one you have
 open. Going back to the tree to find it again is doing the same work twice.
-The current buffer alone is already `\fp` to add and `\fx` to remove.
+The current buffer alone is already `:ProjectFilesAdd %` to add and `\fx` to remove.
 
 The line is read by its buffer number, not by the name BufExplorer prints -
 that name is shortened, and two buffers can print the same one.

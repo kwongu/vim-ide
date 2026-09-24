@@ -177,6 +177,15 @@ Plug 'ivechan/gtags.vim'
 Plug 'ronakg/quickr-cscope.vim'
 Plug 'vim-scripts/grep.vim'
 Plug 'vim-scripts/AutoComplPop'
+" 텔레스코프 프롬프트와 neo-tree 의 입력 칸에서는 자동완성 팝업을 띄우지
+" 않는다. 두 글자만 쳐도 키워드 완성(^N^P) 목록이 떠서, 이름을 치고 바로 친
+" <CR> 이 파일을 여는 대신 완성 항목을 고르는 데 쓰였다 (tmux 화면 실측:
+" f06<CR> 이 아무것도 열지 않았다). 빈 목록을 주면 그 filetype 에서는 아무
+" 동작도 고르지 않는다 - 플러그인은 기본값을 합칠 때 있는 키를 지킨다.
+" 찾기 창(askform.lua)과 찾아 바꾸기 창은 스스로 AcpDisable 한다.
+let g:acp_behavior = get(g:, 'acp_behavior', {})
+let g:acp_behavior['TelescopePrompt'] = []
+let g:acp_behavior['neo-tree-popup'] = []
 "Plug 'vim-scripts/The-NERD-tree'
 "Plug 'vim-scripts/Tagbar'
 "Plug 'ryanoasis/vim-devicons'
@@ -366,10 +375,20 @@ lua << EOF
 require'telescope'.setup{
 	defaults = {
 		prompt_prefix = "$ ",
+		-- 목록은 위에서 아래로 읽는다: 첫 항목이 맨 위에 온다 - 가장 잘 맞는 것,
+		-- \fi(git_commits)의 최신 커밋, 북마크 창의 '＋ 등록' 줄. 기본값
+		-- (descending)은 첫 항목을 맨 아래(프롬프트 바로 위)에 두어서, 커밋
+		-- 목록이 아래에서 위로 옛날로 가며 거꾸로 읽혔다. 프롬프트도 위로
+		-- 올린다 - 첫 항목과 붙어 있어야 친 글자로 걸러진 것이 바로 보인다.
+		sorting_strategy = 'ascending',
+		-- 끝에서 더 가면 멈춘다. 기본값(cycle)은 맨 위에서 한 칸 더 올라가면
+		-- 맨 아래로, 맨 아래에서 더 내려가면 맨 위로 돌아가서 헷갈렸다.
+		scroll_strategy = 'limit',
 		layout_config = {
 			width = 0.80,
 			height = 0.80,
 			preview_cutoff = 120,
+			prompt_position = 'top',
 		},
 		-- 고른 파일을 '직전에 포커스가 있던 편집 창'에 연다.
 		--
@@ -410,7 +429,17 @@ require'telescope'.setup{
 			end
 			return 0
 		end,
-	}
+	},
+	pickers = {
+		-- \fb: 최근에 쓴 버퍼가 맨 위. 기본은 버퍼 번호 순이라, 목록이 위에서
+		-- 아래로 읽히게 바꾸고 나니 방금 연 버퍼가 맨 아래로 갔다.
+		--
+		-- tiebreak: 점수가 같으면 원래 순서(최근 것이 위)를 지킨다. 기본값은
+		-- 짧은 글자를 앞으로 올려서, 글자를 치는 순간 순서가 흐트러졌다.
+		-- git_commits(\fi, :Telescope git_commits)도 같다 - 최신 커밋이 위.
+		buffers = { sort_mru = true, tiebreak = function() return false end },
+		git_commits = { tiebreak = function() return false end },
+	},
 }
 require'telescope'.load_extension'fzf'
 EOF
@@ -860,6 +889,12 @@ _G.rv_setup('neo-tree', {
       -- 키 글자도 소문자로 쓴다('<C-F>' 는 다른 항목으로 하나 더 생긴다).
       ['<C-g>'] = function(state) _G.vimide_tree_search(state, 'grep') end,
       ['<C-f>'] = function(state) _G.vimide_tree_search(state, 'find') end,
+      -- \ff \fg \fi 도 커서 밑 항목을 기준으로 찾는다: 그 경로를 관리하는
+      -- git 저장소에서, 없으면 그 경로 아래에서 (reposearch.lua). 편집 창의
+      -- 같은 키는 아래 전역 매핑이 지금 파일을 기준으로 한다.
+      ['<leader>ff'] = function(state) _G.vimide_repo_search('files', state) end,
+      ['<leader>fg'] = function(state) _G.vimide_repo_search('grep', state) end,
+      ['<leader>fi'] = function(state) _G.vimide_repo_search('commits', state) end,
     },
   },
   -- 파일을 열 때 이 창들은 고르지 않는다.
@@ -1173,9 +1208,19 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 let g:sihl_index_db = 'root'
 
 " Find files using Telescope command-line sugar.
-nnoremap <leader>fi <cmd>Telescope git_commits<cr>
-nnoremap <leader>ff <cmd>Telescope find_files<cr>
-nnoremap <leader>fg <cmd>Telescope live_grep<cr>
+"
+" \ff \fg \fi 는 지금 파일을 관리하는 git 저장소에서 찾는다 (reposearch.lua).
+"   편집 창        그 파일의 저장소 맨 위에서. 저장소가 없으면 그 파일이 든
+"                  디렉터리 아래에서
+"   neo-tree 창    커서 밑 경로의 저장소에서, 없으면 그 경로 아래에서
+"                  (트리 창에서는 neo-tree window.mappings 의 같은 키가 받는다)
+"   그 밖의 창     마지막 편집 창의 파일로
+" 올라가다 .repo(안드로이드 SDK 맨 위)나 홈에 닿으면 멈춘다 - SDK 전체나 홈
+" 전체를 뒤지지 않게. \fi 는 저장소가 없으면 알리고 끝난다.
+" 예전처럼 지금 디렉터리(cwd) 기준으로 찾으려면 :Telescope find_files 등.
+nnoremap <silent> <leader>fi <Cmd>VimIdeRepoSearch commits<CR>
+nnoremap <silent> <leader>ff <Cmd>VimIdeRepoSearch files<CR>
+nnoremap <silent> <leader>fg <Cmd>VimIdeRepoSearch grep<CR>
 nnoremap <leader>fb <cmd>Telescope buffers<cr>
 nnoremap <leader>fh <cmd>Telescope help_tags<cr>
 
@@ -3150,6 +3195,9 @@ let g:relationview_unpin_delay = 2000
 "     |        |        | context   |   c
 "     +--------+--------+-----------+
 "
+"   \z 는 지금 창(셋 중 하나)을 열의 높이 전체로 채운다. 다시 누르면
+"   되돌린다 (나머지 둘은 그동안 한 줄씩으로 눌린다).
+"
 "   'T' (또는 \b) 는 그 열 왼쪽에 세로 전체 높이로 미리보기를 하나 더 연다.
 "   아래쪽 작은 미리보기와 같은 자리를 보여 주는 '넓게 읽는 창'이고, 둘은
 "   따로 켜고 끈다.
@@ -3321,15 +3369,22 @@ if has('nvim')
     nnoremap <silent> <Leader>lt <Cmd>RelationViewTree<CR>
     nnoremap <silent> <Leader>lc <Cmd>RelationViewBigContext<CR>
     nnoremap <silent> <Leader>lw <Cmd>RelationViewWide<CR>
+    " \z (= \lz): 지금 창(neo-tree / 관계 목록 / 미리보기)을 세로로 가득.
+    " 다시 누르면 누르기 전 높이로. 셋 중 다른 창에서 누르면 그 창으로 옮긴다.
+    " tmux 의 prefix z(zoom)와 같은 글자다. \z 는 비어 있었다.
+    nnoremap <silent> <Leader>z <Cmd>RelationViewZoom<CR>
+    nnoremap <silent> <Leader>lz <Cmd>RelationViewZoom<CR>
 endif
 
 " ------------------------------------
 " Project files view (projectfiles.lua): 무엇을 색인할지 고르는 창
 "   전부 telescope 픽커로 동작한다:
-"     <leader>fo  색인된 파일 찾아 열기   (^a 추가, ^d 목록에서 제거)
-"     <leader>fp  추가할 파일 고르기      (<Tab> 여러 개)
-"     <leader>fd  추가할 디렉터리 고르기  (그 아래 전부)
-"     <leader>fx  등록 항목 제거
+"     <leader>fo  색인된 파일 찾아 열기   (^d 또는 <Esc>d 로 목록에서 제거,
+"                 <Tab> 으로 여럿 골라 한꺼번에. 지워도 창은 그대로)
+"                 <F3> 으로도 같은 것을 연다
+"     <leader>fx  등록 항목 제거          (<CR>/^d/<Esc>d, <Tab> 여럿. 창은 그대로)
+"     (<leader>fp 추가할 파일 고르기, <leader>fd 추가할 디렉터리 고르기는
+"      느려서 껐다. :ProjectFilesAdd / :ProjectFilesAddDir 로는 그대로 연다)
 "     <leader>fm  preset 선택/전환        (^d 내 사본 삭제, auto 포함)
 "     <leader>fM  preset 가져오기        (새 SDK 로 목록을 옮긴다)
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
@@ -3369,8 +3424,17 @@ let g:projectfiles_absorb = 1
 nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
 " F3 도 같은 것을 연다. RelationView 를 F12 로 옮기면서 비었다.
 nnoremap <silent> <F3> :ProjectFilesFind<CR>
-nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
-nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
+" \fp(추가할 파일 고르기)와 \fd(추가할 디렉터리 고르기)는 껐다 - 프로젝트
+" 전체를 훑어 목록을 만드느라 큰 트리에서 느리다. 색인에 넣는 것은 트리
+" (neo-tree 의 + / V 로 영역 잡고 +)나 :ProjectFilesAdd <경로> 로 한다.
+" 명령은 그대로 있으니 되살리려면 아래 두 줄의 주석을 풀고 그 밑 두 줄을 지운다.
+"nnoremap <silent> <leader>fp :ProjectFilesAdd<CR>
+"nnoremap <silent> <leader>fd :ProjectFilesAddDir<CR>
+" 키는 알림만 내고 삼킨다. 매핑을 지우기만 하면 \f(:Gtags -P <단어>, Enter 를
+" 기다린다)가 timeout 뒤에 먼저 돌고 p / d 가 그 명령줄에 쳐진다 (tmux 화면
+" 실측: ':Gtags -P intp').
+nnoremap <silent> <leader>fp :echo '\fp 는 느려서 꺼 두었습니다 - 트리의 + 나 :ProjectFilesAdd'<CR>
+nnoremap <silent> <leader>fd :echo '\fd 는 느려서 꺼 두었습니다 - 트리의 + 나 :ProjectFilesAddDir'<CR>
 nnoremap <silent> <leader>fx :ProjectFilesRemove<CR>
 nnoremap <silent> <leader>fm :ProjectFilesPreset<CR>
 " 새 SDK 를 받았을 때: 다른 프로젝트의 preset 목록을 이 트리로 가져온다.

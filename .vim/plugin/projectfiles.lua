@@ -3431,6 +3431,55 @@ local function pick_symbol(prefill)
 end
 
 -- <leader>fo : find a project file and jump to it
+-- 텔레스코프 창을 닫지 않고 목록을 갈아 끼운다 (\fo, F3, \fx 에서 지운 뒤).
+-- 친 글자·선택 자리를 지키는 것과, 갈아 끼우는 동안 키를 받지 않는 것은
+-- pickerkeep.lua 가 한다. 그것이 없으면(따로 떼어 쓴 경우) 그냥 다시 찾는다.
+local function picker_refresh(picker, finder, title)
+  if type(_G.vimide_picker_keep) == 'function' then
+    return _G.vimide_picker_keep(picker, finder, { title = title })
+  end
+  pcall(function() picker.layout.prompt.border:change_title(title) end)
+  picker:refresh(finder, { reset_prompt = false })
+end
+
+local function picker_busy(picker)
+  return type(_G.vimide_picker_busy) == 'function' and _G.vimide_picker_busy(picker)
+end
+
+-- 두 목록이 같은가. 지우기가 취소됐거나(확인 창) 이미 없던 항목이면 목록이
+-- 그대로다 - 그때는 갈아 끼우지 않는다. 갈아 끼우면 <Tab> 표시가 지워진다.
+local function same_list(a, b)
+  if #a ~= #b then
+    return false
+  end
+  for i = 1, #a do
+    if a[i] ~= b[i] then
+      return false
+    end
+  end
+  return true
+end
+
+-- 바쁨을 재기 시작한다 (pickerkeep.lua). 창이 다 선 뒤에.
+local function picker_track(t, bufnr)
+  vim.schedule(function()
+    if type(_G.vimide_picker_track) == 'function' then
+      pcall(_G.vimide_picker_track, t.state.get_current_picker(bufnr))
+    end
+  end)
+end
+
+-- 픽커에서 지울 것: <Tab> 으로 골라 둔 것들, 없으면 커서 줄 하나
+local function picker_picks(t, bufnr)
+  local picker = t.state.get_current_picker(bufnr)
+  local picks = picker and picker:get_multi_selection() or {}
+  if #picks == 0 then
+    local e = t.state.get_selected_entry()
+    picks = e and { e } or {}
+  end
+  return picker, picks
+end
+
 local function pick_find()
   local root = cur_root()
   local files = current_files(root)
@@ -3441,37 +3490,83 @@ local function pick_find()
     return fallback_select(files, 'Project files',
       function(c) open_in_edit(root, c, from_win) end)
   end
-  t.pickers.new({}, {
-    prompt_title = ('Project files (%d)  →  %s   ^a add  ^d remove')
-        :format(#files, target_label(root)),
-    finder = t.finders.new_table({
+  local function title()
+    return ('Project files (%d)  →  %s   ^d/<Esc>d 제거 (<Tab> 여럿)')
+        :format(#files, target_label(root))
+  end
+  local function make_finder()
+    return t.finders.new_table({
       results = files,
       entry_maker = function(e)
         return { value = e, display = e, ordinal = e, path = root .. '/' .. e }
       end,
-    }),
+    })
+  end
+  -- 지워도 창은 그대로 둔다. 한 번의 커밋으로 빼고(재색인 한 번, 알림 한
+  -- 줄) 목록을 다시 읽어 갈아 끼운다.
+  --
+  -- <C-a>(추가 창 열기)는 뺐다. \fp 와 같은 창인데, 느려서 \fp·\fd 를 껐다.
+  local function remove(bufnr)
+    local picker, picks = picker_picks(t, bufnr)
+    -- 목록을 갈아 끼우는 중에 온 키는 버린다 - 그 사이의 선택은 방금 지운 항목이다
+    if #picks == 0 or picker_busy(picker) then
+      return
+    end
+    -- 목록이 없는 모드(auto 등)에서는 뺄 것이 없다. 배치로 돌리면 아무것도
+    -- 안 빠졌는데 재색인(프로젝트 전체)만 돈다 - remove_path 가 한 번 알리고
+    -- 끝나게 둔다. 하나만 지울 때도 remove_path 를 곧장 부른다: 디렉터리
+    -- 항목이 한꺼번에 많이 빠지면 물어보는 것은 배치 밖에서만 한다.
+    local _, name, bad = entries_of(root)
+    if bad or not name or #picks == 1 then
+      remove_path(root, picks[1].value)
+    else
+      in_batch(root, '제거', function()
+        for _, e in ipairs(picks) do
+          remove_path(root, e.value)
+        end
+      end)
+    end
+    if not picker or bad or not name then
+      return
+    end
+    -- 마지막 항목까지 빠지면 none 모드가 되고 목록 파일이 지워진다. 그때
+    -- current_files 는 프로젝트 전체를 훑는 스크립트로 떨어지므로 부르지
+    -- 않는다 - 빈 목록이 맞다.
+    local fresh = mode_of(root) == MODE_NONE and {} or current_files(root)
+    if same_list(files, fresh) then
+      return
+    end
+    files = fresh
+    picker_refresh(picker, make_finder(), title())
+  end
+  t.pickers.new({}, {
+    prompt_title = title(),
+    finder = make_finder(),
     sorter = t.conf.generic_sorter({}),
     previewer = t.conf.file_previewer({}),
     attach_mappings = function(bufnr, map)
       t.actions.select_default:replace(function()
-        local entry = t.state.get_selected_entry()
-        t.actions.close(bufnr)
-        if entry then
-          open_in_edit(root, entry.value, from_win)
+        -- 목록이 프롬프트를 아직 따라오지 않았으면(방금 지웠다, 방금 쳤다)
+        -- 따라온 뒤에 연다 - 그 사이의 선택은 방금 지운 파일이거나 새 글자로
+        -- 걸러지기 전의 항목이다.
+        local function go()
+          local entry = t.state.get_selected_entry()
+          t.actions.close(bufnr)
+          if entry then
+            open_in_edit(root, entry.value, from_win)
+          end
+        end
+        local pk = t.state.get_current_picker(bufnr)
+        if pk and type(_G.vimide_picker_ready) == 'function' then
+          _G.vimide_picker_ready(pk, go)
+        else
+          go()
         end
       end)
-      map({ 'i', 'n' }, '<C-d>', function()
-        local entry = t.state.get_selected_entry()
-        t.actions.close(bufnr)
-        if entry then
-          announce_root(root)
-          remove_path(root, entry.value)
-        end
-      end)
-      map({ 'i', 'n' }, '<C-a>', function()
-        t.actions.close(bufnr)
-        vim.schedule(function() vim.cmd('ProjectFilesAdd') end)
-      end)
+      map({ 'i', 'n' }, '<C-d>', function() remove(bufnr) end)
+      -- 'd' 는 노멀 모드에서만 (입력 모드에서는 검색할 글자다)
+      map('n', 'd', function() remove(bufnr) end)
+      picker_track(t, bufnr)
       return true
     end,
   }):find()
@@ -3721,7 +3816,7 @@ local function pick_save()
   local root = cur_root()
   local entries = entries_of(root) or {}
   if #entries == 0 then
-    notify('저장할 항목이 없습니다 (,fp 로 추가하세요)', vim.log.levels.WARN)
+    notify('저장할 항목이 없습니다 (트리에서 + 나 :ProjectFilesAdd 로 추가하세요)', vim.log.levels.WARN)
     return
   end
   local function save(name)
@@ -3768,11 +3863,14 @@ end
 -- pick entries to drop
 local function pick_remove()
   local root = cur_root()
-  local entries = entries_of(root) or {}
-  local items = {}
-  for _, e in ipairs(entries) do
-    items[#items + 1] = e.kind .. '  ' .. e.path
+  local function items_of()
+    local items = {}
+    for _, e in ipairs(entries_of(root) or {}) do
+      items[#items + 1] = e.kind .. '  ' .. e.path
+    end
+    return items
   end
+  local items = items_of()
   local t = telescope()
   local function drop(label)
     remove_path(root, (label:gsub('^%a+%s+', '')))
@@ -3780,27 +3878,46 @@ local function pick_remove()
   if not t then
     return fallback_select(items, '제거할 항목', drop)
   end
+  local function title()
+    return ('Remove from project files (%d)  →  %s   <CR>/^d/<Esc>d 제거 (<Tab> 여럿)')
+        :format(#items, target_label(root))
+  end
+  -- 지워도 창은 그대로 둔다 (\fo 와 같다). 닫기는 <Esc> 두 번 / <C-c>.
+  local function remove(bufnr)
+    local picker, picks = picker_picks(t, bufnr)
+    -- 목록을 갈아 끼우는 중에 온 키는 버린다 - 그 사이의 선택은 방금 지운 항목이다
+    if #picks == 0 or picker_busy(picker) then
+      return
+    end
+    -- 하나면 곧장 (디렉터리 항목이 많이 빠질 때 물어본다), 여럿이면 한 번의 커밋으로
+    if #picks == 1 then
+      drop(picks[1][1] or picks[1].value)
+    else
+      in_batch(root, '제거', function()
+        for _, e in ipairs(picks) do
+          drop(e[1] or e.value)
+        end
+      end)
+    end
+    if not picker then
+      return
+    end
+    local fresh = items_of()
+    if same_list(items, fresh) then
+      return
+    end
+    items = fresh
+    picker_refresh(picker, t.finders.new_table({ results = items }), title())
+  end
   t.pickers.new({}, {
-    prompt_title = ('Remove from project files (%d)  →  %s')
-        :format(#items, target_label(root)),
+    prompt_title = title(),
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
-    attach_mappings = function(bufnr)
-      t.actions.select_default:replace(function()
-        local picker = t.state.get_current_picker(bufnr)
-        local picks = picker:get_multi_selection()
-        if #picks == 0 then
-          local e = t.state.get_selected_entry()
-          picks = e and { e } or {}
-        end
-        t.actions.close(bufnr)
-        announce_root(root)
-        in_batch(root, '제거', function()
-          for _, e in ipairs(picks) do
-            drop(e[1] or e.value)
-          end
-        end)
-      end)
+    attach_mappings = function(bufnr, map)
+      t.actions.select_default:replace(function() remove(bufnr) end)
+      map({ 'i', 'n' }, '<C-d>', function() remove(bufnr) end)
+      map('n', 'd', function() remove(bufnr) end)
+      picker_track(t, bufnr)
       return true
     end,
   }):find()
@@ -3831,7 +3948,7 @@ local function root_for_arg(arg)
 end
 
 api.nvim_create_user_command('ProjectFiles', function() pick_find() end,
-  { desc = 'Find a project file (telescope) - ^a add, ^d remove' })
+  { desc = 'Find a project file (telescope) - ^d remove, <Tab> several' })
 api.nvim_create_user_command('ProjectFilesFind', function() pick_find() end,
   { desc = 'Find a project file and jump to it' })
 

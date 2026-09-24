@@ -6431,6 +6431,17 @@ local function column_ratio()
 end
 
 apply_column_ratio = function()
+  -- \z 로 한 창을 세로로 채워 둔 동안은 비율 대신 그 창을 다시 채운다.
+  -- 이 함수는 창 크기가 바뀔 때마다(WinResized) 불리므로, 그냥 두면 채우자
+  -- 마자 2:4:6 으로 되돌아간다. 채운 창이 사라졌으면 채움을 잊고 나눈다.
+  local vm = s.vmax and s.vmax[api.nvim_get_current_tabpage()]
+  if vm then
+    if api.nvim_win_is_valid(vm.win) then
+      A.vmax_fill(vm.win, vm.had)
+      return
+    end
+    s.vmax[api.nvim_get_current_tabpage()] = nil
+  end
   local a, b, c = column_ratio()
   if not a then
     return
@@ -6675,6 +6686,12 @@ function A.toggle_wide()
   local tab = api.nvim_get_current_tabpage()
   local right = cfg('position', 'bottom') == 'right'
   local axis = right and 'w' or 'h'
+  -- 아래 배치에서는 'w' 도 높이를 다룬다. \z 로 채운 채 'w' 를 누르면 채운
+  -- 높이를 기준으로 적어 두었다가 나중에 그 배치를 되살렸다 (반대 심문).
+  -- 채움을 먼저 되돌린다.
+  if axis == 'h' and s.vmax and s.vmax[tab] then
+    A.vmax_restore(tab, true)
+  end
   local sv = s.wide[tab]
   local steps = wide_steps()
   local fixed = tonumber(cfg(right and 'wide_width' or 'wide_height', 0)) or 0
@@ -6788,6 +6805,238 @@ function A.toggle_wide()
       end
     end
   end
+end
+
+-- \z: 트리·관계 목록·미리보기 창을 세로로 가득 채운다. 다시 누르면 누르기
+-- 전 높이로 돌아간다 (요청).
+--
+-- 오른쪽 배치에서는 한 열을 셋(neo-tree / 관계 목록 / 미리보기)이 나눠 쓴다.
+-- 고른 창이 열의 높이를 다 갖고 나머지 둘은 한 줄씩으로 눌린다 - 눌린 창도
+-- 상태줄이 남아 무엇이 있는지는 보인다. 아래 배치의 관계 목록은 위쪽(편집
+-- 창들)을 눌러 화면 높이를 다 갖는다.
+--
+-- 셋 중 다른 창에서 누르면 되돌린 뒤 그 창을 채운다. 폭('w')과는 따로 논다 -
+-- 높이만 적어 두고 높이만 되돌린다. 탭마다 따로 기억한다.
+--
+-- 되돌리기는 창 id 로 적어 둔 높이로 한다 (winrestcmd 는 창 번호 기준이라
+-- 번호가 밀리면 엉뚱한 창을 줄인다 - toggle_wide 의 설명). 채우는 동안은
+-- 'winfixheight' 를 잠깐 풀어 둔다: 트리처럼 높이를 박아 둔 창은 그대로
+-- 두면 줄어들지 않아 다 채우지 못한다.
+function A.vmax_eligible(w)
+  local ok, c = pcall(api.nvim_win_get_config, w)
+  if ok and c and c.relative and c.relative ~= '' then
+    return false, '뜬 창은 세로로 채울 자리가 없습니다'
+  end
+  if w == s.win or w == s.ctx_win or w == s.tree_win or w == s.big_win then
+    return true
+  end
+  -- s.win 들은 패널을 마지막으로 연 탭의 창이다. 다른 탭의 목록·미리보기는
+  -- 버퍼로 알아본다 (목록은 s.buf, 작은·큰 미리보기는 같은 s.ctx_ph).
+  local b = api.nvim_win_get_buf(w)
+  if (s.buf and b == s.buf) or (s.ctx_ph and b == s.ctx_ph) then
+    return true
+  end
+  if vim.bo[b].filetype == 'neo-tree' then
+    return true
+  end
+  return false, '\\z 는 neo-tree · 관계 목록 · 미리보기 창에서 씁니다'
+end
+
+-- 채운다: 이 창이 든 세로 묶음(열) 안에서만 키운다.
+--
+-- 그냥 높이를 화면만큼 주면 vim 이 열 밖(아래 quickfix, 열과 나란한 줄의
+-- 바깥)에서도 줄을 빼 온다 - 채운 채로 quickfix 를 열었더니 1줄로 눌렸다
+-- (tmux 화면 실측). 그래서 열 밖 창들의 높이를 적어 두었다가 키운 뒤 도로
+-- 넣는다. 그러면 모자란 줄은 열 안의 다른 창(이미 한 줄)이 아니라 채운 창
+-- 자신이 내놓는다.
+-- 이 창이 든 세로 묶음(열)의 창들. 창 배치(winlayout)에서 이 창까지 내려가는
+-- 길 위의 가장 가까운 'col' 을 찾아 그 아래 창을 모은다. 바로 위가 'row' 여도
+-- 더 올라간다 - 큰 미리보기(T)는 편집 창과 한 줄(row)에 서고 그 줄이 아래
+-- loclist 와 한 열을 이루며, 아래 배치의 관계 목록은 트리·미리보기와 한
+-- 줄이다. 바로 위만 보면 둘 다 '이미 가득'이라며 아무것도 안 했다 (반대
+-- 심문). 열이 없으면(가로로만 나뉜 화면) 이 창 하나.
+function A.vmax_inside(win)
+  local path = {}
+  local function find(node)
+    if node[1] == 'leaf' then
+      return node[2] == win
+    end
+    path[#path + 1] = node
+    for _, c in ipairs(node[2]) do
+      if find(c) then
+        return true
+      end
+    end
+    path[#path] = nil
+    return false
+  end
+  local inside = { [win] = true }
+  local ok, layout = pcall(vim.fn.winlayout)
+  if not (ok and find(layout)) then
+    return inside
+  end
+  local parent
+  for i = #path, 1, -1 do
+    if path[i][1] == 'col' then
+      parent = path[i]
+      break
+    end
+  end
+  local function mark(node)
+    if node[1] == 'leaf' then
+      inside[node[2]] = true
+    else
+      for _, c in ipairs(node[2]) do
+        mark(c)
+      end
+    end
+  end
+  if parent then
+    mark(parent)
+  end
+  return inside
+end
+
+-- had: 채울 때 있던 창들. 그 뒤에 생긴 남의 창(채운 채 연 quickfix)은 열
+-- 안에 있어도 제 높이를 지킨다 - 아래 배치에서는 열이 화면 전체라, 안
+-- 그러면 quickfix 가 1줄로 눌렸다 (반대 심문). RelationView 자기 창은 새로
+-- 생겼어도 같이 눌린다: F10 등으로 열의 트리가 다시 만들어지면 창 id 가
+-- 바뀌는데, 그것까지 지키면 트리가 12줄로 돌아와 채움이 반쯤 풀렸다 (tmux
+-- 화면 실측).
+function A.vmax_new_foreign(w, had)
+  return had ~= nil and not had[w] and not A.vmax_eligible(w)
+end
+
+function A.vmax_fill(win, had)
+  local inside = A.vmax_inside(win)
+  local keep = {}
+  for _, e in ipairs(win_sizes()) do
+    if not inside[e.win] or A.vmax_new_foreign(e.win, had) then
+      keep[#keep + 1] = e
+    end
+  end
+  pcall(api.nvim_win_set_height, win, vim.o.lines)
+  apply_sizes(keep, 'h')
+end
+
+-- now: 한 박자 뒤의 두 번째 넣기를 하지 않는다. 'w' 가 되돌린 바로 뒤에 한
+-- 단계 넓히는데, 미뤄 둔 넣기가 그 뒤에 돌아 넓힌 것을 도로 줄였다.
+function A.vmax_restore(tab, now)
+  local vm = s.vmax and s.vmax[tab]
+  if not vm then
+    return
+  end
+  s.vmax[tab] = nil
+  -- 옛 높이는 열 안의 창, 그것도 채울 때 있던 창에만 돌려준다. 열 밖 창과
+  -- 그 뒤에 생긴 창(채운 채 연 quickfix)은 지금 높이를 지킨다 - 전부 옛
+  -- 높이로 되돌렸더니 편집 창이 옛 높이를 되찾으며 quickfix 를 1줄로
+  -- 눌렀다 (tmux 화면 실측). 열 전체 높이가 그사이 바뀌었으면 옛 높이가
+  -- 딱 맞지 않는다 - 오른쪽 배치는 곧이어 비율(2:4:6)로 다시 나눈다.
+  local inside = api.nvim_win_is_valid(vm.win) and A.vmax_inside(vm.win) or {}
+  local had = {}
+  for _, e in ipairs(vm.sizes) do
+    had[e.win] = true
+  end
+  local back, keep = {}, {}
+  for _, e in ipairs(vm.sizes) do
+    if inside[e.win] then
+      back[#back + 1] = e
+    end
+  end
+  for _, e in ipairs(win_sizes()) do
+    if not inside[e.win] or A.vmax_new_foreign(e.win, had) then
+      keep[#keep + 1] = e
+    end
+  end
+  local function put()
+    apply_sizes(back, 'h')
+    apply_sizes(keep, 'h')
+    pcall(apply_column_ratio)
+  end
+  -- 채운 창의 'winfixheight' 만 원래대로 (나머지는 채울 때 곧바로 되돌려
+  -- 두었다). 높이를 넣는 동안은 열 안 창들의 고정을 잠깐 푼다.
+  local held = {}
+  for w in pairs(inside) do
+    if api.nvim_win_is_valid(w) then
+      held[w] = vim.wo[w].winfixheight
+      pcall(function() vim.wo[w].winfixheight = false end)
+    end
+  end
+  put()
+  for w, v in pairs(held) do
+    if api.nvim_win_is_valid(w) then
+      if w == vm.win then
+        v = vm.fix
+      end
+      pcall(function() vim.wo[w].winfixheight = v end)
+    end
+  end
+  -- 한 틱 뒤에 한 번 더 (toggle_wide 와 같은 까닭: 미뤄 둔 다른 크기 조정이
+  -- 방금 되돌린 것을 덮지 않게). 그사이 다시 채웠으면 건드리지 않는다.
+  if now then
+    return
+  end
+  vim.schedule(function()
+    if not (s.vmax and s.vmax[tab]) then
+      put()
+    end
+  end)
+end
+
+function A.vmax_toggle()
+  s.vmax = s.vmax or {}
+  local tab = api.nvim_get_current_tabpage()
+  local cur = api.nvim_get_current_win()
+  local vm = s.vmax[tab]
+  if vm and not api.nvim_win_is_valid(vm.win) then
+    s.vmax[tab] = nil -- 채운 창이 닫혔다 (F12 로 껐다 등): 잊는다
+    vm = nil
+  end
+  if vm then
+    A.vmax_restore(tab)
+    if vm.win == cur then
+      return
+    end
+  end
+  local ok, why = A.vmax_eligible(cur)
+  if not ok then
+    vim.notify('RelationView: ' .. why, vim.log.levels.WARN)
+    return
+  end
+  local before = api.nvim_win_get_height(cur)
+  local sizes = win_sizes()
+  local had = {}
+  for _, e in ipairs(sizes) do
+    had[e.win] = true
+  end
+  -- 'winfixheight' 는 열 안 창들만, 키우는 그 순간만 푼다. 열 밖(아래
+  -- loclist·quickfix)까지 풀어 두면 채운 동안의 'wincmd ='(F9, F10 ...)가 그
+  -- 창들을 반으로 늘렸고 되돌려도 그대로 남았다. 열 안 형제들도 곧바로 다시
+  -- 고정한다 - 열이 전부 고정이어야 터미널을 줄일 때 nvim 이 열을 화면
+  -- 안으로 접어 넣는다 (풀어 두면 창이 화면 아래로 밀려났다 - 반대 심문).
+  local inside = A.vmax_inside(cur)
+  local fix = {}
+  for w in pairs(inside) do
+    if api.nvim_win_is_valid(w) then
+      fix[w] = vim.wo[w].winfixheight
+      pcall(function() vim.wo[w].winfixheight = false end)
+    end
+  end
+  A.vmax_fill(cur)
+  for w, v in pairs(fix) do
+    if api.nvim_win_is_valid(w) and w ~= cur then
+      pcall(function() vim.wo[w].winfixheight = v end)
+    end
+  end
+  if api.nvim_win_get_height(cur) <= before then
+    -- 더 늘 자리가 없다: 이미 세로로 가득 찬 창 (F9 트리)
+    pcall(function() vim.wo[cur].winfixheight = fix[cur] end)
+    vim.notify('RelationView: 이미 세로로 가득 찬 창입니다')
+    return
+  end
+  -- 창을 열고 닫을 때 'equalalways' 가 고르게 펴며 이 창을 줄이지 않게
+  pcall(function() vim.wo[cur].winfixheight = true end)
+  s.vmax[tab] = { win = cur, sizes = sizes, had = had, fix = fix[cur] }
 end
 
 function A.pin()
@@ -7683,6 +7932,10 @@ end, { desc = 'Widen the relation panel to half the screen (toggle)' })
 api.nvim_create_user_command('RelationViewBigContext', function()
   A.toggle_big()
 end, { desc = 'Toggle the full-height context window left of the column' })
+
+api.nvim_create_user_command('RelationViewZoom', function()
+  A.vmax_toggle()
+end, { desc = 'Give the tree / list / context window the full height (toggle)' })
 
 api.nvim_create_user_command('RelationViewToggle', function()
   if panel_visible() or panel_win_here() then
