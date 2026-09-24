@@ -178,7 +178,7 @@ backspacing cannot eat them. Results land where they always did: the relation
 panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 `g:vimide_lookup_float = 0` put the command line back.
 
-\' (Leader, then '), Ctrl+' or Ctrl+M twice: The marks you set, in a telescope picker - filter by mark, by file
+\' (Leader, then '), Ctrl+' or Ctrl+M twice: Named bookmarks and the marks you set, in a telescope picker - filter by mark, by file
 name or by the text of the line, and `<CR>` jumps there in the edit window
 (`:VimIdeMarks`; `<Esc>` then `d` deletes one). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
@@ -198,6 +198,32 @@ reports modified keys (CSI u: in iTerm2 turn on *Report modifiers using CSI u*;
 inside tmux also `extended-keys`). Where it does not, the binding costs nothing:
 the `'` that arrives is vim's own jump-to-mark key. `:JumpKeyTest` shows what
 your terminal sends when you press it.
+Named bookmarks live in the same list. Its first row, right above the prompt
+and selected when it opens, is `＋ 등록` ("add"): press Enter on it to bookmark
+where you are. Opened with the cursor on a symbol, the row already reads
+`＋ 등록: <symbol>`; opened on blank space, type a name in the prompt and the
+row follows what you type. (The prompt is deliberately not pre-filled with the
+symbol - that would filter the list down to it just when you opened the picker
+to jump somewhere.) Bookmarks show as `★ name`, current project first, then the
+most recent, and are kept in `stdpath('data')/vim-ide/bookmarks.json` (name,
+file, line and that line's text) - vim's marks are only 26 and cannot be named.
+When edits move the line, the jump finds the saved text again nearby (then the
+name as a word, searching both ways, case-sensitive, then the saved line) and
+stores the new line only when it really found one. Blank lines and lines of
+bare punctuation such as `}` are not searched by text - they are everywhere, and
+the nearest copy is usually the wrong place. Text is cut at 200 *characters*,
+not bytes, so a long line of Korean does not split a character. The same line
+with the same name is refreshed, a different name on the same line is a second
+bookmark (an earlier version renamed silently); a bookmark whose file is gone
+reports that instead of opening an empty buffer. What you type stays with the
+add row, so typing and Enter always registers: to jump to an entry the typing
+filtered, move onto it first. Move with the arrows (or `Ctrl+n`/`Ctrl+p`), or
+`Esc` then `j`/`k`, and Enter jumps in the edit window; `Esc` then `d` removes a
+bookmark or a mark. With the add row selected, the preview shows the spot that
+would be saved. The file is never rewritten when it cannot be read (bad JSON,
+no permission), writes from several nvim at once take turns through a lock
+file, and a symlinked or restricted `bookmarks.json` keeps its link and mode.
+
 Ctrl+M twice opens it too. In a terminal Ctrl+M *is* Enter, so this is Enter
 twice - and it is done without waiting: a `<CR><CR>` mapping would make every
 single Enter hang for `timeoutlen` (0.8 s) and slow down the Enter of the

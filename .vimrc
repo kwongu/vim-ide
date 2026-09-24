@@ -3393,6 +3393,12 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 "   Ctrl+M 두 번   같은 것 - Enter 두 번이기도 하다 (아래 g:vimide_marks_double)
 "   :VimIdeMarks   같은 것
 "
+" 이름 붙은 북마크: 목록 맨 앞의 '＋ 등록' 줄(열면 골라져 있다)에서 <CR> 이면
+" 지금 자리를 담는다. 심볼 위에서 열었으면 그 심볼 이름으로, 빈 곳이면
+" 프롬프트에 친 이름으로. ★ 로 뜨고 stdpath('data')/vim-ide/bookmarks.json 에
+" 남는다. 줄이 밀려도 적어 둔 그 줄의 글자로 다시 찾아간다 (marksjump.lua).
+" 목록은 화살표나 <Esc> 뒤 j/k 로 옮겨 <CR>.
+"
 " 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
 " 0-9 와 ' " ^ . 같은 자동 표시는 뺀다. 특히 0-9 는 '최근에 닫은 파일'이라
 " 이 설정에서는 .tags/files 같은 색인 내부 파일이 올라온다
