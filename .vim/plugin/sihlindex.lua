@@ -931,7 +931,63 @@ end
 -- 지역 이름 집합은 글자가 그대로인 동안 같다. 스크롤할 때마다 위아래 400줄을
 -- 다시 훑었는데(6600줄 파일에서 번당 9ms), 범위를 200줄 단위로 넓혀 잡고
 -- changedtick 과 함께 담아 둔다 - 같은 구간 안에서 스크롤하면 공짜다.
-local ln_memo = {}   -- buf -> { tick =, key =, names = }
+-- '#if 0' 안의 죽은 코드 줄 구간들 (after/queries/c/highlights.scm 의
+-- @si.inactive 와 같은 규칙: #if 0 부터 #else 앞까지, #else 가 없으면 #endif
+-- 까지). 거기는 SI 처럼 회색으로 두고 칠하지도 색인에 묻지도 않는다 - 우선
+-- 순위 200 의 색이 회색(105)을 덮어 죽은 코드가 살아 있는 것처럼 보였다 (QA).
+local INACT_Q = {}
+local function inactive_rows(lang, root, buf, lo, hi, out)
+  if INACT_Q[lang] == nil then
+    local ok, q = pcall(vim.treesitter.query.parse, lang,
+      '(preproc_if condition: (number_literal) @z) @blk')
+    INACT_Q[lang] = ok and q or false
+  end
+  local q = INACT_Q[lang]
+  if not q then
+    return out
+  end
+  for id, node in q:iter_captures(root, buf, lo, hi) do
+    if q.captures[id] == 'blk' then
+      local cond = node:field('condition')[1]
+      if cond and vim.treesitter.get_node_text(cond, buf) == '0' then
+        local sr = node:start()
+        local alt = node:field('alternative')[1]
+        local er = alt and alt:start() or select(3, node:range())
+        out[#out + 1] = { sr, er }
+      end
+    end
+  end
+  return out
+end
+
+local function in_rows(rs, r)
+  for _, x in ipairs(rs) do
+    if r > x[1] and r < x[2] then
+      return true
+    end
+  end
+  return false
+end
+
+-- 창마다 모은 줄 구간을 겹치거나 맞닿는 것끼리 합친다 (같은 곳을 보는 :vsplit 이
+-- 같은 일을 두 번 하지 않게 - 반대 심문)
+local function merge_ranges(rs)
+  table.sort(rs, function(x, y) return x[1] < y[1] end)
+  local out = {}
+  for _, r in ipairs(rs) do
+    local last = out[#out]
+    if last and r[1] <= last[2] then
+      if r[2] > last[2] then
+        last[2] = r[2]
+      end
+    else
+      out[#out + 1] = { r[1], r[2] }
+    end
+  end
+  return out
+end
+
+local ln_memo = {}   -- buf -> { tick =, map = { key -> names }, n = }
 local ln_query = {}  -- lang -> query | false
 
 local function local_names(buf, lang, lo, hi)
@@ -940,8 +996,12 @@ local function local_names(buf, lang, lo, hi)
   local tick = api.nvim_buf_get_changedtick(buf)
   local key = a .. ':' .. b
   local m = ln_memo[buf]
-  if m and m.tick == tick and m.key == key then
-    return m.names
+  if not m or m.tick ~= tick then
+    m = { tick = tick, map = {}, n = 0 }
+    ln_memo[buf] = m
+  end
+  if m.map[key] then
+    return m.map[key]
   end
   local names = {}
   if ln_query[lang] == nil then
@@ -971,7 +1031,12 @@ local function local_names(buf, lang, lo, hi)
     local t = vim.treesitter.get_node_text(node, buf)
     if t then names[t] = true end
   end
-  ln_memo[buf] = { tick = tick, key = key, names = names }
+  -- 창 여러 개가 같은 버퍼의 다른 곳을 보면 구간이 여럿이다 - 몇 개는 같이 담아 둔다
+  if m.n >= 8 then
+    m.map, m.n = {}, 0
+  end
+  m.map[key] = names
+  m.n = m.n + 1
   return names
 end
 
@@ -994,6 +1059,18 @@ repaint = function(win)
   if lang ~= 'c' and lang ~= 'cpp' then
     return
   end
+  -- 이미 초록이던 멤버 자리를 기억해 둔다. 아래 멤버 풀이가 시간 한도를
+  -- 넘겨 이번에 못 푼 멤버는 이 기억으로 초록을 이어 간다 - 지우고 비워
+  -- 두면 글자를 고칠 때마다 화면의 멤버가 검게 깜빡였다가(약 60ms) 다음
+  -- 칠하기에 초록으로 돌아왔다 (반대 심문). extmark 는 글자를 따라 움직이므로
+  -- 줄:칸이 지금 노드 자리와 맞는다.
+  local prev_member = {}
+  local okx, oldmarks = pcall(api.nvim_buf_get_extmarks, buf, NS, 0, -1, { details = true })
+  for _, m in ipairs(okx and oldmarks or {}) do
+    if m[4] and m[4].hl_group == 'SiMemberRef' then
+      prev_member[m[2] .. ':' .. m[3]] = true
+    end
+  end
   pcall(api.nvim_buf_clear_namespace, buf, NS, 0, -1)
   if cfg('', 1) == 0 then
     return
@@ -1002,14 +1079,31 @@ repaint = function(win)
   if #roots == 0 then
     return
   end
-  local info = vim.fn.getwininfo(win)[1]
-  if not info then
-    return
-  end
+  -- 이 버퍼를 보여 주는 (지금 탭의) 창마다 그 창의 보이는 줄(+여유)을 칠한다 -
+  -- 한 창 몫만 칠하면 같은 버퍼를 보여 주는 다른 창의 색이 통째로 지워졌다 (QA).
+  -- 다른 탭은 그 탭에 들어갈 때 다시 칠해진다.
   local pad = tonumber(cfg('pad', 20)) or 20
   local last = api.nvim_buf_line_count(buf)
-  local lo = math.max(0, (info.topline or 1) - 1 - pad)
-  local hi = math.min(last, (info.botline or last) + pad)
+  local ranges = {}
+  local wins = { win }
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if w ~= win and api.nvim_win_get_buf(w) == buf then
+      wins[#wins + 1] = w
+    end
+  end
+  for _, w in ipairs(wins) do
+    local info = vim.fn.getwininfo(w)[1]
+    if info then
+      ranges[#ranges + 1] = {
+        math.max(0, (info.topline or 1) - 1 - pad),
+        math.min(last, (info.botline or last) + pad),
+      }
+    end
+  end
+  if #ranges == 0 then
+    return
+  end
+  ranges = merge_ranges(ranges)
 
   local okq, q = pcall(vim.treesitter.query.get, lang, 'highlights')
   if not okq or not q then
@@ -1023,7 +1117,12 @@ repaint = function(win)
   if not trees or not trees[1] then
     return
   end
-  local locals = local_names(buf, lang, lo, hi)
+  local locals = {}
+  for _, r in ipairs(ranges) do
+    for k in pairs(local_names(buf, lang, r[1], r[2])) do
+      locals[k] = true
+    end
+  end
   local buckets = {}
   for i, r in ipairs(roots) do
     buckets[i] = bucket(r)
@@ -1054,14 +1153,23 @@ repaint = function(win)
 
   -- 캡처는 한 번만 모은다. 예전에는 같은 쿼리를 같은 범위에 두 번 돌렸다
   -- (선언 자리 찾기, 칠하기) - 스크롤 한 번에 9ms 씩 두 번.
+  -- 창이 여럿이면 구간마다 모은다. 캡처마다 제 구간(lo, hi)을 같이 적어 둔다.
   local caps = {}
-  for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
-    caps[#caps + 1] = id
-    caps[#caps + 1] = node
+  local inact = {}
+  for _, r in ipairs(ranges) do
+    inactive_rows(lang, trees[1]:root(), buf, r[1], r[2], inact)
+  end
+  for _, r in ipairs(ranges) do
+    for id, node in q:iter_captures(trees[1]:root(), buf, r[1], r[2]) do
+      caps[#caps + 1] = id
+      caps[#caps + 1] = node
+      caps[#caps + 1] = r[1]
+      caps[#caps + 1] = r[2]
+    end
   end
 
   -- 선언하는 자리는 건드리지 않는다: 파랑(item 1/2)을 덮으면 안 된다
-  for ci = 1, #caps, 2 do
+  for ci = 1, #caps, 4 do
     local id, node = caps[ci], caps[ci + 1]
     local cap = q.captures[id]
     if cap:match('^si%.declaration') then
@@ -1084,17 +1192,20 @@ repaint = function(win)
   --   let g:sihl_index_member_budget = 0   " 끄기 (예전처럼 한 번에 전부)
   -- 시간이 모자라도 한 번에 적어도 8개는 푼다 - 멤버에 닿기 전에 이미 시간을
   -- 넘기는 화면(캡처가 아주 많은)에서도 칠할 때마다 앞으로 나아가게.
+  -- 한도는 멤버 풀이에 쓴 시간만 잰다. 칠하기 전체를 재면 멤버가 아닌 일만으로
+  -- 한도를 넘는 화면에서 끝내 다 못 풀고 1초에 16번씩 다시 칠했다 (반대 심문).
   local budget = tonumber(cfg('member_budget', 25)) or 25
-  local t_begin = uv.hrtime()
+  local member_ms = 0
   local over, mk_calls = false, 0
-  for ci = 1, #caps, 2 do
-    local id, node = caps[ci], caps[ci + 1]
+  for ci = 1, #caps, 4 do
+    local id, node, lo, hi = caps[ci], caps[ci + 1], caps[ci + 2], caps[ci + 3]
     local cap = q.captures[id]
     local exp = OK_NODE[node:type()] and export_arg(node, buf) or false
     if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap]) or exp)
         and OK_NODE[node:type()] then
       local r1, c1, r2, c2 = node:range()
       if r1 == r2 and r1 >= lo and r1 < hi and not decl_here[r1 .. ':' .. c1]
+          and not in_rows(inact, r1)
           and not done[r1 .. ':' .. c1] then
         done[r1 .. ':' .. c1] = true
         local name = vim.treesitter.get_node_text(node, buf)
@@ -1126,17 +1237,19 @@ repaint = function(win)
           -- 그 타입이 이 멤버를 가졌는지 본다. 갈 수 있으면 초록이다.
           if is_member and members_on and how ~= 'found'
               and _G.relationview_member_known then
-            if not over and budget > 0 and mk_calls >= 8
-                and (uv.hrtime() - t_begin) / 1e6 > budget then
+            if not over and budget > 0 and mk_calls >= 8 and member_ms > budget then
               over = true
             end
             local okm, known
             if over then
-              okm, known = true, nil -- 시간을 넘겼다: 다음 칠하기로 미룬다
+              -- 시간을 넘겼다: 다음 칠하기로 미룬다. 전에 초록이던 자리는 초록 그대로.
+              okm, known = true, prev_member[r1 .. ':' .. c1] or nil
             else
               mk_calls = mk_calls + 1
+              local t0 = uv.hrtime()
               okm, known = pcall(_G.relationview_member_known, buf,
                 r1 + 1, c1, redraw_soon)
+              member_ms = member_ms + (uv.hrtime() - t0) / 1e6
             end
             if okm and known == true then
               how, extra = 'found', 'member'

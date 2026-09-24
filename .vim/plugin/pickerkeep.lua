@@ -11,6 +11,18 @@
 --   _G.vimide_picker_track(picker)  바쁨을 재기 시작한다 (창을 열 때 한 번)
 --   _G.vimide_picker_ready(picker, fn)  바쁘지 않으면 곧장, 바쁘면 목록이
 --                                    따라온 뒤에 fn() - 여는 키(<CR>)용
+--   _G.vimide_picker_guard(action)   텔레스코프 매핑용: 그 동작(select_default,
+--                                    move_selection_next ...)을 목록이 따라온
+--                                    뒤에 한다 (.vimrc 의 telescope 기본 매핑)
+--
+-- 모든 텔레스코프 창에 건다 (아래 autocmd 두 개):
+--   TelescopeFindPre      앞 창의 선택과 프롬프트를 지운다. telescope 는 둘을
+--                         전역 하나에 두고 새 창을 열 때 지우지 않아서, 새 창이
+--                         첫 목록을 내기 전의 <CR> 이 앞 창의 항목에 먹혔다 -
+--                         \fi 에서는 'git checkout <앞 창의 파일>' 이 되어 고친
+--                         내용이 날아갔고, \ff 는 앞에서 연 파일을 다시 열었다
+--                         (QA 실측).
+--   FileType TelescopePrompt  첫 찾기보다 먼저 바쁨을 재기 시작한다.
 --
 -- 선택은 '그 자리'에 둔다: 커서 줄이 새 목록에 남아 있으면 그 줄, 없어졌으면
 -- 그 자리를 채우며 올라온 줄. 몇 번째인지가 아니라 열쇠로 찾는다 - \fx 에서
@@ -107,13 +119,18 @@ local function current_line()
   return ok and st.get_global_key('current_line') or nil
 end
 
-function _G.vimide_picker_track(picker)
+-- seed: 처음 '다 걸러진 프롬프트'. 창이 설 때(첫 찾기 전) 재기 시작하면
+-- false - 아직 아무것도 걸러지지 않았다. 늦게 재기 시작하면 지금 전역에 있는
+-- 프롬프트(FindPre 가 지웠으므로 이 창의 것)로.
+function _G.vimide_picker_track(picker, seed)
   if not picker or picker._vimide_tracked then
     return
   end
   picker._vimide_tracked = true
-  -- 지금 걸러진(걸러지는 중인) 프롬프트로 시작한다
-  picker._vimide_done = current_line()
+  if seed == nil then
+    seed = current_line()
+  end
+  picker._vimide_done = seed
   picker:register_completion_callback(function(p)
     -- 완료는 찾기가 끝난 직후, 다음 찾기가 시작되기 전에 불린다. 그때의
     -- current_line 이 방금 다 걸러진 프롬프트다.
@@ -132,8 +149,13 @@ function _G.vimide_picker_busy(picker)
     _G.vimide_picker_track(picker)
     return false
   end
+  -- 아직 한 번도 다 걸러지지 않았으면(false) 빈 프롬프트로 본다. 아무것도
+  -- 치지 않은 채 첫 목록을 불러오는 동안은 키를 바로 처리한다 - 앞 창의 선택은
+  -- 창이 설 때 지웠으므로 엉뚱한 항목을 잡을 일이 없고, 느린 첫 목록(큰 트리,
+  -- SMB) 동안 옮기기 키가 한참 늦던 것이 사라진다 (반대 심문). 친 글자가 아직
+  -- 목록에 들어가지 않았을 때만 기다린다.
   local ok, now = pcall(picker._get_prompt, picker)
-  return ok and picker._vimide_done ~= nil and now ~= picker._vimide_done
+  return ok and now ~= (picker._vimide_done or '')
 end
 
 function _G.vimide_picker_ready(picker, fn)
@@ -142,14 +164,99 @@ function _G.vimide_picker_ready(picker, fn)
   end
   -- 선택이 새 목록으로 옮겨진 뒤에 부른다: 갈아 끼우는 쪽의 콜백이 먼저
   -- 등록돼 있으면 같은 차례에 앞서 돈다. 한 박자 더 미뤄 확실히 뒤에 둔다.
+  local fired = false
+  local function go()
+    if fired then
+      return
+    end
+    fired = true
+    if picker.prompt_bufnr and vim.api.nvim_buf_is_valid(picker.prompt_bufnr) then
+      fn()
+    end
+  end
   once(picker, function(p)
     if _G.vimide_picker_busy(p) then
       return false -- 아직 (거르기가 또 걸렸다)
     end
-    vim.schedule(fn)
+    vim.schedule(go)
     return true
   end)
+  -- 끝내 따라오지 않는 창(프롬프트를 스스로 고쳐 거르는 창 등)에서 키가 영영
+  -- 먹히지 않는 일은 없게: 5초 뒤에는 그대로 한다. 1.5초였을 때는 첫 목록이
+  -- 느린 창(커널 트리의 \ff, git_commits)에서 목록이 오기 전에 키가 돌아
+  -- 'Nothing currently selected' 로 사라졌다 (반대 심문).
+  vim.defer_fn(go, 5000)
 end
+
+-- action: telescope 동작 이름('select_default' ...) 또는 function(bufnr)
+function _G.vimide_picker_guard(action)
+  return function(bufnr)
+    local okA, actions = pcall(require, 'telescope.actions')
+    local okS, as = pcall(require, 'telescope.actions.state')
+    if not (okA and okS) then
+      return
+    end
+    local function run()
+      if type(action) == 'function' then
+        action(bufnr)
+      else
+        actions[action](bufnr)
+      end
+    end
+    local pk = as.get_current_picker(bufnr)
+    if pk then
+      _G.vimide_picker_ready(pk, run)
+    else
+      run()
+    end
+  end
+end
+
+local grp = vim.api.nvim_create_augroup('VimIdePickerKeep', { clear = true })
+vim.api.nvim_create_autocmd('User', {
+  group = grp,
+  pattern = 'TelescopeFindPre',
+  callback = function()
+    local ok, st = pcall(require, 'telescope.state')
+    if ok then
+      st.set_global_key('selected_entry', nil)
+      st.set_global_key('current_line', nil)
+    end
+  end,
+})
+-- :Telescope resume 은 찾기를 다시 돌리지 않고 담아 둔 목록을 되살린다(완료
+-- 콜백이 오지 않는다). 되살리기가 끝나면 지금 프롬프트까지 다 걸러진 것으로
+-- 본다 - 안 그러면 되살린 창은 키마다 늦게 먹었다 (반대 심문).
+vim.api.nvim_create_autocmd('User', {
+  group = grp,
+  pattern = 'TelescopeResumePost',
+  callback = function(a)
+    local ok, as = pcall(require, 'telescope.actions.state')
+    if not ok then
+      return
+    end
+    local okp, pk = pcall(as.get_current_picker, a.buf)
+    if okp and pk then
+      _G.vimide_picker_track(pk, false)
+      local okq, now = pcall(pk._get_prompt, pk)
+      pk._vimide_done = okq and now or ''
+    end
+  end,
+})
+vim.api.nvim_create_autocmd('FileType', {
+  group = grp,
+  pattern = 'TelescopePrompt',
+  callback = function(a)
+    local ok, as = pcall(require, 'telescope.actions.state')
+    if not ok then
+      return
+    end
+    local okp, pk = pcall(as.get_current_picker, a.buf)
+    if okp and pk then
+      _G.vimide_picker_track(pk, false)
+    end
+  end,
+})
 
 function _G.vimide_picker_keep(picker, finder, opts)
   opts = opts or {}

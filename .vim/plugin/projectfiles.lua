@@ -841,13 +841,26 @@ local function text_file(path)
   if cfg('skip_binary', 1) == 0 then
     return true
   end
-  local fd = uv.fs_open(path, 'r', 438)
-  if not fd then
-    return true
+  -- 바이너리 판정은 크기·수정 시각이 그대로인 동안 담아 둔다. 항목 하나를
+  -- 넣고 뺄 때마다 목록 전체를 다시 펼치는데, 4000개짜리 preset 에서 파일마다
+  -- 앞 1KB 를 다시 읽느라 +/-/^d 한 번에 400~850ms 가 멎었다 (QA).
+  local key = st.size .. ':' .. st.mtime.sec .. ':' .. (st.mtime.nsec or 0)
+  s.bin_cache = s.bin_cache or {}
+  local hit = s.bin_cache[path]
+  local isbin
+  if hit and hit.key == key then
+    isbin = hit.bin
+  else
+    local fd = uv.fs_open(path, 'r', 438)
+    if not fd then
+      return true
+    end
+    local data = uv.fs_read(fd, 1024, 0)
+    uv.fs_close(fd)
+    isbin = (data and data:find('\0', 1, true)) and true or false
+    s.bin_cache[path] = { key = key, bin = isbin }
   end
-  local data = uv.fs_read(fd, 1024, 0)
-  uv.fs_close(fd)
-  if data and data:find('\0', 1, true) then
+  if isbin then
     skipped.binary = skipped.binary + 1
     return false
   end
@@ -1251,10 +1264,13 @@ local function materialize(root)
   -- 파일짜리 프로젝트의 색인이 0이 됐다. 이 프로젝트에 없는 경로만 담긴
   -- preset 을 골랐을 때도 같은 일이 난다. 조용히 넘길 일이 아니다.
   if #files == 0 and #entries > 0 then
-    notify(("preset '%s' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다"):format(
-        name or '?')
-      .. ' — 목록과 색인을 그대로 둡니다. 다른 체크아웃의 preset 이거나'
-      .. ' 전부 하위 프로젝트 안입니다.', vim.log.levels.WARN)
+    -- 항목을 빼다 이렇게 된 경우는 부른 쪽(none_for_empty)이 따로 알린다
+    if not s.quiet_empty then
+      notify(("preset '%s' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다"):format(
+          name or '?')
+        .. ' — 목록과 색인을 그대로 둡니다. 다른 체크아웃의 preset 이거나'
+        .. ' 전부 하위 프로젝트 안입니다.', vim.log.levels.WARN)
+    end
     return nil, name
   end
   table.sort(files)
@@ -1334,6 +1350,16 @@ local function bnotify(msg, level, done)
   notify(msg, level)
 end
 
+-- 남은 preset 항목이 이 체크아웃에서 하나도 펼쳐지지 않을 때: none 모드
+local function none_for_empty(root, name)
+  set_last(root, name)
+  set_active(root, MODE_NONE)
+  materialize(root) -- none 모드: .tags/files 를 지우고 캐시를 비운다
+  reindex(root)
+  notify(("preset '%s' 의 남은 항목이 이 체크아웃에 없어 none 모드로 돌아갑니다 (preset 은 그대로)")
+    :format(name), vim.log.levels.WARN)
+end
+
 local function save_entries(root, name, entries)
   if #entries == 0 then
     -- an empty preset indexes nothing, and an empty file list makes the
@@ -1372,7 +1398,19 @@ local function save_entries(root, name, entries)
   if batch then
     return nil -- 커밋은 배치 끝에서
   end
-  local files = materialize(root)
+  -- 뺄 때만: 더할 때(담은 경로에 색인할 파일이 없을 때)는 예전처럼 알리고
+  -- 목록을 그대로 둔다 - 더하다가 none 모드로 바뀌면 안 된다 (반대 심문)
+  s.quiet_empty = s.removing
+  local files, nm = materialize(root)
+  s.quiet_empty = nil
+  if not files and nm and s.removing then
+    -- 남은 항목이 이 체크아웃에서 하나도 펼쳐지지 않는다 (다른 체크아웃에만 있는
+    -- 경로들). 목록이 빈 것과 같은 규칙으로 none 모드로 - preset 파일은 다른
+    -- 체크아웃에서 쓰이므로 그대로 둔다. 예전에는 목록과 색인이 옛것 그대로
+    -- 남아 \fo 에 계속 보였고 지우려 하면 '목록에 없습니다' 였다 (QA).
+    none_for_empty(root, name)
+    return nil
+  end
   reindex(root)
   return files
 end
@@ -1511,8 +1549,12 @@ local function confirm_drop(root, rel, dropped, total)
   end
   local ans = 0
   pcall(function()
-    ans = vim.fn.confirm(msg .. '\n계속할까요?', "&예\n&아니오", 2, 'Question')
+    -- 단축글자는 ASCII 로. '&예/&아니오' 는 nvim 0.12 의 confirm() 이 여러 바이트
+    -- 글자를 단축키로 맞추지 못해 '예'를 고를 방법이 없었다 - 늘 취소됐다 (QA).
+    ans = vim.fn.confirm(msg .. '\n계속할까요?', "&y 예\n&n 아니오", 2, 'Question')
   end)
+  -- 여러 줄짜리 물음이 지나간 자리에 바로 알림을 쓰면 Press ENTER 가 뜬다
+  pcall(vim.cmd, 'redraw')
   return ans == 1
 end
 
@@ -1552,7 +1594,9 @@ local function remove_path(root, path)
   local excluded = 0
   local expanded = {}
   for _, e in ipairs(kept) do
-    if e.kind == 'dir' and rel:sub(1, #e.path + 1) == e.path .. '/' then
+    -- '.' 은 프로젝트 루트 항목(트리의 루트 줄에서 + 한 번)이라 모든 경로를 덮는다
+    if e.kind == 'dir' and rel ~= '.' and (e.path == '.'
+        or rel:sub(1, #e.path + 1) == e.path .. '/') then
       local keep_e = {}
       local n = 0
       for _, f in ipairs((expand_entry(root, e))) do
@@ -1588,7 +1632,13 @@ local function remove_path(root, path)
     bnotify('제거를 취소했습니다: ' .. rel, vim.log.levels.WARN)
     return
   end
-  save_entries(root, name, kept)
+  -- 빼다가 남은 항목이 이 체크아웃에서 하나도 안 펼쳐지면 none 모드로 (save_entries)
+  s.removing = true
+  local okS, errS = pcall(save_entries, root, name, kept)
+  s.removing = nil
+  if not okS then
+    error(errS)
+  end
   local parts = {}
   if dropped > 0 then
     parts[#parts + 1] = ('항목 %d개'):format(dropped)
@@ -1617,8 +1667,17 @@ local function in_batch(root, what, fn)
     -- 배치로 마지막 항목까지 빠졌다: 단일 경로와 같은 규칙으로 auto 복귀
     save_entries(root, b.emptied, {})
   else
-    materialize(root)
-    reindex(root)
+    -- 이 배치가 실제로 뺀 것이 있을 때만 none 모드로 (아무것도 안 바뀐 배치가
+    -- 모드를 바꾸면 안 된다 - 반대 심문). 더하는 배치는 예전 그대로.
+    local removing = what == '제거' and (b.done or 0) > 0
+    s.quiet_empty = removing
+    local files, nm = materialize(root)
+    s.quiet_empty = nil
+    if not files and nm and removing then
+      none_for_empty(root, nm) -- 남은 항목이 이 체크아웃에 하나도 없다
+    else
+      reindex(root)
+    end
   end
 
   -- 알림은 한 줄로. 경고는 몇 개만 보여 주고 나머지는 수만 알린다.
@@ -1861,7 +1920,16 @@ local function announce_root(root)
 end
 
 local function tree_apply(arg, what, one)
-  local paths, dropped = drop_root(tree_paths(arg))
+  -- 루트 줄을 빼는 것은 범위(V 로 여러 줄)를 고른 경우만이다. 루트 줄에서
+  -- + 를 한 번 누른 것은 '루트를 담아라'다 (README) - 예전에는 한 줄도
+  -- 범위처럼 걸러서 '범위에 루트만 있었습니다' 라며 아무것도 안 했다 (QA).
+  local all = tree_paths(arg)
+  local paths, dropped
+  if type(arg) == 'table' and #all > 1 then
+    paths, dropped = drop_root(all)
+  else
+    paths, dropped = all, 0
+  end
   if #paths == 0 then
     if dropped > 0 then
       notify('트리 루트는 건너뜁니다 (범위에 루트만 있었습니다)',
@@ -3423,8 +3491,18 @@ local function pick_symbol(prefill)
           end)
         end
       end
-      map({ 'i', 'n' }, '<F12>', to_relation)
-      map({ 'i', 'n' }, '<C-g>', to_relation)
+      -- 이름을 치자마자 넘기면 걸러지기 전 첫 심볼이 넘어갔다 (반대 심문) -
+      -- 목록이 따라온 뒤에 넘긴다
+      local function to_relation_ready()
+        local pk = t.state.get_current_picker(bufnr)
+        if pk and type(_G.vimide_picker_ready) == 'function' then
+          _G.vimide_picker_ready(pk, to_relation)
+        else
+          to_relation()
+        end
+      end
+      map({ 'i', 'n' }, '<F12>', to_relation_ready)
+      map({ 'i', 'n' }, '<C-g>', to_relation_ready)
       return true
     end,
   }):find()
@@ -3482,6 +3560,29 @@ end
 
 local function pick_find()
   local root = cur_root()
+  -- none / unset 모드에는 색인 목록이 없다. 예전에는 그때 프로젝트 전체를
+  -- 훑는 스크립트를 그 자리에서 돌려(4만 파일 트리에서 3.4초) F3 을 누를
+  -- 때마다 멎었다 (QA). 목록 대신 전체 파일을 비동기로 찾는 창을 연다.
+  local m0 = mode_of(root)
+  if m0 == MODE_NONE or m0 == MODE_UNSET then
+    local okb, builtin = pcall(require, 'telescope.builtin')
+    if okb then
+      -- 뜬 트리(F11)에서 불렸으면 편집 창으로 나간 뒤에 연다 (<C-q> 가 편집 창을
+      -- quickfix 로 덮지 않게 - reposearch.lua 와 같다)
+      if api.nvim_win_get_config(0).relative ~= '' and type(_G.vimide_last_edit_win) == 'function' then
+        local okw, w = pcall(_G.vimide_last_edit_win)
+        if okw and type(w) == 'number' and w ~= 0 and api.nvim_win_is_valid(w) then
+          pcall(api.nvim_set_current_win, w)
+        end
+      end
+      builtin.find_files({
+        cwd = root,
+        prompt_title = ('Project files  →  %s   [%s: 색인 목록 없음 - 전체에서 찾기]')
+            :format(target_label(root), m0 == MODE_NONE and 'none' or '모드 미정'),
+      })
+      return
+    end
+  end
   local files = current_files(root)
   -- 고른 파일은 '여기서 불렀다'는 그 창에 연다
   local from_win = api.nvim_get_current_win()
@@ -3915,6 +4016,11 @@ local function pick_remove()
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr, map)
       t.actions.select_default:replace(function() remove(bufnr) end)
+      -- 여기서는 <CR> 도 지우는 키다. 전역 <CR>(목록이 따라온 뒤에 한다)을 거치면
+      -- 갈아 끼우는 동안 온 두 번째 <CR> 이 버려지지 않고 줄을 섰다가 다음 항목을
+      -- 지웠다 (반대 심문: 빠른 <CR><CR> 에 둘이 빠짐). 곧장 remove 로 보내
+      -- '바쁘면 버린다'를 지킨다.
+      map({ 'i', 'n' }, '<CR>', function() remove(bufnr) end)
       map({ 'i', 'n' }, '<C-d>', function() remove(bufnr) end)
       map('n', 'd', function() remove(bufnr) end)
       picker_track(t, bufnr)

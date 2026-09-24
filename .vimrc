@@ -366,6 +366,36 @@ require'nvim-treesitter.configs'.setup {
 			additional_vim_regex_highlighting = true,
 		},
 	}
+
+-- nvim-treesitter(보관된 master) 의 두 지시자를 nvim 0.11+ 모양으로 다시 건다.
+-- 그 플러그인은 {force=true, all=false} 로 등록하는데 0.12 는 all 을 무시하고
+-- 캡처를 노드 목록(TSNode[])으로 넘긴다. 그러면 코드 펜스가 있는 마크다운
+-- (set-lang-from-info-string!)과 heredoc 이 있는 셸 스크립트(downcase!)를 열
+-- 때마다 'attempt to call method range' 오류와 Press ENTER 가 떴고, 펜스 안
+-- 코드는 색이 빠졌다 (QA 실측). 플러그인 파일은 건드리지 않는다.
+if vim.treesitter and vim.fn.has('nvim-0.11') == 1 then
+	-- 그 플러그인의 지시자 모듈을 먼저 올린다. 나중에 올라오면 force=true 로
+	-- 이 심을 도로 덮는다 (실측: 심을 걸어도 그대로 오류). require 는 한 번만
+	-- 돌므로 여기서 올려 두면 뒤에서 다시 덮지 않는다.
+	pcall(require, 'nvim-treesitter.query_predicates')
+	local q = vim.treesitter.query
+	local function one(n) if type(n) == 'table' then return n[#n] end return n end
+	local alias = { ex = 'elixir', pl = 'perl', sh = 'bash', uxn = 'uxntal', ts = 'typescript' }
+	pcall(q.add_directive, 'set-lang-from-info-string!', function(match, _, buf, pred, md)
+		local node = one(match[pred[2]])
+		if not node then return end
+		local a = vim.treesitter.get_node_text(node, buf):lower()
+		md['injection.language'] = vim.filetype.match({ filename = 'a.' .. a }) or alias[a] or a
+	end, { force = true })
+	pcall(q.add_directive, 'downcase!', function(match, _, buf, pred, md)
+		local id = pred[2]
+		local node = one(match[id])
+		if not node then return end
+		local text = vim.treesitter.get_node_text(node, buf, { metadata = md[id] }) or ''
+		md[id] = md[id] or {}
+		md[id].text = text:lower()
+	end, { force = true })
+end
 EOF
 
 " ------------------------------------
@@ -384,6 +414,61 @@ require'telescope'.setup{
 		-- 끝에서 더 가면 멈춘다. 기본값(cycle)은 맨 위에서 한 칸 더 올라가면
 		-- 맨 아래로, 맨 아래에서 더 내려가면 맨 위로 돌아가서 헷갈렸다.
 		scroll_strategy = 'limit',
+		-- 여는 키와 옮기는 키는 목록이 친 글자를 따라온 뒤에 한다
+		-- (pickerkeep.lua 의 vimide_picker_guard). 창을 열자마자, 또는 글자를
+		-- 치자마자 온 키가 앞 창의 선택이나 거르기 전 목록에 먹혔다 - \fi 의
+		-- <CR> 이 'git checkout <앞 창의 파일>' 로 고친 내용을 날렸고, \ff 는
+		-- 앞에서 연 파일을 다시 열었고, 북마크 창은 옮긴 줄 대신 등록 줄에서
+		-- <CR> 을 받아 같은 북마크를 하나 더 만들었다 (QA 실측). 목록이 이미
+		-- 따라와 있으면 그 자리에서 한다 - 평소 손에는 차이가 없다.
+		mappings = (function()
+			local function g(action)
+				return function(b)
+					if type(_G.vimide_picker_guard) == 'function' then
+						return _G.vimide_picker_guard(action)(b)
+					end
+					local a = require('telescope.actions')
+					if type(action) == 'function' then return action(b) end
+					return a[action](b)
+				end
+			end
+			local function tab(dir)
+				return function(b)
+					local a = require('telescope.actions')
+					a.toggle_selection(b)
+					a['move_selection_' .. dir](b)
+				end
+			end
+			local keys = {
+				['<CR>'] = g('select_default'),
+				['<C-x>'] = g('select_horizontal'),
+				['<C-v>'] = g('select_vertical'),
+				['<C-t>'] = g('select_tab'),
+				['<Down>'] = g('move_selection_next'),
+				['<Up>'] = g('move_selection_previous'),
+				['<Tab>'] = g(tab('worse')),
+				['<S-Tab>'] = g(tab('better')),
+				-- quickfix 로 보내기도 같은 줄에 선다 - 앞에 미뤄 둔 <Tab> 표시보다
+				-- 먼저 돌아 빈 목록을 보냈다 (반대 심문)
+				['<C-q>'] = g(function(b)
+					local a = require('telescope.actions')
+					a.send_to_qflist(b); a.open_qflist(b)
+				end),
+				['<M-q>'] = g(function(b)
+					local a = require('telescope.actions')
+					a.send_selected_to_qflist(b); a.open_qflist(b)
+				end),
+			}
+			local i = vim.tbl_extend('force', keys, {
+				['<C-n>'] = g('move_selection_next'),
+				['<C-p>'] = g('move_selection_previous'),
+			})
+			local n = vim.tbl_extend('force', keys, {
+				['j'] = g('move_selection_next'),
+				['k'] = g('move_selection_previous'),
+			})
+			return { i = i, n = n }
+		end)(),
 		layout_config = {
 			width = 0.80,
 			height = 0.80,
@@ -678,7 +763,11 @@ return {
   -- 아웃라인에 남는다 - tagbar 쪽에 손으로 만들어 둔 follow 동작과 같다
   -- (s:TagbarFollowCursor, 아래 Tagbar 절).
   --   autojump = false 로 끄면 <CR> 로만 이동한다.
-  autojump = true,
+  -- aerial 의 autojump 는 끈다. 켜 두면 아웃라인 커서가 움직일 때마다 편집
+  -- 창을 그 심볼로 옮기는데, aerial 이 창을 열며 스스로 커서를 놓는 것도
+  -- 움직임이라 F10 을 누르기만 해도 편집 창 커서와 화면이 심볼 머리로 튀었다
+  -- (QA 실측). 따라가기는 아래 autocmd 가 한다 - 사람이 다른 심볼로 옮겼을 때만.
+  autojump = false,
   --   'global' 아웃라인 창 하나가 '지금 포커스된 창'을 따라간다.
   --   'window' 창마다 제 아웃라인을 갖는다 (예전 방식).
   attach_mode = outline_global and 'global' or 'window',
@@ -706,15 +795,63 @@ return {
 end
 local auto_now = (tonumber(vim.g.vimide_outline_auto) or 0) ~= 0
 _G.rv_setup('aerial', aerial_opts(auto_now))
+-- 아웃라인에서 j/k 로 옮기면 편집 창이 그 심볼로 따라간다 (예전 autojump).
+-- aerial 이 이미 편집 창 커서의 심볼에 아웃라인 커서를 놓은 경우(열 때,
+-- 새로 그릴 때, 초점이 오갈 때)는 따라갈 것이 없다 - 그것까지 따라가면 편집
+-- 창 커서가 그 심볼의 머리줄로 옮겨졌다. tagbar_follow_line 과 같은 생각.
+vim.api.nvim_create_autocmd('FileType', {
+  group = vim.api.nvim_create_augroup('VimIdeAerialFollow', { clear = true }),
+  pattern = 'aerial',
+  callback = function(ev)
+    vim.api.nvim_create_autocmd('CursorMoved', {
+      buffer = ev.buf,
+      callback = function()
+        if not vim.b[ev.buf].rendered then
+          return
+        end
+        local src = vim.b[ev.buf].source_buffer
+        if not src or not vim.api.nvim_buf_is_valid(src) then
+          return
+        end
+        local okd, data = pcall(require, 'aerial.data')
+        if not okd then
+          return
+        end
+        local okb, bd = pcall(data.get_or_create, src)
+        local pos = okb and bd and bd.last_win and bd.positions and bd.positions[bd.last_win]
+        if pos and pos.lnum == vim.api.nvim_win_get_cursor(0)[1] then
+          return
+        end
+        pcall(function() require('aerial.navigation').select({ jump = false, quiet = true }) end)
+      end,
+    })
+  end,
+})
 if not auto_now then
+  local grp = vim.api.nvim_create_augroup('VimIdeAerialAuto', { clear = true })
+  local function late_auto(first)
+    if (tonumber(vim.g.vimide_outline_auto) or 0) == 0 then
+      return false
+    end
+    local o = aerial_opts(true)
+    _G.rv_setup('aerial', o)
+    -- 시작 파일은 이미 들어와 있어서 aerial 의 자동 열기가 돌지 않는다.
+    -- 프로젝트 설정(.project.vimrc)에서 켠 경우가 그렇다 - 여기서 한 번,
+    -- 자동으로 열 때와 같은 검사(neo-tree 가 떠 있으면 안 연다 등)를 거쳐 연다.
+    if first and type(o.open_automatic) == 'function'
+        and o.open_automatic(vim.api.nvim_get_current_buf()) then
+      pcall(require('aerial').open, { focus = false })
+    end
+    pcall(vim.api.nvim_del_augroup_by_id, grp)
+    return true
+  end
+  vim.api.nvim_create_autocmd('VimEnter', {
+    group = grp,
+    callback = function() vim.schedule(function() late_auto(true) end) end,
+  })
   vim.api.nvim_create_autocmd('BufEnter', {
-    group = vim.api.nvim_create_augroup('VimIdeAerialAuto', { clear = true }),
-    callback = function()
-      if (tonumber(vim.g.vimide_outline_auto) or 0) ~= 0 then
-        _G.rv_setup('aerial', aerial_opts(true))
-        return true -- 한 번이면 된다 (autocmd 를 지운다)
-      end
-    end,
+    group = grp,
+    callback = function() late_auto(false) end,
   })
 end
 EOF
@@ -1166,7 +1303,11 @@ let g:gutentags_define_advanced_commands = 1
 " 올라가 SDK 여러 개를 담은 디렉터리를 루트로 잡는다 (autoindex.lua marker_root).
 let g:gutentags_project_root = ['.git', '.repo', '.project', '.root']
 let g:gutentags_add_default_project_roots = 0
-let g:gutentags_cache_dir = expand('~/.cache/tags')
+" XDG_CACHE_HOME 을 준 경우(격리된 시험)에만 그 아래로. 평소(맥·서버 모두 비어
+" 있다)는 예전 자리 그대로다 - 옮기면 모든 프로젝트의 tags 를 다시 만든다.
+" 격리한 시험이 여기(~/.cache/tags)에 시험 트리의 tags 를 쌓아 48MB 짜리까지
+" 남긴 적이 있다.
+let g:gutentags_cache_dir = empty($XDG_CACHE_HOME) ? expand('~/.cache/tags') : $XDG_CACHE_HOME . '/tags'
 let g:gutentags_generate_on_new = 1
 let g:gutentags_generate_on_missing = 1
 let g:gutentags_generate_on_write = 1
@@ -1823,7 +1964,17 @@ func! s:RvEditJump() abort
 		call s:JumpFromPeek()
 		return
 	endif
-	execute "normal! \<C-]>"
+	" 색인에 없는 이름(return, 숫자, 모르는 심볼)이면 태그 오류를 한 줄로 알린다.
+	" 그대로 두면 'Error in function ...' 네 줄과 Press ENTER 가 떴다 (QA).
+	" 미리보기 창의 <C-]> 가 이미 그렇게 한 줄로 알린다.
+	try
+		execute "normal! \<C-]>"
+	catch /^Vim\%((\a\+)\)\=:E\%(426\|433\|257\|73\):/
+		call s:RvUnmark(l:marked)
+		echohl WarningMsg
+		echo '정의를 찾지 못했습니다: ' . expand('<cword>')
+		echohl None
+	endtry
 endfunc
 nnoremap <silent> g] :call <SID>RvEditJump()<CR>
 " f] 도 같은 자리에 건다(요청). g] 는 그대로 둔다 - 손에 익은 쪽을 쓰면 된다.
@@ -3437,7 +3588,7 @@ endif
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
 "     <leader>fR  지금 목록으로 재색인
-"     <leader>fs  색인된 심볼 검색 (<F3> 또는 ^g 로 relation window 로 넘김)
+"     <leader>fs  색인된 심볼 검색 (<F12> 또는 ^g 로 relation window 로 넘김)
 "                 <F7> 로도 같은 것을 연다
 "     <leader>fw  커서 밑 심볼로 바로 검색
 "     <leader>fk  북마크(mark) 목록      (ma..mz 로 표시, 'a 로 이동)

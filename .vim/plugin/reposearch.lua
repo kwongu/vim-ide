@@ -91,11 +91,17 @@ local function has_commit(gitdir)
     if uv.fs_stat(d .. '/' .. ref) or uv.fs_stat(d .. '/reftable') then
       return true
     end
+    -- HEAD 가 가리키는 가지가 아직 없어도(orphan 가지로 막 옮김) 다른 가지에
+    -- 커밋이 있으면 저장소다 (QA). 갓 git init 한 것은 refs/heads 가 비어 있다.
+    local sd = uv.fs_scandir(d .. '/refs/heads')
+    if sd and uv.fs_scandir_next(sd) then
+      return true
+    end
     local fd = io.open(d .. '/packed-refs', 'r')
     if fd then
-      local want = ' ' .. ref
       for line in fd:lines() do
-        if line:sub(-#want) == want then
+        -- 주석(# pack-refs ...)과 벗긴 태그(^...) 줄이 아니면 ref 가 하나 있다
+        if line ~= '' and not line:match('^[#^]') then
           fd:close()
           return true
         end
@@ -202,7 +208,14 @@ local function dir_of(p)
   if vim.fn.isdirectory(p) == 1 then
     return p
   end
+  -- 아직 없는 디렉터리의 새 파일(:e newdir/x.c)이면 가장 가까운 있는 윗
+  -- 디렉터리에서 시작한다 - 예전에는 nvim 의 cwd 로 떨어졌다 (QA).
   local d = vim.fn.fnamemodify(p, ':h')
+  local guard = 0
+  while d ~= '/' and vim.fn.isdirectory(d) ~= 1 and guard < 64 do
+    d = vim.fn.fnamemodify(d, ':h')
+    guard = guard + 1
+  end
   return vim.fn.isdirectory(d) == 1 and d or nil
 end
 
@@ -266,6 +279,16 @@ local function base_dir(state)
   return vim.fn.getcwd()
 end
 
+-- 알림에 넣는 경로. 줄이 넘치면 Press ENTER 가 뜨므로 길면 줄여 쓴다 (QA).
+local function short(p)
+  local t = vim.fn.fnamemodify(p, ':~')
+  local room = math.max(20, (tonumber(vim.v.echospace) or 80) - 40)
+  if vim.fn.strdisplaywidth(t) > room then
+    t = vim.fn.pathshorten(t)
+  end
+  return t
+end
+
 local KINDS = {
   files = { fn = 'find_files', title = 'Find Files' },
   grep = { fn = 'live_grep', title = 'Live Grep' },
@@ -287,7 +310,7 @@ function _G.vimide_repo_search(kind, state)
   local dir = base_dir(state)
   local root = repo_root(dir)
   if k.need_repo and not root then
-    vim.notify('git 저장소가 아닙니다 - ' .. vim.fn.fnamemodify(dir, ':~'), WARN)
+    vim.notify('git 저장소가 아닙니다 - ' .. short(dir), WARN)
     return
   end
   local cwd = root or dir
@@ -310,16 +333,28 @@ function _G.vimide_repo_search(kind, state)
           and { 'rg', '--files', '--max-depth', '1' }
           or { 'find', '.', '-maxdepth', '1', '(', '-type', 'f', '-o', '-type', 'l', ')' }
     elseif kind == 'grep' then
-      o.additional_args = { '--hidden', '--max-depth', '1' }
+      -- --follow: 링크인 점 파일(~/.vimrc)도 찾는다 (--max-depth 1 이라 링크된
+      -- 디렉터리 안으로 들어가지는 않는다)
+      o.additional_args = { '--hidden', '--follow', '--max-depth', '1' }
     end
   end
   o.prompt_title = ('%s  →  %s  %s'):format(k.title, vim.fn.fnamemodify(cwd, ':~'), where)
+  -- 뜬 트리(F11)에서 불렸으면 편집 창으로 나간 뒤에 연다. telescope 는 부른
+  -- 창으로 돌아가는데, 그게 곧 닫힐 뜬 창이면 <C-q>(quickfix 로 보내기)가
+  -- 편집 창을 quickfix 로 덮었다 (QA).
+  if api.nvim_win_get_config(0).relative ~= '' and type(_G.vimide_last_edit_win) == 'function' then
+    local okw, w = pcall(_G.vimide_last_edit_win)
+    if okw and type(w) == 'number' and w ~= 0 and api.nvim_win_is_valid(w) then
+      pcall(api.nvim_set_current_win, w)
+    end
+  end
   -- 저장소처럼 보여도 git 이 거절하는 경우(다른 사람 체크아웃의 'dubious
   -- ownership' 등)가 있다. 날것의 오류 대신 한 줄로 알린다.
   local ok2, err = pcall(builtin[k.fn], o)
   if not ok2 then
-    vim.notify(('%s 를 열 수 없습니다 - %s (%s)'):format(k.title,
-      vim.fn.fnamemodify(cwd, ':~'), (tostring(err):gsub('^.-:%d+: ', ''))), WARN)
+    local msg = tostring(err):gsub('^.-:%d+: ', ''):gsub('%s+', ' ')
+    vim.notify(('%s 를 열 수 없습니다 - %s (%s)'):format(k.title, short(cwd),
+      vim.fn.strcharpart(msg, 0, 60)), WARN)
   end
 end
 

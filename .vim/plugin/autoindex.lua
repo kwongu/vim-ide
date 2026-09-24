@@ -1209,7 +1209,8 @@ local function count_files(root, cb)
 end
 
 -- 이 루트를 gutentags 에서 떼어내고, 대신 ctags 스냅숏을 우리가 만든다.
-local function exclude_gutentags(root, why)
+-- no_build: gutentags 만 막고 우리 ctags 는 아직 만들지 않는다 (모드 미정/none)
+local function exclude_gutentags(root, why, no_build)
   local list = vim.g.gutentags_exclude_project_root or {}
   local known = false
   for _, r in ipairs(list) do
@@ -1223,8 +1224,12 @@ local function exclude_gutentags(root, why)
     vim.g.gutentags_exclude_project_root = list
     -- keep this on one line: a wrapped message means a hit-enter prompt at
     -- every start in a narrow terminal
-    notify(string.format('%s: %s - ctags 는 여기서 직접 만듭니다',
+    notify(string.format(no_build and '%s: %s - 색인 모드를 고르면 ctags 를 여기서 직접 만듭니다'
+      or '%s: %s - ctags 는 여기서 직접 만듭니다',
       vim.fn.fnamemodify(root, ':~'), why or 'big tree'))
+  end
+  if no_build then
+    return
   end
   if cfg('ctags', 1) ~= 0 and not s.ctags_tried[root] then
     local have = ctags_apply(root)
@@ -1298,7 +1303,18 @@ local function guard_ctags(path)
     return
   end
   local root = marker_root(path)
-  if not root or counted[root] then
+  if not root then
+    return
+  end
+  if counted[root] then
+    -- 모드를 정하기 전에 세어 두고 미뤄 둔 ctags 를, 모드를 고른 뒤 여는 첫
+    -- 파일에서 만든다
+    local why = s.ctags_deferred and s.ctags_deferred[root]
+    if why and (not _G.projectfiles_should_index_file
+        or _G.projectfiles_should_index_file(path)) then
+      s.ctags_deferred[root] = nil
+      exclude_gutentags(root, why)
+    end
     return
   end
   counted[root] = true
@@ -1309,7 +1325,20 @@ guard_ctags_decide = function(root, max, n)
   if n ~= nil and n <= max then
     return
   end
-  exclude_gutentags(root, n and (n .. ' files') or 'big tree')
+  -- 색인 모드를 아직 안 정했거나(unset) none 이면 우리 ctags 는 만들지 않는다 -
+  -- 예전에는 파일 하나를 열자마자 5000개가 넘는 트리 전체의 ctags 를 만들었다
+  -- (QA: 4만 파일, 9초, 9.7MB). 그래도 세기는 하고 gutentags 는 막아 둔다: 세기를
+  -- 모드를 고른 뒤로 미루면, 고른 뒤 여는 첫 버퍼에 세기가 끝나기 전에
+  -- gutentags 가 붙어 큰 트리 전체의 tags 를 만들었다 (반대 심문). 만들기는
+  -- 모드를 고른 뒤 여는 첫 파일에서 한다 (위 guard_ctags).
+  local why = n and (n .. ' files') or 'big tree'
+  if _G.projectfiles_should_index and not _G.projectfiles_should_index(root) then
+    s.ctags_deferred = s.ctags_deferred or {}
+    s.ctags_deferred[root] = why
+    exclude_gutentags(root, why, true)
+    return
+  end
+  exclude_gutentags(root, why)
 end
 
 -- ---------------------------------------------------------------------------

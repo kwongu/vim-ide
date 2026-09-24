@@ -109,7 +109,20 @@ function _G.vimide_ask(spec, on_ok)
     end
     return out
   end
+  -- 칸 수와 줄 수가 어긋났으면(어떻게든 줄이 합쳐지거나 늘었으면) 조용히
+  -- 멈추지 말고 닫으며 알린다 - 다시 열면 된다
+  local function broken()
+    if api.nvim_buf_line_count(buf) ~= #fields then
+      finish(nil)
+      vim.notify('입력 칸이 흐트러져 닫았습니다 - 다시 열어 주세요', vim.log.levels.WARN)
+      return true
+    end
+    return false
+  end
   local function confirm()
+    if broken() then
+      return
+    end
     local cur = api.nvim_win_get_cursor(win)[1]
     -- 아직 뒤 칸이 비어 있으면 Enter 는 '다음 칸으로'다
     for i = cur + 1, #fields do
@@ -121,6 +134,9 @@ function _G.vimide_ask(spec, on_ok)
     finish(values())
   end
   local function other(step)
+    if broken() then
+      return
+    end
     local cur = api.nvim_win_get_cursor(win)[1]
     local n = cur + step
     if n < 1 then n = #fields elseif n > #fields then n = 1 end
@@ -135,9 +151,14 @@ function _G.vimide_ask(spec, on_ok)
     vim.keymap.set(m, '<C-c>', function() finish(nil) end, { buffer = buf, nowait = true })
   end
   -- 칸 경계에서 줄이 합쳐지지 않게. 합쳐지면 이름표 둘이 한 줄에 겹친다.
-  vim.keymap.set('i', '<BS>', function()
-    return api.nvim_win_get_cursor(win)[2] == 0 and '' or '<BS>'
-  end, { buffer = buf, expr = true, replace_keycodes = true, nowait = true })
+  -- 뒤로 지우는 키는 전부 막는다 - 'backspace' 에 eol 이 있어 칸 머리의
+  -- <C-u>/<C-w>/<C-h> 도 줄바꿈을 지웠고, 그러면 두 칸이 한 줄이 되어 Enter
+  -- 가 먹지 않았다 (QA). 칸 안에서는 그대로 동작한다.
+  for _, k in ipairs({ '<BS>', '<C-h>', '<C-u>', '<C-w>' }) do
+    vim.keymap.set('i', k, function()
+      return api.nvim_win_get_cursor(win)[2] == 0 and '' or k
+    end, { buffer = buf, expr = true, replace_keycodes = true, nowait = true })
+  end
   vim.keymap.set('i', '<Del>', function()
     local c = api.nvim_win_get_cursor(win)
     local l = api.nvim_buf_get_lines(buf, c[1] - 1, c[1], false)[1] or ''

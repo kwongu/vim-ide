@@ -284,7 +284,14 @@ Every telescope list (\ff \fg \fi \fo \fx, the bookmarks ...) reads top down:
      `scroll_strategy = 'limit'` in the telescope setup of `.vimrc`). \fb lists
      the most recently used buffer first, and in \fb, \fi and the bookmarks
      equal matches keep that order while you type (telescope's default
-     tiebreak moves the shorter line up)
+     tiebreak moves the shorter line up). Enter, the open keys (`^x ^v ^t`),
+     the arrows, `^n`/`^p`, `j`/`k`, `<Tab>` and `^q`/`M-q` wait until the
+     list has caught up with what was typed (at most 5 s), so a name typed
+     and entered in one burst opens that name. With nothing typed they act at
+     once, even while a slow first list is still loading, and a resumed picker
+     (`:Telescope resume`) counts as caught up. In `\fx`, where Enter removes,
+     a second Enter that arrives while the list is being rebuilt is dropped,
+     not queued - see "Found by random QA" below
 Ctrl+n, Ctrl+p: Next/previous item of the list in front of you - the
      RelationView caller list when the panel holds one (previewed in the
      context window; the edit window does not move), the quickfix list
@@ -514,7 +521,7 @@ window of its own: everything runs through telescope pickers.
 \fm  choose the preset                  (auto included, ^d deletes mine)
 \fS  save the current entries as a preset
 \fR  reindex now
-\fs  find any symbol in the index      (<F3> sends it to the relation window)
+\fs  find any symbol in the index      (<F12> or ^g sends it to the relation window)
 \fw  the same, for the symbol under the cursor
 ```
 
@@ -538,7 +545,7 @@ selection and the `<Tab>` marks as they were. The
 selection is found again by name, not by position, so dropping a directory
 entry (which takes the file entries under it along) does not push it down.
 `d` is taken in these pickers, so `<Esc>dd` no longer clears the prompt - use
-`Ctrl+u` in insert mode for that.
+`<Esc>cc` for that (telescope keeps `Ctrl+u` for scrolling the preview).
 `\fp` and `\fd` (pick files / directories to add) are off: both walk the whole
 project to build their list, which is slow on a big tree. The keys now only say
 so - left unmapped, `\f` (`:Gtags -P <word>`, which waits for Enter) would fire
@@ -1239,6 +1246,40 @@ stalls that were there and what took them away:
 | every edit with the outline closed | 50 ms, 120 at worst (aerial recounting the file's symbols) | none | aerial loads when F10 opens it; `g:vimide_outline_auto = 1` still makes it open by itself, and switching that on mid-session takes effect at the next buffer |
 | right after startup | 50 ms (neo-tree merging its whole configuration for the git-status size guard) | none | the guard writes into the pending configuration instead |
 | startup to first screen | 0.48-0.89 s | 0.38-0.41 s | the above |
+
+### Found by random QA
+
+A randomized QA pass (six feature areas driven through the real TUI in
+isolated sandboxes, every finding reproduced a second time before it was
+fixed) turned these up; all are fixed and were checked again on screen:
+
+| what went wrong | now |
+|---|---|
+| telescope keeps "the selected entry" and "the prompt" in one global slot that a new picker does not clear. Enter pressed right after opening `\fi` ran `git checkout <the file picked in the previous picker>` and threw away uncommitted edits; `\ff`/`\fb` opened the previous pick or the unfiltered top row when a name and Enter arrived together | every picker clears the slot when it opens, and Enter/moves wait for the list (see the telescope line in the key list) |
+| typing a filter, a move key and Enter in one burst in the bookmark list registered a duplicate bookmark instead of jumping | moves wait too, so the move lands on the filtered list |
+| the bookmark list opened from another telescope picker lost the add row and `d` died with `Invalid buffer id` | it takes its place, symbol and marks from the last edit window |
+| a Markdown file with a code fence or a shell script with a heredoc showed a treesitter traceback and Press ENTER on every open (the archived nvim-treesitter's directives predate nvim 0.12's capture lists) | `.vimrc` re-registers the two directives in the new shape; fenced code is highlighted again |
+| the same buffer in two windows kept its local/global/index colours only in the focused one | every window showing it is painted |
+| F10 moved the edit window's cursor to a symbol (aerial's autojump fires on its own cursor placement) | autojump is off; the edit window follows only when you move to another symbol in the outline |
+| the "remove N entries?" prompt had no working yes (`&예` is not a hotkey nvim can match) | `y` / `n` |
+| removing the last entries that exist in this checkout left them in `.tags/files` and the index | the project goes to none mode (the preset file stays for other checkouts) |
+| `\fo`/F3 in none or unset mode walked the whole tree on every press (3.4 s on 40k files) | it opens an asynchronous find over the project instead |
+| each tree `+`/`-` or `^d` re-read the first KB of every file in the preset (0.4-0.85 s with 4000 files) | the binary check is kept per file by size and mtime |
+| opening one file in an unset-mode tree of 5000+ files started a full ctags build | nothing is built until a mode is chosen |
+| quickfix opened from the F11 float tree took over the edit window and left `cmdheight` at 38 | the float is left first |
+| `Ctrl+u`/`Ctrl+w` at the start of the find dialog's second field joined the two fields | the backward-delete keys stop at a field's start |
+| F10 within 1.5 s of opening RelationView replaced the edit window's file and could leave two panels | the tree cleanup only waits while the tree slot still shows the buffer it was split from, and the window guard drops records copied by `:split` |
+| re-opening the list with the tree/context column up built a second column | the list goes back into the column |
+| the panel of the first tab went dead once a panel was opened in a second tab; `Ctrl+n` there moved the edit window | the current tab's windows are picked up again on every tab change |
+| `Ctrl+]` on a word the index does not know printed a four-line traceback | one line: `정의를 찾지 못했습니다: <word>` |
+| names inside `#if 0` were painted over the grey | dead code stays grey and is not looked up |
+| C++ namespaces/classes/templates and C inside `extern "C" {` lost local colours after the speed-up | those scopes are walked too |
+| the status line's current function stayed blank after jumping into a large file | a blank computed before the tree exists is not kept |
+| after an edit, struct members blinked black while the member budget carried on | members that were green stay green until re-resolved |
+| isolated test runs left tag files in `~/.cache/tags` | `g:gutentags_cache_dir` follows `$XDG_CACHE_HOME` when it is set (it is not, normally) |
+| a tree of 5000+ files opened before its index mode is chosen: gutentags must stay off it, but our own ctags build waits | the file count still runs and keeps gutentags away; the ctags build starts with the first file opened after a mode is chosen |
+
+Smaller ones fixed alongside: `+` on the tree's root row adds the whole project and `-` on anything under it then works; a removal that removes nothing, or an add whose path holds nothing to index, no longer switches the project to none mode; a big context window (`T`) in another tab is no longer taken for the small one; a bookmark saved through a symlink opens from the real path; a dangling symlinked `bookmarks.json` is left alone instead of replaced; long paths in notices are shortened so they do not trip Press ENTER; `\fg` at home follows symlinked dotfiles; a new file in a directory that does not exist yet searches from the nearest existing one; a repository on an orphan branch still counts; a single `+` on the tree's root row adds the root.
 
 ### Searching from the repository
 

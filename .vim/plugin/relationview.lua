@@ -1976,11 +1976,18 @@ end
 -- 창을 새로 만들 때만이 아니라 '이미 있는 패널 창을 다시 집는' 갈래에서도
 -- 걸어야 한다. 안 그러면 그 창에는 훅이 없어, 닫혀도 넓힘 기억이 남는다.
 local function watch_panel(win)
+  -- 탭을 오가며 다시 집을 때마다 불리므로 창마다 한 번만 건다
+  s.watched = s.watched or {}
+  if s.watched[win] then
+    return
+  end
+  s.watched[win] = true
   local tab = api.nvim_win_get_tabpage(win)
   api.nvim_create_autocmd('WinClosed', {
     pattern = tostring(win),
     once = true,
     callback = function()
+      s.watched[win] = nil
       -- 넓혀 둔 채로 패널을 닫았다: 그 탭의 기억은 이제 쓸 데가 없다.
       -- 남겨 두면 다음에 열어 'w' 를 눌렀을 때 옛 배치를 되돌린다.
       if s.wide then
@@ -2017,7 +2024,26 @@ local function panel_open()
     return existing
   end
   local prev = api.nvim_get_current_win()
-  if cfg('position', 'bottom') == 'right' then
+  -- 오른쪽 열(트리/미리보기)이 이미 떠 있으면 그 열 안에 끼워 넣는다 -
+  -- 미리보기 위, 없으면 트리 아래. 예전에는 늘 새 열을 만들어서, 목록만
+  -- 닫았다가 다시 열거나 'context' 에서 'both' 로 바꾸면 목록이 따로 한 열이
+  -- 되고 편집 창이 반으로 줄었다 (QA 실측).
+  local host, above
+  if cfg('position', 'bottom') == 'right' and cfg('right_stack', 1) ~= 0 then
+    local tab = api.nvim_get_current_tabpage()
+    local function here(w)
+      return w and api.nvim_win_is_valid(w) and api.nvim_win_get_tabpage(w) == tab
+    end
+    if here(s.ctx_win) then
+      host, above = s.ctx_win, true
+    elseif here(s.tree_win) then
+      host, above = s.tree_win, false
+    end
+  end
+  if host then
+    api.nvim_set_current_win(host)
+    vim.cmd('keepalt ' .. (above and 'leftabove' or 'rightbelow') .. ' split')
+  elseif cfg('position', 'bottom') == 'right' then
     vim.cmd('keepalt botright vertical ' .. cfg('width', 50) .. 'split')
   else
     vim.cmd('keepalt botright ' .. cfg('height', 12) .. 'split')
@@ -2048,6 +2074,9 @@ local function panel_open()
   end
   if want_tree() then
     ensure_tree()
+  end
+  if host then
+    pcall(apply_column_ratio) -- 끼워 넣은 열을 2:4:6 으로
   end
   return win
 end
@@ -2327,7 +2356,12 @@ function _G.relationview_flash(buf, line, sym)
 end
 
 function _G.relationview_panel_win()
-  return (s.win and api.nvim_win_is_valid(s.win)) and s.win or nil
+  -- 지금 탭의 패널만. 다른 탭에서 연 패널을 이 탭의 <C-n> 이 몰면 이 탭의
+  -- 편집 창이 그 목록 항목으로 옮겨졌다 (QA)
+  if not panel_visible() then
+    pcall(A.adopt_here)
+  end
+  return panel_visible() and s.win or nil
 end
 
 -- sihlindex.lua 가 색과 점프가 같은 DB 를 보도록 쓰는 입구.
@@ -2465,6 +2499,9 @@ local function ctx_fill(path, line)
 end
 
 ensure_ctx = function()
+  if not ctx_visible() then
+    pcall(A.adopt_here) -- 이 탭에 이미 있는 미리보기 창을 다시 집는다 (새로 만들지 않게)
+  end
   if ctx_visible() then
     return s.ctx_win
   end
@@ -2767,6 +2804,9 @@ api.nvim_create_autocmd('FileType', {
 })
 
 ensure_tree = function()
+  if not tree_visible() then
+    pcall(A.adopt_here)
+  end
   if tree_visible() then
     return s.tree_win
   end
@@ -2815,6 +2855,10 @@ ensure_tree = function()
     return nil
   end
   s.tree_win = win
+  pcall(function() vim.w[win].rv_tree = true end) -- 탭을 오갈 때 다시 집는 표
+  -- 갈라 만든 창은 처음에 원래 창(패널)의 버퍼를 보여 준다. 아래 청소
+  -- autocmd 는 '트리 자리가 아직 그 버퍼인' 동안만 건너뛴다.
+  s.tree_seed = api.nvim_win_get_buf(win)
   s.tree_making = true
   vim.defer_fn(function() s.tree_making = false end, 1500)
   install_open_hook()
@@ -3089,11 +3133,18 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
   group = group,
   callback = function()
     local w = s.tree_win
-    if not (w and api.nvim_win_is_valid(w)) or s.tree_making then
+    if not (w and api.nvim_win_is_valid(w)) then
       return
     end
     local b = api.nvim_win_get_buf(w)
     if vim.bo[b].filetype == 'neo-tree' then
+      return
+    end
+    -- 만드는 중(1.5초)이라도 건너뛰는 것은 갈라 온 그 버퍼가 아직 있을 때뿐이다.
+    -- 예전에는 1.5초를 통째로 건너뛰어서, 그 사이 F10(:Neotree close)이 트리
+    -- 자리에 다른 버퍼를 넣으면 아무도 치우지 않았고, 창 지킴이가 그 버퍼를
+    -- 편집 창으로 밀어내 편집 창의 파일이 바뀌고 RelationView 가 둘이 됐다 (QA).
+    if s.tree_making and b == s.tree_seed then
       return
     end
     s.tree_win = nil
@@ -3154,6 +3205,8 @@ local function ensure_big()
     vim.wo[win].winfixwidth = true
   end)
   s.big_win = win
+  -- 탭을 오갈 때 이 창을 작은 미리보기로 잘못 집지 않게 표를 단다 (A.adopt_here)
+  pcall(function() vim.w[win].rv_big = true end)
   api.nvim_create_autocmd('WinClosed', {
     pattern = tostring(win),
     once = true,
@@ -7073,6 +7126,78 @@ function A.vmax_toggle()
   s.vmax[tab] = { win = cur, sizes = sizes, had = had, fix = fix[cur] }
 end
 
+-- 지금 탭의 패널·미리보기·트리 창을 다시 집는다.
+--
+-- s.win/s.ctx_win/s.tree_win 은 창을 만든 그 순간에만 잡혀서, 두 번째 탭에서
+-- 패널을 열면 셋 다 그 탭 것을 가리킨다. 첫 탭으로 돌아오면 그 탭의 패널은
+-- '꺼짐'으로 보여 커서를 따라가지 않았고, <C-n> 은 다른 탭의 목록을 몰아
+-- 이 탭의 편집 창을 옮겼으며, F12 는 있는 미리보기·트리 옆에 또 만들었다 (QA).
+function A.adopt_here()
+  if not panel_visible() then
+    local w = panel_win_here()
+    if w then
+      s.win = w
+      watch_panel(w)
+    end
+  end
+  -- 큰 미리보기(T)는 같은 버퍼를 보여 주므로 표(rv_big)로 가른다. s.big_win 은
+  -- 전역 하나라 다른 탭의 창을 가리킬 수 있어서, 그것만 빼면 이 탭의 큰
+  -- 미리보기를 작은 미리보기로 집었다 - 열이 눌리고 cmdheight 가 불어났다 (반대 심문).
+  local function is_big(w)
+    local okb, b = pcall(function() return vim.w[w].rv_big end)
+    return okb and b == true
+  end
+  if not (s.big_win and api.nvim_win_is_valid(s.big_win)
+      and api.nvim_win_get_tabpage(s.big_win) == api.nvim_get_current_tabpage()) then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if is_big(w) then
+        s.big_win = w
+        break
+      end
+    end
+  end
+  if not ctx_visible() and s.ctx_ph and api.nvim_buf_is_valid(s.ctx_ph) then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local okc, c = pcall(api.nvim_win_get_config, w)
+      if w ~= s.big_win and not is_big(w) and api.nvim_win_get_buf(w) == s.ctx_ph
+          and okc and (c.relative or '') == '' then
+        s.ctx_win = w
+        s.ctx_last = nil
+        s.hooked = s.hooked or {}
+        if not s.hooked[w] then
+          s.hooked[w] = true
+          api.nvim_create_autocmd('WinClosed', {
+            pattern = tostring(w),
+            once = true,
+            callback = function()
+              s.hooked[w] = nil
+              if s.ctx_win == w then
+                s.ctx_win = nil
+                s.ctx_last = nil
+              end
+            end,
+          })
+        end
+        break
+      end
+    end
+  end
+  if not tree_visible() then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local okv, mark = pcall(function() return vim.w[w].rv_tree end)
+      if okv and mark then
+        s.tree_win = w
+        break
+      end
+    end
+  end
+end
+
+api.nvim_create_autocmd({ 'TabEnter', 'TabClosed' }, {
+  group = group,
+  callback = function() pcall(A.adopt_here) end,
+})
+
 function A.pin()
   s.pinned = not s.pinned
   update_header()
@@ -7116,7 +7241,10 @@ end
 -- Returns false when there is no list to walk, which is what makes the
 -- mapping fall through to quickfix.
 function A.step(dir, focus)
-  if not (s.win and api.nvim_win_is_valid(s.win)
+  if not panel_visible() then
+    pcall(A.adopt_here)
+  end
+  if not (panel_visible()
       and s.buf and api.nvim_buf_is_valid(s.buf)
       and api.nvim_win_get_buf(s.win) == s.buf) then
     return false
@@ -8193,6 +8321,12 @@ function A.grep(pattern, dir, origin)
       vim.notify(title .. ' : 결과 없음', vim.log.levels.INFO)
       return
     end
+    -- 뜬 창(F11 트리)에서 불렸으면 먼저 편집 창으로 나간다. 뜬 창에서 곧장
+    -- 가르면 neo-tree 가 그 WinEnter 에 뜬 창을 닫으며 새 창까지 닫혀, copen 이
+    -- 편집 창을 quickfix 로 덮고 cmdheight 가 38 이 됐다 (QA 실측).
+    if api.nvim_win_get_config(0).relative ~= '' then
+      pcall(goto_edit_slot)
+    end
     pcall(vim.cmd, 'botright copen')
   end
 
@@ -8351,6 +8485,12 @@ function A.find(pattern, dir)
     -- lnum 은 1 이다. 0 이면 quickfix 가 그 항목을 '유효하지 않음'으로
     -- 보고 <CR> 과 :cnext 가 건너뛴다.
     vim.fn.setqflist({}, ' ', { title = title, items = qf })
+    -- 뜬 창(F11 트리)에서 불렸으면 먼저 편집 창으로 나간다. 뜬 창에서 곧장
+    -- 가르면 neo-tree 가 그 WinEnter 에 뜬 창을 닫으며 새 창까지 닫혀, copen 이
+    -- 편집 창을 quickfix 로 덮고 cmdheight 가 38 이 됐다 (QA 실측).
+    if api.nvim_win_get_config(0).relative ~= '' then
+      pcall(goto_edit_slot)
+    end
     pcall(vim.cmd, 'botright copen')
   end
 

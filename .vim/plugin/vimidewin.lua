@@ -483,6 +483,21 @@ local function rescue(win)
     end
   end
 
+  -- 기록된 곁창 버퍼가 같은 탭의 다른 창에 이미 떠 있으면, 이 기록은
+  -- :split 으로 베껴 온 것이다 (RelationView 가 패널을 갈라 트리 창을 만들면
+  -- 새 창은 처음에 패널 버퍼를 보여 준다). 되돌리면 패널이 둘이 되고 들어앉은
+  -- 버퍼가 편집 창으로 밀려나 편집 창의 파일이 바뀌었다 (QA). 기록만 버린다.
+  -- 다른 탭은 보지 않는다 - 탭마다 같은 패널 버퍼를 보여 줄 수 있다.
+  if g.buf and api.nvim_buf_is_valid(g.buf) then
+    local tab = api.nvim_win_get_tabpage(win)
+    for _, w2 in ipairs(vim.fn.win_findbuf(g.buf)) do
+      if w2 ~= win and api.nvim_win_get_tabpage(w2) == tab then
+        guarded[win] = nil
+        return
+      end
+    end
+  end
+
   -- 되돌리기 전에 커서를 기억해 둔다. 사용자가 보려던 자리다.
   local pos = api.nvim_win_get_cursor(win)
   -- 곁창 버퍼가 이미 지워져 '되돌리기' 대신 '다시 세우기' 를 해야 하는가

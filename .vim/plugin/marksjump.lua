@@ -116,11 +116,26 @@ end
 -- ---------------------------------------------------------------------------
 local uv = vim.uv or vim.loop
 
+-- 두 번째 값이 true 면 '링크인데 가리키는 곳이 없다' (공유 폴더가 안 붙은 것
+-- 같은). 그때는 읽을 수 없는 것으로 보고 쓰지 않는다 - 없는 것으로 보고 새로
+-- 쓰면 rename 이 링크를 보통 파일로 갈아 치워, 공유 폴더가 돌아왔을 때 북마크가
+-- 두 벌로 갈렸다 (QA).
 local function bm_file()
   local f = vim.fn.stdpath('data') .. '/vim-ide/bookmarks.json'
   -- 링크로 두었으면 링크를 따라간 자리를 고친다. 바꿔 치기(rename)를 링크에
   -- 하면 링크가 보통 파일로 갈린다.
-  return uv.fs_realpath(f) or f
+  local real = uv.fs_realpath(f)
+  if real then
+    return real, false
+  end
+  local l = uv.fs_lstat(f)
+  return f, (l and l.type == 'link') or false
+end
+
+-- 알림에 넣는 경로: 파일 이름과 줄만. 경로가 길면 한 줄을 넘겨 Press ENTER 가 떴다 (QA).
+local function where_of(path, line)
+  local t = vim.fn.fnamemodify(path, ':t')
+  return line and (t .. ':' .. line) or t
 end
 
 -- 한 줄 글자를 적어 둘 모양으로. 바이트가 아니라 글자로 자른다 - 200바이트에서
@@ -133,7 +148,12 @@ end
 -- 빈 목록으로 덮어쓰면 담아 둔 것을 전부 잃는다. '없다'와 '못 읽는다'를 가른다:
 -- 권한이 없어 못 읽는 파일을 없는 것으로 보고 덮어쓴 적이 있다(반대 심문).
 local function bm_read()
-  local f = bm_file()
+  local f, dangling = bm_file()
+  if dangling then
+    vim.notify('북마크 파일이 가리키는 곳이 없습니다 (링크) - 읽지도 쓰지도 않습니다: '
+      .. vim.fn.fnamemodify(f, ':~'), vim.log.levels.WARN)
+    return {}, true
+  end
   if not uv.fs_stat(f) then
     return {}, false
   end
@@ -442,22 +462,32 @@ local function jump(e)
   -- 버퍼의 마크도 있다). 버퍼로 떠 있으면 그것도 연다.
   if e.kind == 'bookmark' and vim.fn.filereadable(e.path) ~= 1
       and vim.fn.bufexists(e.path) == 0 then
-    vim.notify('그 파일이 없습니다: ' .. vim.fn.fnamemodify(e.path, ':~:.'),
+    vim.notify('그 파일이 없습니다: ' .. where_of(e.path),
       vim.log.levels.WARN)
     return
   end
   -- 마크로 뛰면 점프 목록에 자리가 남아 <C-o> 로 돌아올 수 있다
   pcall(vim.cmd, "normal! m'")
+  -- 같은 파일인지는 링크를 푼 실제 경로로 본다. 링크로 등록한 북마크(linked.py
+  -- -> real/real.py)를 실제 경로로 연 세션에서 고르면, :edit 가 이미 열린 버퍼를
+  -- 다시 쓰는데(파일 id 로 맞춘다) 이름이 달라 '열지 못했다'고 했다 (QA).
+  local function same(a, b)
+    if a == b then
+      return true
+    end
+    local ra, rb = uv.fs_realpath(a), uv.fs_realpath(b)
+    return ra ~= nil and ra == rb
+  end
   local cur = api.nvim_buf_get_name(0)
-  if vim.fn.fnamemodify(cur, ':p') ~= e.path then
+  if not same(vim.fn.fnamemodify(cur, ':p'), e.path) then
     pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(e.path))
   end
   local lnum, col = e.lnum, e.col
   if e.kind == 'bookmark' then
     -- :edit 가 실패했으면(winfixbuf 창 등) 지금 버퍼는 다른 파일이다. 거기서 줄을
     -- 찾아 저장하면 엉뚱한 줄이 적힌다.
-    if vim.fn.fnamemodify(api.nvim_buf_get_name(0), ':p') ~= e.path then
-      vim.notify('그 파일을 열지 못했습니다: ' .. vim.fn.fnamemodify(e.path, ':~:.'),
+    if not same(vim.fn.fnamemodify(api.nvim_buf_get_name(0), ':p'), e.path) then
+      vim.notify('그 파일을 열지 못했습니다: ' .. where_of(e.path),
         vim.log.levels.WARN)
       return
     end
@@ -518,9 +548,8 @@ local function register(pos, name)
   end
   local ok, how = bm_add(pos, vim.trim(name))
   if ok then
-    vim.notify((how == 'same' and '이미 있는 북마크입니다 (시각만 새로): %s  (%s:%d)'
-        or '북마크 등록: %s  (%s:%d)'):format(vim.trim(name),
-      vim.fn.fnamemodify(pos.path, ':~:.'), pos.line))
+    vim.notify((how == 'same' and '이미 있는 북마크입니다 (시각만 새로): %s  (%s)'
+        or '북마크 등록: %s  (%s)'):format(vim.trim(name), where_of(pos.path, pos.line)))
     return true
   end
   return false
@@ -554,9 +583,24 @@ local function picker_busy(picker)
 end
 
 function _G.vimide_marks()
-  local pos, sym = here()
-  local origin_buf = api.nvim_get_current_buf()
-  local items = collect()
+  local pos, sym, origin_buf, items
+  -- 다른 텔레스코프 창(프롬프트)에서 열면 그 프롬프트는 곧 닫히며 지워진다.
+  -- 담을 자리·커서 밑 심볼·마크를 모을 버퍼는 마지막 편집 창에서 가져온다 -
+  -- 프롬프트 버퍼를 잡아 두었다가 d 에서 'Invalid buffer id' 로 죽었다 (QA).
+  -- 트리·패널에서 열 때는 예전처럼 담지 않는다 (here() 의 규칙 그대로).
+  local ew = (vim.bo.buftype == 'prompt' and type(_G.vimide_last_edit_win) == 'function')
+      and select(2, pcall(_G.vimide_last_edit_win)) or nil
+  if type(ew) == 'number' and ew ~= 0 and api.nvim_win_is_valid(ew) then
+    api.nvim_win_call(ew, function()
+      pos, sym = here()
+      origin_buf = api.nvim_get_current_buf()
+      items = collect()
+    end)
+  else
+    pos, sym = here()
+    origin_buf = api.nvim_get_current_buf()
+    items = collect()
+  end
   local t = telescope()
   if not t then
     -- 0 은 취소다(inputlist 는 Esc 나 빈 Enter 도 0 을 준다). 등록은 1 번.
@@ -742,16 +786,26 @@ function _G.vimide_marks()
           end
         else
           -- 버퍼 마크(a-z)는 그 버퍼에서 지워야 한다. 지금 창은 프롬프트라, 마크를
-          -- 모아 온 원래 버퍼에서 지운다.
-          pcall(api.nvim_buf_call, origin_buf, function()
-            vim.cmd('delmarks ' .. e.name)
+          -- 모아 온 원래 버퍼에서 지운다. 전역 마크(A-Z, 0-9)는 어디서 지워도 된다.
+          local okd, err = pcall(function()
+            if e.global or not api.nvim_buf_is_valid(origin_buf) then
+              vim.cmd('delmarks ' .. e.name)
+            else
+              api.nvim_buf_call(origin_buf, function() vim.cmd('delmarks ' .. e.name) end)
+            end
           end)
-          vim.notify(("마크 '%s' 를 지웠습니다"):format(e.name))
+          if okd then
+            vim.notify(("마크 '%s' 를 지웠습니다"):format(e.name))
+          else
+            vim.notify(("마크 '%s' 를 지우지 못했습니다: %s"):format(e.name, tostring(err)),
+              vim.log.levels.WARN)
+          end
         end
         if not picker then
           return
         end
-        items = api.nvim_buf_call(origin_buf, collect)
+        items = api.nvim_buf_is_valid(origin_buf) and api.nvim_buf_call(origin_buf, collect)
+            or collect()
         refresh_keep(picker, make_finder(), title())
       end)
       return true

@@ -103,6 +103,18 @@ local PREPROC = {
   preproc_elif = true, preproc_elifdef = true,
 }
 
+-- 함수 정의를 품을 수 있는 그릇들 - 칠할 때(visit) 이 안으로도 내려간다.
+-- C 의 '#ifdef __cplusplus / extern "C" {' 가드, C++ 의 namespace/class/
+-- template, 구문 오류(ERROR) 조각. 여기로 안 내려가면 그 안의 함수는 '함수
+-- 밖'으로 여겨져 지역 색이 빠지고, 전역과 이름이 같은 지역이 전역 색으로
+-- 칠해졌다 (반대 심문).
+local SCOPE = {
+  linkage_specification = true, declaration_list = true,
+  namespace_definition = true, template_declaration = true,
+  class_specifier = true, struct_specifier = true, union_specifier = true,
+  field_declaration_list = true, ERROR = true,
+}
+
 local function globals_of(root, buf)
   local globals, gdecl_at = {}, {}
   local function add(id)
@@ -154,6 +166,63 @@ local function globals_of(root, buf)
   end
   walk(root, true)
   return globals, gdecl_at
+end
+
+
+-- '#if 0' 안의 죽은 코드 줄 구간들 (after/queries/c/highlights.scm 의
+-- @si.inactive 와 같은 규칙: #if 0 부터 #else 앞까지, #else 가 없으면 #endif
+-- 까지). 거기는 SI 처럼 회색으로 두고 칠하지도 색인에 묻지도 않는다 - 우선
+-- 순위 200 의 색이 회색(105)을 덮어 죽은 코드가 살아 있는 것처럼 보였다 (QA).
+local INACT_Q = {}
+local function inactive_rows(lang, root, buf, lo, hi, out)
+  if INACT_Q[lang] == nil then
+    local ok, q = pcall(vim.treesitter.query.parse, lang,
+      '(preproc_if condition: (number_literal) @z) @blk')
+    INACT_Q[lang] = ok and q or false
+  end
+  local q = INACT_Q[lang]
+  if not q then
+    return out
+  end
+  for id, node in q:iter_captures(root, buf, lo, hi) do
+    if q.captures[id] == 'blk' then
+      local cond = node:field('condition')[1]
+      if cond and vim.treesitter.get_node_text(cond, buf) == '0' then
+        local sr = node:start()
+        local alt = node:field('alternative')[1]
+        local er = alt and alt:start() or select(3, node:range())
+        out[#out + 1] = { sr, er }
+      end
+    end
+  end
+  return out
+end
+
+local function in_rows(rs, r)
+  for _, x in ipairs(rs) do
+    if r > x[1] and r < x[2] then
+      return true
+    end
+  end
+  return false
+end
+
+-- 창마다 모은 줄 구간을 겹치거나 맞닿는 것끼리 합친다 (같은 곳을 보는 :vsplit 이
+-- 같은 일을 두 번 하지 않게 - 반대 심문)
+local function merge_ranges(rs)
+  table.sort(rs, function(x, y) return x[1] < y[1] end)
+  local out = {}
+  for _, r in ipairs(rs) do
+    local last = out[#out]
+    if last and r[1] <= last[2] then
+      if r[2] > last[2] then
+        last[2] = r[2]
+      end
+    else
+      out[#out + 1] = { r[1], r[2] }
+    end
+  end
+  return out
 end
 
 local qcache = {}
@@ -234,17 +303,36 @@ local function paint(win)
   end
   local root = trees[1]:root()
 
-  local info = vim.fn.getwininfo(win)[1]
-  if not info then
+  -- 이 버퍼를 보여 주는 (지금 탭의) 창마다 그 창의 보이는 줄(+여유)을 칠한다.
+  -- 네임스페이스는 버퍼에 붙으므로 한 창 몫만 칠하면 같은 버퍼를 보여 주는 다른
+  -- 창(:vsplit)의 색이 통째로 지워졌다 (QA 실측). 다른 탭의 창은 그 탭에 들어갈
+  -- 때(BufWinEnter/WinScrolled/CursorHold) 다시 칠해진다.
+  local pad = tonumber(cfg('pad', 40)) or 40
+  local maxl = tonumber(cfg('max', 4000)) or 4000
+  local last = api.nvim_buf_line_count(buf)
+  local ranges = {}
+  local wins = { win }
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if w ~= win and api.nvim_win_get_buf(w) == buf then
+      wins[#wins + 1] = w
+    end
+  end
+  for _, w in ipairs(wins) do
+    local info = vim.fn.getwininfo(w)[1]
+    if info then
+      local a = math.max(0, (info.topline or 1) - 1 - pad)
+      local b = math.min(last, (info.botline or last) + pad)
+      if (b - a) > maxl then
+        b = a + maxl
+      end
+      ranges[#ranges + 1] = { a, b }
+    end
+  end
+  if #ranges == 0 then
     return
   end
-  local pad = tonumber(cfg('pad', 40)) or 40
-  local last = api.nvim_buf_line_count(buf)
-  local lo = math.max(0, (info.topline or 1) - 1 - pad)
-  local hi = math.min(last, (info.botline or last) + pad)
-  if (hi - lo) > (tonumber(cfg('max', 4000)) or 4000) then
-    hi = lo + (tonumber(cfg('max', 4000)) or 4000)
-  end
+  ranges = merge_ranges(ranges)
+  local lo, hi = ranges[1][1], ranges[1][2]
 
   -- 보이는 줄이 걸쳐 있는 함수들을 모으고, 함수마다 선언된 이름을 센다.
   -- 함수 단위로 보는 이유: C 에서 블록마다 가리는 경우는 드물고, 블록까지
@@ -296,9 +384,13 @@ local function paint(win)
   local prio = tonumber(vim.g.sihl_priority) or 200
   local glob_on = (tonumber(vim.g.sihl_local_global) or 1) ~= 0
   local done = {}
+  local inact = {}
+  for _, r in ipairs(ranges) do
+    inactive_rows(lang, root, buf, r[1], r[2], inact)
+  end
   local function paint_ref(node, fn)
     local r1, c1, r2, c2 = node:range()
-    if r1 == r2 and r1 >= lo and r1 < hi then
+    if r1 == r2 and r1 >= lo and r1 < hi and not in_rows(inact, r1) then
       local at = r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2
       if not done[at] then
         done[at] = true
@@ -339,7 +431,7 @@ local function paint(win)
       local sr, _, er, _ = c:range()
       if er >= lo and sr < hi then
         local t = c:type()
-        if PREPROC[t] then
+        if PREPROC[t] or SCOPE[t] then
           visit(c)
         else
           local fn = (t == 'function_definition') and c or nil
@@ -350,7 +442,10 @@ local function paint(win)
       end
     end
   end
-  visit(root)
+  for _, r in ipairs(ranges) do
+    lo, hi = r[1], r[2]
+    visit(root)
+  end
 end
 
 local function schedule()

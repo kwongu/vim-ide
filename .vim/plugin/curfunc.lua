@@ -81,12 +81,20 @@ function _G.vimide_cur_func()
   if last.buf == buf and last.tick == tick and last.line == line then
     return last.val
   end
-  local val = ''
+  local val, answered = '', true
   -- 이미 있는 트리만 쓴다 (없으면 빈칸). 여기서 새로 분석하면 큰 파일에서
   -- 상태줄이 분석을 기다린다.
   local okp, parser = pcall(vim.treesitter.get_parser, buf, nil, { error = false })
   if okp and parser then
     local okn, node = pcall(vim.treesitter.get_node, { bufnr = buf, ignore_injections = true })
+    -- 트리가 아직 없으면(큰 파일은 비동기로 분석한다) 빈칸을 담아 두지 않는다.
+    -- 담아 두면 분석이 끝난 뒤에도 커서가 줄을 옮길 때까지 빈칸이었다 - <C-]>
+    -- 로 다른 큰 파일에 뛰었을 때가 바로 그랬다 (반대 심문).
+    --
+    -- 커서 노드에서 parent() 로 거슬러 오른다. 루트에서 내려가며 형제를 Lua 로
+    -- 훑는 쪽으로 바꿔 봤는데, parent() 는 C 안에서 싸게 돌고 형제 훑기는
+    -- 형제마다 Lua 를 거쳐 60~1000배 느렸다 (반대 심문: 큰 파일에서 상태줄마다 5~7ms).
+    answered = okn and node ~= nil
     local typename
     while okn and node do
       local t = node:type()
@@ -105,6 +113,8 @@ function _G.vimide_cur_func()
       val = typename
     end
   end
-  last = { buf = buf, tick = tick, line = line, val = val }
+  if answered then
+    last = { buf = buf, tick = tick, line = line, val = val }
+  end
   return val
 end
