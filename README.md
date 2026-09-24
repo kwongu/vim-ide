@@ -1225,6 +1225,21 @@ listed.
 `Ctrl+f` in neo-tree was `scroll_preview` (scrolling the preview `P` opens).
 `Ctrl+b` still scrolls it the other way.
 
+### Keeping it quick
+
+Measured on the dev server with a 6,600-line C file (600 functions), the
+stalls that were there and what took them away:
+
+| where | before | after | what changed |
+|---|---|---|---|
+| scrolling, local-variable colours (`sihllocal`) | 55 ms per paint, 80 at worst | 9.6 ms, 22 | globals and per-function names kept per buffer change; top-down walk instead of `parent()` per name |
+| after an edit, the same | 164 ms, 325 at worst | 9.6 ms, 22 | globals by walking the top level instead of a whole-file query |
+| index colours (`sihlindex`) | 66-89 ms per paint | 20 ms (63 at worst after an edit) | one pass over the captures instead of two; local names kept per buffer change; the declaration a member's base variable comes from kept per function; member resolution limited to 25 ms a paint |
+| moving to another file, saving | about 340 ms (tagbar re-running ctags and parsing its output in Vim script, for the status line only) | none | the status line's current function comes from treesitter (`curfunc.lua`); `g:vimide_curfunc = 0` puts tagbar back. Real vim keeps tagbar |
+| every edit with the outline closed | 50 ms, 120 at worst (aerial recounting the file's symbols) | none | aerial loads when F10 opens it; `g:vimide_outline_auto = 1` still makes it open by itself, and switching that on mid-session takes effect at the next buffer |
+| right after startup | 50 ms (neo-tree merging its whole configuration for the git-status size guard) | none | the guard writes into the pending configuration instead |
+| startup to first screen | 0.48-0.89 s | 0.38-0.41 s | the above |
+
 ### Searching from the repository
 
 `\ff` (find files), `\fg` (live grep) and `\fi` (git commits) search the git
@@ -2034,6 +2049,19 @@ one function - is still a name you can jump to.
 | `g:sihl_local_global` | 0 turns off the purple globals below |
 | `g:sourceinsight_global_color` | a different purple, e.g. `'#6a1b9a'` |
 
+What stays the same while the text does is kept per buffer change
+(`changedtick`): the file-scope globals and each function's declared names.
+Scrolling therefore costs only the lines on screen. The globals are found by
+walking the top-level nodes (declarations at file scope and inside the
+top-level `#ifdef` chain) instead of running a query over the whole file, and
+the names on screen are visited top-down, function by function, instead of
+climbing to the enclosing function from every name - treesitter's `parent()`
+searches down from the root each time, which in a file of 600 functions cost
+0.13 ms per name. Measured on the dev server, 6,600-line C file: a paint went
+from 55 ms on average (80 at worst) while scrolling and 164 ms (325) after an
+edit, to 9.6 ms (22). A declaration inside an `#ifdef` in a function body is
+no longer taken for a global.
+
 **A global used inside a function is purple**, and italic where the terminal
 can draw it.
 
@@ -2243,6 +2271,7 @@ wrong:
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
+| `g:sihl_index_member_budget` | ms per paint spent resolving struct members, default 25 (0 = no limit). The rest are left untouched, as while an answer is pending, and the next paint 60 ms later carries on - after an edit every member on screen is resolved again, which on a 6,600-line file held the screen for 60 ms and more |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
 
 **Turning a black symbol green.** `:SiHlIndexAdd` on it searches the sources

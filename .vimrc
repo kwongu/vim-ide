@@ -611,7 +611,14 @@ endif
 " ------------------------------------
 lua << EOF
 local outline_global = (tonumber(vim.g.vimide_outline_global) or 1) ~= 0
-_G.rv_setup('aerial', {
+-- auto: open_automatic 을 함수로 줄지. aerial 은 open_automatic 이 참(함수도
+-- 참)이면 게으르게 올라오지 않고 모든 버퍼에 붙어서, 창을 닫아 둔 채로도
+-- 글자를 고칠 때마다 파일 전체의 심볼을 다시 센다 - 6600줄 C 파일에서 번당
+-- 50ms, 크면 120ms (개발서버 실측). 자동으로 열지 않는 기본값에서는 false 를
+-- 주어 F10 을 누를 때 올라오게 한다. g:vimide_outline_auto 를 도중에 켜면
+-- 다음 버퍼에 들어갈 때 함수로 다시 설정한다 (아래).
+local function aerial_opts(auto)
+return {
   backends = { 'treesitter', 'lsp', 'markdown', 'man' },
   -- 아웃라인은 tagbar 시절부터 왼쪽에 있었다(g:tagbar_left=1). 그 자리를
   -- 그대로 쓴다 - 오른쪽은 RelationView 의 context 창이 쓰고 있다.
@@ -643,7 +650,7 @@ _G.rv_setup('aerial', {
   -- 때도 그 검사를 그대로 이어 간다.
   -- 값은 부를 때마다 읽는다. setup 에서 한 번 읽어 굳혀 두면 나중에
   -- :let 으로 켤 수 없고, 이 설정의 다른 옵션들과도 어긋난다.
-  open_automatic = function(bufnr)
+  open_automatic = auto and function(bufnr)
     if (tonumber(vim.g.vimide_outline_auto) or 0) == 0 then
       return false
     end
@@ -666,7 +673,7 @@ _G.rv_setup('aerial', {
     end
     local ok, util = pcall(require, 'aerial.util')
     return not (ok and util.is_ignored_buf(bufnr))
-  end,
+  end or false,
   -- 아웃라인에서 커서를 옮기면 편집 창이 그 심볼로 간다. 포커스는
   -- 아웃라인에 남는다 - tagbar 쪽에 손으로 만들어 둔 follow 동작과 같다
   -- (s:TagbarFollowCursor, 아래 Tagbar 절).
@@ -695,7 +702,21 @@ _G.rv_setup('aerial', {
     ['h'] = false,
     ['l'] = false,
   },
-})
+}
+end
+local auto_now = (tonumber(vim.g.vimide_outline_auto) or 0) ~= 0
+_G.rv_setup('aerial', aerial_opts(auto_now))
+if not auto_now then
+  vim.api.nvim_create_autocmd('BufEnter', {
+    group = vim.api.nvim_create_augroup('VimIdeAerialAuto', { clear = true }),
+    callback = function()
+      if (tonumber(vim.g.vimide_outline_auto) or 0) ~= 0 then
+        _G.rv_setup('aerial', aerial_opts(true))
+        return true -- 한 번이면 된다 (autocmd 를 지운다)
+      end
+    end,
+  })
+end
 EOF
 nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
 
@@ -1082,12 +1103,20 @@ do
     return ok
   end
 
+  -- peek_config: 아직 합치지 않았으면 합칠 설정 표를 그대로 준다 (싸다).
+  -- ensure_config 는 그 자리에서 neo-tree 설정 전체를 합쳐서, 트리를 열지도
+  -- 않았는데 VimEnter 직후 50ms 가 멎었다 (개발서버 실측). 여기서 값을 넣어
+  -- 두면 나중에 합칠 때 그대로 들어간다.
   local function apply(dir)
     local okmod, nt = pcall(require, 'neo-tree')
-    if not okmod or not nt.ensure_config then
+    if not okmod then
       return
     end
-    local okc, conf = pcall(nt.ensure_config)
+    local get = nt.peek_config or nt.ensure_config
+    if not get then
+      return
+    end
+    local okc, conf = pcall(get)
     if okc and type(conf) == 'table' then
       conf.enable_git_status = affordable(dir)
     end
@@ -1329,6 +1358,24 @@ let g:airline_theme='hybrid'
 let g:airline#extensions#tabline#enabled = 1
 let g:airline#extensions#tabline#formatter = 'unique_tail'
 let g:airline#extensions#tagbar#enabled = 1
+" nvim: 상태줄의 '지금 함수' 를 tagbar 대신 treesitter 로 (curfunc.lua).
+" airline 의 tagbar 확장은 tagbar 를 깨우고, 깨어난 tagbar 는 파일을 옮기거나
+" 저장할 때마다 ctags 를 그 자리에서 돌려 출력을 Vim script 로 푼다 - 6600줄
+" C 파일에서 번당 약 340ms 가 멎었다 (개발서버 :profile 실측). 진짜 vim 은
+" 그대로 tagbar.
+"
+" 확장을 끄고 같은 이름('tagbar')의 자리를 airline 이 섹션을 만들기 전에 이
+" 함수로 정의해 둔다. airline 은 섹션을 만들 때 자리의 함수 이름을 글자로
+" 박아 넣으므로, 다 만든 뒤(AirlineAfterInit)에 바꾸면 소용이 없다 (실측:
+" tagbar 쪽이 31번 불리고 이쪽은 0번).
+"   let g:vimide_curfunc = 0   " 되돌리기 (이 줄보다 앞에)
+if has('nvim') && get(g:, 'vimide_curfunc', 1)
+    let g:airline#extensions#tagbar#enabled = 0
+    function! VimIdeCurTag() abort
+        return luaeval('_G.vimide_cur_func and _G.vimide_cur_func() or ""')
+    endfunction
+    silent! call airline#parts#define_function('tagbar', 'VimIdeCurTag')
+endif
 if !exists('g:airline_symbols')
     let g:airline_symbols = {}
 endif

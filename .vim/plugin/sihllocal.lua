@@ -89,6 +89,73 @@ local GLOBAL_SRC = [[
     declarator: (identifier) @g)))
 ]]
 
+-- 파일 스코프 전역을 모은다. 위 GLOBAL_SRC 와 같은 것을 잡되 쿼리 대신 맨 위
+-- 노드들만 걷는다 - 전역 선언은 translation_unit 의 자식(또는 맨 위 #ifdef
+-- 사슬 안)에만 있으므로 파일 전체를 훑을 까닭이 없다. 6600줄 파일에서 쿼리는
+-- 35ms, 이 걷기는 1ms 안쪽이다 (개발서버 실측). 글자를 고칠 때마다 새로 세야
+-- 하는 값이라(스크롤은 담아 둔 것으로 끝난다) 여기가 고친 뒤의 멎음이었다.
+--
+-- 쿼리와 다른 점 하나: 함수 본문 안의 #ifdef 속 선언은 전역으로 치지 않는다.
+-- 쿼리의 (preproc_ifdef (declaration ...)) 는 어디에 있든 잡아서 함수 안
+-- 지역 선언까지 전역 색으로 칠했다.
+local PREPROC = {
+  preproc_ifdef = true, preproc_if = true, preproc_else = true,
+  preproc_elif = true, preproc_elifdef = true,
+}
+
+local function globals_of(root, buf)
+  local globals, gdecl_at = {}, {}
+  local function add(id)
+    local t = vim.treesitter.get_node_text(id, buf)
+    if t and t ~= '' then
+      local r1, c1, r2, c2 = id:range()
+      globals[t] = true
+      gdecl_at[r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2] = true
+    end
+  end
+  local function inner(d)
+    local x = d and d:field('declarator')[1]
+    return (x and x:type() == 'identifier') and x or nil
+  end
+  -- top: translation_unit 바로 밑, ifdef: #ifdef 바로 밑 (GLOBAL_SRC 의 두 무리)
+  local function decl(n, top)
+    for _, d in ipairs(n:field('declarator')) do
+      local t = d:type()
+      if t == 'identifier' then
+        add(d)
+      elseif t == 'init_declarator' then
+        local x = d:field('declarator')[1]
+        local xt = x and x:type()
+        if xt == 'identifier' then
+          add(x)
+        elseif top and (xt == 'pointer_declarator' or xt == 'array_declarator') then
+          local y = inner(x)
+          if y then add(y) end
+        end
+      elseif t == 'pointer_declarator' or (top and t == 'array_declarator') then
+        local y = inner(d)
+        if y then add(y) end
+      end
+    end
+  end
+  local function walk(parent, is_root)
+    for c in parent:iter_children() do
+      local t = c:type()
+      if t == 'declaration' then
+        if is_root then
+          decl(c, true)
+        elseif parent:type() == 'preproc_ifdef' then
+          decl(c, false)
+        end
+      elseif PREPROC[t] then
+        walk(c, false)
+      end
+    end
+  end
+  walk(root, true)
+  return globals, gdecl_at
+end
+
 local qcache = {}
 local function queries(lang)
   if qcache[lang] == nil then
@@ -101,20 +168,28 @@ local function queries(lang)
   return qcache[lang] or nil
 end
 
--- 이 노드를 감싸는 함수 정의
-local function enclosing_fn(node)
-  local n = node
-  while n do
-    local t = n:type()
-    if t == 'function_definition' then
-      return n
-    end
-    n = n:parent()
-  end
-  return nil
-end
 
 local s = { timer = nil }
+
+-- 버퍼마다 '글자가 그대로인 동안은 같은' 계산을 담아 둔다: 파일 스코프 전역
+-- 목록과 함수별 선언 이름. 키는 b:changedtick 이다 - 글자가 바뀌면 새로 센다.
+--
+-- 예전에는 칠할 때마다(스크롤할 때마다) 전역 쿼리를 파일 전체(0..-1)에 돌렸다.
+-- 6600줄 파일에서 한 번에 35ms, 전역이 하나도 없어도 그렇다 - 스크롤 한 번에
+-- 입력이 50~80ms 씩 멎었다 (개발서버 실측). 스크롤은 글자를 바꾸지 않으니 두
+-- 번째부터는 공짜다. RelationView 미리보기 버퍼도 파일이 바뀔 때만 다시 채워지므로
+-- 같은 규칙이 먹는다.
+local memo = {}   -- buf -> { tick =, globals =, gdecl_at =, fninfo = }
+
+local function memo_of(buf)
+  local tick = api.nvim_buf_get_changedtick(buf)
+  local m = memo[buf]
+  if not m or m.tick ~= tick then
+    m = { tick = tick, fninfo = {} }
+    memo[buf] = m
+  end
+  return m
+end
 
 local function clear(buf)
   pcall(api.nvim_buf_clear_namespace, buf, NS, 0, -1)
@@ -182,24 +257,23 @@ local function paint(win)
   --
   -- 헤더에서 온 전역(extern)은 여기서 보이지 않는다. 이 파일만 봐서는
   -- extern 이름이 변수인지 함수인지도 알 수 없다.
-  local globals, gdecl_at = {}, {}
-  if q.glob then
-    for _, node in q.glob:iter_captures(root, buf, 0, -1) do
-      local r1, c1, r2, c2 = node:range()
-      local t = vim.treesitter.get_node_text(node, buf)
-      if t and t ~= '' then
-        globals[t] = true
-        gdecl_at[r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2] = true
-      end
+  local m = memo_of(buf)
+  if not m.globals then
+    if q.glob then
+      m.globals, m.gdecl_at = globals_of(root, buf)
+    else
+      m.globals, m.gdecl_at = {}, {}
     end
   end
+  local globals, gdecl_at = m.globals, m.gdecl_at
 
   -- 함수마다 '여기서 선언된 이름'을 한 번만 모아 둔다.
   --
   -- 함수 단위로 보는 이유: C 에서 블록마다 가리는 경우는 드물고, 블록까지
   -- 따지면 한 줄을 칠할 때마다 스코프를 거슬러 올라가야 한다. 틀리는 경우는
   -- '같은 함수 안 다른 블록의 같은 이름' 뿐인데 그것도 점프는 된다.
-  local fninfo = {}
+  -- 같은 글자면 같은 트리이고, 노드 id 도 같다 - 함수별 이름 집합도 담아 둔다
+  local fninfo = m.fninfo
   local function info_of(fn)
     local id = fn:id()
     if fninfo[id] then
@@ -222,14 +296,13 @@ local function paint(win)
   local prio = tonumber(vim.g.sihl_priority) or 200
   local glob_on = (tonumber(vim.g.sihl_local_global) or 1) ~= 0
   local done = {}
-  for _, node in q.ref:iter_captures(root, buf, lo, hi) do
+  local function paint_ref(node, fn)
     local r1, c1, r2, c2 = node:range()
     if r1 == r2 and r1 >= lo and r1 < hi then
       local at = r1 .. ':' .. c1 .. ':' .. r2 .. ':' .. c2
       if not done[at] then
         done[at] = true
         local name = vim.treesitter.get_node_text(node, buf)
-        local fn = enclosing_fn(node)
         local hl
         if fn then
           local i = info_of(fn)
@@ -254,6 +327,30 @@ local function paint(win)
       end
     end
   end
+  -- 위에서 아래로 내려가며 이름을 센다: 보이는 줄에 걸친 맨 위 노드를 골라,
+  -- 함수 정의면 그 안의 이름은 모두 그 함수 것이다. 예전에는 이름마다
+  -- node:parent() 로 거슬러 올라가 감싸는 함수를 찾았는데, treesitter 의
+  -- parent() 는 매번 루트에서부터 다시 내려오며 찾는다 - 함수가 600개인
+  -- 파일에서 이름 하나에 0.13ms, 한 번 칠하는 데 50~100ms 가 들었다
+  -- (개발서버 실측). #ifdef 사슬은 안으로 들어간다. C 에는 함수 안의 함수가
+  -- 없으니 결과는 같다.
+  local function visit(parent)
+    for c in parent:iter_children() do
+      local sr, _, er, _ = c:range()
+      if er >= lo and sr < hi then
+        local t = c:type()
+        if PREPROC[t] then
+          visit(c)
+        else
+          local fn = (t == 'function_definition') and c or nil
+          for _, node in q.ref:iter_captures(c, buf, math.max(lo, sr), math.min(hi, er + 1)) do
+            paint_ref(node, fn)
+          end
+        end
+      end
+    end
+  end
+  visit(root)
 end
 
 local function schedule()
@@ -276,6 +373,10 @@ local function schedule()
 end
 
 local group = api.nvim_create_augroup('SiHlLocal', { clear = true })
+api.nvim_create_autocmd({ 'BufWipeout', 'BufUnload' }, {
+  group = group,
+  callback = function(a) memo[a.buf] = nil end,
+})
 api.nvim_create_autocmd({ 'BufWinEnter', 'WinScrolled', 'TextChanged', 'InsertLeave',
                           'CursorHold', 'BufWritePost', 'ColorScheme' }, {
   group = group,

@@ -4689,6 +4689,34 @@ local_decl = function(bufnr, line, sym)
   if not fn then
     return nil
   end
+  -- 같은 글자(changedtick)·같은 함수·같은 이름이면 선언 후보는 늘 같다.
+  -- 줄에 따라 달라지는 것은 '커서 위에서 가장 가까운 것' 고르기뿐이라, 후보
+  -- 목록을 담아 두고 고르기만 새로 한다. 예전에는 부를 때마다 함수 전체의
+  -- 노드를 Lua 로 훑었는데, 구조체 멤버 색(sihlindex)이 화면의 멤버마다
+  -- 불러서 스크롤 한 번에 30ms 넘게 들었다 (개발서버 실측: 78번, 번당 0.8ms).
+  local okt, tick = pcall(api.nvim_buf_get_changedtick, bufnr)
+  local mkey = tostring(select(1, fn:start())) .. '\0' .. sym
+  s.ld_memo = s.ld_memo or {}
+  local mm = s.ld_memo[bufnr]
+  if not okt or not mm or mm.tick ~= tick then
+    mm = { tick = okt and tick or -1, hits = {} }
+    s.ld_memo[bufnr] = mm
+  end
+  local cached = mm.hits[mkey]
+  if cached then
+    local found
+    for _, h in ipairs(cached.list) do
+      if not found or (h.line <= line and h.line >= found.line) then
+        found = h
+      end
+    end
+    if not found then
+      return nil
+    end
+    local r = vim.deepcopy(found)
+    r.fnname, r.fns, r.fne = cached.fnname, cached.fns, cached.fne
+    return r
+  end
   local fnname
   do -- the declarator's innermost identifier is the function name
     local d = field1(fn, 'declarator')
@@ -4711,6 +4739,7 @@ local_decl = function(bufnr, line, sym)
   end
 
   local found
+  local hits = {}
   local function scan(n)
     local nt = n:type()
     if nt == 'declaration' or nt == 'parameter_declaration' then
@@ -4747,15 +4776,17 @@ local_decl = function(bufnr, line, sym)
       end
       if hit then
         local srow = n:start() + 1
+        local h = {
+          line = srow,
+          text = (ntext(n, bufnr):gsub('%s+', ' ')),
+          type = type_of_node(tnode, bufnr),
+          type_text = tnode and ntext(tnode, bufnr) or nil,
+          is_param = nt == 'parameter_declaration',
+        }
+        hits[#hits + 1] = h
         -- the declaration closest above the cursor wins (shadowing)
         if not found or (srow <= line and srow >= found.line) then
-          found = {
-            line = srow,
-            text = ntext(n, bufnr):gsub('%s+', ' '),
-            type = type_of_node(tnode, bufnr),
-            type_text = tnode and ntext(tnode, bufnr) or nil,
-            is_param = nt == 'parameter_declaration',
-          }
+          found = h
         end
       end
     end
@@ -4764,10 +4795,13 @@ local_decl = function(bufnr, line, sym)
     end
   end
   scan(fn)
+  local fns, fne = fn:start() + 1, select(3, fn:range()) + 1
+  mm.hits[mkey] = { list = hits, fnname = fnname, fns = fns, fne = fne }
   if found then
+    found = vim.deepcopy(found)
     found.fnname = fnname
-    found.fns = fn:start() + 1
-    found.fne = select(3, fn:range()) + 1
+    found.fns = fns
+    found.fne = fne
   end
   return found
 end
@@ -7304,6 +7338,17 @@ end
 
 api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' },
   { group = group, callback = watch_unpin })
+-- local_decl 의 담아 둔 선언 후보를 버퍼와 함께 버린다. 버퍼 번호는 다시
+-- 쓰이고 changedtick 은 작은 수부터 다시 세므로, 남겨 두면 새 버퍼가 옛
+-- 버퍼의 후보를 읽을 수 있다.
+api.nvim_create_autocmd({ 'BufWipeout', 'BufUnload' }, {
+  group = group,
+  callback = function(a)
+    if s.ld_memo then
+      s.ld_memo[a.buf] = nil
+    end
+  end,
+})
 api.nvim_create_autocmd('ColorScheme',
   { group = group, callback = set_highlights })
 api.nvim_create_autocmd('OptionSet',

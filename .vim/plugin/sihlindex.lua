@@ -928,9 +928,24 @@ end
 
 ------------------------------------------------------------------- 칠하기
 -- 같은 함수 안에서 선언된 이름은 묻지 않는다 (3번 주석)
+-- 지역 이름 집합은 글자가 그대로인 동안 같다. 스크롤할 때마다 위아래 400줄을
+-- 다시 훑었는데(6600줄 파일에서 번당 9ms), 범위를 200줄 단위로 넓혀 잡고
+-- changedtick 과 함께 담아 둔다 - 같은 구간 안에서 스크롤하면 공짜다.
+local ln_memo = {}   -- buf -> { tick =, key =, names = }
+local ln_query = {}  -- lang -> query | false
+
 local function local_names(buf, lang, lo, hi)
+  local a = math.floor(math.max(0, lo - 400) / 200) * 200
+  local b = math.ceil((hi + 400) / 200) * 200
+  local tick = api.nvim_buf_get_changedtick(buf)
+  local key = a .. ':' .. b
+  local m = ln_memo[buf]
+  if m and m.tick == tick and m.key == key then
+    return m.names
+  end
   local names = {}
-  local ok, q = pcall(vim.treesitter.query.parse, lang, [[
+  if ln_query[lang] == nil then
+    local okq, qq = pcall(vim.treesitter.query.parse, lang, [[
     (parameter_declaration declarator: (identifier) @d)
     (parameter_declaration declarator: (_ declarator: (identifier) @d))
     (parameter_declaration declarator: (_ declarator: (_ declarator: (identifier) @d)))
@@ -938,7 +953,10 @@ local function local_names(buf, lang, lo, hi)
     (declaration declarator: (_ declarator: (identifier) @d))
     (declaration declarator: (_ declarator: (_ declarator: (identifier) @d)))
   ]])
-  if not ok then
+    ln_query[lang] = okq and qq or false
+  end
+  local q = ln_query[lang]
+  if not q then
     return names
   end
   local okp, parser = pcall(vim.treesitter.get_parser, buf, lang)
@@ -949,10 +967,11 @@ local function local_names(buf, lang, lo, hi)
   if not trees or not trees[1] then
     return names
   end
-  for _, node in q:iter_captures(trees[1]:root(), buf, math.max(0, lo - 400), hi + 400) do
+  for _, node in q:iter_captures(trees[1]:root(), buf, a, b) do
     local t = vim.treesitter.get_node_text(node, buf)
     if t then names[t] = true end
   end
+  ln_memo[buf] = { tick = tick, key = key, names = names }
   return names
 end
 
@@ -1033,8 +1052,17 @@ repaint = function(win)
     return 'missing'
   end
 
-  -- 선언하는 자리는 건드리지 않는다: 파랑(item 1/2)을 덮으면 안 된다
+  -- 캡처는 한 번만 모은다. 예전에는 같은 쿼리를 같은 범위에 두 번 돌렸다
+  -- (선언 자리 찾기, 칠하기) - 스크롤 한 번에 9ms 씩 두 번.
+  local caps = {}
   for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
+    caps[#caps + 1] = id
+    caps[#caps + 1] = node
+  end
+
+  -- 선언하는 자리는 건드리지 않는다: 파랑(item 1/2)을 덮으면 안 된다
+  for ci = 1, #caps, 2 do
+    local id, node = caps[ci], caps[ci + 1]
     local cap = q.captures[id]
     if cap:match('^si%.declaration') then
       local r1, c1 = node:range()
@@ -1047,7 +1075,20 @@ repaint = function(win)
   local done = {}
   local members_on = (tonumber(cfg('members', 1)) or 1) ~= 0
   local asked = false
-  for id, node in q:iter_captures(trees[1]:root(), buf, lo, hi) do
+  -- 멤버 풀이(<C-]> 가 쓰는 타입 따라가기)에 한 번 칠하는 동안 쓸 시간.
+  -- 자리마다 한 번씩 풀고 글자가 그대로인 동안 담아 두지만, 글자를 고치면
+  -- 화면의 멤버를 전부 다시 푼다 - 6600줄 파일에서 멤버 78개, 한 번에
+  -- 60ms 넘게 멎었다 (개발서버 실측). 시간을 넘기면 남은 멤버는 '답을
+  -- 기다리는 중'과 똑같이 손대지 않고(깜빡임 없음) 곧 다시 칠해 이어 간다.
+  -- 담아 둔 자리는 빨리 지나가므로 몇 번 안에 끝난다.
+  --   let g:sihl_index_member_budget = 0   " 끄기 (예전처럼 한 번에 전부)
+  -- 시간이 모자라도 한 번에 적어도 8개는 푼다 - 멤버에 닿기 전에 이미 시간을
+  -- 넘기는 화면(캡처가 아주 많은)에서도 칠할 때마다 앞으로 나아가게.
+  local budget = tonumber(cfg('member_budget', 25)) or 25
+  local t_begin = uv.hrtime()
+  local over, mk_calls = false, 0
+  for ci = 1, #caps, 2 do
+    local id, node = caps[ci], caps[ci + 1]
     local cap = q.captures[id]
     local exp = OK_NODE[node:type()] and export_arg(node, buf) or false
     if (ASK_CAP[cap] or (members_on and MEMBER_CAP[cap]) or exp)
@@ -1085,8 +1126,18 @@ repaint = function(win)
           -- 그 타입이 이 멤버를 가졌는지 본다. 갈 수 있으면 초록이다.
           if is_member and members_on and how ~= 'found'
               and _G.relationview_member_known then
-            local okm, known = pcall(_G.relationview_member_known, buf,
-              r1 + 1, c1, redraw_soon)
+            if not over and budget > 0 and mk_calls >= 8
+                and (uv.hrtime() - t_begin) / 1e6 > budget then
+              over = true
+            end
+            local okm, known
+            if over then
+              okm, known = true, nil -- 시간을 넘겼다: 다음 칠하기로 미룬다
+            else
+              mk_calls = mk_calls + 1
+              okm, known = pcall(_G.relationview_member_known, buf,
+                r1 + 1, c1, redraw_soon)
+            end
             if okm and known == true then
               how, extra = 'found', 'member'
             elseif okm and known == nil and how ~= 'ask' then
@@ -1172,6 +1223,9 @@ repaint = function(win)
       end
     end
   end
+  if over then
+    redraw_soon() -- 못 푼 멤버를 이어서
+  end
   if asked then
     local n = tonumber(cfg('batch', 2)) or 2
     for _ = 1, n do
@@ -1208,6 +1262,10 @@ local function schedule()
 end
 
 local group = api.nvim_create_augroup('SiHlIndex', { clear = true })
+api.nvim_create_autocmd({ 'BufWipeout', 'BufUnload' }, {
+  group = group,
+  callback = function(a) ln_memo[a.buf] = nil end,
+})
 api.nvim_create_autocmd({ 'BufWinEnter', 'WinScrolled', 'CursorHold',
                           'TextChanged', 'InsertLeave', 'ColorScheme' }, {
   group = group,
