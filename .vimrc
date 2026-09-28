@@ -3851,6 +3851,11 @@ let g:overview_mouse = 1
 " 1 (기본) :only / <C-w>o 가 곁창은 그대로 두고 편집 창만 하나로 합친다.
 "          :only! 은 늘 예전대로 모든 창을 닫는다.
 let g:vimide_only_keeps_sides = 1
+" 1 (기본) Ctrl-W H/J/K/L(맨 왼쪽/아래/위/오른쪽으로) r/R(돌리기) x(맞바꾸기)
+"          T(새 탭으로)가 곁창(트리, aerial, RelationView, quickfix)은 제자리에 두고
+"          편집 창끼리만 옮긴다. 편집 창이 3분할 4분할이어도 그 안에서 vim 과 똑같이
+"          움직인다 (~/.vim/plugin/editwinmove.lua). 곁창에서 누르면 그대로 둔다.
+let g:vimide_edit_winmove = 1
 " 1 (기본) 곁창에서 친 아래 명령을 EDIT 창으로 옮겨서 실행한다.
 "            :e :ene :find :view :sview :sfind :diffsplit
 "            :b :bn :bp :sb :bd :bw  :h :tag :tjump :tselect :pop :tn :tp

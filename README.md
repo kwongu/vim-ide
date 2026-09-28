@@ -328,6 +328,7 @@ gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      that holds the current file - or, in neo-tree, the path under the cursor.
      No repository: under that file's directory (or that path). See "Searching
      from the repository" below.
+Ctrl-W H/J/K/L/r/R/x/T: Move edit windows the usual way, but only among the edit windows - the tree, the outline, the relation panel and the quickfix list stay put (nvim only, see [Moving windows](#moving-windows-inside-the-edit-area-nvim-only))
 Ctrl+]: Open the definition in the EDIT window, the same as `g]` and `f]`;
      Ctrl+t back
 Ctrl+] Ctrl+]: open that definition in the context window and focus it
@@ -1459,6 +1460,62 @@ back to following the shared one; the shared original is removed by deleting
 the file in the repository. To ignore the shared presets entirely:
 `let g:projectfiles_shared_presets = ''`, or point it at a directory of your
 own.
+
+## Moving windows inside the edit area (nvim only)
+
+vim's own `Ctrl-W H` sends the current window to the far left of the *whole
+screen*. With the tree and the outline on the left, the relation panel on the
+right and the quickfix list at the bottom, that puts an edit window outside
+the tree, full height, or under the quickfix list; `Ctrl-W r`, `R` and `x`
+swap edit windows with side windows. Here the side windows stay where they
+are and the edit windows move among themselves, however many there are:
+
+| | |
+|---|---|
+| `Ctrl-W H` / `J` / `K` / `L` | to the far left / bottom / top / right of the edit area |
+| `Ctrl-W r` / `R` | rotate the edit windows in that row or column |
+| `Ctrl-W x` | swap with the next edit window (the cursor ends where vim puts it) |
+| `Ctrl-W T` | move to a new tab; if it is the only edit window, the tab it leaves keeps an edit window in its place (showing the alternate buffer, or an empty one) so that tab's layout survives |
+
+Counts work either way (`2 Ctrl-W x`, `Ctrl-W 2 x`), and so does Visual mode.
+Pressed on a side window they do nothing - the side windows are the ones that
+stay put. In a tab without side windows, and in floating windows, they are
+vim's own (including `Ctrl-W T` saying "Already only one window").
+
+How: the side windows are turned into hidden floating windows for a moment,
+which leaves only the edit windows in the layout, so vim's own command sees
+the edit area as the whole screen and behaves exactly as it always does. Then
+the side windows go back: those before and after the edit windows, and the
+ones around them, from the inside out, onto the edge they came from
+(`topleft`/`botright` splits) and split back into shape. One that sat between
+edit windows - a location list under its window, help above one - goes back
+next to the window it was next to, and follows it if that window moved.
+Afterwards:
+
+- each side window gets back the size it owns - a column its width, a row its
+  height, a pane in a stacked column its height - outer ones first, each one
+  locked as it is done (restoring them in window order let a full-width
+  quickfix list take lines back from the relation panel column, one pane down
+  to 0 lines);
+- the edit windows keep their own sizes after `x`, `r` and `R`, and are evened
+  out after `H`, `J`, `K` and `L` (with `'equalalways'`), as vim does;
+- every window's scroll position and cursor are put back (the side windows
+  used to come back scrolled so that the cursor line was at the top);
+- if a side window cannot go back (no room on a tiny screen), it goes to the
+  bottom edge or stays visible as a small floating window - never hidden.
+
+Checked in a real TUI against vim itself: the same edit windows, laid out
+alone in a clean nvim, were given vim's command and the layout and the cursor
+compared - H, J, K, L, r, R, x, counts before and after `Ctrl-W`, Visual mode,
+with aerial, the relation panel column, the tree and a 100-entry quickfix
+list scrolled to the middle around three edit windows; the tree plus four edit
+windows and a location list; help and a preview window above one of two edit
+windows; a 60x15 screen. The edit windows matched vim every time, and every
+side window kept its position, size and scroll position.
+
+```vim
+let g:vimide_edit_winmove = 0   " vim's own behaviour
+```
 
 ## Comparing directories (DirDiff)
 
