@@ -900,12 +900,17 @@ augroup END
 "   1) git_status_scope_to_path - 하위 디렉터리를 보고 있을 때는 그 경로만
 "      묻는다. 6.4초 -> 109ms. 마크는 그대로 나온다.
 "   2) 트리 루트에서는 경로 한정이 곧 전체라 싸게 만들 방법이 없다. 그래서
-"      repo 가 크면(.git/index 크기 기준) git 표시를 아예 끈다. 마크만
-"      사라지고 트리는 그대로다.
+"      git status 가 오래 걸리는 repo 는 git 표시를 끈다 - 기준을 넘긴
+"      프로세스를 그 자리에서 죽이고 그 repo 만 이 세션 동안 끈다. 마크만
+"      사라지고 트리는 그대로다. 같은 repo 에 git status 가 겹쳐 뜨지도
+"      않는다 (아래 '느린 repo 에서 neo-tree 의 git 표시를 끈다' 절).
+"      예전의 크기(.git/index) 기준은 시간과 맞지 않았다 - 8.4MB 가 0.15초,
+"      8.9MB 가 10~16초.
 "
-"   let g:vimide_neotree_git = 1        " 크기 무시하고 항상 켜기
-"   let g:vimide_neotree_git = 0        " 항상 끄기
-"   let g:vimide_neotree_git_max_mb = 2 " 이 크기를 넘으면 자동으로 끈다
+"   let g:vimide_neotree_git = 1          " 느려도 항상 켜기 (시간 판정 없음)
+"   let g:vimide_neotree_git = 0          " 항상 끄기
+"   let g:vimide_neotree_git_max_sec = 2  " 이보다 오래 걸리면 그 repo 는 끈다
+"   let g:vimide_neotree_git_max_mb = 2   " (주면) 예전처럼 크기로도 끈다
 " ------------------------------------
 
 " Nerd Font 글자를 못 그리는 터미널에서는 ASCII 로 바꾼다.
@@ -941,13 +946,17 @@ endif
 "   git status --porcelain        0.15초
 "   untracked 만 (ls-files -o)    0.12초
 " 위 1)의 git_status_scope_to_path 가 이미 켜져 있어 보고 있는 경로만
-" 묻는 것도 그대로다. 크기로 자동으로 끄는 판정(.git/index > 2MB)은 이
-" repo 를 끄게 되므로, 여기서 명시적으로 켠다.
+" 묻는 것도 그대로다. 예전에는 크기로 끄는 판정(.git/index > 2MB)이 이
+" repo 를 껐으므로 여기서 g:vimide_neotree_git = 1 로 강제했는데, 그 강제가
+" 정말 느린 repo(맥의 ~/k6.12, 한 번에 10~16초)까지 켜 두어 CPU 를 계속
+" 물었다. 이제는 걸린 시간으로 판정하므로 강제하지 않는다 - 빠른 repo 는 켜진
+" 채로, 느린 repo 는 그것만 꺼진다.
 "
 " 켜면 git 이 모르는 파일 이름이 주황(#ff8700)으로 뜬다 - NeoTreeGitUntracked.
 " 껐을 때는 트리가 애초에 그 사실을 모르므로 아무 색도 나오지 않는다.
 "   let g:vimide_neotree_git = 0   " 다시 끄기 (주황도 같이 사라진다)
-let g:vimide_neotree_git = 1
+"   let g:vimide_neotree_git = 1   " 느린 repo 도 켜기
+let g:vimide_neotree_git_max_sec = 2
 
 " 그 주황에서 이탤릭만 뺀다.
 "
@@ -1027,7 +1036,9 @@ _G.rv_setup('neo-tree', {
       ['o'] = 'open',
       ['O'] = 'expand_all_subnodes',
       ['X'] = 'close_all_subnodes',
-      ['I'] = 'toggle_hidden',
+      -- I(숨김 토글)는 filesystem 쪽에 둔다 (아래 filesystem.window) - toggle_hidden
+      -- 은 filesystem 명령이라 여기 두면 buffers·git_status 창을 열 때마다
+      -- 'Invalid mapping for I' 경고가 떴다
       ['K'] = function(state) _G.neotree_sibling(state, 'first') end,
       ['J'] = function(state) _G.neotree_sibling(state, 'last') end,
       -- 'w' 로 트리 폭을 넓혔다 줄인다 (RelationView 패널의 'w' 와 같다).
@@ -1133,6 +1144,7 @@ _G.rv_setup('neo-tree', {
       mappings = {
         ['/'] = 'none',
         ['F'] = { 'fuzzy_finder', config = { keep_filter_on_submit = true } },
+        ['I'] = 'toggle_hidden',
       },
     },
     hijack_netrw_behavior = 'disabled',
@@ -1169,16 +1181,52 @@ _G.rv_setup('neo-tree', {
   },
 })
 
--- 큰 repo 에서 neo-tree 의 git 표시를 끈다.
+-- 느린 repo 에서 neo-tree 의 git 표시를 끈다.
 --
--- neo-tree 는 스캔할 때마다 worktree 전체에 git status 를 돌린다. 파일이
--- 수만 개면 그게 6~10초짜리 프로세스라, find/검색으로 스캔이 반복될 때마다
--- CPU 를 하나씩 물고 늘어진다. repo 크기는 .git/index 크기로 즉시 알 수
--- 있으므로(stat 한 번), 크면 표시를 끄고 그 사실을 한 번 알려 준다.
+-- neo-tree 는 스캔할 때마다 worktree 전체에 git status 를 돌린다. 예전에는 repo
+-- 크기(.git/index)로 미리 껐는데 크기와 시간이 맞지 않았다: kernel/common(index
+-- 8.4MB)은 0.15초라 켜 두어야 했고(그래서 g:vimide_neotree_git = 1 로 강제했다),
+-- 맥의 ~/k6.12(8.9MB)는 'status --ignored=traditional' 한 번이 10~16초였다. 그
+-- 강제 때문에 k6.12 를 연 nvim 이 CPU 를 계속 물었고, 하나가 끝나기 전에 다음이
+-- 떠서 둘이 겹쳤다 (2026-09-24 실측. neo-tree 의 debounce 는 1초 뒤 다시 띄울 뿐
+-- 앞 프로세스가 끝났는지 보지 않는다).
+--
+-- 그래서 크기 대신 걸린 시간으로 판정한다. neo-tree 가 띄우는 git status 와
+-- ls-files(첫 스캔의 무시 목록 - 같은 디렉터리 훑기다)마다(utils.job 을 감싼다):
+--   * status 는 같은 repo 에서 이미 돌고 있으면 새로 띄우지 않고 마지막 요청
+--     하나만 남겨 두었다가 앞의 것이 끝나면 띄운다
+--   * g:vimide_neotree_git_max_sec(기본 2초)를 넘기면 그 repo 에서 돌고 있는 것을
+--     모두 죽이고 git 표시를 끈다(마크는 걷어 둔다). 한 번 알린다.
+--   * 끈 뒤 g:vimide_neotree_git = 1 로 하거나 기준을 올리면 다시 켜고 걷어 둔
+--     마크를 되돌린다
+-- buffers·git_status 소스가 쓰는 동기 git.status()(vim.fn.system - 도는 동안
+-- 편집기가 멎는다)도 감싼다: 끈 repo 에서는 묻지 않고, 기준을 넘기면 끈다.
+-- 다른 repo 의 표시는 그대로다.
 do
   local uv = vim.uv or vim.loop
   local seen = {}       -- git dir -> 이미 알린 repo
-  local decided = {}    -- git dir -> true/false
+  local decided = {}    -- git dir -> true/false (크기 판정)
+  local slow = {}       -- worktree 루트 -> 끌 때의 기준(ms). 기준을 올리거나 강제로 켜면 풀린다
+  local hidden = {}     -- worktree 루트 -> 끌 때 걷어 둔 git 상태 (다시 켤 때 되돌린다)
+  local running = {}    -- worktree 루트 -> 돌고 있는 git status 수
+  local live = {}       -- worktree 루트 -> { [기록]=true } 돌고 있는 git status·ls-files
+  local queued = {}     -- worktree 루트 -> { cmd, opts, on_exit } 기다리는 마지막 요청
+  -- vim.g 는 빠른 이벤트(uv 콜백) 안에서 못 읽는다. neo-tree 는 git config 의
+  -- 콜백 안에서 다음 git status 를 띄우므로 설정은 여기 담아 두고 쓴다.
+  local cfg = { force = nil, max_ms = 2000 }
+
+  local function refresh_cfg()
+    if vim.in_fast_event() then
+      return
+    end
+    local forced = vim.g.vimide_neotree_git
+    if forced ~= nil and forced ~= '' then
+      cfg.force = tonumber(forced) ~= 0
+    else
+      cfg.force = nil
+    end
+    cfg.max_ms = (tonumber(vim.g.vimide_neotree_git_max_sec) or 2) * 1000
+  end
 
   -- '.git' 은 디렉터리이거나 'gitdir: <경로>' 한 줄이 든 파일이다
   -- (worktree, submodule). 어느 쪽이든 index 파일을 찾아 준다.
@@ -1212,9 +1260,13 @@ do
 
   -- true 면 git 표시를 켜도 된다
   local function affordable(dir)
-    local forced = vim.g.vimide_neotree_git
-    if forced ~= nil and forced ~= '' then
-      return tonumber(forced) ~= 0
+    refresh_cfg()
+    if cfg.force ~= nil then
+      return cfg.force
+    end
+    -- 크기 판정은 g:vimide_neotree_git_max_mb 를 준 경우에만 (예전 방식)
+    if vim.g.vimide_neotree_git_max_mb == nil then
+      return true
     end
     local idx = index_path(dir or vim.fn.getcwd())
     if not idx then
@@ -1230,14 +1282,214 @@ do
     if not ok and not seen[idx] then
       seen[idx] = true
       vim.schedule(function()
-        vim.notify(('neo-tree: git 표시를 끕니다 - 이 repo 는 큽니다 '
-          .. '(.git/index %.1f MB). 전체 git status 가 수 초씩 걸려 '
-          .. '검색할 때마다 CPU 를 물기 때문입니다. '
+        local say = _G.vimide_notify or vim.notify
+        say(('neo-tree: git 표시를 끕니다 - 이 repo 는 큽니다 '
+          .. '(.git/index %.1f MB, g:vimide_neotree_git_max_mb). '
           .. 'let g:vimide_neotree_git = 1 로 강제할 수 있습니다.')
           :format((st and st.size or 0) / 1048576))
       end)
     end
     return ok
+  end
+
+  -- neo-tree 가 띄우는 git 명령의 worktree 루트('-C <루트>')와 하위 명령
+  -- ('status', 'ls-files', 'config' ...). git 명령이 아니면 nil
+  local function git_job(cmd)
+    if type(cmd) ~= 'table' or cmd[1] ~= 'git' then
+      return nil
+    end
+    local root
+    local i = 2
+    while i <= #cmd do
+      local a = cmd[i]
+      if a == '-C' then
+        root, i = cmd[i + 1], i + 2
+      elseif a == '-c' then
+        i = i + 2
+      elseif a:sub(1, 1) == '-' then
+        i = i + 1
+      else
+        return root, a
+      end
+    end
+    return nil
+  end
+
+  -- 다시 그리게 한다 (마크는 git.worktrees[루트].status 에서 읽는다)
+  local function redraw_marks(root)
+    local oke, ev = pcall(require, 'neo-tree.events')
+    if oke then
+      pcall(ev.fire_event, ev.GIT_STATUS_CHANGED, { git_root = root })
+    end
+  end
+
+  -- 끈 repo 의 마크를 걷어 둔다. 버리지 않는 것은 neo-tree 가 git 출력이 앞과
+  -- 같으면 다시 풀지 않고 지금 상태를 그대로 돌려주기 때문이다 - 비워 두면 다시
+  -- 켜도 파일이 바뀔 때까지 빈칸이었다 (반대 심문)
+  local function hide_marks(root)
+    local okg, git = pcall(require, 'neo-tree.git')
+    local wt = okg and git.worktrees and git.worktrees[root]
+    if wt and wt.status and next(wt.status) ~= nil then
+      hidden[root] = wt.status
+      wt.status = {}
+      wt.status_diff = {}
+    end
+    redraw_marks(root)
+  end
+
+  local function show_marks(root)
+    local okg, git = pcall(require, 'neo-tree.git')
+    local wt = okg and git.worktrees and git.worktrees[root]
+    if wt and hidden[root] and (wt.status == nil or next(wt.status) == nil) then
+      wt.status = hidden[root]
+    end
+    hidden[root] = nil
+    vim.schedule(function()
+      redraw_marks(root)
+    end)
+  end
+
+  -- 끈 채로인가. 강제로 켰거나(g:vimide_neotree_git = 1) 기준을 끌 때보다
+  -- 올렸으면 풀고 걷어 둔 마크를 되돌린다
+  local function is_off(root)
+    local at = slow[root]
+    if not at then
+      return false
+    end
+    if cfg.force or cfg.max_ms > at then
+      slow[root] = nil
+      show_marks(root)
+      return false
+    end
+    return true
+  end
+
+  -- 그 repo 를 끈다: 돌고 있는 git status·ls-files 를 모두 죽이고(죽인 것의
+  -- 결과는 neo-tree 에 넘기지 않는다), 마크를 걷고, 한 번 알린다. ls-files 까지
+  -- 죽이는 것은 첫 스캔의 'ls-files --others --ignored' 가 status 가 죽은 뒤에
+  -- 끝나며 반쪽 마크를 되살렸기 때문이다 (반대 심문)
+  local function mark_slow(root)
+    if slow[root] then
+      return
+    end
+    slow[root] = cfg.max_ms
+    queued[root] = nil
+    for rec in pairs(live[root] or {}) do
+      rec.killed = true
+      pcall(function()
+        rec.job.handle:kill(15)
+      end)
+    end
+    local sec = cfg.max_ms / 1000
+    vim.schedule(function()
+      hide_marks(root)
+      local say = _G.vimide_notify or vim.notify
+      say(('neo-tree: %s 의 git 표시를 끕니다 - git status 가 %g초를 넘겼습니다 '
+        .. '(다시 켜기: let g:vimide_neotree_git = 1 또는 g:vimide_neotree_git_max_sec 를 올린다)')
+        :format(vim.fn.fnamemodify(root, ':~'), sec))
+    end)
+  end
+
+  local function guard_jobs()
+    local oku, nu = pcall(require, 'neo-tree.utils')
+    if not oku or type(nu.job) ~= 'function' or nu._vimide_orig_job then
+      return
+    end
+    local orig = nu.job
+    nu._vimide_orig_job = orig
+    local start
+    -- status 는 한 repo 에 하나씩(queue), status·ls-files 는 둘 다 시간을 잰다
+    start = function(root, sub, cmd, opts, on_exit)
+      local serial = sub == 'status'
+      if serial then
+        running[root] = (running[root] or 0) + 1
+      end
+      local rec = { killed = false }
+      local job, err = orig(cmd, opts, function(code, out, errs)
+        if rec.timer then
+          rec.timer:stop()
+          rec.timer:close()
+          rec.timer = nil
+        end
+        if live[root] then
+          live[root][rec] = nil
+        end
+        if serial then
+          running[root] = math.max(0, (running[root] or 1) - 1)
+        end
+        if not rec.killed and on_exit then
+          on_exit(code, out, errs)
+        end
+        local q = queued[root]
+        if serial and q and running[root] == 0 then
+          queued[root] = nil
+          if not is_off(root) then
+            start(root, 'status', q[1], q[2], q[3])
+          end
+        end
+      end)
+      if not job then
+        if serial then
+          running[root] = math.max(0, (running[root] or 1) - 1)
+        end
+        return job, err
+      end
+      rec.job = job
+      live[root] = live[root] or {}
+      live[root][rec] = true
+      if cfg.force == nil and cfg.max_ms > 0 then
+        rec.timer = uv.new_timer()
+        rec.timer:start(cfg.max_ms, 0, function()
+          if not rec.timer then
+            return
+          end
+          rec.timer:close()
+          rec.timer = nil
+          mark_slow(root)
+        end)
+      end
+      return job, err
+    end
+    nu.job = function(cmd, opts, on_exit)
+      local root, sub = git_job(cmd)
+      if not root or (sub ~= 'status' and sub ~= 'ls-files') then
+        return orig(cmd, opts, on_exit)
+      end
+      refresh_cfg()
+      if is_off(root) then
+        return nil, 'vimide: git status is off for this repository (too slow)'
+      end
+      if sub == 'status' and (running[root] or 0) > 0 then
+        queued[root] = { cmd, opts, on_exit }
+        return nil, 'vimide: queued behind a running git status'
+      end
+      return start(root, sub, cmd, opts, on_exit)
+    end
+
+    -- buffers·git_status 소스는 git.status() 를 쓴다 - vim.fn.system 이라 위의
+    -- 감싸개를 거치지 않고, 끝날 때까지 편집기가 멎는다(느린 repo 에서 10~16초).
+    -- 끈 repo 에서는 묻지 않고, 한 번이라도 기준을 넘기면 그 repo 를 끈다
+    local okg, git = pcall(require, 'neo-tree.git')
+    if okg and type(git.status) == 'function' and not git._vimide_orig_status then
+      local orig_status = git.status
+      git._vimide_orig_status = orig_status
+      git.status = function(path, ...)
+        refresh_cfg()
+        local p = path or uv.cwd() or ''
+        for root in pairs(slow) do
+          if (p == root or p:sub(1, #root + 1) == root .. '/') and is_off(root) then
+            return nil, nil
+          end
+        end
+        local t0 = uv.hrtime()
+        local r = { orig_status(path, ...) }
+        if cfg.force == nil and cfg.max_ms > 0 and r[2]
+            and (uv.hrtime() - t0) / 1e6 > cfg.max_ms then
+          mark_slow(r[2])
+        end
+        return unpack(r, 1, 3)
+      end
+    end
   end
 
   -- peek_config: 아직 합치지 않았으면 합칠 설정 표를 그대로 준다 (싸다).
@@ -1269,13 +1521,15 @@ do
   vim.api.nvim_create_user_command('NeotreeGuarded', function(o)
     pcall(apply, nil)
     vim.cmd('Neotree ' .. (o.args ~= '' and o.args or 'toggle'))
-  end, { nargs = '*', desc = 'Neotree, with the git-status size guard applied' })
+  end, { nargs = '*', desc = 'Neotree, with the git-status guard applied' })
 
   -- 스캔 중에 처음 보는 worktree(중첩 repo 등)가 나타나면 그때도 판단한다.
   -- 이 훅은 status 명령이 나가기 직전에 불리므로, 여기서 끄면 다음 스캔부터
-  -- 확실히 막힌다.
+  -- 확실히 막힌다. git status 를 감싸는 것도 여기서 건다 - neo-tree.events 가
+  -- neo-tree.utils 를 이미 올려 두므로 시작 때 더 드는 것은 없다.
   local okev, events = pcall(require, 'neo-tree.events')
   if okev and events and events.subscribe then
+    pcall(guard_jobs)
     pcall(events.subscribe, {
       event = events.BEFORE_GIT_STATUS,
       handler = function(args)

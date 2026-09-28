@@ -1569,20 +1569,51 @@ different answers:
 - Looking at a subdirectory: `git_status_scope_to_path` asks about that
   path only. 6.4 s becomes 109 ms and the marks still work.
 - At the tree root, "that path" *is* the worktree, so there is nothing to
-  make cheap. Above a size threshold the marks are switched off instead -
-  decided from one stat of `.git/index` (5.4 MB for those 56k files) - and
-  it says so once, with the size, so a missing mark is not a mystery.
+  make cheap. The marks are switched off for a repository whose `git status`
+  takes too long, and it says so once.
+
+"Too long" used to be guessed from the size of `.git/index`, and the size
+turned out not to predict the time: `kernel/common` (8.4 MB) answers in
+0.15 s, so `.vimrc` forced the marks on, and that same force kept them on for
+`~/k6.12` on the Mac (8.9 MB), where one `status --ignored=traditional` took
+10-16 s. neo-tree's debounce only waits one second before the next call, not
+for the previous process to finish, so two of those overlapped and the editor
+kept a core or two busy for as long as the tree was open.
+
+Now it is decided by the clock. Every `git status` neo-tree starts, and the
+`ls-files --others --ignored` of its first scan (the same directory walk), goes
+through a wrapper around its job runner:
+
+- while a status is running for a repository, a new one is not started; the
+  latest request waits and runs when the first finishes
+- one that runs past `g:vimide_neotree_git_max_sec` (2 s) is killed on the
+  spot together with anything else still running for that repository, the
+  marks for it are put aside and switched off, and a one-line notice says so.
+  Other repositories keep theirs
+- `let g:vimide_neotree_git = 1`, or raising the limit, switches it back on and
+  puts the marks back (neo-tree skips re-parsing output it has seen, so marks
+  that were thrown away would stay blank until a file changed)
+- the buffers and git_status views call a blocking `git.status()`
+  (`vim.fn.system` - the editor waits for it). It is skipped for a repository
+  that is switched off, and one that takes longer than the limit switches the
+  repository off
 
 ```vim
-let g:vimide_neotree_git = 1         " always on, whatever the size
-let g:vimide_neotree_git = 0         " always off
-let g:vimide_neotree_git_max_mb = 2  " the threshold (default 2)
+let g:vimide_neotree_git = 1          " always on, however slow (no timing)
+let g:vimide_neotree_git = 0          " always off
+let g:vimide_neotree_git_max_sec = 2  " slower than this: off for that repo
+let g:vimide_neotree_git_max_mb = 2   " (only if set) also off above this size
 ```
 
+Checked with a stand-in `git` that delays `status` (real TUI, isolated): a 6 s
+repository was killed at about 2 s and never asked again; a 1.5 s one was asked
+four times in a burst of six refreshes, one at a time, and kept its marks; a
+fast one kept its marks; with the option set to 1 the 6 s one ran to the end.
+
 Counted live on the kernel repo while opening neo-tree, walking into a
-subdirectory and revealing a file: forced on, one git process at 89%, then
-97% eight seconds in, then a second at 121%. With the guard, none at any
-step.
+subdirectory and revealing a file, with the old size guard: forced on, one git
+process at 89%, then 97% eight seconds in, then a second at 121%. With the
+guard, none at any step.
 
 ### The first telescope window used to open tiny
 
