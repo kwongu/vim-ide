@@ -420,6 +420,9 @@ local FOREIGN_FT = {
   NeogitStatus = true, NeogitPopup = true, NeogitCommitView = true,
   NeogitLogView = true, NeogitDiffView = true, NeogitCommitMessage = true,
   NeogitRebaseTodo = true, NeogitConsole = true,
+  -- DirDiff 탭(dirdifftab.vim): 목록 창 위로 비교 창을 쪼개 붙이는 것이 그
+  -- 플러그인의 일이다 - 곁창 보호가 끼면 비교 창이 다른 데로 옮겨진다
+  dirdiff = true,
 }
 
 local function foreign_tab()

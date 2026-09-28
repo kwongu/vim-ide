@@ -245,6 +245,9 @@ Plug 'ludovicchabant/vim-gutentags'
 Plug 'stevearc/aerial.nvim'
 Plug 'MunifTanjim/nui.nvim'
 Plug 'nvim-neo-tree/neo-tree.nvim', { 'branch': 'v3.x' }
+" 디렉터리 비교 - :DirDiff <A> <B> 가 새 탭에서(dirdifftab.vim), neo-tree 에서 \d 두 번
+" (dirdiffpick.lua). 옵션은 아래 'DirDiff' 절
+Plug 'will133/vim-dirdiff'
 
 " supertab 이 로드되기 전에 nvim 의 기본 <S-Tab> 삽입 맵핑을 치운다.
 "
@@ -1025,6 +1028,7 @@ _G.rv_setup('neo-tree', {
   --   o  열기            O  이 아래를 전부 펼치기
   --   X  이 아래를 접기   I  숨김 파일 토글 (neo-tree 의 H 도 그대로)
   --   K  형제 중 처음     J  형제 중 마지막
+  --   \d 비교할 두 곳을 고르기 (첫 번째에서 \d, 두 번째에서 \d -> DirDiff)
   --
   -- NERDTree 의 x(부모 접기) p(부모로) C(루트 변경) P(루트로) u(상위
   -- 디렉터리) 는 neo-tree 가 이미 다른 뜻으로 쓰고 있어 넣지 않았다.
@@ -1045,6 +1049,10 @@ _G.rv_setup('neo-tree', {
       -- 단계는 g:neotree_wide_steps, 하는 일은 neotree_nerd.lua 에 있다.
       -- neo-tree 기본의 open_with_window_picker 자리를 넘겨받는다.
       ['w'] = function() _G.neotree_toggle_wide() end,
+      -- \d 두 번으로 두 곳을 비교한다: 첫 번째 위에서 \d , 두 번째 위에서 \d
+      -- (디렉터리 둘이면 DirDiff, 파일 둘이면 vimdiff - dirdiffpick.lua).
+      -- = 는 이미 색인 목록 정보다 (projectfiles_neotree.lua)
+      ['<leader>d'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교 (DirDiff)' },
       -- 커서 자리 이하에서 찾는다. 디렉터리 줄이면 그 디렉터리, 파일 줄이면
       -- 그 파일이 든 디렉터리, 빈 줄이면 트리 루트 (treesearch.lua).
       --   <C-g>  찾기 (grep) - 내용에서. 편집 창의 <C-g> 와 같은 창이다
@@ -1736,6 +1744,8 @@ Plugin 'vim-utils/vim-troll-stopper'
 Plugin 'Raimondi/delimitMate'
 Plugin 'mhinz/vim-signify'
 Plugin 'terryma/vim-smooth-scroll'
+" 디렉터리 비교 (:DirDiff) - 옵션은 아래 'DirDiff' 절
+Plugin 'will133/vim-dirdiff'
 "Plugin 'ctrlpvim/ctrlp.vim'
 "Plugin 'SirVer/ultisnips'
 "Plugin 'honza/vim-snippets'
@@ -1758,6 +1768,25 @@ filetype plugin indent on     " required!
 " see :h vundle for more details or wiki for FAQ
 " NOTE: comments after Plugin command are not allowed..
 "
+
+" ------------------------------------
+" DirDiff: 두 디렉터리 비교 (will133/vim-dirdiff)
+"   :DirDiff <A> <B>   새 탭에서 비교 (~/.vim/plugin/dirdifftab.vim). 끝내면 탭도 닫힌다
+"   neo-tree 에서 \d   비교할 첫 번째 위에서 \d , 두 번째 위에서 \d (dirdiffpick.lua)
+"                      파일 둘이면 새 탭에서 vimdiff. 같은 줄에서 다시 \d 는 취소
+"   목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
+"   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
+"
+" 'diff -r' 는 끝날 때까지 편집기를 기다리게 한다. .git 하나가 소스 전체보다 큰
+" 경우가 흔하므로 색인·빌드 산출물과 함께 뺀다. -x 는 이름이 딱 맞는 것만 뺀다
+" (.git 을 빼도 .gitignore 는 비교된다).
+"   let g:DirDiffExcludes = '...'   " 바꾸려면 여기보다 먼저(또는 목록 창에서 x)
+"   let g:vimide_dirdiff_tab = 0    " :DirDiff 를 플러그인 그대로(지금 창에서)
+" ------------------------------------
+if !exists('g:DirDiffExcludes')
+    let g:DirDiffExcludes = '.git,.svn,.hg,.repo,.tags,GTAGS,GRTAGS,GPATH,*.o,*.ko,*.a,*.so,*.pyc,*.swp,__pycache__'
+endif
+let g:vimide_dirdiff_tab = 1
 
 " Ease my eyes
 "colorscheme solarized

@@ -1171,6 +1171,7 @@ slots that were empty:
 | `I` | toggle hidden files (`H` still does it too) |
 | `K` / `J` | first / last sibling |
 | `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
+| `\d` | pick two directories (or two files) to compare - see [Comparing directories](#comparing-directories-dirdiff) |
 
 `o` is the one key that was not free: neo-tree had it on help, and help is
 also on `?`, so nothing was lost.
@@ -1458,6 +1459,73 @@ back to following the shared one; the shared original is removed by deleting
 the file in the repository. To ignore the shared presets entirely:
 `let g:projectfiles_shared_presets = ''`, or point it at a directory of your
 own.
+
+## Comparing directories (DirDiff)
+
+[DirDiff.vim](https://github.com/will133/vim-dirdiff) compares two directory
+trees: it runs `diff -r --brief`, lists every file that differs or exists on
+one side only, and opens the pair under the cursor side by side in diff mode.
+
+```vim
+:DirDiff <A> <B>          " compare two directories (tab-completes paths)
+```
+
+In neo-tree (F9, F11 or the RelationView tree), press `\d` on the first
+directory and `\d` on the second. Two files instead of two directories open
+side by side in vimdiff. `\d` again on the row already picked cancels it, and
+the two can come from different trees.
+
+| in the list | |
+|---|---|
+| `<CR>` / `o` | open that pair (`A` on the left, `B` on the right) |
+| `s` | sync - make one side match the other. It asks which way (A to B, B to A, the same for the rest, skip). **This copies and deletes**: a file that differs is copied over, one that exists only on the side being copied from is copied, and one that exists only on the side being overwritten is *deleted* (`rm -rf` for a directory). Works on a visual range too |
+| `u` | run the comparison again |
+| `x` / `i` / `a` | change the excludes / ignored lines / extra `diff` arguments |
+| `q` | finish (asks first) |
+
+In the two diff windows the usual keys apply: `]c` / `[c` to the next and
+previous change, `do` / `dp` to take or give one, `:DirDiffNext` /
+`:DirDiffPrev` to step through the list.
+
+What vim-ide adds around the plugin:
+
+- **A tab of its own, and back again.** The plugin puts its list in the
+  current window and splits around it, which in this layout means the edit
+  window becomes the list and new windows squeeze in between the tree, the
+  outline and the relation panel. `:DirDiff` opens a new tab instead. Finishing
+  with `q` - or closing that tab any other way - closes it, returns to the tab
+  it was started from, and removes the buffers the comparison opened; one you
+  edited is kept and named. `let g:vimide_dirdiff_tab = 0` stays in the current
+  window instead (the fixes below still apply).
+- **Opening an entry is done here.** Moving to the next entry, the plugin
+  `:bd`s the previous files - including a file that was already open before
+  the comparison, which closed its window in the original tab. `<CR>`, `o`,
+  `:DirDiffNext` and `:DirDiffPrev` close the two diff windows and split new
+  ones, and never delete a buffer. An entry that is a directory on one side
+  only is not opened (nvim-tree would take the window); the list says so.
+- **One comparison at a time.** The plugin keeps its state in one global slot,
+  so a second comparison started while the first is open broke both. Starting
+  one takes you to the open one instead; finish it with `q` first. If the last
+  one ended some other way, its state is cleared before the next starts.
+- **Excludes.** `diff -r` holds the editor until it is done, and `.git` alone
+  is often bigger than the source it tracks. `.git .svn .hg .repo .tags
+  GTAGS GRTAGS GPATH *.o *.ko *.a *.so *.pyc *.swp __pycache__` are left out
+  (`g:DirDiffExcludes`; set your own before `.vimrc` reaches it, or change it
+  from the list with `x`). A name has to match exactly, so leaving out `.git`
+  still compares `.gitignore`.
+- **Paths under a `tmp` directory.** The plugin resolves its arguments with
+  `expand()`, which returns an empty string for anything `'wildignore'`
+  matches, and `.vimrc` has `*/tmp/*` there. Every Yocto tree lives under
+  `build/tmp/work/`, so both sides quietly became the current directory. The
+  plugin is called with `'wildignore'` cleared, and so is every file opened
+  from the list.
+- **Characters it cannot pass.** The plugin expands a path a second time and
+  builds a `:!diff` command from it, so `` $ % # ! " ` \ `` in a path would compare
+  the wrong place or nothing. Such a path is refused with a message.
+- **`nvim -c "DirDiff A B"`** works too: the command is taken over as soon as
+  the plugin is loaded, before `-c` commands run.
+- In real vim (the Vundle side) `:DirDiff` and all of the above behave the same;
+  the neo-tree key is nvim only.
 
 ## What Source Insight has, and what is here
 
