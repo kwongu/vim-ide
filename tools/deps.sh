@@ -101,7 +101,7 @@ rg|11|want|<C-g> 의 경로 검색. 없으면 grep 으로 떨어진다(느리다
 curl|7|must|vim-plug 부트스트랩과 플러그인 내려받기|curl --version|
 make|3.8|want|telescope-fzf-native 빌드와 소스 설치|make --version|
 cc|4|want|위와 같다. 소스로 빌드할 때만 쓴다|cc --version|
-python3|3.6|want|install.sh 가 vim 을 python 지원으로 빌드할 때만 쓴다|python3 --version|
+python3|3.6|want|install.sh 가 vim 을 python 지원으로 빌드할 때, nvim 의 :DirDiff 트리(.vim/tools/dirdiffscan.py)|python3 --version|
 tmux|3.2|want|tmux 안에서 nvim 을 쓸 때 Ctrl+작은따옴표 같은 확장 키를 넘긴다(extended-keys, 3.2 부터). 모자라면 GitHub 의 최신 릴리스를 올린다|tmux -V|
 '
 

@@ -97,7 +97,9 @@ function _G.vimide_dirdiff_pick(state)
   first = nil
   if kind == 'dir' then
     -- :DirDiff 를 거치지 않고 바로 부른다 (VimIdeDirDiff 가 EDIT 창에서 새 탭을 연다)
-    if vim.fn.exists('*VimIdeDirDiff') == 1 then
+    if _G.vimide_dirdiff_open and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
+      _G.vimide_dirdiff_open(a, path)
+    elseif vim.fn.exists('*VimIdeDirDiff') == 1 then
       vim.fn.VimIdeDirDiff(a, path)
     else
       say('dirdifftab.vim 이 없습니다', levels.WARN)

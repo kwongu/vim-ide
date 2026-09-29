@@ -1519,10 +1519,6 @@ let g:vimide_edit_winmove = 0   " vim's own behaviour
 
 ## Comparing directories (DirDiff)
 
-[DirDiff.vim](https://github.com/will133/vim-dirdiff) compares two directory
-trees: it runs `diff -r --brief`, lists every file that differs or exists on
-one side only, and opens the pair under the cursor side by side in diff mode.
-
 ```vim
 :DirDiff <A> <B>          " compare two directories (tab-completes paths)
 ```
@@ -1531,6 +1527,113 @@ In neo-tree (F9, F11 or the RelationView tree), press `\d` on the first
 directory and `\d` on the second. Two files instead of two directories open
 side by side in vimdiff. `\d` again on the row already picked cancels it, and
 the two can come from different trees.
+
+### The side-by-side tree (nvim)
+
+In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare: the two
+edit windows on top show the chosen pair in diff mode (A on the left, B on
+the right), and the window below holds A's tree, a verdict column, and B's
+tree next to each other.
+
+```
+▾ sub                 2026-09-29 ≠ ▾ sub                 2026-09-29
+    d1.c            2 2020-01-01 ≠     d1.c            2 2026-09-29
+  hunks.c         111 2020-01-01 ≠   hunks.c         118 2026-09-29
+  onlyA.c           2 2026-09-29 ◀
+  onlyB.c                        ▶   onlyB.c           2 2026-09-29
+  same.c            5 2026-09-29 =   same.c            5 2026-09-29
+```
+
+`=` same, `≠` different, `◀` only in A, `▶` only in B, `·` not checked
+yet (`= x < > .` with `g:vimide_ascii_icons`). Differences are red, one-side
+entries blue. A folder is `≠` as soon as anything inside it differs, and `=`
+only once everything below it has been checked. The status line shows the
+progress and the totals.
+
+| in the tree | |
+|---|---|
+| `<CR>` | file: show the pair in the edit windows and move the cursor there, on the first change. Folder: open / close |
+| `o` | show the pair, stay in the tree |
+| `<C-n>` / `<C-p>` | next / previous file that differs (or exists on one side only), opening folders on the way |
+| `l` / `h` | open a folder / close it (or go to the parent) |
+| `O` / `X` | open every folder that has a difference / close all (the whole tree) |
+| `f` | only differences |
+| `<Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side works too). The status line says which |
+| `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
+| `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
+| `R` | compare again |
+| `q` | finish: closes the tab, goes back, removes the buffers it opened (an edited one is kept, and named) |
+| `?` | these keys |
+
+In the two edit windows `<C-n>` / `<C-p>` are `]c` / `[c` (next / previous
+change), and `<C-r>` / `<C-l>` copy the line under the cursor - or the lines of a
+visual selection, or a count of lines - to the right (B) / to the left (A).
+That is `:diffput` or `:diffget` for those lines, so the other buffer changes
+and `:w` saves it; each copy is one undo step there. On a line that is not
+itself changed but has lines that exist only on the other side right above or
+below it, that change is copied; on any other unchanged line nothing happens.
+When one side is not a file (the empty side of a one-sided file, a note) the
+keys refuse and point to the tree copy. `do` / `dp` still work, and a count
+works on `<C-n>` / `<C-p>` as on `]c` / `[c`. Outside the DirDiff tab `<C-r>`
+is redo and `<C-l>` moves to the right window, exactly as before
+(`let g:vimide_dirdiff_copy_keys = 0` leaves them alone everywhere).
+
+Copying in the tree:
+
+- It asks first, naming what goes which way
+  (`let g:vimide_dirdiff_confirm_copy = 0` to skip the question). A file with
+  the same name on the other side is overwritten; a folder is merged into the
+  one there - nothing on the other side is deleted.
+- The helper does the copying, entry by entry, so that the target side cannot
+  be damaged: a file is written to a temporary name next to it and renamed
+  over the old one only when it is complete (a failed copy leaves the old file
+  as it was); a symlink on the target side is replaced, never written through;
+  nothing is written below a target folder that is really a symlink or a
+  file; names in `g:DirDiffExcludes` (`.git`, `GTAGS`, `*.o` ...) are neither
+  copied nor touched on the other side; special files (FIFOs, devices) are
+  skipped. Symlinks are copied as links. One copy runs at a time, and `q`
+  waits for it.
+- It skips, and says why, an entry that does not exist on the source side, a
+  name that is a folder on one side and a file on the other, and a target
+  whose buffer has unsaved changes.
+- Only what was copied is compared again (from the highest folder that did
+  not exist on the target side), not the whole tree, and a pair shown in the
+  edit windows is reopened with the new file once its new verdict is in.
+
+- **Only in A / only in B.** The missing side is an empty buffer in diff
+  mode, so the whole file shows as added: an A-only file on the left with an
+  empty right side, a B-only file on the right with an empty left side. The
+  window bar says `(없음)` on the empty side.
+- Binary files and files over 20 MB (`g:vimide_dirdiff_max_mb`) are not
+  loaded; the windows say so. So does a name that is a folder on one side and
+  a file on the other.
+- **Big trees show up at once.** `diff -r --brief` reads every file with the
+  same name to the end before it says anything, and holds the editor while it
+  does. On two Android 15 `maincore/external` trees (hundreds of thousands of
+  files) it had not printed a single line after 120 s. Here a python3 helper
+  (`.vim/tools/dirdiffscan.py`) walks both trees in the background and the
+  top level is on screen in under 0.1 s; everything fills in as it is found.
+  Folders are read with `readdir` alone (no `stat` per entry - one `stat` on
+  that server's filesystem takes milliseconds), a different size is marked
+  different on the spot, the same size and modification time counts as the
+  same (`let g:vimide_dirdiff_trust_mtime = 0` to read those too), and only
+  the rest is read. The folder you open is checked first, the rest in screen
+  order, with the listing and the reading done by separate workers so neither
+  waits for the other.
+- The excludes are the same `g:DirDiffExcludes` as below.
+- `:DirDiff A B` again for a pair already open goes to its tab; another pair
+  opens its own.
+- `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again;
+  `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
+  starts with only the differences, `g:vimide_dirdiff_list_height` sets the
+  tree height (default 40% of the screen).
+
+### The plugin's list (vim, `:DirDiffClassic`)
+
+[DirDiff.vim](https://github.com/will133/vim-dirdiff) compares two directory
+trees: it runs `diff -r --brief`, lists every file that differs or exists on
+one side only, and opens the pair under the cursor side by side in diff mode.
+This is `:DirDiff` in real vim, and `:DirDiffClassic` in nvim.
 
 | in the list | |
 |---|---|
@@ -1581,8 +1684,8 @@ What vim-ide adds around the plugin:
   the wrong place or nothing. Such a path is refused with a message.
 - **`nvim -c "DirDiff A B"`** works too: the command is taken over as soon as
   the plugin is loaded, before `-c` commands run.
-- In real vim (the Vundle side) `:DirDiff` and all of the above behave the same;
-  the neo-tree key is nvim only.
+- In real vim (the Vundle side) `:DirDiff` is this list and all of the above
+  behave the same; the neo-tree key and the side-by-side tree are nvim only.
 
 ## What Source Insight has, and what is here
 

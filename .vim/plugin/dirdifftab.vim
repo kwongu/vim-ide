@@ -7,7 +7,8 @@
 " 탭을 :tabclose 로 닫아도 - 그 탭을 닫고, 비교하느라 연 버퍼를 치우고(고친 것은
 " 남긴다), 시작한 탭으로 돌아간다.
 "
-"   :DirDiff <A> <B>                두 디렉터리 비교 (새 탭)
+"   :DirDiff <A> <B>                두 디렉터리 비교 (새 탭) - nvim 에서는 나란한 트리
+"                                   (dirdiffview.lua), 이 목록 방식은 :DirDiffClassic
 "   neo-tree 에서 \d                첫 번째를 고르고, 두 번째에서 \d (dirdiffpick.lua)
 "   let g:vimide_dirdiff_tab = 0    " 새 탭 없이 지금 창에서 (아래 고침은 그대로)
 "
@@ -493,9 +494,28 @@ function! VimIdeDirDiff(...) abort
   execute s:list_win() . 'wincmd w'
 endfunction
 
+" nvim 에서는 :DirDiff 가 Beyond Compare 식 나란한 트리(dirdiffview.lua)다. 이 파일의
+" 목록 방식은 :DirDiffClassic 으로 남는다. 진짜 vim 은 여기 목록 방식 그대로.
+function! VimIdeDirDiffView(...) abort
+  if a:0 != 2
+    return s:warn('디렉터리 두 개를 주세요 - :DirDiff <A> <B>')
+  endif
+  call luaeval('_G.vimide_dirdiff_open(_A[1], _A[2])', [a:1, a:2])
+endfunction
+
+function! s:use_view() abort
+  return has('nvim') && get(g:, 'vimide_dirdiff_view', 1)
+        \ && luaeval('_G.vimide_dirdiff_open ~= nil')
+endfunction
+
 function! s:install() abort
-  if exists(':DirDiff') == 2
-    command! -nargs=* -complete=dir DirDiff call VimIdeDirDiff(<f-args>)
+  if exists(':DirDiff') == 2 || exists(':DirDiffClassic') == 2
+    command! -nargs=* -complete=dir DirDiffClassic call VimIdeDirDiff(<f-args>)
+    if s:use_view()
+      command! -nargs=* -complete=dir DirDiff call VimIdeDirDiffView(<f-args>)
+    else
+      command! -nargs=* -complete=dir DirDiff call VimIdeDirDiff(<f-args>)
+    endif
     command! -nargs=0 DirDiffUpdate call VimIdeDirDiffUpdate()
     command! -nargs=0 DirDiffOpen call VimIdeDirDiffOpen()
     command! -nargs=0 DirDiffNext call VimIdeDirDiffStep(1)

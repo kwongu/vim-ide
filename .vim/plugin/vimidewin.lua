@@ -423,6 +423,8 @@ local FOREIGN_FT = {
   -- DirDiff 탭(dirdifftab.vim): 목록 창 위로 비교 창을 쪼개 붙이는 것이 그
   -- 플러그인의 일이다 - 곁창 보호가 끼면 비교 창이 다른 데로 옮겨진다
   dirdiff = true,
+  -- 나란한 트리 DirDiff(dirdiffview.lua)의 탭도 같다
+  vimidedirdiff = true,
 }
 
 local function foreign_tab()
@@ -911,6 +913,19 @@ local function dirty_bufs()
   return out
 end
 
+-- EDIT 창은 아니지만 살아 있으면 끝내지 않는 창: DirDiff 의 비교 트리. 그 탭 하나만
+-- 남았을 때 비교 창 둘을 닫거나 트리에서 :only 하면 nvim 이 꺼졌다 (트리는 nofile 이라
+-- EDIT 으로 세지 않는다) - 비교 창은 트리에서 파일을 고르면 다시 생긴다
+local function has_keeper(dying)
+  for _, w in ipairs(api.nvim_list_wins()) do
+    if w ~= dying and api.nvim_win_is_valid(w)
+        and vim.bo[api.nvim_win_get_buf(w)].filetype == 'vimidedirdiff' then
+      return true
+    end
+  end
+  return false
+end
+
 api.nvim_create_autocmd('WinClosed', {
   group = api.nvim_create_augroup('VimIdeMinEdit', { clear = true }),
   callback = function(a)
@@ -930,7 +945,7 @@ api.nvim_create_autocmd('WinClosed', {
       return
     end
     -- 세는 것은 반드시 탭 전체다(지금 탭만 보면 남의 탭까지 끄게 된다).
-    if _G.vimide_edit_win_count_all(dying) > 0 then
+    if _G.vimide_edit_win_count_all(dying) > 0 or has_keeper(dying) then
       return
     end
     pending = true
@@ -941,7 +956,7 @@ api.nvim_create_autocmd('WinClosed', {
       if cfg('min_edit_win', 1) == 0 or busy() then
         return
       end
-      if _G.vimide_edit_win_count_all() > 0 then
+      if _G.vimide_edit_win_count_all() > 0 or has_keeper() then
         return -- 누가 도로 열어 주었다
       end
       -- 돌아가는 터미널이 있으면 끝내지 않는다. 사용자는 편집 창 하나를

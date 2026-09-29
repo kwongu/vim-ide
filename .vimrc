@@ -1772,9 +1772,10 @@ filetype plugin indent on     " required!
 " ------------------------------------
 " DirDiff: 두 디렉터리 비교 (will133/vim-dirdiff)
 "   :DirDiff <A> <B>   새 탭에서 비교 (~/.vim/plugin/dirdifftab.vim). 끝내면 탭도 닫힌다
+"                      nvim 은 아래의 나란한 트리, vim 과 :DirDiffClassic 은 플러그인의 목록
 "   neo-tree 에서 \d   비교할 첫 번째 위에서 \d , 두 번째 위에서 \d (dirdiffpick.lua)
 "                      파일 둘이면 새 탭에서 vimdiff. 같은 줄에서 다시 \d 는 취소
-"   목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
+"   (플러그인의) 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
 " 'diff -r' 는 끝날 때까지 편집기를 기다리게 한다. .git 하나가 소스 전체보다 큰
@@ -1787,6 +1788,30 @@ if !exists('g:DirDiffExcludes')
     let g:DirDiffExcludes = '.git,.svn,.hg,.repo,.tags,GTAGS,GRTAGS,GPATH,*.o,*.ko,*.a,*.so,*.pyc,*.swp,__pycache__'
 endif
 let g:vimide_dirdiff_tab = 1
+" nvim 의 :DirDiff 는 Beyond Compare 식 나란한 트리다 (~/.vim/plugin/dirdiffview.lua).
+" 위(편집 창 둘)는 A | B 비교, 아래는 A 트리 | 판정 | B 트리. 큰 트리도 곧바로 보인다
+" - 뒤에서 python3(~/.vim/tools/dirdiffscan.py)이 훑으며 보내고(펼쳐 둔 디렉터리 먼저,
+" 그다음 맨 위 폴더 순서대로), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음',
+" 나머지만 내용을 읽는다. 제외는 위의 g:DirDiffExcludes 를 같이 쓴다.
+" 한쪽에만 있는 파일은 없는 쪽을 빈 버퍼로 두고 diff (A만: 왼쪽에 파일, B만: 오른쪽에).
+"   트리: <CR> 비교 열고 편집 창으로(디렉터리는 펼치기), o 열기만, <C-n>/<C-p> 다음/앞
+"         차이 파일, l/h 펼치기/접기, O/X 모두 펼치기/접기, f 차이만, R 다시, q 끝, ? 도움말
+"         <Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
+"         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
+"   편집 창: <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서 줄·고른 줄을 오른쪽/왼쪽으로
+"            (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
+"   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
+"   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
+"   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
+"   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (기본: 화면의 40%)
+"   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
+"   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
+"   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l> 을 가로채지 않기
+let g:vimide_dirdiff_view = 1
+let g:vimide_dirdiff_only_diff = 0
+let g:vimide_dirdiff_trust_mtime = 1
+let g:vimide_dirdiff_confirm_copy = 1
+let g:vimide_dirdiff_copy_keys = 1
 
 " Ease my eyes
 "colorscheme solarized
@@ -2020,14 +2045,21 @@ let g:Gtags_OpenQuickfixWindow = 1
 " 엿보기만 하고 싶으면 <C-0>/<C-9> 를 쓴다 - 그 둘은 커서를 그대로 둔다.
 "   let g:relationview_step_focus = 0   " <C-n>/<C-p> 도 엿보기만
 func! s:ListStep(dir) abort
-	if s:RvPanelOn() && exists(':RelationViewNext') == 2
-		exe a:dir > 0 ? 'RelationViewNext!' : 'RelationViewPrev!'
+	" DirDiff(나란한 트리)의 비교 창에서는 ]c / [c (다음/앞 차이) - dirdiffview.lua.
+	" a:dir 의 크기는 횟수(v:count1)다 - 거기서만 쓰고, 아래는 방향만 본다
+	if has('nvim') && luaeval('_G.vimide_dirdiff_step ~= nil and _G.vimide_dirdiff_step(_A) or false', a:dir)
 		return
 	endif
-	call vimide#qf#Step(a:dir)
+	let l:dir = a:dir > 0 ? 1 : -1
+	if s:RvPanelOn() && exists(':RelationViewNext') == 2
+		exe l:dir > 0 ? 'RelationViewNext!' : 'RelationViewPrev!'
+		return
+	endif
+	call vimide#qf#Step(l:dir)
 endfunc
-nnoremap <silent> <C-n> :call <SID>ListStep(1)<CR>
-nnoremap <silent> <C-p> :call <SID>ListStep(-1)<CR>
+" <C-u>: 횟수가 줄 범위(.,.+N-1call)로 바뀌어 여러 번 불리고 끝줄 근처에서 E16 이 났다
+nnoremap <silent> <C-n> :<C-u>call <SID>ListStep(v:count1)<CR>
+nnoremap <silent> <C-p> :<C-u>call <SID>ListStep(-v:count1)<CR>
 
 " 릴레이션 패널 리스트 전용: Ctrl+0 (다음) / Ctrl+9 (이전)
 "   context view 에만 미리보기가 뜨고 EDIT 창은 움직이지 않는다. 포커스도
@@ -3076,6 +3108,11 @@ endif
 map <C-l> :wincmd l<cr>
 map <C-k> :wincmd k<cr>
 map <C-j> :wincmd j<cr>
+" DirDiff 비교 창의 <C-l>(오른쪽 -> 왼쪽 복사)은 이 map 을 먼저 기억해 두고 가로챈다.
+" .vimrc 를 다시 읽으면 위 map 이 그것을 덮으므로 다시 가로채게 한다 (dirdiffview.lua)
+if has('nvim')
+	silent! lua if _G.vimide_dirdiff_take_over then _G.vimide_dirdiff_take_over() end
+endif
 
 
 "===== 버퍼 이동
