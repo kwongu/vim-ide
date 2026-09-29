@@ -1160,7 +1160,7 @@ writes is byte-for-byte the same 1,452 lines.
 ### NERDTree's keys inside neo-tree
 
 The file operations stay neo-tree's, because they are the reason to use it -
-`a` add, `A` directory, `d` delete, `r` rename, `c` copy, `m` move, `y`/`x`/`p`
+`a` add, `A` directory, `d` delete, `r` rename, `c` copy, `m` move, `Y`/`x`/`p`
 clipboard, `u` undo, `T` trash, `U` restore. NERDTree's keys went into the
 slots that were empty:
 
@@ -1171,11 +1171,22 @@ slots that were empty:
 | `X` | collapse everything under it |
 | `I` | toggle hidden files (`H` still does it too) |
 | `K` / `J` | first / last sibling |
+| `yy` | copy the name of the entry under the cursor, linewise (`3yy`, `"ayy` work) |
+| `y` | vim's yank, as anywhere else: `yiw`, `y$`, and `y` on a visual or `<C-v>` block selection copy exactly the text selected |
+| `Y` | put the entry into neo-tree's file clipboard (what neo-tree has on `y`), to paste it in the tree with `p` |
 | `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
 | `\d` | pick two directories (or two files) to compare - see [Comparing directories](#comparing-directories-dirdiff) |
 
 `o` is the one key that was not free: neo-tree had it on help, and help is
 also on `?`, so nothing was lost.
+
+`y` was not free either. neo-tree has it on its file clipboard, in normal and
+visual mode, so `yy` or a `<C-v>` block `y` in the tree put nothing into a
+register, and `p` in the edit window then pasted whatever was there before.
+`y` is vim's yank again, and the file clipboard moved to `Y`. `yy` copies the
+entry's name rather than the tree line itself - the line also holds the
+indent, the tree guides, the icon and the git mark, which are no use in code;
+select with `V` or `<C-v>` and `y` to get the line as shown.
 
 `/` was not free either - neo-tree puts its fuzzy finder there. The fuzzy
 finder is a fine thing, but `/` is muscle memory for *search*, and a tree you

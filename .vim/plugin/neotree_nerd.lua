@@ -1,8 +1,12 @@
--- neotree_nerd.lua - neo-tree 에서 NERDTree 의 K/J (형제 중 처음/마지막).
+-- neotree_nerd.lua - neo-tree 에서 NERDTree 의 K/J (형제 중 처음/마지막),
+-- 폭 넓히기(w), 그리고 yy (이름 복사).
 --
 -- neo-tree 에는 이에 해당하는 명령이 없어서 직접 만든다. 나머지 NERDTree
 -- 키(o O X I)는 neo-tree 의 명령에 그대로 붙일 수 있어 .vimrc 에서 맵으로만
--- 얹었다. 파일 조작 키(a A d r c m y x p u)는 neo-tree 것을 건드리지 않는다.
+-- 얹었다. 파일 조작 키(a A d r c m x p u)는 neo-tree 것을 건드리지 않는다.
+-- y 만 예외: neo-tree 는 y 를 '파일을 트리 클립보드에' 로 가져가서 yy·비주얼 y 로
+-- 복사한 글자가 레지스터에 들어가지 않았다 (EDIT 창에서 p 하면 예전 내용이 나왔다).
+-- 그래서 y 는 vim 의 복사로 돌려주고, 그 파일 클립보드는 Y 로 옮겼다 (.vimrc).
 
 if vim.g.loaded_neotree_nerd then
   return
@@ -126,6 +130,39 @@ function _G.neotree_toggle_wide()
       pcall(api.nvim_win_set_width, o.win, o.width)
     end
   end
+end
+
+-- yy: 커서 줄부터 [count] 줄의 항목 이름을 줄 단위로 복사한다 ("ayy, 3yy 도).
+-- 트리 줄 그대로(들여쓰기·트리 선·아이콘·git 표시)는 코드에 붙이기에 쓸모가 없어서
+-- 이름만 - 그 줄의 글자가 필요하면 V 나 <C-v> 로 골라 y (vim 의 복사 그대로)
+function _G.neotree_yank_names(state)
+  local api = vim.api
+  local count = vim.v.count1
+  local reg = vim.v.register
+  local first = api.nvim_win_get_cursor(0)[1]
+  local last = math.min(api.nvim_buf_line_count(0), first + count - 1)
+  local names = {}
+  for l = first, last do
+    local ok, node = pcall(function()
+      return state and state.tree and state.tree:get_node(l)
+    end)
+    local name = ok and node and node.type ~= 'message' and node.name or nil
+    if not name or name == '' then
+      -- 항목이 아닌 줄(안내 줄 등)은 보이는 글자에서 앞뒤 공백만 뗀다
+      name = vim.trim(api.nvim_buf_get_lines(0, l - 1, l, false)[1] or '')
+    end
+    names[#names + 1] = name
+  end
+  local ok = pcall(vim.fn.setreg, reg, names, 'l')
+  if not ok then
+    reg = '"'   -- 클립보드 도구가 없으면(서버의 + 레지스터) 이름 없는 레지스터에라도
+    vim.fn.setreg(reg, names, 'l')
+  end
+  if reg == '"' then
+    vim.fn.setreg('0', names, 'l')   -- vim 의 y 처럼 "0 에도 (다음 지우기에 밀려나지 않게)
+  end
+  local shown = table.concat(vim.list_slice(names, 1, 3), ', ') .. (#names > 3 and (' 외 %d'):format(#names - 3) or '')
+  api.nvim_echo({ { ('복사함%s: %s'):format(reg == '"' and '' or (' ("' .. reg .. ')'), shown) } }, false, {})
 end
 
 -- 창이 닫히면 기억도 버린다 (winid 는 돌려 쓰인다)

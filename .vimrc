@@ -1021,13 +1021,19 @@ _G.rv_setup('neo-tree', {
   -- NERDTree 손버릇을 그대로 쓰게 얹는다.
   --
   -- 파일 조작은 neo-tree 것을 그대로 둔다(a 생성, A 디렉터리, d 삭제,
-  -- r 이름변경, c 복사, m 이동, y/x/p 클립보드, u 실행취소). 그래서
+  -- r 이름변경, c 복사, m 이동, x/p 클립보드, u 실행취소). 그래서
   -- 비어 있는 키에만 NERDTree 쪽을 넣었다. 'o' 만 예외인데, neo-tree 에서
   -- 그건 도움말이고 도움말은 '?' 로도 열리기 때문에 잃는 것이 없다.
+  -- 'y' 도 예외: neo-tree 는 y 를 '파일을 트리 클립보드에'(copy_to_clipboard)로
+  -- 써서 yy·비주얼 y·<C-v> 블록 y 로 복사한 글자가 레지스터에 들어가지 않았다 -
+  -- EDIT 창에서 p 하면 예전 내용이 나왔다. y 는 vim 의 복사로 돌려주고
+  -- (yiw, y$, 비주얼 y 는 고른 글자 그대로), yy 는 항목 이름을 줄 단위로
+  -- (3yy, "ayy 도 - neotree_nerd.lua), 트리 클립보드는 Y 로 옮겼다.
   --
   --   o  열기            O  이 아래를 전부 펼치기
   --   X  이 아래를 접기   I  숨김 파일 토글 (neo-tree 의 H 도 그대로)
   --   K  형제 중 처음     J  형제 중 마지막
+  --   yy 이름 복사        Y  트리 클립보드에 (neo-tree 의 원래 y, p 로 붙이기)
   --   \d 비교할 두 곳을 고르기 (첫 번째에서 \d, 두 번째에서 \d -> DirDiff)
   --
   -- NERDTree 의 x(부모 접기) p(부모로) C(루트 변경) P(루트로) u(상위
@@ -1045,6 +1051,9 @@ _G.rv_setup('neo-tree', {
       -- 'Invalid mapping for I' 경고가 떴다
       ['K'] = function(state) _G.neotree_sibling(state, 'first') end,
       ['J'] = function(state) _G.neotree_sibling(state, 'last') end,
+      ['y'] = 'none',
+      ['yy'] = { function(state) _G.neotree_yank_names(state) end, desc = '이름 복사 (yy)' },
+      ['Y'] = 'copy_to_clipboard',
       -- 'w' 로 트리 폭을 넓혔다 줄인다 (RelationView 패널의 'w' 와 같다).
       -- 단계는 g:neotree_wide_steps, 하는 일은 neotree_nerd.lua 에 있다.
       -- neo-tree 기본의 open_with_window_picker 자리를 넘겨받는다.
