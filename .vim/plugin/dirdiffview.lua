@@ -1677,6 +1677,24 @@ function _G.vimide_dirdiff_step(dir)
   return false
 end
 
+-- 트리 커서 줄이 가리키는 경로 (A 쪽, 없으면 B 쪽). 디렉터리면 끝에 '/' -
+-- 곁창에서 <C-g>/<C-/> 로 찾을 때의 기준 (searchctx.lua)
+function _G.vimide_dirdiff_path_at()
+  local s = sessions[api.nvim_get_current_tabpage()]
+  if not (s and api.nvim_get_current_win() == s.win_l) then
+    return nil
+  end
+  local r = s.rows[api.nvim_win_get_cursor(s.win_l)[1]]
+  if not (r and r.e) then
+    return nil
+  end
+  -- 쪽을 고른 뒤 그 쪽의 종류로 '/' 를 붙인다 (A 는 파일, B 는 디렉터리인 줄에서
+  -- A 의 파일에 '/' 를 붙여 찾을 곳이 파일이 되었다)
+  local k = r.e.ka or r.e.kb
+  local root = r.e.ka and s.a or s.b
+  return root .. '/' .. r.rel .. (k == 'd' and '/' or '')
+end
+
 function _G.vimide_dirdiff_open(a, b)
   M.open(a, b)
 end

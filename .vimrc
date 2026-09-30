@@ -4197,6 +4197,13 @@ endfunction
 " 다시 쳐야 한다. '{' 같은 글자 위에서는 '{' 가 그대로 들어왔다.
 " 그런 자리에서는 빈 채로 띄우고 직접 치게 둔다.
 function! s:LookupCword() abort
+    " 목록 곁창(quickfix, RelationView 목록, aerial ...)은 그 줄의 낱말 (searchctx.lua)
+    if &buftype !=# '' && exists('*s:ListWord')
+        let l:w = s:ListWord()
+        if l:w isnot v:null
+            return l:w
+        endif
+    endif
     let l:ch = matchstr(getline('.'), '\%' . col('.') . 'c.')
     return (l:ch =~# '\k') ? expand('<cword>') : ''
 endfunction
@@ -4207,13 +4214,17 @@ endfunction
 func! s:LookupPrompt() abort
 	if has('nvim') && exists('*luaeval') && get(g:, 'vimide_lookup_float', 1)
 				\ && luaeval('_G.vimide_ask ~= nil')
+		" 기준 파일은 창을 띄우기 전에 잡는다: 찾기 창이 닫힐 때 nvim 은 초점을 quickfix·
+		" 미리보기 창으로 돌려주지 않고(vim 의 규칙) 편집 창으로 보내서, 거기서 찾으면
+		" quickfix 항목이 아니라 편집 파일의 색인을 뒤졌다
 		call luaeval('(function(a)'
 					\ . ' _G.vimide_ask({ title = " 룩업 레퍼런스 ",'
-					\ . '   fields = { { label = "찾을 말", value = a } },'
+					\ . '   fields = { { label = "찾을 말", value = a[1] } },'
 					\ . '   footer = " Enter 찾기 · Esc 취소 " },'
 					\ . '  function(v) if v[1] ~= "" then'
-					\ . '    vim.cmd("LookupReferences " .. vim.fn.escape(v[1], " \\\\"))'
-					\ . '  end end) return 1 end)(_A)', s:LookupCword())
+					\ . '    if _G.relationview_lookup and a[2] ~= "" then _G.relationview_lookup(v[1], false, a[2])'
+					\ . '    else vim.cmd("LookupReferences " .. vim.fn.escape(v[1], " \\\\")) end'
+					\ . '  end end) return 1 end)(_A)', [s:LookupCword(), s:SearchFile()])
 		return
 	endif
 	call feedkeys(':LookupReferences ' . s:LookupCword(), 'n')
@@ -4492,15 +4503,47 @@ let Grep_Default_Options = '--exclude="*svn*" --exclude="cscope.out" --exclude="
 " 점프라서), 여기서 통과시키면 vim 런타임의 doc 디렉터리를 뒤지게 되고,
 " 패널이 떠 있는데 미리보기가 닫혀 있으면 첫 결과로 편집 창이 도움말
 " 텍스트로 바뀐다. 도움말에서 낱말을 찾는 일은 :helpgrep 이 한다.
+" 터미널 창도 뺀다.
 "
-" 곁창도 뺀다 - 거기 커서 밑 낱말은 목록의 글자이지 소스의 심볼이 아니다.
-" 다만 미리보기 창(\p)은 진짜 파일을 보여주는 자리라 낱말도 경로도 뜻이
-" 있어서 받는다. <C-]>/gf 가 s:JumpFromPeek 으로 해 주는 것과 같은 대접이다.
+" 곁창(quickfix, RelationView 목록, context view, aerial ...)은 받는다. 예전에는
+" '거기 낱말은 목록의 글자이지 소스의 심볼이 아니다' 라며 뺐는데, 목록을 보다가
+" 그 자리에서 다시 찾고 싶다는 요청이 있었다. 찾을 곳은 그 창이 가리키는 파일의
+" 디렉터리다 (s:SearchFile - searchctx.lua).
 func! s:GrepHere() abort
-	if &buftype ==# 'help'
-		return 0
+	return &buftype !=# 'help' && &buftype !=# 'terminal'
+endfunc
+
+" 찾을 때의 기준 파일. 편집 창이면 지금 파일, 곁창이면 그 창이 가리키는 파일
+" (quickfix 는 커서 줄 항목, RelationView 목록은 그 항목, context view 는 보여
+" 주는 파일, aerial 은 원본 - searchctx.lua), 모르면 EDIT 자리의 파일.
+func! s:SearchFile() abort
+	if has('nvim') && exists('*luaeval') && luaeval('_G.vimide_search_file ~= nil')
+		return luaeval('_G.vimide_search_file() or ""')
 	endif
-	return s:JumpHere() || (&buftype ==# '' && !empty(expand('%:p')))
+	return &buftype ==# '' ? expand('%:p') : ''
+endfunc
+
+" 찾을 말의 처음 값. 편집 창은 예전 그대로 커서 밑 낱말. 곁창에서는 커서가 아이콘이나
+" 기호(◆ 󰊕) 위에 있기 쉬워서, 거기면 그 줄의 첫 식별자를 쓴다 (searchctx.lua).
+" 목록이 아닌 곳(편집 창, context view)이면 v:null - 부르는 쪽이 예전 규칙을 쓴다.
+func! s:ListWord() abort
+	if &buftype !=# '' && has('nvim') && exists('*luaeval') && luaeval('_G.vimide_search_word ~= nil')
+		return luaeval('_G.vimide_search_word()')
+	endif
+	return v:null
+endfunc
+func! s:SearchWord() abort
+	let l:w = s:ListWord()
+	return l:w is v:null ? expand('<cword>') : l:w
+endfunc
+
+" 찾은 뒤 돌아갈 편집 창 (relationview_grep 의 origin). 곁창에서 부르면 EDIT 자리 -
+" 곁창을 주면 미리보기의 <C-t> 스택에 그 곁창 버퍼 이름이 파일처럼 적힌다.
+func! s:SearchOrigin() abort
+	if has('nvim') && exists('*luaeval') && luaeval('_G.vimide_search_origin ~= nil')
+		return luaeval('_G.vimide_search_origin()')
+	endif
+	return win_getid()
 endfunc
 
 " 찾을 말을 명령줄에 채워 보여준다. Enter 를 누르면 찾고, 고쳐 치면 고친
@@ -4523,7 +4566,7 @@ func! s:GrepPrompt(text) abort
 	"   let g:vimide_grep_float = 0   " 예전처럼 명령줄로
 	if has('nvim') && exists('*luaeval') && get(g:, 'vimide_grep_float', 1)
 				\ && luaeval('_G.vimide_ask ~= nil')
-		let l:f = expand('%:p')
+		let l:f = s:SearchFile()
 		let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
 		call luaeval('(function(a)'
 					\ . ' _G.vimide_ask({ title = " 찾기 (grep) ",'
@@ -4532,13 +4575,14 @@ func! s:GrepPrompt(text) abort
 					\ . '   footer = " Tab 칸 이동 · Enter 찾기 · Esc 취소 · <C-x><C-f> 경로 완성 " },'
 					\ . '  function(v)'
 					\ . '   if v[1] == "" then return end'
-					\ . '   local d = vim.fn.fnamemodify(vim.fn.expand(v[2] == "" and a[2] or v[2]), ":p")'
+					\ . '   local raw = (v[2] == "" or v[2] == a[2]) and a[2] or vim.fn.expand(v[2], 1)'
+					\ . '   local d = vim.fn.fnamemodify(raw, ":p")'
 					\ . '   d = d:gsub("/+$", "")'
 					\ . '   if vim.fn.isdirectory(d) ~= 1 then'
 					\ . '     vim.notify("그런 디렉터리가 없습니다 - " .. d, vim.log.levels.WARN) return'
 					\ . '   end'
-					\ . '   _G.relationview_grep(v[1], d)'
-					\ . '  end) return 1 end)(_A)', [a:text, l:d])
+					\ . '   _G.relationview_grep(v[1], d, a[3])'
+					\ . '  end) return 1 end)(_A)', [a:text, l:d, s:SearchOrigin()])
 		return
 	endif
 	" 낱말이 비어 있어도(빈칸 위에서 눌렀어도) 명령줄은 띄운다. 거기서
@@ -4567,7 +4611,7 @@ func! s:RunGrep(word) abort
 	if empty(l:w)
 		return
 	endif
-	let l:f = expand('%:p')
+	let l:f = s:SearchFile()
 	let l:d = empty(l:f) ? getcwd() : fnamemodify(l:f, ':h')
 	" 찾을 경로를 한 번 더 보여준다.
 	"
@@ -4594,7 +4638,11 @@ func! s:RunGrep(word) abort
 		if empty(trim(l:in))
 			return
 		endif
-		let l:d = fnamemodify(expand(trim(l:in)), ':p')
+		" expand(, 1): 'wildignore' 의 */tmp/* 에 걸린 경로(Yocto 의 build/tmp/...)를
+		" expand() 는 빈 글자로 돌려주어 현재 디렉터리에서 찾았다. 손대지 않은 값은
+		" 풀지도 않는다 ($ 나 { } 가 든 진짜 디렉터리 이름이 바뀌지 않게)
+		let l:in = trim(l:in)
+		let l:d = fnamemodify(l:in ==# l:d ? l:d : expand(l:in, 1), ':p')
 		" 끝의 '/' 는 떼어 둔다. rg 는 상관없지만 결과에 '//' 가 섞인다.
 		let l:d = substitute(l:d, '/\+$', '', '')
 		if !isdirectory(l:d)
@@ -4606,8 +4654,8 @@ func! s:RunGrep(word) abort
 	endif
 	if has('nvim') && exists('*luaeval')
 				\ && luaeval('_G.relationview_grep ~= nil')
-		call luaeval('(function() _G.relationview_grep(_A[1], _A[2]) return 1 end)()',
-					\ [l:w, l:d])
+		call luaeval('(function() _G.relationview_grep(_A[1], _A[2], _A[3]) return 1 end)()',
+					\ [l:w, l:d, s:SearchOrigin()])
 		return
 	endif
 	" 진짜 vim 8.1: 패널도 lua 도 없다. quickfix 로 보낸다.
@@ -4671,7 +4719,7 @@ command! -nargs=? VimIdeGrep call s:RunGrep(<q-args>)
 " <C-u> 로 카운트를 먹는다. 없으면 2<C-g> 가 ':.,.+1call ...' 이 되어
 " E481(범위를 받지 않는다)로 죽는다 - vim 본래의 2<C-g>(전체 경로) 손버릇이
 " 남아 있는 사람이 바로 만나는 자리다.
-nnoremap <silent> <C-g> :<C-u>call <SID>GrepPrompt(expand('<cword>'))<CR>
+nnoremap <silent> <C-g> :<C-u>call <SID>GrepPrompt(<SID>SearchWord())<CR>
 " 비주얼: 고른 글자를 채워 보여준다. :<C-u> 로 '<,'> 범위를 지우고, 레지스터를
 " 쓰는 s:VisualText 안에서 gv 로 그 선택을 되살린다.
 xnoremap <silent> <C-g> :<C-u>call <SID>GrepPrompt(<SID>VisualText())<CR>

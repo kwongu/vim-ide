@@ -390,6 +390,13 @@ Ctrl+g: Grep. In nvim a floating "찾기 (grep)" box opens with two fields:
         Inside neo-tree (F9, F11 or the RelationView tree) the same box opens
         with the directory taken from the cursor instead - see "Searching from
         the tree" below.
+        It works in the side windows too - quickfix and location lists, the
+        RelationView list, the context view, aerial, the DirDiff tree: the
+        directory is that of the file the window points at (the quickfix entry
+        or list entry under the cursor, the file the context view shows,
+        aerial's source), falling back to the edit window's file, and when
+        the cursor sits on an icon or a marker the text starts as the first
+        identifier on the line. Only help and terminal windows refuse.
         (Real vim, and nvim with g:vimide_grep_float = 0, ask the two
         questions on the command line instead: the text, then the directory.
         :VimIdeGrep <text> greps that text the same way - no box, the
@@ -856,6 +863,13 @@ and `<CR>` jumps. With the panel closed it goes to the quickfix list instead,
 with absolute paths so it resolves wherever the cwd happens to be. The
 Definition section is dropped for a text search - it is a string, not a
 symbol, and `(no definition)` was just noise.
+
+`Ctrl+/` works from the side windows as well (quickfix, the RelationView list,
+the context view, aerial, neo-tree). The index it searches is the one over the
+file that window points at - the entry under the cursor, the file the context
+view shows - not the current directory: a list window is not a file, and
+falling back to the cwd searched the wrong index (or none) whenever nvim was
+started somewhere else.
 
 ### Borrowing a nested project's list
 

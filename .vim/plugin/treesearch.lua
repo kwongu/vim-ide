@@ -72,7 +72,8 @@ end
 -- $ 나 { } 가 든 디렉터리가 환경 변수나 중괄호 전개로 바뀌면 안 된다.
 -- 고쳐 쳤을 때만 ~ 와 $HOME 을 풀어 준다.
 local function resolve(v, fallback)
-  local raw = (v == '' or v == fallback) and fallback or vim.fn.expand(v)
+  -- expand(, 1): 'wildignore' 의 */tmp/* 에 걸리면 expand() 는 빈 글자를 돌려준다
+  local raw = (v == '' or v == fallback) and fallback or vim.fn.expand(v, 1)
   local d = vim.fn.fnamemodify(raw, ':p')
   if d ~= '/' then
     d = (d:gsub('/+$', ''))

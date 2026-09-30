@@ -7800,7 +7800,7 @@ local function lookup_to_qf(root, pat, refs)
   vim.cmd('normal! gg')
 end
 
-function A.lookup_refs(pat, regex)
+function A.lookup_refs(pat, regex, base)
   if not pat or pat == '' then
     -- 인자가 없으면 커서 밑 낱말. 단 '커서가 진짜 그 낱말 위에 있을 때'만
     -- 이다 - <cword> 는 빈칸 위에서 그 줄의 다음 낱말을 집어 오므로,
@@ -7817,7 +7817,12 @@ function A.lookup_refs(pat, regex)
     return
   end
   local name = api.nvim_buf_get_name(0)
-  local from = (name ~= '' and vim.bo.buftype == '') and name
+  -- 곁창(quickfix, 이 패널, 미리보기, aerial ...)에서 부르면 그 창이 가리키는 파일의
+  -- 색인에서 (searchctx.lua). 예전에는 현재 디렉터리로 떨어져, 다른 디렉터리에서
+  -- 연 파일이면 엉뚱한 색인을 뒤졌다
+  local from = (base and base ~= '' and base)
+      or ((name ~= '' and vim.bo.buftype == '') and name)
+      or (_G.vimide_search_file and _G.vimide_search_file())
       or (vim.fn.getcwd() .. '/x')
   root_for(from, function(root)
     if not root then
@@ -7872,6 +7877,12 @@ api.nvim_create_user_command('LookupReferences', function(o)
   A.lookup_refs(o.args, o.bang)
 end, { nargs = '?', bang = true, desc =
   'Search the indexed files for text (panel if open, else quickfix)' })
+
+--- .vimrc 의 <C-/> 가 부른다. base: 어느 파일의 색인에서 찾을지 (찾기 창을 띄우기 전에
+--- 잡아 둔 것 - 창이 닫히면 초점이 곁창으로 돌아오지 않는다)
+function _G.relationview_lookup(pat, regex, base)
+  A.lookup_refs(pat, regex, base)
+end
 
 api.nvim_create_user_command('RelationView', function(o)
   -- 설정된 기본 방향으로 되돌린다(g:relationview_relation). 예전에는 여기서
