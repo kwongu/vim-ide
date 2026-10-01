@@ -2943,7 +2943,8 @@ end
 -- 지금 편집 중인 파일. 트리가 펼쳐 보여줄 대상이다.
 -- 우리 창(패널/미리보기/트리)에 있거나 진짜 파일이 아니면 nil.
 follow_file = function()
-  if cfg('tree_follow', 1) == 0 then
+  -- \P 로 트리를 고정해 두었으면 따라가지 않는다 (treepin.lua)
+  if cfg('tree_follow', 1) == 0 or vim.g.vimide_tree_pinned == 1 then
     return nil
   end
   local win = api.nvim_get_current_win()
@@ -3091,9 +3092,16 @@ local function tree_follow_now()
   end
 end
 
+-- 트리 고정을 풀 때 곧바로 한 번 따라간다 (treepin.lua). '이미 그 파일로 갔다' 는 기억을
+-- 지우고 - 고정 중에 트리에서 커서를 옮겨 다녔으면 같은 파일이어도 돌아가야 한다
+function _G.relationview_tree_follow_now()
+  s.tree_last = nil
+  pcall(tree_follow_now)
+end
+
 -- 커서가 파일 사이를 빠르게 옮겨 다닐 때 트리를 매번 다시 그리지 않는다
 local function tree_follow_soon()
-  if not tree_visible() or cfg('tree_follow', 1) == 0 then
+  if not tree_visible() or cfg('tree_follow', 1) == 0 or vim.g.vimide_tree_pinned == 1 then
     return
   end
   if s.tree_timer then
