@@ -1,19 +1,21 @@
 -- treepin.lua - \P: neo-tree 트리를 고정한다 (편집 파일을 따라가지 않게, 토글)
 --
 -- EDIT 창에서 파일을 옮겨 다니면 neo-tree 가 그 파일까지 펼치고 커서를 옮긴다
--- (filesystem.follow_current_file, RelationView 열의 트리는 relationview.lua 의
--- 따라가기). 다른 곳을 보면서 트리는 그대로 두고 싶을 때 \P 로 고정한다.
+-- (filesystem.follow_current_file). 다른 곳을 보면서 트리는 그대로 두고 싶을 때 \P 로
+-- 고정한다. F9 사이드바 같은 neo-tree 창만이다 - RelationView 열의 트리는 늘 따라간다
+-- (요청: 그 트리는 언제나 지금 파일을 보여 줄 것. 그 따라가기는 relationview.lua 가
+-- 따로 하고 이 고정을 보지 않는다. 표시도 그 창에는 달지 않는다).
 --
 --   \P               고정 / 풀기 (어느 창에서나)
 --   :VimIdeTreePin   같은 것.  :VimIdeTreePin on / off 로 정해서도
 --
--- 고정 중에는 파일 트리 창마다 맨 위에 '[고정] \P 로 풀기' 가 뜬다. 풀면 그 줄이
+-- 고정 중에는 고정되는 트리 창마다 맨 위에 '[고정] \P 로 풀기' 가 뜬다. 풀면 그 줄이
 -- 사라지고, 편집 창에서 풀었으면 곧바로 지금 파일로 한 번 따라간다. 고정은 따라가기만
 -- 막는다: 트리에서 직접 펼치기·열기, :Neotree reveal 처럼 일부러 드러내는 것은 된다.
 -- 파일 트리(filesystem)만이다 - neo-tree 의 buffers 보기(< > 로 바꾸는 것)는 그대로
 -- 따라가고, 거기에는 표시도 달지 않는다.
 --
--- 막는 곳은 넷이다.
+-- 막는 곳은 셋이다.
 --   * neo-tree 의 BufEnter 따라가기 - 그 처리기는 follow_current_file.enabled 를 다시
 --     보지 않고 filesystem.follow() 를 부르므로 follow 를 감싼다
 --   * neo-tree 가 트리를 다시 그릴 때(git 표시 갱신 등)의 따라가기 - 상태마다의
@@ -22,7 +24,8 @@
 --     만들어진다. 그 설정은 neo-tree 가 트리를 처음 열 때에야 합쳐 두므로(ensure_config),
 --     ensure_config 를 감싸 합친 바로 뒤에 고친다 - 시작부터 고정이면 첫 트리가 그 파일까지
 --     펼쳐졌다
---   * RelationView 열의 트리 - relationview.lua 가 g:vimide_tree_pinned 를 본다
+-- (RelationView 열의 트리는 position=current 라 neo-tree 의 따라가기를 타지 않는다 - 위의
+-- 어느 것도 그 트리에 닿지 않는다)
 --
 -- neo-tree 의 모듈을 미리 부르지 않는다 (시작이 15ms 느려졌다). 감싸기는 트리가 처음
 -- 생길 때(FileType neo-tree) 한다 - 그 전에는 따라갈 트리도 없다.
@@ -131,8 +134,11 @@ end
 -- 남았다. 다른 것이 winbar 를 쓰고 있으면 손대지 않는다
 local BAR = '%#VimIdeTreePinned# [고정] \\P 로 풀기 %*'
 
-local function is_fs_tree(buf)
+-- 고정되는 트리 창: neo-tree 파일 트리이고 RelationView 열의 트리(w:rv_tree)가 아닌 것
+local function pinnable(win)
+  local buf = api.nvim_win_get_buf(win)
   return vim.bo[buf].filetype == 'neo-tree' and vim.b[buf].neo_tree_source == 'filesystem'
+      and not vim.w[win].rv_tree
 end
 
 local function mark_win(win)
@@ -140,7 +146,7 @@ local function mark_win(win)
     return
   end
   local cur = vim.wo[win].winbar
-  local want = pinned() and is_fs_tree(api.nvim_win_get_buf(win))
+  local want = pinned() and pinnable(win)
   if want and cur == '' then
     vim.wo[win].winbar = BAR
   elseif not want and cur == BAR then
@@ -175,9 +181,6 @@ local function catch_up()
   local fs = wrap_follow()   -- 트리를 한 번도 안 열었으면 nil - 따라갈 트리가 없다
   if fs and fs.follow then
     pcall(fs.follow)
-  end
-  if _G.relationview_tree_follow_now then
-    pcall(_G.relationview_tree_follow_now)
   end
 end
 

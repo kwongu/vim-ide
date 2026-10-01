@@ -1197,9 +1197,9 @@ also on `?`, so nothing was lost.
 `\P` pins the tree, and `\P` again lets it go (from any window;
 `:VimIdeTreePin [on|off]` does the same). Normally the tree follows the edit
 window - every file you move to gets expanded and the cursor jumps to it.
-Pinned, the F9 sidebar and the RelationView column's tree stay where they are
-while you move between files; a ` [고정] \P 로 풀기 ` line at the top of each
-tree window says so. Letting go from an edit window jumps the tree to the
+Pinned, the F9 sidebar stays where it is while you move between files; a
+` [고정] \P 로 풀기 ` line at the top of the tree window says so. The tree in the
+RelationView column is not pinned - it always shows the current file. Letting go from an edit window jumps the tree to the
 current file at once. Only the following stops: opening and expanding by hand
 in the tree, and an explicit `:Neotree reveal`, still work. It is the file
 tree that is pinned - neo-tree's buffers view (`<` / `>`) keeps following and
