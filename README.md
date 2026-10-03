@@ -1189,7 +1189,7 @@ slots that were empty:
 | `y` | vim's yank, as anywhere else: `yiw`, `y$`, and `y` on a visual or `<C-v>` block selection copy exactly the text selected |
 | `Y` | put the entry into neo-tree's file clipboard (what neo-tree has on `y`), to paste it in the tree with `p` |
 | `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
-| `\d` | pick two directories (or two files) to compare - see [Comparing directories](#comparing-directories-dirdiff) |
+| `Tab` | pick two directories (or two files) to compare: `Tab` on the first marks it `[A]`, `Tab` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff). `\d` does the same. neo-tree had `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
 
 `o` is the one key that was not free: neo-tree had it on help, and help is
 also on `?`, so nothing was lost.
@@ -1560,10 +1560,13 @@ let g:vimide_edit_winmove = 0   " vim's own behaviour
 :DirDiff <A> <B>          " compare two directories (tab-completes paths)
 ```
 
-In neo-tree (F9, F11 or the RelationView tree), press `\d` on the first
-directory and `\d` on the second. Two files instead of two directories open
-side by side in vimdiff. `\d` again on the row already picked cancels it, and
-the two can come from different trees.
+In neo-tree (F9, F11 or the RelationView tree), press `Tab` on the first
+directory - its row gets an `[A]` at the end - and `Tab` on the one to compare
+it with: that one becomes `[B]` and the comparison opens straight away. Two
+files instead of two directories open side by side in vimdiff. `Tab` again on
+the `[A]` row cancels it, and the two can come from different trees (pick `[A]`
+in the F9 sidebar, `[B]` in the RelationView tree). `\d` is the same key under
+another name.
 
 ### The side-by-side tree (nvim)
 
@@ -2249,8 +2252,10 @@ XButton2::SendInput("^i")
 
 The mouse vendor's own utility can do the same binding with no AutoHotkey at
 all. The one cost is that `Ctrl+I` is `Tab`, so the forward button inserts a
-tab if you press it in insert mode; the escape-sequence route has no such
-overlap. If Tera Term runs elevated and AutoHotkey does not, Windows blocks
+tab if you press it in insert mode, and in a neo-tree window (F9, the
+RelationView tree) it picks the row for a comparison (`[A]`, then `[B]` - see
+[Comparing directories](#comparing-directories-dirdiff)); the escape-sequence
+route has no such overlap. If Tera Term runs elevated and AutoHotkey does not, Windows blocks
 the synthetic input - run both the same way.
 
 **`:JumpKeyTest`** says where the chain breaks. Run it, press the button
