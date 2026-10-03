@@ -103,6 +103,16 @@ let &ttimeoutlen = get(g:, 'vimide_esc_wait', 25)
 " Not redraw while executing macros, and commands.
 set lazyredraw
 
+" 괄호 짝 강조(matchparen)를 끈다. 커서가 움직이거나 글자가 바뀔 때마다 짝 괄호를
+" 찾는데, 큰 C 파일에서 회당 2.2ms - 그 순간 도는 자동명령 29개 비용의 90% 였다
+" (2026-10-03 서버 nvim 실측. 나머지는 다 합쳐 0.2ms). 짝은 % 로 찾아갈 수 있다.
+" 런타임 플러그인이 읽히기 전(.vimrc)에 걸어야 하고, vim 에서도 같다.
+"   let g:vimide_matchparen = 1   " 다시 켜기 (이 위에 둔다)
+" 띄워 둔 nvim 에서 잠깐 켜려면: :unlet g:loaded_matchparen | runtime plugin/matchparen.vim
+if !get(g:, 'vimide_matchparen', 0)
+	let g:loaded_matchparen = 1
+endif
+
 "set visualbell
 
 " Turn on syntax highlighting
