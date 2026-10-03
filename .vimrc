@@ -255,8 +255,8 @@ Plug 'ludovicchabant/vim-gutentags'
 Plug 'stevearc/aerial.nvim'
 Plug 'MunifTanjim/nui.nvim'
 Plug 'nvim-neo-tree/neo-tree.nvim', { 'branch': 'v3.x' }
-" 디렉터리 비교 - :DirDiff <A> <B> 가 새 탭에서(dirdifftab.vim), neo-tree 에서 \d 두 번
-" (dirdiffpick.lua). 옵션은 아래 'DirDiff' 절
+" 디렉터리 비교 - :DirDiff <A> <B> 가 새 탭에서(dirdifftab.vim), neo-tree 에서 Tab 두 번
+" ([A] -> [B], \d 도 같다. dirdiffpick.lua). 옵션은 아래 'DirDiff' 절
 Plug 'will133/vim-dirdiff'
 
 " supertab 이 로드되기 전에 nvim 의 기본 <S-Tab> 삽입 맵핑을 치운다.
@@ -1052,7 +1052,7 @@ _G.rv_setup('neo-tree', {
   --   X  이 아래를 접기   I  숨김 파일 토글 (neo-tree 의 H 도 그대로)
   --   K  형제 중 처음     J  형제 중 마지막
   --   yy 이름 복사        Y  트리 클립보드에 (neo-tree 의 원래 y, p 로 붙이기)
-  --   \d 비교할 두 곳을 고르기 (첫 번째에서 \d, 두 번째에서 \d -> DirDiff)
+  --   Tab 비교할 두 곳을 고르기 ([A] 에서 Tab, [B] 에서 Tab -> DirDiff. \d 도 같다)
   --
   -- NERDTree 의 x(부모 접기) p(부모로) C(루트 변경) P(루트로) u(상위
   -- 디렉터리) 는 neo-tree 가 이미 다른 뜻으로 쓰고 있어 넣지 않았다.
@@ -1079,6 +1079,10 @@ _G.rv_setup('neo-tree', {
       -- \d 두 번으로 두 곳을 비교한다: 첫 번째 위에서 \d , 두 번째 위에서 \d
       -- (디렉터리 둘이면 DirDiff, 파일 둘이면 vimdiff - dirdiffpick.lua).
       -- = 는 이미 색인 목록 정보다 (projectfiles_neotree.lua)
+      -- Tab 두 번: [A] 를 고르고(줄 끝에 [A]), 비교할 곳에서 Tab 이면 [B] - 곧바로 비교 창.
+      -- neo-tree 기본의 Tab(select, 여러 줄 골라 두기)을 넘겨받는다 (여러 줄은 V 로).
+      -- 키 글자는 기본값과 같게 '<Tab>' - 다르게 쓰면 다른 항목으로 하나 더 생긴다
+      ['<Tab>'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교할 곳 고르기 [A] -> [B]' },
       ['<leader>d'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교 (DirDiff)' },
       -- 커서 자리 이하에서 찾는다. 디렉터리 줄이면 그 디렉터리, 파일 줄이면
       -- 그 파일이 든 디렉터리, 빈 줄이면 트리 루트 (treesearch.lua).
@@ -1800,8 +1804,9 @@ filetype plugin indent on     " required!
 " DirDiff: 두 디렉터리 비교 (will133/vim-dirdiff)
 "   :DirDiff <A> <B>   새 탭에서 비교 (~/.vim/plugin/dirdifftab.vim). 끝내면 탭도 닫힌다
 "                      nvim 은 아래의 나란한 트리, vim 과 :DirDiffClassic 은 플러그인의 목록
-"   neo-tree 에서 \d   비교할 첫 번째 위에서 \d , 두 번째 위에서 \d (dirdiffpick.lua)
-"                      파일 둘이면 새 탭에서 vimdiff. 같은 줄에서 다시 \d 는 취소
+"   neo-tree 에서 Tab  비교할 첫 번째 위에서 Tab (줄 끝에 [A]), 비교할 곳에서 Tab ([B])
+"                      이면 곧바로 비교 창 (dirdiffpick.lua). \d 도 같다. 파일 둘이면
+"                      새 탭에서 vimdiff. 같은 줄에서 다시 Tab 은 취소
 "   (플러그인의) 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
