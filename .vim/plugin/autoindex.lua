@@ -1578,33 +1578,56 @@ function _G.autoindex_tagfunc(pattern, flags, info)
   local dir = name ~= '' and vim.bo.buftype == ''
       and vim.fs.dirname(vim.fn.fnamemodify(name, ':p')) or vim.fn.getcwd()
   local root = s.roots[dir] or scan_root(dir)
-  if not root then
-    return vim.NIL
-  end
-  local ok, o = pcall(function()
-    return vim.system({ prog, '-d', '--result=ctags-mod', pattern },
-      { text = true, cwd = root, env = env_for(root) }):wait(3000)
-  end)
-  if not ok or not o or o.code ~= 0 or not o.stdout or o.stdout == '' then
-    return vim.NIL
-  end
-  local items = {}
-  for line in o.stdout:gmatch('[^\n]+') do
-    local path, lno, text = line:match('^([^\t]+)\t(%d+)\t(.*)$')
-    if path then
-      items[#items + 1] = {
-        name = pattern,
-        filename = path:sub(1, 1) == '/' and path or (root .. '/' .. path),
-        cmd = tostring(lno),
-        kind = 'd',
-        user_data = (text or ''):gsub('^%s+', ''),
-      }
+  local function ask(r)
+    local ok, o = pcall(function()
+      return vim.system({ prog, '-d', '--result=ctags-mod', pattern },
+        { text = true, cwd = r, env = env_for(r) }):wait(3000)
+    end)
+    if not ok or not o or o.code ~= 0 or not o.stdout or o.stdout == '' then
+      return nil
     end
+    local items = {}
+    for line in o.stdout:gmatch('[^\n]+') do
+      local path, lno, text = line:match('^([^\t]+)\t(%d+)\t(.*)$')
+      if path then
+        items[#items + 1] = {
+          name = pattern,
+          filename = path:sub(1, 1) == '/' and path or (r .. '/' .. path),
+          cmd = tostring(lno),
+          kind = 'd',
+          user_data = (text or ''):gsub('^%s+', ''),
+        }
+      end
+    end
+    return #items > 0 and items or nil
   end
-  if #items == 0 then
-    return vim.NIL
+  -- 가장 가까운 색인부터 묻고, 거기서 모르면 바깥 색인으로 올라간다.
+  --
+  -- 가까운 것이 먼저다: d5_qnx_hyp 처럼 안쪽(kernel/common) 색인만 아는
+  -- 트리가 있다. 그러나 거기서 멈추면, 자기 '.tags' 를 가진 중첩 프로젝트
+  -- (하위 저장소) 안에서 바깥에만 있는 심볼을 <C-]> 만 '정의를 찾지
+  -- 못했습니다' 라고 했다 - \g, 패널, 초록 색칠(sihlindex 'chain')은 다
+  -- 찾는데. 찾으면 비용은 그대로고, 못 찾을 때만 바깥 색인마다 global 이
+  -- 한 번 는다. 한도는 sihlindex 의 walk_up 과 같다 (4단계, $HOME 에서 멈춤).
+  local home = vim.env.HOME
+  for _ = 1, 4 do
+    if not root then
+      break
+    end
+    local items = ask(root)
+    if items then
+      return items
+    end
+    if root == home then
+      break
+    end
+    local parent = vim.fs.dirname(root)
+    if not parent or parent == root then
+      break
+    end
+    root = scan_root(parent)
   end
-  return items
+  return vim.NIL
 end
 
 -- ---------------------------------------------------------------------------

@@ -149,7 +149,11 @@ function _G.vimide_tree_search(state, kind)
     return
   end
   if kind == 'find' then
-    ask_find(dir, name)
+    -- 트리에서 채운 이름은 글자 그대로 찾게 한다. [ ] * ? \ 는 find -iname 의
+    -- 와일드카드라 'w[1].c' 가 w1.c 에 걸리고 자기 자신은 못 찾았다 (QA).
+    -- BSD/GNU find 둘 다 \ 로 막은 글자를 글자 그대로 읽는다. target() 은
+    -- reposearch.lua 도 쓰니 그대로 두고 여기서만 막는다.
+    ask_find(dir, (name:gsub('[%[%]*?\\]', '\\%0')))
     return
   end
   -- 돌아갈 편집 창은 지금 잡아 둔다. 찾기 창이 닫히면 초점은 트리로

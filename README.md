@@ -51,7 +51,9 @@ echo '' >> ${HOME}/.profile <br/>
 
 * Grep: finds the locations of symbols such as functions, macros, structs and classes in your source code and displays all searched source at the down
 
-* Auto completion: opens a popup menu to complete using tab
+* Auto completion: opens a popup menu to complete using tab. In a buffer over
+  `g:vimide_acp_max_lines` lines (5000; `0` = no limit) the popup no longer
+  opens by itself while typing - `<Tab>`/`^N` still complete
 
 * File system explorer: browses directory hierarchies, and performs file system operations
 
@@ -1203,7 +1205,9 @@ slots that were empty:
 | `Tab` | pick two directories (or two files) to compare: `Tab` on the first marks it `[A]`, `Tab` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff). `\d` does the same. neo-tree had `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
 
 `o` is the one key that was not free: neo-tree had it on help, and help is
-also on `?`, so nothing was lost.
+also on `?`, so nothing was lost. neo-tree's two-key sort maps (`oc` `od` `og`
+`om` `on` `os` `ot`) are dropped - they start with `o`, so `o` used to wait
+`timeoutlen` before it opened anything.
 
 `\P` pins the tree, and `\P` again lets it go (from any window;
 `:VimIdeTreePin [on|off]` does the same). Normally the tree follows the edit
@@ -1331,6 +1335,75 @@ fixed) turned these up; all are fixed and were checked again on screen:
 | a tree of 5000+ files opened before its index mode is chosen: gutentags must stay off it, but our own ctags build waits | the file count still runs and keeps gutentags away; the ctags build starts with the first file opened after a mode is chosen |
 
 Smaller ones fixed alongside: `+` on the tree's root row adds the whole project and `-` on anything under it then works; a removal that removes nothing, or an add whose path holds nothing to index, no longer switches the project to none mode; a big context window (`T`) in another tab is no longer taken for the small one; a bookmark saved through a symlink opens from the real path; a dangling symlinked `bookmarks.json` is left alone instead of replaced; long paths in notices are shortened so they do not trip Press ENTER; `\fg` at home follows symlinked dotfiles; a new file in a directory that does not exist yet searches from the nearest existing one; a repository on an orphan branch still counts; a single `+` on the tree's root row adds the root.
+
+### Found by the second random QA
+
+A second pass of the same kind (six areas: window layout, search and
+navigation, neo-tree, DirDiff, performance, and a monkey test that sends
+random key bursts and bisects what breaks; every finding reproduced a second
+time, the fixes checked again on screen after they were merged, then the
+merged result swept once more for what the fixes broke between them) turned
+up 41 more, and the sweep 14. All are fixed; for `:copen` from the F11 float,
+`Ctrl-W s`/`:vsplit`/`:new` typed inside the float still only close it
+(nothing is lost).
+
+| what went wrong | now |
+|---|---|
+| F12 or `:RelationView` pressed in the F11 float tree turned the edit window into the relation list (neo-tree closed the new split along with the float). The file disappeared from the tab, and the next F12 hit E444 | the float is left first, and the panel never takes over a window that already existed |
+| F12 with the cursor in the column's tree, after the list and the preview had been closed by hand, showed an E1513 traceback and Press ENTER (neo-tree redrew into the new window after the panel had taken it) | the list is split into the column without autocommands, as the preview and the tree already were |
+| closing the zoomed (`\z`) relation list with `:q` left the tree squashed to one row for good | the remaining column windows get their pre-zoom heights back, and the bottom one takes the freed rows |
+| a list or preview copied with `Ctrl-W s`/`:split`/`:vsplit` survived F12 off, so the next F12 opened without the tree, at the wrong width, or with the preview outside the column. Turning the tree off in "relation only" set `cmdheight` to 17. `:split file` typed in a side window opened inside it | F12 off closes every copy, including tree copies in the column. A panel window that is picked up again gets the panel options back. A panel left alone in its column keeps its height. `:split`/`:vsplit`/`:new`/`:vnew` with a file name go to the edit area |
+| every F12 off (and `t`/`:RelationViewTree` off) left a listed empty `[No Name]` buffer that `:bnext` landed on, because neo-tree's "current" tree hides itself by creating one | the buffer neo-tree creates while the column tree closes is wiped |
+| F12 pressed while a telescope picker was open put the focus in the relation list, and the notice started at column 182, wrapped, and raised Press ENTER | the float is left first, and the notice is shown after the layout settles |
+| a panel or `\fs` jump made after `Ctrl+t` was appended to the tag stack, so a later `Ctrl+t` revisited an entry already popped | the stack is written the way `:tag` does it: entries above the current one are dropped |
+| `Ctrl+g` on text that starts or ends with punctuation (`legacy_init(`, `->hw.`) found nothing, because word mode always added `-w` | word boundaries apply only at the ends that are word characters (`\blegacy_init\(` with rg). grep and the vim fallback drop `-w` in that case |
+| `Ctrl+f` in the tree pre-filled a name containing `[ ]` that `find -iname` read as a pattern, so `w[1].c` found nothing, or found `w1.c` | wildcards in the pre-filled name are escaped, so it finds exactly that entry |
+| `Ctrl+]` on a blank line or a `{` line showed a three-line E349 and Press ENTER; `Ctrl+] Ctrl+]` there could stop at a `Gtags for pattern:` prompt | one line: `커서 밑에 이름이 없습니다` |
+| `:tabnew`/`:tabedit` typed in a side window (quickfix, F9 tree, aerial, the RelationView panel, the F11 float) left the new tab with two windows: the new one and a copy of that side window | while the new tab's only window still shows the buffer it was copied from, it is not recorded as a side window; the new tab has one window, as in plain vim |
+| `:copen` or `,o` typed in the F11 float tree still replaced the edit window with quickfix and left `cmdheight` at 38 (the earlier fix covered only the search results) | `:copen`, `:cwindow`, `:lopen`, `:lwindow` and `,o` leave a float first; from a side window they open in place as before |
+| F9 with the F11 float open only closed the float, so F9 had to be pressed twice (both keys share one neo-tree per tab, and neo-tree's `toggle` ignores the position); `<leader>t` opened a float once F11 had been used | F9 moves an open tree to the left, and `<leader>t` is now exactly F9 |
+| F11 with the F9 sidebar open closed the sidebar and showed no float | the tree moves into the float, and F9 from the float moves it back to the left |
+| F10 or `<leader>o` in a telescope picker (or the F11 float) printed an aerial traceback (`Invalid window id`) with Press ENTER and left an empty narrow window | the float is left first, then the outline opens beside the edit window |
+| `Ctrl+^` in a window that `:cnext` had split off the quickfix window loaded the quickfix list into it, and `,c` then closed that edit window instead of the list | `Ctrl+^` will not switch to a quickfix list; it says so in one line |
+| `Ctrl+g` or `Ctrl+/` pressed in a neo-tree add/move/rename prompt (after `Ctrl+o`) failed with `Window was closed immediately` and Press ENTER, and left the form's buffer in the edit window | the form window is opened first and entered afterwards, so the prompt closes and the form opens; if a form still cannot open, one line says so |
+| the grep, lookup and find/replace boxes auto-paired brackets and quotes (delimitMate), so `legacy_init(` was searched as `legacy_init()` and found nothing | the boxes keep exactly what you type; editing buffers still auto-pair |
+| In a repo that holds a submodule or another git repo (committed or not), or a tracked symlink to a directory, `indexfiles.sh` printed the right list but exited 1, because `grep -Il` failed on the directory. autoindex threw the list away, so every start said 'big tree' and `:GtagsIndex` said no files were found | the binary check skips directories and judges only by its output, and untracked nested repos (`sub/`) are dropped from the git list. The list exits 0 and the index builds and refreshes |
+| Ctrl+] on a parameter, a local variable or a struct member (`p->hw.min`) moved the cursor but left no tag-stack entry, so the next Ctrl+t popped an older jump and skipped this one, and the Ctrl+t after that went forward again through Ctrl+o | these jumps push a tag-stack entry like every other symbol jump. Ctrl+t undoes them in order (Ctrl+] on the declaration itself pushes nothing) |
+| Inside a nested project (a sub-repo with its own `.tags`), Ctrl+] asked only the nearest index and said 'not found' for a symbol that only the outer index knows, while `<leader><leader>g`, the F12 panel, Ctrl+] Ctrl+] and the green highlighting all found it | Ctrl+] still asks the nearest index first, then each index above it (up to 4, stopping at $HOME), and lands on the first answer |
+| With the relation view off, Ctrl+] (and Ctrl+click) no longer painted the jumped symbol, because Ctrl+] had moved to g]'s function and picked up g]'s 'only while the panel is open' rule. A Ctrl+t after such a jump then cleared the colour of an older jump | Ctrl+] paints the jumped symbol whether or not the panel is open, and Ctrl+t clears it in step with the tag stack. g] and f] keep the panel-only rule |
+| Typing in a big C file kept the struct-member colouring busy for the whole time you typed: each pass went over its 25 ms budget, re-armed itself 60 ms later, and every keystroke threw away what it had resolved. Finding the enclosing function walked every top-level node in Lua, about 0.6 ms per member, and was 90% of the cost | the enclosing function is found from the cursor node upwards in C (about 0.001 ms). A pass that runs out of budget in insert mode no longer re-arms itself, and the rest is painted on leaving insert mode. Keystroke latency matches the members-off control |
+| `o` in neo-tree (F9, F11, the RelationView tree) usually waited `timeoutlen` before opening, about 1 s: neo-tree's two-key sort maps `oc` `od` `og` `om` `on` `os` `ot` start with `o`, and `<nowait>` only wins when `o` happens to come first in the buffer's map list, an order that changes on every start | the sort maps are dropped, so `o` opens at once (4-10 ms) |
+| `=` (index status) in neo-tree always answered after 0.8 s: its buffer map had no `<nowait>`, and vim-unimpaired's global `=p` `=P` `=s` start with `=` | `+` `-` `=` in neo-tree are `<nowait>`, as in netrw, quickfix, bufexplorer and the relation panel |
+| the Last Modified / Created column (F11, or F9 widened with `w`) ended every row in `<ec><98>…` under a Korean locale: neo-tree's default `%I:%M %p` gives `오전`/`오후`, and its 20-column cut counts bytes, splitting the character | the date is `%Y-%m-%d %H:%M` (24-hour, no `%p`) |
+| renaming or moving an indexed path in neo-tree (`r`, `m`, `x`/`p`) left the preset pointing at the old path: the new name had no mark, `=` said excluded, `.tags/files` and the index kept the old name, and the next rebuild dropped those files without a word | index entries follow the path (the path itself and everything under it). A file taken out of an indexed directory is added at its new place, and a path moved out of the project is removed like `-`. A move inside an indexed directory only rebuilds the list and the index; the preset file is not rewritten |
+| deleting a directory in neo-tree (`d`, `T`) left the buffers of files under it: the edit window kept a file that no longer existed, each entry into it printed two neo-tree ENOENT errors and a false "reloaded" notice, and `:w` failed with E212 | unmodified buffers under the deleted directory are wiped, and their windows switch to the alternate file, as neo-tree already does for a single file. Modified ones are kept, with a warning. The external-change notice says the file was deleted when it is gone |
+| `\m` did not set a vim-mark mark: the vendored `highlights.vim` used it for its keypad-map toggle (vim-mark skips its default `\m` because F4 already maps `<Plug>MarkSet`). Turning that toggle off unmapped `\f` (`:Gtags -P`) and vim-mark's `\n` and `\*` for the rest of the session, and cleared every match in the window (vim-mark, reference highlight, yellow marks) | `\m` marks the word like F4. The toggle is now `:HighlightMaps`; turning it off restores the maps it replaced, and it only touches its own `hl1`-`hl99` matches |
+| F5 (clear marks) also moved the cursor one character right, or to the next line on a one-character line, because a stray space in the mapping ran as `<Space>`; in visual mode it failed with E481 | F5 clears marks and the search highlight without moving the cursor, in normal and visual mode |
+| every status-line redraw ran airline's `xkblayout` part, which tries `require'ime'` and `require'fcitx5-ui'` (neither exists) and never shows anything: about 0.25 ms per redraw, the top function under `:profile` while moving with `j` | the extension is off |
+| AutoComplPop fired `^N` on the second letter of every word, and `^N` scans the whole buffer (and, through ACP's `complete=.,w,b,k`, every loaded buffer) without reading typed keys: 100-300 ms stalls while typing in a 20k-line file, or in a small file with a big one loaded | the automatic popup stays off in buffers over `g:vimide_acp_max_lines` (5000) lines and only scans the current buffer when all loaded buffers together exceed that. `<Tab>`/`^N` by hand still complete; `0` turns the guard off |
+| `Ctrl+x`/`Ctrl+v`/`Ctrl+t` in the preset pickers (`\fm`/F2, `\fM`, `\fS`, `\fx`, `:ProjectFilesAddDir`) split-opened the row label as a file name, leaving a listed empty buffer such as `● none  (아무것도 하지 않는다)` that `:w` would write to disk | those keys do nothing in these pickers and the picker stays open; file pickers such as `\fo` still split |
+| `R` pressed while a tree copy ran stopped the copy half-way without a word (a folder left with part of its files, mode 0700). From then on `q` and every tree copy were refused as still copying until `:tabclose`, and a helper that died during a copy locked the tab the same way | `R` waits for the copy, as `q` does. If the helper dies, the lock is released, a message says the copy stopped part-way, and tree copies are refused until `R` |
+| `:tabclose` or `:qa` during a tree copy left a half-written `.dirdiff~PID~name` temp file (gigabytes for a big file) in the target tree, and the next comparison showed it as a one-side file | before it exits (on quit, the SIGTERM from `jobstop`, SIGHUP or a closed pipe), the helper deletes the temp file it is writing. `:tabclose` says the copy was stopped, and the files already copied stay |
+| making a pair identical in the edit windows and saving it with `:w` left the tree row at `≠`, with the old size and date, until `R` | saving a file inside either compared folder compares that entry again, as a tree copy does |
+| with "only differences" on (`f`, `g:vimide_dirdiff_only_diff`), the whole tree was rebuilt every 60 ms while scanning, and the editor was blocked for about 60% of the scan (20,000 files in one folder) | rows that turn `=` are removed (with their open subfolders) and the rest are updated in place. The whole tree is redrawn only when a row has to appear, so blocked time matches the unfiltered view (about 0.4 s of a 2 s scan) |
+| `o`/`<CR>` on a name containing a newline opened a non-existent `nl\` in both windows, ran the rest of the name as an Ex command (E492) and showed a stack traceback. Picking two such files with `Tab` in neo-tree did the same | file names are passed to `:edit`, `:tabnew` and `:diffsplit` as arguments and never pasted into an Ex line, so the real files open. Error notes no longer carry a traceback |
+| on macOS a name spelled differently only in Unicode normalization (NFC/NFD, e.g. Hangul names from git or Linux) or only in case was shown as two rows, A-only and B-only, that were never compared. Copying the A one overwrote the B file without a word, and the stale B row stayed | when `lstat` shows the two spellings are the same file, the helper pairs them into one row with its contents compared, and a copy asks the usual overwrite question. File systems that really hold both spellings are not affected |
+| a count that ran past the last line (`15<C-l>` on line 30 of 40) in the edit windows failed with E16 and copied nothing | the count stops at the last line, as `15dd` does |
+| a name that is a folder on one side and a file on the other could not be viewed: `o` did nothing and `<CR>` only opened the folder, though the windows were supposed to show a note | `o` and `<CR>` show the file side next to `(A 쪽은 디렉터리: …)`. `<CR>` still opens or closes the folder side |
+| `:tabnew`/`:tabedit` typed in the RelationView list made the new tab's only window a second panel: `:e` hit E1513, the panel buffer came back on the next redraw, and F12 there built a column with no edit window. From the preview window, the new tab's edit window was taken as the preview | a tab's first window is taken as the panel or preview only if it still shows that buffer after the command finishes (as with `:tab split`) |
+| with the relation list open, a `Ctrl+g` / `Ctrl+/` / `:LookupReferences` search for text with a bracket (`legacy_init(`, `(sizeof`) gave an `unfinished capture` traceback and Press ENTER, and repeated it on every `j`, `Ctrl+n` and Enter in the list. The preview stayed at the top of the file | the preview looks for the text as typed, with word boundaries only at word-character ends, and lands on the hit |
+| `Ctrl+]` on a struct member while the file that declares the struct had unsaved changes gave an E37 traceback and Press ENTER. It also left a tag-stack entry and a painted word for a jump that never happened | a member declared in the same file is reached without reloading the file. A jump that still fails shows one line and leaves neither the tag entry nor the colour |
+| `Ctrl+]` (or `Ctrl+] Ctrl+]`) on a local's own declaration painted the word without jumping, so the colour stack got one entry ahead of the tag stack and the next `Ctrl+t` cleared the wrong colour | nothing is painted when the cursor is already on the declaration |
+| after F12 from the column's tree (and after `c`/`T` in the list), the NORMAL status line was drawn on the new preview window while the cursor was elsewhere, until the next cursor move | the status line is redrawn for the focused window once the layout is built |
+| F10 with RelationView open left a hidden listed `[No Name]` behind every time, because it closed the column's tree too | F10 closes only the left, right and floating trees |
+| opening the F9 tree, the outline (F10, `\o`) or RelationView (F12) while the cursor was in the quickfix list left a hidden listed `[No Name]` each time (a split from a quickfix window starts with an empty buffer) | the sidebar is split from the edit window instead; closing one from the quickfix list keeps the cursor there |
+| F12 (or `q`) pressed inside the RelationView column put the cursor in the F9 tree when one was open | the cursor goes back to the last edit window |
+| `:sp`/`:vs`/`:new`/`:vnew <file>` typed in a tab with no edit window (`:tab help`, `:tab terminal`, a quickfix window moved out with `:tab split`) said 'EDIT 창이 없어 실행하지 않았습니다' and opened nothing | with no edit window in the tab, that window is split, as in plain vim; it is still refused from the F11 float when there is no edit window to leave to |
+| a file name with an escaped `\%` or `\#` typed after `:e`/`:sp`/`:vs`/`:new`/`:vnew`/`:view`/`:sview`/`:diffsplit`/`:Ex` in a side window (quickfix, panel, tree) opened a wrong, empty buffer such as `src/psrc/main.cq.c`, because `%`/`#` were expanded twice; `:Ex %:h` there gave E499 | the name is expanded once, in the edit window: `\%`/`\#` open the file you typed, and `%` means the edit window's file |
+| on vim 8.1 (the server) the 'all loaded buffers together exceed g:vimide_acp_max_lines' rule never fired, so ACP's popup still scanned a big hidden buffer (getbufinfo() has no 'linecount' before 8.2.0019) | the lines are counted another way there, reading no more than the limit, so the popup scans only the current buffer, as in nvim |
+| after `:source ~/.vimrc` and reopening the tree, deleting a directory in neo-tree left buffers of its files again, and the git-status check for nested repos stopped running (neo-tree dropped both subscriptions when it re-read its config) | both handlers are part of the neo-tree config, so they survive a re-source |
+| deleting a directory in neo-tree while a modified file inside it was kept could put that kept, now-deleted file into another window (as its `#` buffer), which then said E211 on every entry | windows of wiped files get a file outside the deleted directory, or an empty buffer |
+| with the relation view off, `Ctrl+]` on a word the index does not know (`return`, `endif`) showed `mark-1/\<word\>`, `mark-1 cleared` and the not-found line, then Press ENTER (the jump now paints the word even with the panel off) | the paint and its undo are silent: one line, `정의를 찾지 못했습니다: <word>` |
 
 ### Searching from the repository
 
@@ -1612,7 +1685,7 @@ progress and the totals.
 | `<Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side works too). The status line says which |
 | `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
 | `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
-| `R` | compare again |
+| `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
 | `q` | finish: closes the tab, goes back, removes the buffers it opened (an edited one is kept, and named) |
 | `?` | these keys |
 
@@ -2627,7 +2700,7 @@ wrong:
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
 | `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
-| `g:sihl_index_member_budget` | ms per paint spent resolving struct members, default 25 (0 = no limit). The rest are left untouched, as while an answer is pending, and the next paint 60 ms later carries on - after an edit every member on screen is resolved again, which on a 6,600-line file held the screen for 60 ms and more |
+| `g:sihl_index_member_budget` | ms per paint spent resolving struct members, default 25 (0 = no limit). The rest are left untouched, as while an answer is pending, and the next paint 60 ms later carries on - after an edit every member on screen is resolved again, which on a 6,600-line file held the screen for 60 ms and more. In insert mode a pass that runs out of budget does not re-arm itself; the rest is painted on leaving insert mode |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
 
 **Turning a black symbol green.** `:SiHlIndexAdd` on it searches the sources
@@ -2685,8 +2758,9 @@ GTAGS, which holds 39 files under `kernel/common` and knows neither, while
 `kernel/common`'s own GTAGS knows both. The outermost root is RelationView's
 rule - it decides what the panel answers from and what paths are measured
 against - but colour has to agree with where `Ctrl+]` actually lands, which
-is the nearest database above the file. `g:sihl_index_db = 'root'` restores
-the old choice.
+is the nearest database above the file (`Ctrl+]` then tries the ones above it,
+up to four, so a symbol only the outer index knows is still found).
+`g:sihl_index_db = 'root'` restores the old choice.
 
 **Both passes run in the context window too**, on the same rules as the edit
 window - a preview that coloured its copy differently from the file would be

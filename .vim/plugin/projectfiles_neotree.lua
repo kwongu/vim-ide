@@ -175,18 +175,21 @@ local function do_info()
   vim.notify('ProjectFiles: ' .. tostring(_G.projectfiles_status(p)))
 end
 
+-- nowait: 키가 전역 매핑의 앞머리면 nvim 이 'timeoutlen' 동안 다음 글자를
+-- 기다린다. '=' 가 그랬다 - vim-unimpaired 의 =p =P =s 때문에 누를 때마다
+-- 0.8초 뒤에야 답했다. netrw/quickfix/bufexplorer/relationview 쪽은 이미 nowait.
 local function map_buf(buf)
   local function nmap(lhs, fn, desc)
     if lhs == '' then
       return
     end
-    vim.keymap.set('n', lhs, fn, { buffer = buf, silent = true, desc = desc })
+    vim.keymap.set('n', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc })
   end
   local function xmap(lhs, fn, desc)
     if lhs == '' then
       return
     end
-    vim.keymap.set('x', lhs, fn, { buffer = buf, silent = true, desc = desc })
+    vim.keymap.set('x', lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc })
   end
   local ka, kr, ki = key('add', '+'), key('remove', '-'), key('info', '=')
 
@@ -314,6 +317,31 @@ api.nvim_create_autocmd('User', {
   end,
 })
 
+-- 트리에서 이름을 바꾸거나 옮기면(r / m / x,p) 색인 목록이 따라간다
+-- (projectfiles.lua 의 projectfiles_renamed). 예전에는 이 이벤트를 듣지 않아서
+-- 바꾼 이름은 색인에서 빠지고, preset 에는 없는 경로가 남았다.
+--
+-- neo-tree 의 setup() 이 다시 불리면 이벤트 구독이 모두 지워진다
+-- (events.clear_all_events). 그래서 트리 버퍼가 생길 때마다 같은 id 로 다시 건다.
+local function on_moved(args)
+  if enabled() and type(args) == 'table' and type(_G.projectfiles_renamed) == 'function' then
+    _G.projectfiles_renamed(args.source, args.destination)
+  end
+end
+
+local function subscribe_moves()
+  local ok, events = pcall(require, 'neo-tree.events')
+  if not (ok and type(events) == 'table' and events.subscribe) then
+    return
+  end
+  for _, ev in ipairs({ events.FILE_RENAMED, events.FILE_MOVED }) do
+    local h = { id = 'projectfiles_' .. ev, event = ev, handler = on_moved }
+    pcall(events.unsubscribe, h)
+    pcall(events.subscribe, h)
+  end
+end
+subscribe_moves()
+
 -- neo-tree 가 자기 매핑을 건 뒤에 걸어야 우리 것이 이긴다. FileType 이
 -- neo-tree 의 매핑보다 먼저 올 수 있어서 한 틱 미룬다.
 api.nvim_create_autocmd('FileType', {
@@ -324,6 +352,7 @@ api.nvim_create_autocmd('FileType', {
       return
     end
     vim.schedule(function()
+      subscribe_moves()
       if api.nvim_buf_is_valid(a.buf) then
         pcall(map_buf, a.buf)
       end

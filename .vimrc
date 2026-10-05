@@ -868,7 +868,7 @@ if not auto_now then
   })
 end
 EOF
-nnoremap <silent> <Leader>o <Cmd>AerialToggle<CR>
+nnoremap <silent> <Leader>o <Cmd>call <SID>OutlineKey()<CR>
 
 " aerial 창만 옅은 회색 바탕으로 (SI 의 Symbol Window 처럼).
 "
@@ -1007,8 +1007,29 @@ lua << EOF
 -- (neo-tree 의 icon 컴포넌트는 provider 의 반환값이 nil 이면 그대로 둔다).
 local ascii_icons = (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
 
+-- 아래의 neo-tree 이벤트 처리기(git 표시 판정, 디렉터리 지우기)는 설정의
+-- event_handlers 로 건다. events.subscribe 로 직접 걸었더니 :source ~/.vimrc 뒤
+-- neo-tree 가 새 설정을 합칠 때(merge_config 의 events.clear_all_events) 함께
+-- 지워져, 트리에서 디렉터리를 지워도 그 안의 버퍼가 다시 남았다 (QA).
+-- event_handlers 는 합칠 때마다 다시 걸린다. 몸통은 아래에서 nt_on[id] 에
+-- 채운다 - 부를 때 찾으므로 neo-tree 가 설정을 언제 합치든 맞다.
+local nt_on = {}
+local function nt_handler(event, id)
+  return { event = event, id = id, handler = function(args)
+    if nt_on[id] then
+      return nt_on[id](args)
+    end
+  end }
+end
+
 _G.rv_setup('neo-tree', {
-  default_component_configs = ascii_icons and {
+  default_component_configs = vim.tbl_extend('force', {
+    -- 날짜 칸(F11, 넓힌 F9)은 24시간제로. 기본 '%I:%M %p' 의 %p 는 지역 설정을
+    -- 따라 맥의 ko_KR 에서 '오전/오후'(6바이트)가 되고, neo-tree 가 20칸에 맞춰
+    -- 바이트로 자르면서 '오' 의 UTF-8 이 쪼개져 줄마다 '<ec><98>…' 가 찍혔다.
+    last_modified = { format = '%Y-%m-%d %H:%M' },
+    created = { format = '%Y-%m-%d %H:%M' },
+  }, ascii_icons and {
     -- U+2502 세로줄은 East Asian Ambiguous 라 CJK 글꼴 터미널이 두 칸으로
     -- 그린다. 들여쓰기 안내선까지 ASCII 로 내려야 줄이 안 밀린다
     indent = {
@@ -1029,7 +1050,11 @@ _G.rv_setup('neo-tree', {
         staged = 's', conflict = 'C',
       },
     },
-  } or nil,
+  } or {}),
+  event_handlers = {
+    nt_handler('before_git_status', 'vimide_neotree_git_guard'),
+    nt_handler('file_deleted', 'vimide_wipe_bufs_under_deleted_dir'),
+  },
   close_if_last_window = true,
   enable_git_status = true,
   enable_diagnostics = false,
@@ -1062,6 +1087,15 @@ _G.rv_setup('neo-tree', {
     width = 32,
     mappings = {
       ['o'] = 'open',
+      -- neo-tree 의 정렬 키(oc od og om on os ot)는 o 로 시작한다. 남겨 두면
+      -- o 한 번이 'timeoutlen'(0.8초)을 기다린 뒤에야 열렸다: o 의 nowait 은
+      -- 버퍼 매핑 목록에서 o 가 oX 보다 앞에 있을 때만 듣는데, 그 순서는
+      -- pairs() 를 따라 띄울 때마다 바뀐다 (실측: 세 번 중 두 번 1초).
+      -- 소스(filesystem/buffers/git_status)의 기본값마다 들어 있지만 이 전역
+      -- window 가 마지막에 덮이므로 여기 한 곳이면 된다. 'none' 은 명령을
+      -- 찾기 전에 건너뛰어서 og 가 없는 buffers 에서도 경고가 없다.
+      ['oc'] = 'none', ['od'] = 'none', ['og'] = 'none', ['om'] = 'none',
+      ['on'] = 'none', ['os'] = 'none', ['ot'] = 'none',
       ['O'] = 'expand_all_subnodes',
       ['X'] = 'close_all_subnodes',
       -- I(숨김 토글)는 filesystem 쪽에 둔다 (아래 filesystem.window) - toggle_hidden
@@ -1563,24 +1597,88 @@ do
   end, { nargs = '*', desc = 'Neotree, with the git-status guard applied' })
 
   -- 스캔 중에 처음 보는 worktree(중첩 repo 등)가 나타나면 그때도 판단한다.
-  -- 이 훅은 status 명령이 나가기 직전에 불리므로, 여기서 끄면 다음 스캔부터
-  -- 확실히 막힌다. git status 를 감싸는 것도 여기서 건다 - neo-tree.events 가
-  -- neo-tree.utils 를 이미 올려 두므로 시작 때 더 드는 것은 없다.
+  -- 이 훅(before_git_status)은 status 명령이 나가기 직전에 불리므로, 여기서 끄면
+  -- 다음 스캔부터 확실히 막힌다. 구독은 위 설정의 event_handlers 가 건다.
+  -- git status 를 감싸는 것도 여기서 건다 - neo-tree.events 가 neo-tree.utils 를
+  -- 이미 올려 두므로 시작 때 더 드는 것은 없다.
   local okev, events = pcall(require, 'neo-tree.events')
   if okev and events and events.subscribe then
     pcall(guard_jobs)
-    pcall(events.subscribe, {
-      event = events.BEFORE_GIT_STATUS,
-      handler = function(args)
-        if args and args.git_root then
-          pcall(apply, args.git_root)
+  end
+  nt_on.vimide_neotree_git_guard = function(args)
+    if args and args.git_root then
+      pcall(apply, args.git_root)
+    end
+  end
+end
+
+-- 트리에서 디렉터리를 지우면(d, T) 그 안의 파일을 띄운 버퍼도 걷는다.
+--
+-- neo-tree 는 파일 하나를 지울 때만 그 버퍼를 걷는다(fs_actions 의 clear_buffer).
+-- 디렉터리는 'rm -Rf' 로 끝이라, 그 안에서 열어 둔 파일이 없는 파일인 채로
+-- 편집 창과 버퍼 줄에 남았다. 그 창에 들어갈 때마다 follow_current_file 이 없는
+-- 경로를 찾다 ENOENT 오류를 두 줄씩 냈고, :w 는 E212 였다 (QA). 이름 바꾸기는
+-- neo-tree 가 그 아래 버퍼까지 옮겨 주니 지우기만 어긋나 있었다.
+-- 걷기 전에 그 버퍼를 띄운 창에는 그 창의 # 버퍼(없으면 다른 파일, 그것도
+-- 없으면 빈 버퍼)를 넣는다 - neo-tree 가 파일 하나일 때 하는 그대로다.
+-- 고친 버퍼는 남기고 알린다: 걷으면 고친 내용이 사라진다.
+do
+  local uv = vim.uv or vim.loop
+  -- 구독은 위 neo-tree 설정의 event_handlers 가 건다 (nt_handler)
+  nt_on.vimide_wipe_bufs_under_deleted_dir = function(path)
+    if type(path) ~= 'string' or path == '' or uv.fs_lstat(path) then
+      return -- 지워지지 않았다(취소, 실패)
+    end
+    -- 끝의 '/' 까지 맞춰야 파일 하나를 지울 때나 이름이 같은 앞머리
+    -- (src/nest 와 src/nestx.c)를 건드리지 않는다
+    local prefix = path:gsub('/+$', '') .. '/'
+    local doomed, kept = {}, {}
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      local name = vim.api.nvim_buf_get_name(b)
+      if vim.bo[b].buftype == '' and name:sub(1, #prefix) == prefix
+          and not uv.fs_stat(name) then
+        if vim.bo[b].modified then
+          kept[#kept + 1] = vim.fn.fnamemodify(name, ':~:.')
+        else
+          doomed[b] = true
         end
-      end,
-    })
+      end
+    end
+    -- 지운 디렉터리 안의 버퍼는 대신 띄울 것으로 고르지 않는다. 남긴 고친 버퍼도
+    -- 그 파일이 없어져서, # 이라고 그것을 넣은 창은 들어갈 때마다 E211 을 냈다 (QA)
+    local function usable(b)
+      return b > 0 and not doomed[b] and vim.api.nvim_buf_is_valid(b)
+        and vim.bo[b].buflisted and vim.bo[b].buftype == ''
+        and vim.api.nvim_buf_get_name(b):sub(1, #prefix) ~= prefix
+    end
+    for b in pairs(doomed) do
+      for _, w in ipairs(vim.fn.win_findbuf(b)) do
+        local alt = vim.api.nvim_win_call(w, function() return vim.fn.bufnr('#') end)
+        local rep = usable(alt) and alt or nil
+        if not rep then
+          for _, c in ipairs(vim.api.nvim_list_bufs()) do
+            if usable(c) then
+              rep = c
+              break
+            end
+          end
+        end
+        -- pcall: winfixbuf 가 걸린 창은 그대로 둔다
+        pcall(vim.api.nvim_win_set_buf, w, rep or vim.api.nvim_create_buf(true, false))
+      end
+      pcall(vim.api.nvim_buf_delete, b, { force = true })
+    end
+    if #kept > 0 then
+      vim.notify('지운 디렉터리 안의 고친 버퍼는 남겼습니다: ' .. table.concat(kept, ', '),
+        vim.log.levels.WARN)
+    end
   end
 end
 EOF
-nnoremap <silent> <Leader>t <Cmd>NeotreeGuarded toggle<CR>
+" F9 와 같은 것 (NeoTreeOnlyLeft). 예전에는 자리 없는 'NeotreeGuarded toggle' 이라
+" neo-tree 가 마지막 자리를 다시 썼다 - F11 을 한 번 쓴 뒤로는 부동 창으로 열렸고,
+" F11 부동 창이 떠 있을 때는 그것만 닫았다 (QA).
+nnoremap <silent> <Leader>t <Cmd>call NeoTreeOnlyLeft()<CR>
 
 " ------------------------------------
 " gutentags: ctags 자동 색인 (소스인사이트식 심볼 DB)
@@ -1863,6 +1961,11 @@ let g:airline_theme='hybrid'
 let g:airline#extensions#tabline#enabled = 1
 let g:airline#extensions#tabline#formatter = 'unique_tail'
 let g:airline#extensions#tagbar#enabled = 1
+" airline 의 xkblayout(입력기 표시) 확장은 nvim 이면 무조건 켜지고, 상태줄을
+" 그릴 때마다 require'ime' / require'fcitx5-ui' 를 찾다 실패한다 (둘 다 없다).
+" 늘 빈 글자인데 한 번에 약 0.25ms - j 한 번 비용의 20% 였다 (:profile 1위).
+" 진짜 vim 은 XkbSwitch/fcitx 가 있을 때만 켜므로 이 줄로 달라지는 것이 없다.
+let g:airline#extensions#xkblayout#enabled = 0
 " nvim: 상태줄의 '지금 함수' 를 tagbar 대신 treesitter 로 (curfunc.lua).
 " airline 의 tagbar 확장은 tagbar 를 깨우고, 깨어난 tagbar 는 파일을 옮기거나
 " 저장할 때마다 ctags 를 그 자리에서 돌려 출력을 Vim script 로 푼다 - 6600줄
@@ -1930,6 +2033,69 @@ endif
 " Set Supertab
 "==============================================================================
 let g:SuperTabDefaultCompletionType = "<c-n>"
+
+"==============================================================================
+" AutoComplPop: 큰 버퍼에서는 자동 팝업을 멈춘다
+"==============================================================================
+" ACP 는 단어의 둘째 글자마다 스스로 ^N 을 누른다. ^N 은 그 앞머리가 나온 자리를
+" 버퍼 전체에서 훑고(ACP 는 'complete' 를 '.,w,b,k' 로 바꿔 로드된 다른 버퍼까지),
+" 그동안 친 글자는 줄을 서서 기다린다. 2만 줄 C 파일에서 둘째 글자마다
+" 100-300ms 씩 멈췄고, 작은 파일이라도 큰 버퍼 하나가 숨어 로드돼 있으면
+" 똑같았다 (QA).
+"   지금 버퍼가 이 줄 수보다 크면 그 버퍼에서는 자동 팝업을 띄우지 않는다
+"   (<Tab>/^N 으로 직접 부르는 완성은 그대로). 로드된 버퍼를 모두 합쳐 넘으면
+"   팝업은 지금 버퍼만 훑는다.
+"   let g:vimide_acp_max_lines = 0   " 끄기 (예전처럼 늘 띄운다)
+if !exists('g:vimide_acp_max_lines')
+    let g:vimide_acp_max_lines = 5000
+endif
+let s:acp_locked = 0
+function! s:AcpGuard() abort
+    if exists(':AcpLock') != 2
+        return
+    endif
+    if !exists('s:acp_complete')
+        let s:acp_complete = get(g:, 'acp_completeOption', '.,w,b,k')
+    endif
+    let l:max = get(g:, 'vimide_acp_max_lines', 5000)
+    let l:big = l:max > 0 && line('$') > l:max
+    " 잠금은 ACP 의 세는 잠금이다: 우리 것은 한 번만 걸고 한 번만 푼다
+    if l:big != s:acp_locked
+        if l:big
+            call acp#lock()
+        else
+            call acp#unlock()
+        endif
+        let s:acp_locked = l:big
+    endif
+    let l:total = 0
+    if l:max > 0 && !l:big
+        if has('nvim')
+            " getbufinfo() 는 버퍼마다 표시(sign) 목록까지 만든다 - 줄 수만 센다
+            let l:total = luaeval('(function() local n = 0 for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.api.nvim_buf_is_loaded(b) then n = n + vim.api.nvim_buf_line_count(b) end end return n end)()')
+        else
+            " getbufinfo() 의 'linecount' 는 vim 8.2.0019 부터다. 서버의 8.1 에는
+            " 없어서 합이 늘 0 이었고, 이 규칙이 vim 에서는 한 번도 걸리지 않았다
+            " (QA). 없으면 남은 몫보다 한 줄 더까지만 읽어 센다 - 넘는지만 알면
+            " 되므로 큰 버퍼를 통째로 베끼지 않는다.
+            for l:b in getbufinfo({'bufloaded': 1})
+                let l:n = get(l:b, 'linecount', -1)
+                if l:n < 0
+                    let l:n = len(getbufline(l:b.bufnr, 1, l:max - l:total + 1))
+                endif
+                let l:total += l:n
+                if l:total > l:max
+                    break
+                endif
+            endfor
+        endif
+    endif
+    let g:acp_completeOption = l:total > l:max && l:max > 0 ? '.' : s:acp_complete
+endfunction
+augroup VimIdeAcpGuard
+    autocmd!
+    autocmd InsertEnter * call <SID>AcpGuard()
+augroup END
 
 "==============================================================================
 " vim-smooth-scroll
@@ -2247,6 +2413,21 @@ func! s:RvUnmark(marked) abort
 	call luaeval('_G.vimide_jump_mark_pop ~= nil and (function() _G.vimide_jump_mark_pop() return 1 end)() or 0')
 endfunc
 
+" 매개변수·지역 변수·멤버의 <C-]> (relationview_local_jump). 1 = 여기서 처리했다.
+"
+" 커서가 이미 그 선언 위면 그 함수는 뛰지 않고 2 를 돌려준다 - 처리는 했으니
+" 태그 오류로 떨어지면 안 되지만, 태그 스택에 칸이 안 생긴다. 그때는 칠해 둔
+" 색도 도로 푼다. 남겨 두면 색 스택이 태그 스택보다 한 칸 앞서서, 다음 <C-t>
+" 가 돌아가면서 방금 것이 아닌 앞의 색을 풀었다 (QA).
+func! s:RvLocalJump(marked) abort
+	let l:r = luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump(_A) or false', a:marked ? 1 : 0)
+	if type(l:r) == type(0) && l:r == 2
+		call s:RvUnmark(a:marked)
+		return 1
+	endif
+	return l:r ? 1 : 0
+endfunc
+
 " g] / <C-마우스왼쪽> : 미리보기가 아니라 '지금 편집 창'에서 그 심볼로 간다.
 "
 " <C-]> 는 패널이 떠 있으면 context view 로 보내는데, 편집 창 자체를 그
@@ -2316,15 +2497,41 @@ func! s:JumpFromPeek() abort
 	return 1
 endfunc
 
-func! s:RvEditJump() abort
-	let l:marked = s:RvMarkCword()
+" builtin <C-]> 를 돌리고, 못 뛰면 그 까닭을 한 줄로 알린다.
+"   색인에 없는 이름(return, 숫자, 모르는 심볼)  '정의를 찾지 못했습니다: <낱말>'
+"   커서 밑에 이름이 없다(빈 줄, '{' 만 있는 줄) '커서 밑에 이름이 없습니다'
+" 그대로 두면 'Error in function ...' 몇 줄과 Press ENTER 가 떠 다음 키를
+" 먹었다 (QA). 뒤의 것(E348/E349)은 예전에 잡는 목록에 없었다.
+" 칠해 둔 것은 안 뛰었으니 도로 푼다 - <C-t> 로 풀 기회가 없다.
+func! s:BuiltinTagJump(marked) abort
+	try
+		execute "normal! \<C-]>"
+	catch /^Vim\%((\a\+)\)\=:E\%(426\|433\|257\|73\):/
+		call s:RvUnmark(a:marked)
+		echohl WarningMsg
+		echo '정의를 찾지 못했습니다: ' . expand('<cword>')
+		echohl None
+	catch /^Vim\%((\a\+)\)\=:E34[89]:/
+		call s:RvUnmark(a:marked)
+		echohl WarningMsg
+		echo '커서 밑에 이름이 없습니다'
+		echohl None
+	endtry
+endfunc
+
+
+" a:1 이 1 이면 패널이 꺼져 있어도 칠한다 - <C-]> 쪽에서 부를 때다.
+" <C-]> 가 이 함수로 오게 되면서(g:vimide_jump_target='edit') g] 의 '패널이
+" 떠 있을 때만' 규칙까지 따라와, 뷰 Off 에서 <C-]> 가 색을 안 칠했다.
+func! s:RvEditJump(...) abort
+	let l:marked = s:RvMarkCword(a:0 > 0 && a:1)
 	if has('nvim') && exists('*luaeval')
 		try
 			if luaeval('_G.relationview_open_include ~= nil and _G.relationview_open_include() or false')
 				call s:RvUnmark(l:marked)
 				return
 			endif
-			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
+			if s:RvLocalJump(l:marked)
 				return
 			endif
 		catch
@@ -2337,15 +2544,8 @@ func! s:RvEditJump() abort
 	endif
 	" 색인에 없는 이름(return, 숫자, 모르는 심볼)이면 태그 오류를 한 줄로 알린다.
 	" 그대로 두면 'Error in function ...' 네 줄과 Press ENTER 가 떴다 (QA).
-	" 미리보기 창의 <C-]> 가 이미 그렇게 한 줄로 알린다.
-	try
-		execute "normal! \<C-]>"
-	catch /^Vim\%((\a\+)\)\=:E\%(426\|433\|257\|73\):/
-		call s:RvUnmark(l:marked)
-		echohl WarningMsg
-		echo '정의를 찾지 못했습니다: ' . expand('<cword>')
-		echohl None
-	endtry
+	" 미리보기 창의 <C-]> 가 이미 그렇게 한 줄로 알린다. 빈 줄도 같다.
+	call s:BuiltinTagJump(l:marked)
 endfunc
 nnoremap <silent> g] :call <SID>RvEditJump()<CR>
 " f] 도 같은 자리에 건다(요청). g] 는 그대로 둔다 - 손에 익은 쪽을 쓰면 된다.
@@ -2376,7 +2576,7 @@ func! s:RvCtxJump() abort
 				return
 			endif
 			" 파라미터/지역변수는 색인에 없다: 이 함수 안의 선언으로 간다
-			if luaeval('_G.relationview_local_jump ~= nil and _G.relationview_local_jump() or false')
+			if s:RvLocalJump(l:marked)
 				return
 			endif
 			" 패널이 떠 있으면 플러그인이 처리한다:
@@ -2412,6 +2612,15 @@ func! s:RvCtxJump() abort
 						" 안 뛰었으니 <C-t> 로 풀 기회도 없다.
 						call s:RvUnmark(l:marked)
 						let l:marked = 0
+						" 커서 밑에 이름이 아예 없다(빈 줄, '{' 줄). 아래 :Gtags
+						" 길로 가면 빈 낱말을 받은 gtags.vim 이 'Gtags for
+						" pattern:' 을 물으며 멈췄다 (QA). 여기서 한 줄로 끝낸다.
+						if v:exception =~# '^Vim\%((\a\+)\)\=:E34[89]:'
+							echohl WarningMsg
+							echo '커서 밑에 이름이 없습니다'
+							echohl None
+							return
+						endif
 						" 아래 :Gtags 길이 없으면 맨 끝에서 같은 <C-]> 를
 						" 한 번 더 시도하게 된다. 이미 해 봤으니 여기서 끝낸다.
 						if exists(':Gtags') != 2
@@ -2446,7 +2655,10 @@ func! s:RvCtxJump() abort
 		call s:JumpFromPeek()
 		return
 	endif
-	execute "normal! \<C-]>"
+	" 패널이 떠 있을 때의 기본 점프. 커서 밑에 심볼이 없어도 여기로 온다 -
+	" 맨 <C-]> 였을 때는 빈 줄에서 'Error in function ... E349' 와 Press
+	" ENTER 가 떴다 (QA).
+	call s:BuiltinTagJump(l:marked)
 endfunc
 " <C-]> 가 어디로 뛸까 - EDIT 창이냐, 미리보기(context)냐.
 "
@@ -2480,12 +2692,12 @@ func! s:RvJumpPrimary() abort
 	if get(g:, 'vimide_jump_target', 'edit') ==# 'ctx'
 		call s:RvCtxJump()
 	else
-		call s:RvEditJump()
+		call s:RvEditJump(1)
 	endif
 endfunc
 func! s:RvJumpSecondary() abort
 	if get(g:, 'vimide_jump_target', 'edit') ==# 'ctx'
-		call s:RvEditJump()
+		call s:RvEditJump(1)
 	else
 		call s:RvCtxJump()
 	endif
@@ -3007,10 +3219,14 @@ augroup VimIdeAutoCheck
                 \ call <SID>CheckTimeThrottled()
     " 실제로 다시 읽었을 때만 알려 준다. 조용히 바뀌면 '내가 방금 본 것과
     " 다른 파일'을 보고 있게 되는데, 그게 제일 헷갈린다.
+    " 파일이 지워져도 이 자동명령이 돈다(E211 뒤). 그때 '다시 읽었습니다' 는
+    " 거짓이라 지워졌다고 말한다 (QA: 그 창에 들어갈 때마다 '다시 읽었다' 고 했다).
     autocmd FileChangedShellPost *
                 \ echohl WarningMsg
-                \ | echo '바깥에서 바뀌어 다시 읽었습니다: ' . expand('<afile>:t')
-                \ . '   (]c / [c 로 바뀐 곳, \v 로 전체 diff)'
+                \ | echo (filereadable(expand('<afile>:p', 1))
+                \     ? '바깥에서 바뀌어 다시 읽었습니다: ' . expand('<afile>:t')
+                \       . '   (]c / [c 로 바뀐 곳, \v 로 전체 diff)'
+                \     : '바깥에서 지워졌습니다: ' . expand('<afile>:t'))
                 \ | echohl None
 augroup END
 
@@ -3176,6 +3392,18 @@ endfunc
 func! s:AltBuf() abort
 	let l:n = v:count > 0 ? v:count : 0
 	if !s:GotoEditSlot(1)
+		return
+	endif
+	" quickfix 창에서 :cnext/:cc 가 갈라 만든 창은 '#' 이 quickfix 버퍼다 (편집
+	" 자리가 BufExplorer 라 못 쓸 때 nvim 이 quickfix 창을 가른다). 그대로 <C-^>
+	" 하면 편집 창에 목록이 실리고, ,c(:cclose)는 그 목록을 든 첫 창 - 그 편집 창 -
+	" 을 닫았다 (QA). '#' 은 창마다 달라서 편집 자리로 옮긴 뒤에 본다.
+	" help/terminal 은 막지 않는다 - edit_route 가 일부러 편집 창에 여는 것들이다.
+	let l:alt = l:n > 0 ? l:n : bufnr('#')
+	if l:alt > 0 && getbufvar(l:alt, '&buftype') ==# 'quickfix'
+		echohl WarningMsg
+		echo 'vim-ide: 대체 버퍼가 quickfix 목록이라 열지 않았습니다 (:copen)'
+		echohl None
 		return
 	endif
 	try
@@ -3823,6 +4051,7 @@ let g:neotree_wide_steps = [25, 40]
 "          0 이면 미리보기만 하고 커서는 그대로 (엿보기용 <C-0>/<C-9> 와 같아진다).
 let g:relationview_step_focus = 1
 " 1 (기본) <C-g> 의 grep 을 낱말 경계로 찾는다(struct 가 structure 에 안 걸린다).
+"          경계는 낱말 글자로 끝나는 쪽에만 둔다 - 'legacy_init(' 은 앞에만.
 let g:relationview_grep_word = 1
 " 1 (기본) <C-g> 로 찾을 말을 정한 뒤, 찾을 경로를 한 번 더 보여준다.
 "          기본값은 지금 파일이 있는 디렉터리. <Tab> 으로 완성할 수 있고,
@@ -4688,7 +4917,12 @@ func! s:RunGrep(word) abort
 	" grepformat 도 같이 바꾼다 - rg --vimgrep 의 칸 번호가 기본 형식에는
 	" 없어서, 안 바꾸면 그 숫자가 메시지 글자에 섞여 보인다.
 	let l:save = [&grepprg, &grepformat]
-	let l:wordf = get(g:, 'relationview_grep_word', 1) ? ' -w' : ''
+	" -w 는 양 끝이 낱말 글자일 때만 붙인다. 'legacy_init(' 이나 '->hw.' 처럼
+	" 끝이 문장 부호면 -w 가 그 옆에 낱말 아닌 글자를 요구해 0건이 됐다 (QA).
+	" 멀티바이트 글자는 낱말로 본다 (rg 의 \w 와 같게).
+	let l:wordf = get(g:, 'relationview_grep_word', 1)
+				\ && l:w =~# '^\%(\w\|[^\x01-\x7f]\)'
+				\ && l:w =~# '\%(\w\|[^\x01-\x7f]\)$' ? ' -w' : ''
 	let l:hid = get(g:, 'relationview_grep_hidden', 0)
 	try
 		if executable('rg')
@@ -4859,8 +5093,47 @@ function! VimIdeBalanceSoon() abort
     endif
 endfunction
 
+" 이 탭에서 F9/F11 의 filesystem 트리가 열려 있는 자리('left', 'float' ...). 없으면 ''.
+" RelationView 열의 트리는 position=current(창마다 따로인 상태)라 세지 않는다.
+func! s:NeoTreeOpenPos() abort
+	for l:w in gettabinfo(tabpagenr())[0].windows
+		let l:b = winbufnr(l:w)
+		if getbufvar(l:b, 'neo_tree_source', '') ==# 'filesystem'
+			let l:p = getbufvar(l:b, 'neo_tree_position', '')
+			if l:p !=# '' && l:p !=# 'current'
+				return l:p
+			endif
+		endif
+	endfor
+	return ''
+endfunc
+
+" 트리를 a:pos 자리에 켜고 끈다.
+"
+" 'Neotree toggle <자리>' 는 자리를 보지 않는다. F9 사이드바와 F11 부동 창은
+" 탭마다 하나인 같은 neo-tree 상태라서, toggle 은 어느 자리에 떠 있든 '열려
+" 있다' 며 닫고 끝낸다 (neo-tree command/init.lua 의 toggle 이 자리를 정하기
+" 전에 renderer.close). 그래서 F11 다음 F9 는 부동 창만 닫고 사이드바를 안 열었고,
+" F9 다음 F11 도 사이드바만 닫았다 - 키를 두 번 눌러야 했다 (QA). 다른 자리에
+" 떠 있으면 toggle 없이 그 자리로 옮긴다(neo-tree 가 옛 창을 닫고 새로 세운다).
+" 옮겼으면 1 을 돌려준다.
+" F9 도 NeotreeGuarded 로 연다 - <leader>t 가 이리로 오면서도 git 표시 판정을 스캔
+" 전에 하던 것(예전 <leader>t)을 잃지 않게.
+func! s:NeoTreeToggleAt(pos) abort
+	let l:open = s:NeoTreeOpenPos()
+	if l:open !=# '' && l:open !=# a:pos
+		execute 'NeotreeGuarded ' . a:pos
+		return 1
+	endif
+	execute 'NeotreeGuarded toggle ' . a:pos
+	return 0
+endfunc
+
 func! NeoTreeOnlyLeft()
 	:TagbarClose
+	" 아웃라인은 global 에서도 늘 같이 닫는다 - 일부러 고른 것이다 (04df3a3, README
+	" 의 F9 줄 'aerial closes with it'). \t 도 이 길이라 같다. 그 아래 조건부
+	" 블록과 그 설명은 그 전의 것으로, 지금은 바로 다음 줄이 먼저 닫는다.
 	:AerialClose
 	" 예전 방식(g:vimide_outline_global = 0)에서만 아웃라인을 닫는다.
 	" 그때는 aerial 이 '지금 창'을 쪼개며 왼쪽 트리를 밀어냈다.
@@ -4869,11 +5142,15 @@ func! NeoTreeOnlyLeft()
 	if !get(g:, 'vimide_outline_global', 1)
 		:AerialClose
 	endif
-	:Neotree toggle left
+	" 여는 것이면 quickfix 창에서 먼저 나온다 (s:LeaveQf). 닫는 것은 가르지 않는다.
+	if s:NeoTreeOpenPos() !=# 'left'
+		call s:LeaveQf()
+	endif
+	call s:NeoTreeToggleAt('left')
 	call VimIdeBalanceSoon()
 endfunc
 func! NeoTreeOnlyRight()
-	:Neotree toggle right
+	call s:NeoTreeToggleAt('right')
 	call VimIdeBalanceSoon()
 endfunc
 
@@ -5061,16 +5338,52 @@ func! s:OutlineToggle() abort
 	if get(g:, 'vimide_outline', 'aerial') ==# 'tagbar' || !exists(':AerialToggle')
 		:TagbarToggle
 	else
+		" tagbar 는 제 버퍼 이름을 붙여 갈라서(:split __Tagbar__) quickfix 에서도 빈
+		" 버퍼가 안 생긴다. aerial 은 이름 없이 가른다 - 열 때만 먼저 나온다.
+		if !s:AerialOpen()
+			call s:LeaveQf()
+		endif
 		:AerialToggle
 	endif
 endfunc
 
 func! TagbarOnly()
+	" 부동 창(telescope 프롬프트, F11 트리)에서 누르면 aerial 이 그 부동 창을 원본
+	" 창으로 잡고 가른다 -> 부동 창이 닫히며 window.lua:107 Invalid window id 와
+	" 빈 창이 남았다 (s:LeaveFloat).
+	if !s:LeaveFloat()
+		return
+	endif
 	" NERDTree 는 nvim 에서 꺼 둘 수 있다(g:vimide_nerdtree). 없으면 조용히 넘어간다.
 	silent! NERDTreeClose
-	:Neotree close
+	" 오른쪽 열의 RelationView 트리(position='current')는 빼고 닫는다.
+	"
+	" 자리 없는 ':Neotree close' 는 그 트리까지 닫았다. neo-tree 는 'current' 트리를
+	" 닫을 때 창은 두고 버퍼만 바꾸는데, # 이 없으면 새 [No Name] 을 만들어 넣는다.
+	" RelationView 가 그 창을 치우고 트리를 다시 세운 뒤에도 그 버퍼는 목록에
+	" 숨어 남아, F10 을 누를 때마다 하나씩 쌓였다 (QA). 자리를 주면 neo-tree 는
+	" 그 자리의 트리만 닫는다. 다섯 번 부르니 neo-tree 가 없는 vim 에서 E492 가
+	" 다섯 줄 뜨지 않게 있을 때만 부른다.
+	if exists(':Neotree') == 2
+		for l:pos in ['left', 'right', 'top', 'bottom', 'float']
+			execute 'Neotree close ' . l:pos
+		endfor
+	endif
 	call s:OutlineToggle()
 	call VimIdeBalanceSoon()
+endfunc
+
+" <leader>o: aerial 만 켜고 끈다. F10 처럼 부동 창에서는 먼저 나온다.
+" AerialToggle 은 -bar 명령이 아니라서 'if ... | AerialToggle | endif' 로 쓰면
+" '| endif' 까지 방향 인자로 받는다 - 따로 줄에 둔다.
+func! s:OutlineKey() abort
+	if !s:LeaveFloat()
+		return
+	endif
+	if !s:AerialOpen()
+		call s:LeaveQf()
+	endif
+	AerialToggle
 endfunc
 
 func! NERDTree_and_Tagbar_Toggle()
@@ -5089,7 +5402,17 @@ map <F1> :!man <C-R>=expand("<cword>") <cr><cr>
 nnoremap <silent> <F2> :ProjectFilesPreset<CR>
 command! -bar Maketags call Maketags()
 map <F4> <Plug>MarkSet
-map <F5> :MarkClear<CR> :noh<CR>
+" \m 도 F4 와 같다 (vim-mark 의 기본 키). F4 를 <Plug>MarkSet 에 걸면 vim-mark 는
+" hasmapto() 를 보고 자기 \m 을 걸지 않는다 - 그 빈자리를 highlights.vim 의 토글이
+" 차지해서, \m 두 번에 \f(:Gtags -P)와 vim-mark 의 \n \* 가 사라졌다 (QA).
+" 그 토글은 이제 :HighlightMaps 다.
+nmap <Leader>m <Plug>MarkSet
+xmap <Leader>m <Plug>MarkSet
+" <CR> 과 :noh 사이에 공백이 있으면 그 공백이 normal 모드의 <Space> 로 돌아
+" 커서가 한 칸(줄 끝이면 다음 줄로) 움직였다. map 이라 비주얼에서는 ':' 가
+" '<,'> 를 붙여 E481 이었다 - normal 과 비주얼을 따로 건다.
+nnoremap <silent> <F5> :<C-u>MarkClear<Bar>nohlsearch<CR>
+xnoremap <silent> <F5> <Esc>:MarkClear<Bar>nohlsearch<CR>
 " 곁창에서 실행하면 먼저 직전 EDIT 창으로 옮긴 뒤 실행한다.
 "
 " '지금 창'을 차지하는 기능들이 있다 - BufExplorer(F6), netrw(:Ex) 같은
@@ -5136,6 +5459,76 @@ func! s:InEditWin(cmd) abort
 		return
 	endif
 	execute a:cmd
+endfunc
+
+" 부동 창(F11 트리, telescope 프롬프트)에 서 있으면 먼저 편집 자리로 나온다.
+"   1 = 이제 부동 창이 아니다 (원래 아니었거나, 나왔다)
+"   0 = 나갈 자리가 없다
+"
+" 부동 창에서 창을 가르는 명령(:copen, aerial)을 부르면 새 창이 그 부동 창의
+" 버퍼를 든 채 생긴다. 그런데 neo-tree 와 telescope 는 '부동 창을 떠나면' 제 창과
+" 버퍼를 지운다 - 새 창도 같이 닫혀 :copen 이 편집 창을 quickfix 로 바꾸고
+" cmdheight 가 38 이 되거나, aerial 이 반쯤 만든 빈 창과 'Invalid window id'
+" 를 남겼다 (QA). 먼저 나오면 그 정리가 우리가 가르기 전에 끝난다.
+" 곁창(aerial, 패널 ...)은 그대로 둔다 - 거기서는 갈라도 제자리다.
+func! s:LeaveFloat() abort
+	if !has('nvim')
+		return 1
+	endif
+	if nvim_win_get_config(0).relative ==# ''
+		return 1
+	endif
+	return s:GotoEditSlot(1)
+endfunc
+
+" quickfix·location list 창에 서 있으면 먼저 편집 자리로 나온다.
+"
+" 곁창(neo-tree, aerial)은 '지금 창'을 갈라 세운다. quickfix 창에서 가르면 vim 이
+" :split 을 :new 로 바꿔(ex_splitview) 새 창에 빈 [No Name] 이 실리고, 곁창
+" 버퍼가 그 자리를 차지한 뒤로 그 [No Name] 이 목록에 숨은 채 남았다 - ,o 다음
+" F9 / F10 / <leader>o 마다 하나씩 (QA). 곁창을 '열' 때만 부른다. 닫는 것은
+" 가르지 않으니 초점을 quickfix 에 그대로 둔다. 나갈 편집 창이 없으면 그 자리에서
+" 예전처럼 연다.
+func! s:LeaveQf() abort
+	if &buftype ==# 'quickfix'
+		call s:GotoEditSlot(1)
+	endif
+endfunc
+
+" aerial 이 이 탭에 떠 있나. global 이면 어느 창에서 물어도 그 하나를 찾는다.
+func! s:AerialOpen() abort
+	if !has('nvim')
+		return 0
+	endif
+	return luaeval('(function() local ok, r = pcall(function() return require("aerial").is_open() end) return ok and r or false end)()') ? 1 : 0
+endfunc
+
+func! s:OutOfFloat(cmd) abort
+	if !s:LeaveFloat()
+		echohl WarningMsg
+		echo 'vim-ide: 부동 창에서 나갈 EDIT 창이 없어 실행하지 않았습니다'
+		echohl None
+		return
+	endif
+	" 함수 안에서 난 오류는 'Error in function ...' 석 줄과 Press ENTER 가 된다.
+	" 명령을 직접 쳤을 때처럼 한 줄로 (:lopen 에 목록이 없으면 E776).
+	try
+		execute a:cmd
+	catch /^Vim\%((\a\+)\)\=:E/
+		echohl ErrorMsg
+		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+		echohl None
+	endtry
+endfunc
+
+" 편집 자리가 있으면 거기서, 없으면 지금 창에서 돌린다 (:split 무리).
+" 가르기는 창을 하나 더 낼 뿐 곁창의 버퍼를 밀어내지 않는다. 그래서 EDIT 창이
+" 없는 탭(:tab help, :tab terminal, quickfix 를 :tab split 한 탭)에서는 거절하지
+" 않고 그 창을 가른다 - s:InEditWin 으로 보냈을 때는 거기서 ':sp a.c' 가 아무것도
+" 열지 못했다 (QA). 부동 창에서 나갈 곳이 없을 때만 거절한다 (s:OutOfFloat).
+func! s:InEditOrHere(cmd) abort
+	call s:GotoEditSlot(1)
+	call s:OutOfFloat(a:cmd)
 endfunc
 
 " 아무 명령이나 EDIT 창에서 돌리고 싶을 때:  :VimIdeInEdit <명령>
@@ -5252,6 +5645,8 @@ endfunc
 " 깔아 둔 약어 장부. <CR> 가로채기(s:RouteCR)가 같은 표를 쓴다.
 let s:route_map = {}
 let s:route_guard = {}
+" 파일 이름이 붙었을 때만 돌리는 것들(:split 무리). 약어 없이 <CR> 에서만 본다.
+let s:route_arg = {}
 
 func! s:RouteAbbrev(full, short, target, guard) abort
 	let l:i = len(a:short)
@@ -5267,14 +5662,40 @@ func! s:RouteAbbrev(full, short, target, guard) abort
 	endwhile
 endfunc
 
+" 아래 VimIde* 명령의 파일·디렉터리 이름 완성.
+"
+" -complete=file / dir 을 주면 vim 은 명령을 읽을 때 % # 를 펼치고 \% \# 의 \ 를
+" 뗀다. 이 명령들은 받은 글자를 편집 자리의 :execute 로 넘기므로 거기서 한 번 더
+" 펼쳐진다 - 곁창에서 친 ':sp src/p\%q.c' 가 편집 창 파일 이름이 박힌
+" 'src/psrc/main.cq.c' 라는 빈 버퍼를 열었다 (QA, :e 도 같았다). customlist 는
+" 그러지 않아 친 글자가 그대로 넘어가고, 펼치기는 편집 자리에서 한 번만 일어난다
+" (그래서 % 도 곁창이 아니라 편집 창의 파일이다). 고른 이름은 file 완성이 하던
+" 대로 fnameescape 해서 넣는다.
+" (셋째 인자 1: 'wildignore' 를 지키고 'suffixes' 순서대로 - 빼면 숨겨 둔 파일까지 나왔다)
+func! s:ComplFile(A, L, P) abort
+	return map(getcompletion(a:A, 'file', 1), 'fnameescape(v:val)')
+endfunc
+func! s:ComplDir(A, L, P) abort
+	return map(getcompletion(a:A, 'dir', 1), 'fnameescape(v:val)')
+endfunc
+
+" <cfile> <cword> <cWORD> <cexpr> 는 명령을 친 창(곁창)에서 펼친다. customlist 로
+" 바꾸면서 vim 이 명령을 읽을 때 펼치지 않게 되어, 편집 자리로 옮긴 뒤에 펼쳐져
+" 엉뚱한 낱말·파일이 됐다 (QA). \<cword> 처럼 막아 둔 것은 그대로, % # 는 편집
+" 자리에서 한 번 펼쳐지도록 그대로 둔다.
+func! s:CurSpecials(a) abort
+	return substitute(a:a, '\\\@<!<\%(cfile\|cword\|cWORD\|cexpr\)>\%(:[p~.htre]\)*',
+				\ '\=fnameescape(expand(submatch(0)))', 'g')
+endfunc
+
 " netrw 한 벌. :Ex 만이 아니라 쪼개 여는 것들도 같이 돌린다 - 곁창에서
 " :Vex 를 치면 그 사이드바를 세로로 쪼개 거기에 목록을 편다.
 " :Rexplore 는 뺀다. netrw 버퍼 안에서 '보던 디렉터리로 돌아가기' 라서
 " EDIT 창으로 옮기면 뜻이 없어진다.
 for s:x in ['Explore', 'Vexplore', 'Sexplore', 'Hexplore', 'Texplore',
 			\ 'Lexplore', 'Ntree']
-	execute 'command! -nargs=* -complete=dir VimIde' . s:x
-				\ . " call s:Explore('<mods> " . s:x . "', <q-args>)"
+	execute 'command! -nargs=* -complete=customlist,s:ComplDir VimIde' . s:x
+				\ . " call s:Explore('<mods> " . s:x . "', s:CurSpecials(<q-args>))"
 	call s:RouteAbbrev(s:x, s:x ==# 'Explore' ? 'Ex' : strpart(s:x, 0, 3),
 				\ 'VimIde' . s:x, 0)
 	" :Ntree 는 netrw 가 '트리 꼴로 연다'. 곁창에서 치면 그 자리를 먹는다.
@@ -5298,6 +5719,11 @@ func! s:RouteCR() abort
 	let l:pre = matchstr(l:line, s:mod_pat)
 	let l:rest = strpart(l:line, len(l:pre))
 	let l:w = matchstr(l:rest, '^\a\+')
+	if has_key(s:route_arg, l:w) && strpart(l:rest, len(l:w)) =~# '^!\=\s\+[^|"[:space:]]'
+				\ && s:SideWin()
+		call setcmdline(l:pre . s:route_arg[l:w] . strpart(l:rest, len(l:w)))
+		return "\<CR>"
+	endif
 	if empty(l:w) || !has_key(s:route_map, l:w)
 		return "\<CR>"
 	endif
@@ -5406,12 +5832,44 @@ for s:r in [
 			\ ]
 	let s:cmd = s:r[0]
 	let s:nm = 'VimIde' . toupper(s:cmd[0]) . s:cmd[1:]
+	" 'file' 은 s:ComplFile 로 - % # 가 두 번 펼쳐지지 않게
+	let s:c = s:r[2] ==# 'file' ? 'customlist,s:ComplFile' : s:r[2]
 	execute 'command! -nargs=* -bang '
-				\ . (empty(s:r[2]) ? '' : '-complete=' . s:r[2] . ' ') . s:nm
-				\ . " call s:InEditWin('<mods> " . s:cmd . "<bang> ' . <q-args>)"
+				\ . (empty(s:c) ? '' : '-complete=' . s:c . ' ') . s:nm
+				\ . " call s:InEditWin('<mods> " . s:cmd . "<bang> ' . s:CurSpecials(<q-args>))"
 	call s:RouteAbbrev(s:cmd, s:r[1], s:nm, 1)
 endfor
-unlet! s:r s:cmd s:nm
+unlet! s:r s:cmd s:nm s:c
+" :split / :vsplit / :new / :vnew 에 파일 이름을 붙여 곁창에서 치면 EDIT 자리를
+" 가른다. 그대로 두면 곁창이 갈라져, RelationView 목록에서 친 ':split a.c' 가
+" 오른쪽 열의 트리와 목록 사이에 열렸다 (QA). :sview/:sfind 는 위 목록이 이미
+" 돌린다. 이름 없이 치면 그 창을 가르는 창 조작이라 그대로 둔다.
+" EDIT 자리가 없는 탭에서는 그 창을 가른다 (s:InEditOrHere).
+" 약어는 걸지 않는다 - 약어는 'sp' 뒤 빈칸에서 바뀌어 이름이 붙을지 모른다.
+for s:r in [['split', 'sp'], ['vsplit', 'vs'], ['new', 'new'], ['vnew', 'vne']]
+	let s:nm = 'VimIde' . toupper(s:r[0][0]) . s:r[0][1:]
+	execute 'command! -nargs=* -bang -complete=customlist,s:ComplFile ' . s:nm
+				\ . " call s:InEditOrHere('<mods> " . s:r[0] . "<bang> ' . s:CurSpecials(<q-args>))"
+	let s:i = len(s:r[1])
+	while s:i <= len(s:r[0])
+		let s:route_arg[strpart(s:r[0], 0, s:i)] = s:nm
+		let s:i += 1
+	endwhile
+endfor
+unlet! s:r s:nm s:i
+
+" quickfix / 위치 목록 창을 여는 명령들. 부동 창(F11 트리)에서 치면 먼저 나온다
+" (s:LeaveFloat - 안 그러면 편집 창이 quickfix 로 바뀌고 cmdheight 가 38 이 됐다).
+" 위 표처럼 EDIT 창으로 옮기지는 않는다: 곁창에서 쳐도 botright 라 자리가 같고,
+" EDIT 창이 없는 탭(:tab help)에서도 열려야 한다.
+for s:r in [['copen', 'cope'], ['cwindow', 'cw'], ['lopen', 'lope'], ['lwindow', 'lw']]
+	let s:nm = 'VimIde' . toupper(s:r[0][0]) . s:r[0][1:]
+	execute 'command! -nargs=* -bang ' . s:nm
+				\ . " call s:OutOfFloat('<mods> " . s:r[0] . "<bang> ' . <q-args>)"
+	call s:RouteAbbrev(s:r[0], s:r[1], s:nm, 1)
+endfor
+unlet! s:r s:nm
+
 " <F7> 은 \fs 와 같은 :ProjectSymbols (색인된 심볼 검색).
 " <F8> 은 커서 밑 심볼에 노란 표시를 붙이고 뗀다 (yellowmark.lua).
 " 예전에는 <F7> 이 'v]}zf'(함수 본문 접기), <F8> 이 'zo'(펼치기) 였다.
@@ -5448,7 +5906,11 @@ map <F10> :call TagbarOnly()<CR>
 "map <F11> :call NeoTreeOnlyRight()<CR>
 "map <F11> :call NERDTreeOnlyRight()<CR>
 func! NeoTreeFloat() abort
-	NeotreeGuarded toggle float
+	" F9 사이드바가 떠 있으면 부동 창으로 옮긴다 (s:NeoTreeToggleAt). 사이드바가
+	" 빠진 자리는 F9 로 끌 때처럼 EDIT 창들에 고르게 나눈다.
+	if s:NeoTreeToggleAt('float')
+		call VimIdeBalanceSoon()
+	endif
 endfunc
 map <F11> :call NeoTreeFloat()<CR>
 "map <F11> :call NERDTree_and_Tagbar_Toggle()<CR>
@@ -5462,7 +5924,8 @@ map ,pa :set paste<CR>		"paste
 map ,np :set nopaste<CR>	"nopaste
 
 " quickfix window control
-nmap ,o :copen<CR>
+" ,o 는 :VimIdeCopen - F11 부동 트리에서 눌러도 편집 창을 잃지 않는다 (s:LeaveFloat)
+nnoremap <silent> ,o :VimIdeCopen<CR>
 nmap ,c :cclose<CR>
 
 " Show quickfix window with full width

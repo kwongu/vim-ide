@@ -726,6 +726,28 @@ function _G.vimide_win_guard_state()
   return table.concat(out, ' ')
 end
 
+-- :tabnew / :tabedit 가 막 만든 탭의 첫 창인가.
+--
+-- 그 창은 버퍼가 실리기 전(WinNew/WinEnter/TabNew)에는 명령을 친 창의 버퍼를
+-- 그대로 보여 준다. 곁창(quickfix, 트리, aerial, 패널, F11 부동 트리)에서
+-- 쳤으면 곁창 버퍼다. 그것을 곁창으로 적어 두면 [No Name]/파일이 실릴 때
+-- rescue 가 곁창 버퍼를 도로 넣고 'EDIT 창이 없다' 며 하나를 더 갈라서, 새
+-- 탭이 [No Name] | 곁창 사본 두 창이 됐다 (QA). rescue 의 ':split 사본' 검사는
+-- 같은 탭만 보므로 원본이 다른 탭에 있는 이 경우를 못 거른다.
+local function copied_into_new_tab(win)
+  local tab = api.nvim_win_get_tabpage(win)
+  if #api.nvim_tabpage_list_wins(tab) ~= 1 then
+    return false
+  end
+  local buf = api.nvim_win_get_buf(win)
+  for _, w2 in ipairs(vim.fn.win_findbuf(buf)) do
+    if w2 ~= win and api.nvim_win_get_tabpage(w2) ~= tab then
+      return true
+    end
+  end
+  return false
+end
+
 api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
   group = api.nvim_create_augroup('VimIdeWinGuard', { clear = true }),
   callback = function()
@@ -748,7 +770,15 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
     -- 사이에 파일이 실려, 곁창이 장부에 오르기도 전에 사라진다.
     if not sweeping then
       sweeping = true
-      pcall(remember, api.nvim_get_current_win())
+      -- 새 탭의 첫 창이 아직 곁창 버퍼를 비추는 중이면 적지 않는다 (위
+      -- copied_into_new_tab). 이미 적어 둔 창(창 하나짜리 탭으로 옮겨 온
+      -- 경우)은 그대로 둔다. :tab split 처럼 끝까지 곁창 버퍼를 든 창은
+      -- 뒤이은 sweep() 이 적는다.
+      local cw = api.nvim_get_current_win()
+      local okn, copied = pcall(copied_into_new_tab, cw)
+      if not (guarded[cw] == nil and okn and copied) then
+        pcall(remember, cw)
+      end
       sweeping = false
     end
     -- 되돌리는 것은 한 틱 미룬다. 곁창을 세우는 플러그인은 먼저 보통

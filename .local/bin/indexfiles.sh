@@ -150,7 +150,15 @@ filter_binary() {
 	# 'grep -I' 는 바이너리를 '일치 없음'으로 취급한다. 빈 패턴은 모든 줄에
 	# 일치하니 텍스트 파일만 이름이 나온다. 파일마다 head 를 띄우는 것보다
 	# 훨씬 싸다 - 한 프로세스가 여러 파일을 읽는다.
-	tr '\n' '\0' | xargs -0 grep -Il -e '' -- 2>/dev/null
+	#
+	# 이 단계가 모든 목록 파이프라인의 끝이라 grep 의 종료 코드가 곧 스크립트의
+	# 종료 코드다. git ls-files 는 서브모듈·커밋된 하위 저장소(gitlink)를
+	# 'sub' 라는 디렉터리 이름으로 내놓는데, grep 이 그걸 열다 실패(exit 2)해서
+	# 목록은 맞게 나오고도 rc=1 이 됐다 - autoindex 는 그 목록을 통째로 버리고
+	# '색인할 파일을 찾지 못했습니다', 시작할 때마다 'big tree' 라고 했다.
+	# 디렉터리는 '-d skip'(GNU/BSD 둘 다 있다)으로 건너뛰고, 깨진 링크나 전부
+	# 바이너리인 묶음(일치 없음 = exit 1)도 있으니 결과는 stdout 으로만 본다.
+	tr '\n' '\0' | xargs -0 grep -Il -d skip -e '' -- 2>/dev/null || true
 }
 
 EXT_RE=''
@@ -235,6 +243,10 @@ elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	# 실측(QNX+Android SDK 트리): 그냥 489,302개 2,978ms →
 	# --exclude=out 으로 63,211개 617ms → .repo 까지 1,491개 62ms.
 	# ':(exclude)' pathspec 은 훑은 뒤에 거르는 것이어서 효과가 없었다.
+	#
+	# 아직 추가하지 않은 하위 저장소는 '--others' 가 'sub/' 처럼 '/' 로 끝나는
+	# 디렉터리 한 줄로 내놓는다(그 안은 들여다보지 않는다). 별개의 프로젝트이고
+	# 파일이 아니니 처음부터 뺀다 (grep -v 는 파이프 중간이라 종료 코드와 무관).
 	set -f
 	gitex=''
 	for d in $PRUNE_DIRS; do
@@ -243,7 +255,7 @@ elif [ -d .git ] && command -v git >/dev/null 2>&1; then
 	done
 	# shellcheck disable=SC2086  # gitex 는 옵션 목록이라 쪼개져야 한다
 	git -c core.quotepath=off ls-files --cached --others --exclude-standard \
-		$gitex |
+		$gitex | grep -v '/$' |
 		filter_prune | filter_types | filter_nested |
 		filter_size | filter_binary
 	set +f

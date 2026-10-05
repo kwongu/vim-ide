@@ -1963,6 +1963,109 @@ function _G.projectfiles_remove(arg)
   return tree_apply(arg, '제거', remove_path)
 end
 
+-- 트리에서 이름을 바꾸거나 옮긴 경로(neo-tree 의 r / m / x,p)를 색인 목록이
+-- 따라간다. projectfiles_neotree.lua 가 neo-tree 의 FILE_RENAMED / FILE_MOVED
+-- 에서 부른다.
+--
+-- preset 항목은 프로젝트 기준 경로라, 예전에는 이름을 바꾸면 항목이 없는
+-- 경로를 가리킨 채 남았다 (QA). 바뀐 이름에는 표시가 없고 '=' 도 '제외',
+-- .tags/files 와 색인은 옛 이름 그대로였다. 다음 재색인에서 그 아래 파일이
+-- 말없이 빠졌고, 항목이 전부 낡으면 '다른 체크아웃의 preset' 이라는 엉뚱한
+-- 경고가 떴다. 이제는
+--   * 그 경로와 그 아래 항목을 새 이름으로 고쳐 쓴다
+--   * 담아 둔 디렉터리에서 담지 않은 곳으로 꺼낸 것은 새 자리를 담는다
+--   * 프로젝트 밖으로 나간 것은 뺀 것과 같다 (none 모드로 가는 규칙도 같다)
+--   * 항목은 그대로인데 목록만 낡은 경우(담아 둔 디렉터리 안에서 옮김, 그
+--     안으로 들여옴)는 목록과 색인만 다시 만든다. preset 은 쓰지 않는다 -
+--     쓰면 고친 것도 없이 vim-ide 공용 preset 이 이 장비 사본으로 갈라진다
+-- 색인과 무관한 경로면 아무것도 하지 않는다. 고친 항목 수를 돌려준다.
+local function rename_path(src_abs, dst_abs)
+  -- 옛 경로는 이미 없으므로 부모로 실제 경로를 맞춘다 (/tmp 와 /private/tmp).
+  -- 끝까지 풀면 심볼릭 링크의 이름을 바꿨을 때 링크 대상으로 읽힌다.
+  local function real(p)
+    p = tostring(p or ''):gsub('/+$', '')
+    local d = p ~= '' and uv.fs_realpath(vim.fs.dirname(p))
+    return d and (d .. '/' .. vim.fs.basename(p)) or p
+  end
+  src_abs, dst_abs = real(src_abs), real(dst_abs)
+  if src_abs == '' or dst_abs == '' or src_abs == dst_abs then
+    return 0
+  end
+  local root = root_of(src_abs)
+  local entries, name, bad = entries_of(root)
+  if bad or not name or #entries == 0 then
+    return 0 -- auto / none / 미설정 / 읽을 수 없는 preset: 고칠 목록이 없다
+  end
+  local src, dst = rel_to(root, src_abs), rel_to(root, dst_abs)
+  if src == '.' or src:sub(1, 1) == '/' then
+    return 0
+  end
+  local outside = dst == '.' or dst:sub(1, 1) == '/'
+  -- p 가 base 자신이거나 그 아래 ('.' 은 루트 항목이라 모두를 덮는다)
+  local function under(p, base)
+    return base == '.' or p == base or p:sub(1, #base + 1) == base .. '/'
+  end
+  local out, moved, cover_src, cover_dst = {}, 0, false, false
+  for _, e in ipairs(entries) do
+    local p = norm_rel(e.path)
+    if under(p, src) then
+      moved = moved + 1
+      if not outside then
+        out[#out + 1] = { path = dst .. p:sub(#src + 1), kind = e.kind }
+      end
+    else
+      out[#out + 1] = e
+      cover_src = cover_src or under(src, p)
+      cover_dst = cover_dst or (not outside and under(dst, p))
+    end
+  end
+  if moved == 0 and not cover_src and not cover_dst then
+    return 0 -- 색인과 무관한 경로
+  end
+  local added = 0
+  if moved == 0 and cover_src and not outside and not cover_dst then
+    local st = uv.fs_stat(dst_abs)
+    out[#out + 1] = { path = dst, kind = (st and st.type == 'directory') and 'dir' or 'file' }
+    added = 1
+  end
+  local removing = outside and (moved > 0 or cover_src)
+  if moved + added > 0 then
+    s.removing = removing or nil
+    local ok, err = pcall(save_entries, root, name, out)
+    s.removing = nil
+    if not ok then
+      error(err)
+    end
+  else
+    s.quiet_empty = removing
+    local files, nm = materialize(root)
+    s.quiet_empty = nil
+    if not files and nm and removing then
+      none_for_empty(root, nm)
+    else
+      reindex(root)
+    end
+  end
+  if removing then
+    notify(('프로젝트 밖으로 나가 색인에서 뺐습니다: %s%s  →  %s'):format(src,
+      moved > 0 and (' (항목 %d개)'):format(moved) or '', target_label(root)),
+      vim.log.levels.WARN)
+  elseif moved + added > 0 then
+    notify(('색인 항목이 따라갔습니다: %s → %s%s  →  %s'):format(src, dst,
+      moved > 1 and (' (항목 %d개)'):format(moved) or '', target_label(root)))
+  end
+  return moved + added
+end
+
+function _G.projectfiles_renamed(src, dst)
+  local ok, n = pcall(rename_path, src, dst)
+  if not ok then
+    notify('색인 목록을 고치지 못했습니다: ' .. tostring(n), vim.log.levels.ERROR)
+    return 0
+  end
+  return n
+end
+
 -- 트리 노드 옆의 표시.
 --
 -- NERDTree 는 그릴 때 노드마다 이 함수를 부른다. 그래서 읽는 것은 전부
@@ -3000,6 +3103,19 @@ local function telescope()
   }
 end
 
+-- 줄이 파일이 아닌 픽커(\fm/F2, \fM, \fS, \fx, :ProjectFilesAddDir)에서
+-- Ctrl+X / Ctrl+V / Ctrl+T 는 아무것도 하지 않는다. telescope 의 기본 동작은
+-- 줄의 글자를 파일 이름으로 :split 해서 '● none  (아무것도 …)' 같은 이름의
+-- 빈 버퍼가 남았고, :w 하면 그 이름의 파일이 생겼다 (QA). 바꿔 끼운 것은
+-- 픽커가 닫힐 때 telescope 가 걷으므로 다른 픽커의 분할 열기는 그대로다.
+local function no_split_open(t)
+  for _, a in ipairs({ 'select_horizontal', 'select_vertical', 'select_tab' }) do
+    if t.actions[a] then
+      t.actions[a]:replace(function() end)
+    end
+  end
+end
+
 -- the files that are indexed right now (preset list, or the whole project)
 local db_stat   -- 아래에서 정의: 색인 데이터베이스의 stat
 
@@ -3356,7 +3472,8 @@ local function jump_to_symbol(root, e)
   pcall(vim.cmd, [[normal! m']])
   -- 떠나는 자리는 창을 옮기기 전에 적어 둔다 - <C-t> 가 쓰는 태그 스택은
   -- 점프 목록과 다른 것이고, 우리 점프는 :tag 가 아니라서 vim 이 스스로
-  -- 쌓아 주지 않는다
+  -- 쌓아 주지 않는다. 쌓을 때는 :tag 처럼 't' 로 - 'a' 는 <C-t> 로 되짚어
+  -- 나온 칸을 남긴 채 덧붙여, 다음 <C-t> 가 그 칸을 다시 들렀다 (QA).
   local from = { vim.fn.bufnr('%'), vim.fn.line('.'), vim.fn.col('.'), 0 }
   local ok = pcall(open_in_edit, root, e.path)
   if not ok then
@@ -3366,7 +3483,7 @@ local function jump_to_symbol(root, e)
   local win = api.nvim_get_current_win()
   if vim.fn.getbufvar(from[1], '&buftype') == '' then
     pcall(vim.fn.settagstack, win,
-      { items = { { tagname = e.name or '?', from = from } } }, 'a')
+      { items = { { tagname = e.name or '?', from = from } } }, 't')
   end
   local buf = api.nvim_win_get_buf(win)
   -- and the file can have changed since it was indexed
@@ -3774,6 +3891,7 @@ local function pick_add_dir()
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr)
+      no_split_open(t)
       t.actions.select_default:replace(function()
         local picker = t.state.get_current_picker(bufnr)
         local picks = picker:get_multi_selection()
@@ -3867,6 +3985,7 @@ local function pick_preset()
     }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr, map)
+      no_split_open(t)
       t.actions.select_default:replace(function()
         local e = t.state.get_selected_entry()
         t.actions.close(bufnr)
@@ -3950,6 +4069,7 @@ local function pick_save()
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr)
+      no_split_open(t)
       t.actions.select_default:replace(function()
         local e = t.state.get_selected_entry()
         t.actions.close(bufnr)
@@ -4016,6 +4136,7 @@ local function pick_remove()
     finder = t.finders.new_table({ results = items }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr, map)
+      no_split_open(t)
       t.actions.select_default:replace(function() remove(bufnr) end)
       -- 여기서는 <CR> 도 지우는 키다. 전역 <CR>(목록이 따라온 뒤에 한다)을 거치면
       -- 갈아 끼우는 동안 온 두 번째 <CR> 이 버려지지 않고 줄을 섰다가 다음 항목을
@@ -4232,6 +4353,7 @@ local function pick_import()
     }),
     sorter = t.conf.generic_sorter({}),
     attach_mappings = function(bufnr)
+      no_split_open(t)
       t.actions.select_default:replace(function()
         local e = t.state.get_selected_entry()
         t.actions.close(bufnr)

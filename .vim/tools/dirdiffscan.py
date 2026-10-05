@@ -43,7 +43,7 @@
 #   {"ev":"u","d":dir,"n":name,"s":st,"e":[...같은 항목...]}   목록을 받아 간 디렉터리 안
 #   {"ev":"reveal","id":N,"path":rel|null,"lists":{dir:[entries]}}
 #   {"ev":"lists","id":N,"lists":{dir:[entries]}}
-#   {"ev":"progress", ...}                    again: 끝난 뒤 복사로 다시 보는 중
+#   {"ev":"progress", ...}                    again: 끝난 뒤 복사·저장으로 다시 보는 중
 #   {"ev":"copied","id":N,"files":n,"dirs":n,"skipped":[[rel,why]],"failed":[[rel,why]],
 #    "roots":[rel,...]}                      roots: 다시 본 곳 (그 아래 목록은 새로 받는다)
 # 상태: same diff onlyA onlyB pend   종류: d f l o (없으면 null)
@@ -57,10 +57,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import sys
 import threading
 import time
+import unicodedata
 
 BAD = ('diff', 'onlyA', 'onlyB')
 started = time.monotonic()
@@ -157,7 +159,7 @@ def flush():
             sys.stdout.write(data)
             sys.stdout.flush()
         except BrokenPipeError:
-            os._exit(0)
+            bail(0)
     last_flush[0] = time.monotonic()
 
 
@@ -324,6 +326,35 @@ def listdir(side, rel):
     return res, err, False
 
 
+def alias(rel, la, lb):
+    # macOS(APFS)는 이름의 정규화(NFC/NFD)와 기본으로 대소문자를 가리지 않는다: A 의 'café'(NFC)
+    # 와 B 의 'café'(NFD), 'Foo.c' 와 'foo.c' 가 같은 파일이다. 이름 그대로 짝지었더니 두 줄
+    # ('A 에만'·'B 에만')로 나뉘어 내용을 견주지 않았고, A 쪽을 복사하면 말없이 B 의 다른 철자
+    # 파일을 덮었는데 그 줄은 그대로 남았다. 그런 B 쪽 이름을 A 의 철자로 바꾼다 - 그 철자로
+    # 열어도 B 의 같은 파일이 열린다. 같은 파일임을 lstat 으로 확인한 것만 (두 철자가 따로
+    # 있는 리눅스·SMB 는 그대로). 한쪽에만 있는 이름끼리만 보므로 양쪽에 다 있는 것은 공짜다
+    only_b = [x for x in lb if x not in la]
+    if not only_b:
+        return
+    keys = {}
+    for x in la:
+        if x not in lb:
+            keys.setdefault(unicodedata.normalize('NFC', x).casefold(), []).append(x)
+    if not keys:
+        return
+    base = os.path.join(ROOT['b'], rel) if rel else ROOT['b']
+    for x in only_b:
+        ys = keys.get(unicodedata.normalize('NFC', x).casefold())
+        if not ys or len(ys) != 1 or ys[0] in lb:
+            continue
+        try:
+            if not os.path.samestat(os.lstat(os.path.join(base, x)), os.lstat(os.path.join(base, ys[0]))):
+                continue
+        except OSError:
+            continue
+        lb[ys[0]] = lb.pop(x)
+
+
 def lstat(side, rel):
     try:
         st = os.lstat(os.path.join(ROOT[side], rel))
@@ -381,6 +412,8 @@ def worker(role):
             if kind == SCAN:
                 la, ea, fa = listdir('a', rel) if n.ka == 'd' else ({}, 0, False)
                 lb, eb, fb = listdir('b', rel) if n.kb == 'd' else ({}, 0, False)
+                if la and lb:
+                    alias(rel, la, lb)
                 res.append((n, la, lb, ea + eb, fa, fb))
             elif kind == STAT or kind == INFO:
                 ra = lstat('a', rel) if n.ka else None
@@ -699,6 +732,23 @@ def detach(n):
         p.bad -= 1
 
 
+def spelled(p, parent_rel, name):
+    # 트리에 다른 철자(alias)로 있는 같은 파일의 이름. nvim 이 macOS 에서 버퍼 이름의 대소문자를
+    # 디스크의 것으로 고쳐(foo.c) :w 의 refresh 가 그 이름으로 오면, 트리의 Foo.c 옆에 같은
+    # 파일의 줄이 하나 더 생겼다
+    key = unicodedata.normalize('NFC', name).casefold()
+    for k in p.kids:
+        if k != name and unicodedata.normalize('NFC', k).casefold() == key:
+            for side in ('a', 'b'):
+                base = os.path.join(ROOT[side], parent_rel) if parent_rel else ROOT[side]
+                try:
+                    if os.path.samestat(os.lstat(os.path.join(base, k)), os.lstat(os.path.join(base, name))):
+                        return k
+                except OSError:
+                    pass
+    return None
+
+
 def refresh_one(rel):
     # 그 항목을 새로 만든다 (복사로 한쪽이 생겼거나 바뀌었다). 부모를 돌려준다
     if not rel:
@@ -708,6 +758,11 @@ def refresh_one(rel):
     if p is None or not p.scanned or p.dead or excluded(name):
         return None
     old = p.kids.get(name)
+    if old is None:
+        k = spelled(p, parent_rel, name)
+        if k is not None:
+            name, rel = k, (parent_rel + '/' + k if parent_rel else k)
+            old = p.kids[k]
     group = old.group if old is not None else p.group
     if old is not None:
         detach(old)
@@ -773,6 +828,24 @@ def cmd_refresh(msg):
 copy_q = collections.deque()
 copy_cv = threading.Condition()
 copier_started = [False]
+copy_tmp = [None]         # 복사 줄기가 지금 쓰고 있는 임시 파일
+copy_mx = threading.RLock()   # 임시 파일 만들기·바꿔 끼우기 <-> bail (RLock: bail 안에서 SIGTERM 이 또 와도)
+stopping = [False]
+
+
+def bail(code):
+    # 끝낸다 - 복사 줄기가 쓰던 임시 파일은 지우고. os._exit 는 그 줄기를 그 자리에서 없애
+    # copy_file 의 뒷정리가 돌지 않았다: :tabclose·:qa (quit + jobstop 의 SIGTERM) 로 끝내면
+    # 반쯤 쓴 '.dirdiff~PID~이름' 이 대상 쪽에 남았고, 다음 비교에 'B 에만' 으로 보였다
+    with copy_mx:
+        stopping[0] = True
+        t = copy_tmp[0]
+    if t:
+        try:
+            os.unlink(t)
+        except OSError:
+            pass
+    os._exit(code)
 
 
 def why(e):
@@ -787,15 +860,28 @@ def copy_file(src, dst, sst):
     except OSError:
         pass
     try:
-        if stat.S_ISLNK(sst.st_mode):
-            os.symlink(os.readlink(src), tmp)
-        else:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        # 임시 파일을 만들고 바꿔 끼우는 것은 copy_mx 안에서: bail 이 그 사이에 끼면 지울
+        # 이름을 모르거나, 지운 뒤에 새로 생긴다
+        with copy_mx:
+            if stopping[0]:
+                raise OSError('stopped')
+            copy_tmp[0] = tmp
+            if stat.S_ISLNK(sst.st_mode):
+                os.symlink(os.readlink(src), tmp)
+                fd = None
+            else:
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        if fd is not None:
             with os.fdopen(fd, 'wb') as out, open(src, 'rb') as inp:
                 shutil.copyfileobj(inp, out, 1 << 20)
             shutil.copystat(src, tmp)
-        os.replace(tmp, dst)
+        with copy_mx:
+            if stopping[0]:
+                raise OSError('stopped')
+            os.replace(tmp, dst)
+            copy_tmp[0] = None
     except BaseException:
+        copy_tmp[0] = None
         try:
             os.unlink(tmp)
         except OSError:
@@ -948,7 +1034,7 @@ def handle(msg):
         cmd_copy(msg)
     elif c == 'quit':
         flush()
-        os._exit(0)
+        bail(0)
 
 
 def reader():
@@ -974,6 +1060,10 @@ def main():
     # 순환 쓰레기 수거를 끈다. 모형은 끝날 때까지 버리지 않으므로 거둘 것이 없는데, 켜 두면
     # 항목이 수십만이 되면서 전체 수거가 거듭 모형 전체를 훑는다 (몇 초씩 멎고 CPU 를 먹는다)
     gc.disable()
+    # nvim 의 jobstop 은 SIGTERM 이다 - 그냥 죽으면 쓰던 임시 파일이 남는다 (bail). 주 줄기는
+    # wake.wait 에서 자고 있어도 시그널 처리기는 곧바로 돈다. 끝 코드는 시그널로 죽은 것과 같게
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda n, _f: bail(128 + n))
     for side in ('a', 'b'):
         if not os.path.isdir(ROOT[side]):
             emit({'ev': 'error', 'msg': 'not a directory: ' + ROOT[side]}, now=True)

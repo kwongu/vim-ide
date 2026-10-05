@@ -104,8 +104,10 @@ local function say(msg, level)
   (_G.vimide_notify or vim.notify)('비교: ' .. msg, level or levels.INFO)
 end
 
+-- 알림에 쓸 이름: 줄바꿈 같은 제어 문자는 ^@ 로 (그대로 두면 알림이 두 줄이 되어 Press ENTER 가
+-- 떴다)
 local function short(p)
-  return vim.fn.fnamemodify(p, ':~')
+  return vim.fn.strtrans(vim.fn.fnamemodify(p, ':~'))
 end
 
 local function key()
@@ -128,6 +130,7 @@ local JOSA = {
 local PLAIN = { 'winhighlight', 'winfixwidth', 'winfixheight', 'number', 'relativenumber',
   'signcolumn', 'foldcolumn', 'cursorline', 'list', 'wrap', 'statuscolumn', 'winbar' }
 
+-- cmd: Ex 줄, 또는 이름을 인자로 넘길 nvim_cmd 표 (vim.cmd 는 둘 다 받는다)
 local function tab_from_edit(cmd)
   local w = _G.vimide_edit_slot and _G.vimide_edit_slot()
   local moved = false
@@ -200,7 +203,9 @@ function _G.vimide_dirdiff_pick(state)
       say('dirdifftab.vim 이 없습니다', levels.WARN)
     end
   else
-    tab_from_edit('tabnew ' .. vim.fn.fnameescape(a))
-    vim.cmd('rightbelow vertical diffsplit ' .. vim.fn.fnameescape(path))
+    -- 이름은 Ex 줄로 만들지 않고 인자로 (dirdiffview.lua 의 show_file 과 같은 까닭): 이름에
+    -- 줄바꿈이 있으면 fnameescape 로도 줄이 갈라져 없는 'x\' 를 열고 나머지를 명령으로 돌렸다
+    tab_from_edit({ cmd = 'tabnew', args = { a }, magic = { file = false } })
+    vim.cmd.diffsplit({ args = { path }, magic = { file = false }, mods = { split = 'belowright', vertical = true } })
   end
 end

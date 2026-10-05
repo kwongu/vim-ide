@@ -201,11 +201,30 @@ local function start_job(s)
       end
     end,
     on_exit = function(_, code)
-      if me == s.job and code ~= 0 and not s.closing then
-        vim.schedule(function()
-          say('비교가 멈췄습니다 (code ' .. code .. ') ' .. (s.stderr or ''), vim.log.levels.WARN)
-        end)
+      if me ~= s.job or s.closing then
+        return
       end
+      vim.schedule(function()
+        if me ~= s.job then
+          return
+        end
+        -- 뒤쪽이 죽었다: 하던 복사는 끝나지 않는다 ('copied' 가 오지 않는다). 풀어 두지 않았더니
+        -- q 와 그 뒤의 복사가 끝내 '복사하는 중' 으로 거절되었다
+        s.job = nil
+        local c = s.copying
+        s.copying = nil
+        local msg = {}
+        if c then
+          msg[#msg + 1] = ('%s → %s 복사가 중간에 멈췄습니다 - %s 쪽에 일부만 복사되었을 수 있습니다 (R 로 다시 훑기)')
+            :format(c.from:upper(), c.to:upper(), c.to:upper())
+        end
+        if code ~= 0 then
+          msg[#msg + 1] = '비교가 멈췄습니다 (code ' .. code .. ') ' .. (s.stderr or '')
+        end
+        if #msg > 0 then
+          say(table.concat(msg, ' / '), vim.log.levels.WARN)
+        end
+      end)
     end,
   })
   s.job = me
@@ -473,7 +492,7 @@ local function status_text(s)
   if p.done then
     parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
   elseif p.again then
-    parts[#parts + 1] = '복사한 곳을 다시 보는 중'
+    parts[#parts + 1] = '바뀐 곳을 다시 보는 중'   -- 복사한 곳, :w 로 저장한 파일
   else
     parts[#parts + 1] = ('훑는 중 %d초 · 디렉터리 %s'):format(math.floor(p.sec or 0), commas(p.dirs or 0))
   end
@@ -600,20 +619,40 @@ render = function(s)
   s.last_render = uv.now()
 end
 
--- 바뀐 줄만 다시 그린다 (거르기가 켜져 있으면 줄이 생기거나 없어지므로 전부)
+-- 바뀐 줄만 다시 그린다. 거르기(차이만)가 켜져 있으면 '같음' 이 된 줄은 그 줄만(펼친 아래까지)
+-- 지우고, 새로 보일 줄이 생길 때만 전부 그린다 - 처음에는 거르기가 켜져 있으면 늘 전부 그렸더니,
+-- 훑는 동안 60ms 마다 트리 전체를 다시 만들어 편집기가 훑는 시간의 60% 동안 멎었다 (2만 파일
+-- 한 폴더, 실측)
 local function render_dirty(s)
   s.render_pending = false
   if not (api.nvim_buf_is_valid(s.buf_l) and api.nvim_win_is_valid(s.win_l)) then
     return
   end
+  local drop = {}
   if s.filter then
-    return render(s)
+    for rel in pairs(s.dirty) do
+      local i = s.row_of[rel]
+      if not i then
+        -- 없던 줄이 보이게 되었다 (펼쳐 보이는 디렉터리 안에서 '같음' 이 아니게 되었다)
+        local e = entry_of_fn(s, rel)
+        local parent = rel:match('^(.*)/[^/]+$') or ''
+        if e and visible(s, e) and (parent == '' or (s.row_of[parent] and s.expanded[parent])) then
+          return render(s)
+        end
+      elseif not visible(s, s.rows[i].e) then
+        local j = i
+        while s.rows[j + 1] and s.rows[j + 1].depth > s.rows[i].depth do
+          j = j + 1
+        end
+        drop[#drop + 1] = { i, j }
+      end
+    end
   end
   local L = layout(s)
   vim.bo[s.buf_l].modifiable = true
   for rel in pairs(s.dirty) do
     local i = s.row_of[rel]
-    if i and s.rows[i] then
+    if i and s.rows[i] and visible(s, s.rows[i].e) then
       local t, h, ob, og = line_of(s, L, s.rows[i])
       s.offb[i], s.offg[i] = ob, og
       api.nvim_buf_set_lines(s.buf_l, i - 1, i, false, { t })
@@ -621,8 +660,49 @@ local function render_dirty(s)
       put_hls(s, i, h)
     end
   end
+  if #drop > 0 then
+    local gone = {}
+    for _, d in ipairs(drop) do
+      for k = d[1], d[2] do
+        gone[k] = true
+      end
+    end
+    -- 아래에서부터 이어진 덩어리째 지운다. 색(extmark)을 먼저 걷는다 - 줄만 지웠더니 폭 0 짜리
+    -- 색이 다음 줄에 쌓였다
+    local k = #s.rows
+    while k >= 1 do
+      if gone[k] then
+        local hi = k
+        while k > 1 and gone[k - 1] do
+          k = k - 1
+        end
+        api.nvim_buf_clear_namespace(s.buf_l, ns, k - 1, hi)
+        api.nvim_buf_set_lines(s.buf_l, k - 1, hi, false, {})
+      end
+      k = k - 1
+    end
+    local rows, offb, offg = {}, {}, {}
+    for i, r in ipairs(s.rows) do
+      if not gone[i] then
+        local n = #rows + 1
+        rows[n], offb[n], offg[n] = r, s.offb[i], s.offg[i]
+      end
+    end
+    s.rows, s.offb, s.offg, s.row_of = rows, offb, offg, {}
+    for i, r in ipairs(rows) do
+      if r.e then
+        s.row_of[r.rel] = i
+      end
+    end
+  end
   vim.bo[s.buf_l].modifiable = false
   s.dirty = {}
+  if #s.rows == 0 then
+    return render(s)   -- '(차이가 없습니다)' / '(훑는 중…)'
+  end
+  if #drop > 0 then
+    mark_side(s)
+  end
   mark_open(s)
   if s.prog_dirty then
     s.prog_dirty = false
@@ -640,8 +720,10 @@ schedule_render = function(s)
   -- 목록이 새로 오면 전부, 상태만 바뀌면 바뀐 줄만 - 60ms 씩 모아서
   vim.defer_fn(function()
     -- 트리에서 비주얼로 고르는 중에는 줄을 다시 쓰지 않는다 - 목록이 오며 줄이 밀리면
-    -- 비주얼 시작 줄은 그대로라 고르지 않은 줄까지 복사되었다
-    if s.need_full and api.nvim_get_current_win() == s.win_l and api.nvim_get_mode().mode:match('^[vV\22]') then
+    -- 비주얼 시작 줄은 그대로라 고르지 않은 줄까지 복사되었다 (거르기가 켜져 있으면 바뀐 줄만
+    -- 그려도 '같음' 이 된 줄이 빠지며 밀린다)
+    if (s.need_full or s.filter) and api.nvim_get_current_win() == s.win_l
+        and api.nvim_get_mode().mode:match('^[vV\22]') then
       s.render_pending = false
       vim.defer_fn(function()
         schedule_render(s)
@@ -708,46 +790,45 @@ end
 
 -- 한쪽에만 있는 파일: 있는 쪽에 파일을, 없는 쪽에는 빈 버퍼를 diff 로 (Beyond Compare
 -- 처럼 - 있는 쪽 줄이 모두 '더해진 줄'로 보인다). 무엇인지는 창 머리(winbar)에 쓴다.
--- 이름이 꼭 같은 버퍼 (bufnr() 는 이름을 무늬로 보아 [ ] ~ 가 든 이름에서 딴 버퍼를 준다)
-local function buf_named(path)
-  local full = vim.fn.fnamemodify(path, ':p')
-  for _, b in ipairs(api.nvim_list_bufs()) do
-    if api.nvim_buf_get_name(b) == full then
-      return b
-    end
-  end
-end
-
 local function show_file(s, win, path, side)
   if not path then
     api.nvim_win_set_buf(win, scratch(s, side, {}))
     return
   end
   -- 누구 버퍼인지는 열기 바로 앞에 본다 (비교를 시작할 때 한 번 찍어 둔 목록으로 보았더니,
-  -- 그 뒤 사용자가 연 버퍼를 비교가 연 것으로 알고 지웠다)
-  local pre = buf_named(path)
-  local pre_listed = pre and vim.bo[pre].buflisted
-  local pre_loaded = pre and api.nvim_buf_is_loaded(pre)
-  local pre_ours = pre and vim.b[pre].vimide_dirdiff
+  -- 그 뒤 사용자가 연 버퍼를 비교가 연 것으로 알고 지웠다). 이름으로 찾지 않고 연 뒤의 버퍼가
+  -- 열기 전에도 있던 것인지로 본다: nvim 은 같은 파일이면 철자가 달라도(macOS 의 Foo.c/foo.c,
+  -- NFC/NFD - 트리는 A 쪽 철자로 연다) 있던 버퍼를 쓰는데, 이름으로 찾았더니 그런 사용자 버퍼를
+  -- 비교의 것으로 알고 치웠다 (bufnr() 는 이름을 무늬로 보아 쓰지 않는다)
+  local before = {}
+  for _, x in ipairs(api.nvim_list_bufs()) do
+    before[x] = { listed = vim.bo[x].buflisted, loaded = api.nvim_buf_is_loaded(x), ours = vim.b[x].vimide_dirdiff }
+  end
   -- noautocmd: 비교하려고 연 파일에서 vim-ide 의 BufRead 훅이 돌지 않게 - 색인이 없는
   -- 트리면 autoindex 가 그 트리 전체의 GTAGS 를 만들기 시작하고(트리 안에 .tags/ 를
   -- 쓴다), gutentags 도 붙는다. 비교는 보기일 뿐이다. 구문 색은 filetype 을 따로 준다.
+  -- 이름은 Ex 줄로 만들지 않고 인자로 넘긴다: 이름에 줄바꿈이 있으면 fnameescape 로도 줄이
+  -- 갈라져, 없는 'nl\' 을 열고 나머지 'name.c' 를 명령으로 돌렸다 (E492). magic.file=false 라
+  -- % # 이나 무늬도 풀지 않는다
   local wi = vim.o.wildignore
   vim.o.wildignore = ''
   local ok, err = pcall(api.nvim_win_call, win, function()
-    vim.cmd('silent keepalt noautocmd hide edit ' .. vim.fn.fnameescape(path))
+    vim.cmd.edit({ args = { path }, magic = { file = false },
+      mods = { silent = true, keepalt = true, noautocmd = true, hide = true } })
   end)
   vim.o.wildignore = wi
   if not ok then
-    say(tostring(err):gsub('^.-(E%d+:)', '%1'), vim.log.levels.WARN)
+    -- nvim_win_call 이 붙여 오는 stack traceback 은 뺀다 (여러 줄이라 Press ENTER 가 떴다)
+    say((tostring(err):gsub('\nstack traceback:.*$', ''):gsub('^.-(E%d+:)', '%1')), vim.log.levels.WARN)
     return
   end
   local b = api.nvim_win_get_buf(win)
-  if not pre or pre_ours or (not pre_listed and not pre_loaded) then
+  local pre = before[b]
+  if not pre or pre.ours or (not pre.listed and not pre.loaded) then
     -- 없던 것, 다른 비교가 연 것(함께 가진다), 지워져 있던 것: 이 비교의 것
     s.opened[b] = true
     vim.b[b].vimide_dirdiff = true
-  elseif not pre_loaded then
+  elseif not pre.loaded then
     -- 목록에만 있고 읽지 않은 사용자 버퍼(세션의 badd): 끝나면 도로 내려 둔다 - 여기서
     -- noautocmd 로 읽었으니 그대로 두면 그 버퍼의 BufRead 훅이 끝내 돌지 않는다
     s.unload[b] = true
@@ -961,6 +1042,11 @@ local function act_enter(s, jump)
     if jump == nil or jump == true then
       toggle(s, r)
     end
+    -- 한쪽은 디렉터리, 한쪽은 파일(링크·특수 파일): 파일 쪽을 안내 옆에 보인다. 디렉터리면
+    -- 늘 여기서 끝냈더니 o 는 아무것도 하지 않았고, 다른 쪽의 파일은 트리에서 열 수 없었다
+    if r.e.ka and r.e.kb and not both_dirs(r.e) then
+      open_pair(s, r, false)
+    end
     return
   end
   open_pair(s, r, jump)
@@ -1122,6 +1208,10 @@ local function real(p)
 end
 
 local function modified_under(path, is_dir_)
+  -- 견줄 경로도 푼다: macOS 에서 트리의 이름(A 쪽 철자 - dirdiffscan.py 의 alias)과 버퍼 이름을
+  -- 푼 것(디스크의 철자 - 대소문자·NFD)이 달라, 고친 채 저장하지 않은 B 의 foo.c 를 Foo.c 로
+  -- 복사할 때 알아보지 못했다
+  path = real(path)
   for _, b in ipairs(api.nvim_list_bufs()) do
     local n = api.nvim_buf_get_name(b)
     if n ~= '' and api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
@@ -1151,6 +1241,10 @@ local function act_copy(s, dir, l1, l2)
   local from, to = dir > 0 and 'a' or 'b', dir > 0 and 'b' or 'a'
   if s.copying then
     return say('앞의 복사가 아직 끝나지 않았습니다', vim.log.levels.WARN)
+  end
+  -- 뒤쪽이 죽은 뒤에 보내면 아무도 받지 않아 '복사하는 중' 이 풀리지 않는다
+  if not (s.job and s.job > 0) then
+    return say('비교가 멈췄습니다 - R 로 다시 훑은 뒤 복사하세요', vim.log.levels.WARN)
   end
   local list, by_mark = picked(s, from, l1, l2)
   local paths, skipped, names = {}, {}, {}
@@ -1243,12 +1337,15 @@ local function on_copied(s, ev)
   end
   -- 대상 쪽 버퍼를 새로 읽는다 (비교가 연 것은 BufRead 훅 없이)
   local base = s[to]
+  local tops = {}
+  for i, rr in ipairs(roots) do
+    tops[i] = real(base .. '/' .. rr)   -- 버퍼 이름처럼 푼다 (modified_under 와 같은 까닭)
+  end
   for _, b in ipairs(api.nvim_list_bufs()) do
     local n = api.nvim_buf_get_name(b)
     if n ~= '' and api.nvim_buf_is_loaded(b) and not vim.bo[b].modified then
       local rn = real(n)
-      for _, rr in ipairs(roots) do
-        local p = base .. '/' .. rr
+      for _, p in ipairs(tops) do
         if rn == p or rn:sub(1, #p + 1) == p .. '/' then
           if vim.b[b].vimide_dirdiff then
             pcall(api.nvim_buf_call, b, function()
@@ -1316,7 +1413,9 @@ function _G.vimide_dirdiff_copy_lines(dir)
   local w = api.nvim_get_current_win()
   local mode = api.nvim_get_mode().mode
   local count = vim.v.count1
-  local l1, l2 = vim.fn.line('.'), vim.fn.line('.') + count - 1
+  -- 횟수는 마지막 줄에서 멈춘다 (15dd 처럼). 그대로 두었더니 30,44diffput 이 E16 으로 실패해
+  -- 있는 줄까지 하나도 복사되지 않았다
+  local l1, l2 = vim.fn.line('.'), math.min(vim.fn.line('.') + count - 1, vim.fn.line('$'))
   local visual = mode:match('^[vV\22]') ~= nil
   if visual then
     l1, l2 = vim.fn.line('v'), vim.fn.line('.')
@@ -1449,6 +1548,12 @@ local function finish(s, stay)
     send(s, { cmd = 'quit' })
     pcall(vim.fn.jobstop, s.job)
   end
+  -- :tabclose·:qa 는 q 와 달리 기다리지 않는다 - 뒤쪽이 쓰던 임시 파일을 지우고 멈춘다
+  if s.copying and vim.v.exiting == vim.NIL then
+    local c = s.copying
+    say(('%s → %s 복사를 멈췄습니다 - 다 쓴 것만 %s 쪽에 남았습니다'):format(c.from:upper(), c.to:upper(),
+      c.to:upper()), vim.log.levels.WARN)
+  end
   sessions[s.tab] = nil
   local here = api.nvim_get_current_tabpage()
   if api.nvim_tabpage_is_valid(s.tab) then
@@ -1493,6 +1598,11 @@ local function finish(s, stay)
 end
 
 local function restart(s)
+  -- q 처럼 복사가 끝나기를 기다린다. 뒤쪽을 바꾸면 하던 복사가 중간에 끊기고(대상에 반쯤 쓴
+  -- 디렉터리가 남았다), 그 'copied' 는 새 뒤쪽에서 오지 않아 q 와 복사가 끝내 거절되었다
+  if s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에 R', vim.log.levels.WARN)
+  end
   if s.job and s.job > 0 then
     local old = s.job
     s.job = nil
@@ -1736,6 +1846,40 @@ api.nvim_create_autocmd('BufWinEnter', {
     for _, s in pairs(sessions) do
       s.opened[ev.buf] = nil
       s.unload[ev.buf] = nil   -- 도로 내려 둘 버퍼도: 사용자가 쓰기 시작했다
+    end
+  end,
+})
+-- 비교 중인 두 디렉터리 안의 파일을 :w 로 저장하면 그 항목만 다시 본다 (트리 복사처럼).
+-- 없었을 때는 편집 창에서 두 파일을 같게 만들어 저장해도 R 을 누를 때까지 트리가 옛 판정·
+-- 크기·날짜(≠)를 그대로 보였다
+api.nvim_create_autocmd('BufWritePost', {
+  group = group,
+  callback = function(ev)
+    if next(sessions) == nil then
+      return
+    end
+    local full = vim.fn.fnamemodify(ev.match, ':p')
+    local rp = real(full)
+    -- 버퍼 이름 그대로가 먼저다: 트리가 연 파일은 트리의 이름으로 열려 있다. 링크를 푼
+    -- 이름(macOS 는 디스크의 철자 - NFD·대소문자)으로 찾으면 트리에 없는 이름이 새 줄로
+    -- 생긴다. 푼 이름은 버퍼 이름이 뿌리 밖일 때(/tmp 와 /private/tmp 등)와, 파일 링크를
+    -- 저장해 가리키는 파일이 바뀌었을 때만
+    local link = (uv.fs_lstat(full) or {}).type == 'link'
+    for _, s in pairs(sessions) do
+      local paths = {}
+      for _, root in ipairs({ s.a, s.b }) do
+        local pre = root .. '/'
+        local mine = full:sub(1, #pre) == pre
+        if mine then
+          paths[#paths + 1] = full:sub(#pre + 1)
+        end
+        if (link or not mine) and rp ~= full and rp:sub(1, #pre) == pre then
+          paths[#paths + 1] = rp:sub(#pre + 1)
+        end
+      end
+      if #paths > 0 then
+        send(s, { cmd = 'refresh', paths = paths })
+      end
     end
   end,
 })

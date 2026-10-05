@@ -2,7 +2,8 @@
 " Version 2008-11-19 from http://vim.wikia.com/wiki/VimTip1572
 " File highlights.csv (in same directory as script) defines the highlights.
 "
-" Type '\m' to toggle mapping of keypad on/off (assuming \ leader).
+" Type ':HighlightMaps' to toggle mapping of keypad on/off (assuming \ leader).
+" (vim-ide: \m belongs to vim-mark, see the note above s:MatchToggle.)
 " Type '\f' to find the next match; '\F' to find backwards.
 " Can also type '\n' or '\N' for search; then n or N will find next.
 " On the numeric keypad, press:
@@ -104,7 +105,7 @@ function! s:UndoHighlight(pat)
   else
     let pattern = a:pat
   endif
-  for m in getmatches()
+  for m in s:OwnMatches()
     if m.pattern ==# pattern
       call matchdelete(m.id)
     endif
@@ -114,7 +115,7 @@ endfunction
 " Return pattern to search for next match, and do search.
 function! s:Search(backward)
   let patterns = []
-  for m in getmatches()
+  for m in s:OwnMatches()
     call add(patterns, m.pattern)
   endfor
   if empty(patterns)
@@ -126,22 +127,62 @@ function! s:Search(backward)
   return pat
 endfunction
  
+" vim-ide: 켤 때 덮어쓰는 키의 원래 매핑을 적어 두었다가 끌 때 되돌린다.
+" 예전에는 끌 때 unmap/nunmap 만 해서, 켜기 전에 있던 vim-ide 의 \f(:Gtags -P)와
+" vim-mark 의 \n \* 가 그 세션 내내 사라졌다 (QA). 토글 키도 \m 에서
+" :HighlightMaps 로 옮겼다 - \m 은 vim-mark 의 마크 키다 (.vimrc 의 F4 옆).
+let s:saved_maps = []
+
+function! s:SaveMaps()
+  let s:saved_maps = []
+  let keys = map(range(0, 9), 'string(v:val)') + ['-', '+', '*', 'f', 'F', 'n', 'N']
+  for k in keys
+    for mode in ['n', 'x']
+      let d = maparg('<Leader>' . k, mode, 0, 1)
+      " 버퍼 매핑은 우리가 덮은 것이 아니다 (전역만 건다)
+      if !empty(d) && !get(d, 'buffer', 0)
+        call add(s:saved_maps, [mode, d])
+      endif
+    endfor
+  endfor
+endfunction
+
+function! s:RestoreMaps()
+  for [mode, d] in s:saved_maps
+    if exists('*mapset')
+      call mapset(mode, 0, d)
+    else
+      " vim 8.1 에는 mapset() 이 없다
+      let cmd = mode . (d.noremap ? 'noremap' : 'map')
+      for o in ['nowait', 'silent', 'expr']
+        if get(d, o, 0)
+          let cmd .= ' <' . o . '>'
+        endif
+      endfor
+      execute cmd d.lhs d.rhs
+    endif
+  endfor
+  let s:saved_maps = []
+endfunction
+
 " Enable or disable mappings and any current matches.
 function! s:MatchToggle()
   if exists('g:match_maps') && g:match_maps
     let g:match_maps = 0
     for i in range(0, 9)
-      execute 'unmap <Leader>'.i.''
+      execute 'silent! unmap <Leader>'.i.''
     endfor
-    nunmap <Leader>-
-    nunmap <Leader>+
-    nunmap <Leader>*
-    nunmap <Leader>f
-    nunmap <Leader>F
-    nunmap <Leader>n
-    nunmap <Leader>N
+    silent! nunmap <Leader>-
+    silent! nunmap <Leader>+
+    silent! nunmap <Leader>*
+    silent! nunmap <Leader>f
+    silent! nunmap <Leader>F
+    silent! nunmap <Leader>n
+    silent! nunmap <Leader>N
+    call s:RestoreMaps()
   else
     let g:match_maps = 1
+    call s:SaveMaps()
     for i in range(1, 9)
       execute 'vnoremap <silent> <Leader>'.i.' :<C-U>call <SID>DoHighlight('.i.', 1, v:count)<CR>'
       execute 'nnoremap <silent> <Leader>'.i.' :<C-U>call <SID>DoHighlight('.i.', 2, v:count)<CR>'
@@ -159,28 +200,53 @@ function! s:MatchToggle()
   call s:WindowMatches(g:match_maps)
   echo 'Mappings for matching:' g:match_maps ? 'ON' : 'off'
 endfunction
-nnoremap <silent> <Leader>m :call <SID>MatchToggle()<CR>
+command! HighlightMaps call s:MatchToggle()
+
+" vim-ide: 이 플러그인이 만든 매치(hl1..hl99)만 다룬다. 예전에는 getmatches()/
+" clearmatches()/setmatches() 로 창의 매치를 통째로 다뤄서, 끌 때 vim-mark(F4)·
+" 참조 강조·노란 표시까지 지웠고, 켤 때는 옛 사본으로 덮어 그 사이에 칠한 것을
+" 날렸다 (QA).
+function! s:OwnMatches()
+  return filter(getmatches(), 'v:val.group =~# ''^hl\d\+$''')
+endfunction
+
+function! s:SetOwnMatches(list)
+  for m in s:OwnMatches()
+    call matchdelete(m.id)
+  endfor
+  for m in a:list
+    if get(m, 'group', '') =~# '^hl\d\+$'
+      try
+        call matchadd(m.group, m.pattern, m.priority, m.id)
+      catch /E801:/
+        " 그 id 를 다른 것이 쓰고 있다: id 없이
+        silent! call matchadd(m.group, m.pattern, m.priority)
+      catch
+      endtry
+    endif
+  endfor
+endfunction
  
 " Remove and save current matches, or restore them.
 function! s:WindowMatches(action)
   call LoadHighlights()
   if a:action == 1
     if exists('w:last_matches')
-      call setmatches(w:last_matches)
+      call s:SetOwnMatches(w:last_matches)
     endif
   elseif a:action == 2
     if exists('g:last_matches')
-      call setmatches(g:last_matches)
+      call s:SetOwnMatches(g:last_matches)
     else
       call s:Hrestore('')
     endif
   else
-    let m = getmatches()
+    let m = s:OwnMatches()
     if !empty(m)
       let w:last_matches = m
       let g:last_matches = m
       call s:Hsave('')
-      call clearmatches()
+      call s:SetOwnMatches([])
     endif
   endif
 endfunction
@@ -209,7 +275,7 @@ endfunction
 function! s:Hsave(name)
   let sname = s:NameForSave(a:name)
   if !empty(sname)
-    let l = getmatches()
+    let l = s:OwnMatches()
     call map(l, 'join([v:val.group, v:val.pattern, v:val.priority, v:val.id], "\t")')
     let g:{sname} = join(l, "\n")
   endif
@@ -227,7 +293,7 @@ function! s:Hrestore(name)
         let f = split(l, "\t", 1)
         call add(matches, {'group':f[0], 'pattern':f[1], 'priority':f[2], 'id':f[3]})
       endfor
-      call setmatches(matches)
+      call s:SetOwnMatches(matches)
     else
       echo 'No such global variable: '.sname
     endif

@@ -1336,8 +1336,16 @@ repaint = function(win)
       end
     end
   end
+  -- 입력 모드에서는 이어 칠하기를 걸지 않는다. 글자 하나마다 changedtick 이
+  -- 바뀌어 member_known 의 자리 기억(mk_pos)이 통째로 버려지므로, 이어 칠할
+  -- 때마다 화면의 멤버를 처음부터 다시 풀고 또 한도를 넘겨 다음 것을 걸었다 -
+  -- 타자를 치는 내내 60ms 마다 30ms 씩 멎었다. 남은 멤버는 InsertLeave 의
+  -- schedule() 이 이어 칠한다.
   if over then
-    redraw_soon() -- 못 푼 멤버를 이어서
+    local m = api.nvim_get_mode().mode:sub(1, 1)
+    if m ~= 'i' and m ~= 'R' then
+      redraw_soon() -- 못 푼 멤버를 이어서
+    end
   end
   if asked then
     local n = tonumber(cfg('batch', 2)) or 2

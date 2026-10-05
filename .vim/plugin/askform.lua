@@ -80,7 +80,16 @@ function _G.vimide_ask(spec, on_ok)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].complete = ''
-  local win = api.nvim_open_win(buf, true, {
+  -- delimitMate 이 BufEnter 에서 ( [ { " ' 짝 매핑을 이 버퍼에 걸지 않게 (창을 열기
+  -- 전에). 걸리면 친 'legacy_init(' 가 'legacy_init()' 로 바뀐 채 찾아서 하나도 못
+  -- 찾았다 (QA). filetype 이 비어 있어 g:delimitMate_excluded_ft 로는 못 뺀다.
+  vim.b[buf].loaded_delimitMate = 1
+  -- enter=false 로 열고 따로 들어간다. enter=true 면 새 창이 지금 버퍼를 든 채
+  -- 들어간 뒤 폼 버퍼로 바뀌며 지금 버퍼의 BufLeave 가 그 새 창 안에서 돈다.
+  -- neo-tree 의 a/m/r 입력 칸(nui Input)은 BufLeave 에서 제 버퍼를 지우므로 새
+  -- 창까지 같이 닫혀 'Window was closed immediately' 와 Press ENTER, 편집 창에
+  -- 남은 폼 버퍼가 됐다 (QA). 따로 들어가면 그 BufLeave 는 입력 칸만 닫는다.
+  local ok, win = pcall(api.nvim_open_win, buf, false, {
     relative = 'editor',
     width = width,
     height = #lines,
@@ -94,6 +103,19 @@ function _G.vimide_ask(spec, on_ok)
     footer_pos = 'center',
     zindex = 200,
   })
+  if ok then
+    pcall(api.nvim_set_current_win, win)
+  end
+  if not ok or not api.nvim_win_is_valid(win) or api.nvim_get_current_win() ~= win then
+    if ok and api.nvim_win_is_valid(win) then
+      pcall(api.nvim_win_close, win, true)
+    end
+    if api.nvim_buf_is_valid(buf) then
+      pcall(api.nvim_buf_delete, buf, { force = true })
+    end
+    vim.notify('입력 창을 열지 못했습니다 - 다시 열어 주세요', vim.log.levels.WARN)
+    return
+  end
   vim.wo[win].winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder'
   acp(false)
 

@@ -53,6 +53,10 @@ local function float(lines, opts)
   local buf = api.nvim_create_buf(false, true)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].bufhidden = 'wipe'
+  -- delimitMate 이 ( [ { " ' 짝 매핑을 걸지 않게 (창을 열기 전에). 걸리면 New 칸에
+  -- 친 'cnt[' 가 'cnt[]' 로 바뀌었다 (QA). 뒤이은 filetype 설정이 FileType 으로
+  -- setup 을 다시 불러도 이 변수가 있으면 그냥 돌아간다.
+  vim.b[buf].loaded_delimitMate = 1
   local width = opts.width or 60
   local height = #lines
   local win = api.nvim_open_win(buf, true, {
