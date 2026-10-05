@@ -4076,6 +4076,8 @@ render_tree = function()
     raw('  (none)')
   end
 
+  -- 글자 찾기 목록에는 Definition 줄이 없다: 첫 찾은 줄에서 시작한다
+  local want_focus = t.kind == 'text'
   local function emit(nodes, prefix)
     for i, nd in ipairs(nodes) do
       local last = i == #nodes
@@ -4099,6 +4101,9 @@ render_tree = function()
           loc = { path = nd.site.path, line = nd.site.line, sym = nd.ref_sym } },
         nd.label)
       r.node = nd
+      if want_focus then
+        r.focus, want_focus = true, false
+      end
       -- one caller can call the symbol several times: show every call site,
       -- not just the first, so nothing is missing next to ':Gtags -r'
       if #nd.sites > 1 then
@@ -4292,10 +4297,19 @@ render_rows = function(t, rows)
   -- a new symbol starts on its most useful row (the definition, or the
   -- member that was under the cursor), so the context window shows that
   -- without the user moving anything
-  if focus and s.shown ~= t.sym and s.win and api.nvim_win_is_valid(s.win) then
+  --
+  -- 찾기 결과(<C-/> 글자 찾기, :Gtags)는 같은 심볼이라도 새 목록이다. 예전에는 심볼이
+  -- 같으면 커서를 그대로 두어, 앞 목록의 줄 번호에 머문 채 머리줄이나 엉뚱한 항목에 서
+  -- 있었고 context view 는 앞 목록의 파일을 그대로 보여 주었다. 같은 목록을 다시 그릴
+  -- 때(펼치기 등)는 커서를 두고, 관계 트리끼리는 예전 그대로
+  local fixed = function(k) return k == 'text' or k == 'results' end
+  local prev = s.shown_tree
+  local new_list = prev ~= t and (fixed(t.kind) or (prev ~= nil and fixed(prev.kind)))
+  if focus and (s.shown ~= t.sym or new_list) and s.win and api.nvim_win_is_valid(s.win) then
     pcall(api.nvim_win_set_cursor, s.win, { focus, 0 })
   end
   s.shown = t.sym
+  s.shown_tree = t
   hl_cursor_row()
   vim.schedule(update_context)
 end
@@ -5049,7 +5063,9 @@ local function finish(gen, sym, root, mtime, data)
   else
     t.extra_rel = nil
   end
-  if gtags_mtime(root) == mtime then
+  -- 글자 찾기(<C-/>) 결과는 넣지 않는다: 열쇠(tree_key)가 같은 심볼의 관계 트리와 같아서,
+  -- 넣으면 그 뒤 커서가 그 심볼에 올 때 Definition/Callers 대신 찾은 줄 목록이 나왔다
+  if t.kind ~= 'text' and gtags_mtime(root) == mtime then
     cache_put(tree_key(sym, root, t.relation, t.extra_rel), mtime, t)
   end
   s.tree = t
@@ -7207,15 +7223,18 @@ end
 -- C-c: let the panel follow the cursor again (the 2-3s dwell rule does this
 -- by itself, this is the "right now" version)
 function A.unpin()
-  -- no panel on screen: the key was not ours, let it mean what it used to
-  if not (s.pinned and panel_visible()) then
+  -- no panel on screen: the key was not ours, let it mean what it used to.
+  -- 찾기 결과(<C-/>, :Gtags)는 고정이 이미 풀렸어도 관계 트리로 다시 짓는다 - 다만
+  -- 실제로 지을 때만 '먹은 것'이다: 아니면 false 로 돌려 .vimrc 의 <C-c> 가 예전처럼
+  -- checksymbol 로 간다 (숫자·CONFIG_ 값 보기가 목록이 떠 있는 내내 먹혔다)
+  local k = s.tree and s.tree.kind
+  if not (panel_visible() and (s.pinned or k == 'text' or k == 'results')) then
     return false
   end
-  s.pinned = false
-  update_header()
   -- A captured ':Gtags' list is frozen, and on_hold() will not rebuild it
   -- (it refuses while the cursor sits in the preview, and the symbol has
   -- not changed), so bring the live view back from a real source window.
+  local src
   local w = pick_src_win()
   if w and api.nvim_win_is_valid(w) then
     local b = api.nvim_win_get_buf(w)
@@ -7226,10 +7245,17 @@ function A.unpin()
         return vim.fn.expand('<cword>')
       end)
       if is_symbol(sym) then
-        update(sym, name, true, false,
-          { buf = b, line = pos[1], col = pos[2] })
+        src = { sym = sym, name = name, ctx = { buf = b, line = pos[1], col = pos[2] } }
       end
     end
+  end
+  if not s.pinned and not src then
+    return false
+  end
+  s.pinned = false
+  update_header()
+  if src then
+    update(src.sym, src.name, true, false, src.ctx)
   end
   return true
 end
@@ -7457,6 +7483,14 @@ local function watch_unpin()
       return
     end
     if api.nvim_get_current_win() ~= win or vim.fn.expand('<cword>') ~= sym then
+      return
+    end
+    -- 찾기 결과(<C-/>, :Gtags)를 찾은 그 말 위에서 쉬는 것은 '이것 말고 다른 것'이 아니다
+    -- - 고정을 그대로 둔다. 풀었더니 on_hold 는 같은 심볼이라 다시 짓지 않아, 고정 표시만
+    -- 사라진 채 목록이 살아 있는 보기인 양 남았다 (다시 지으면 목록이 사라졌다). 다른 말로
+    -- 옮겨 쉬면 예전처럼 풀고 따라간다. 손으로는 p / :RelationViewUnpin 이 관계 트리로
+    local k = s.tree and s.tree.kind
+    if (k == 'text' or k == 'results') and sym == s.tree.sym then
       return
     end
     s.pinned = false
@@ -7831,7 +7865,11 @@ function A.lookup_refs(pat, regex, base)
         vim.log.levels.WARN)
       return
     end
-    local args = { '--result=ctags-mod', '-g' }
+    -- -a: 절대 경로로. 없으면 global 은 색인 루트 기준 상대 경로를 주는데, 패널은 그것을
+    -- 현재 디렉터리 기준으로 읽는다 - 프로젝트 밖(위)에서 nvim 을 켰으면 목록을 훑어도
+    -- context view 에 아무것도 안 나왔다 (quickfix 쪽은 lookup_to_qf 가 루트를 붙여 됐다).
+    -- 다른 global 호출은 다 -a 다
+    local args = { '--result=ctags-mod', '-a', '-g' }
     if not regex then
       args[#args + 1] = '--literal'
     end
@@ -7857,6 +7895,11 @@ function A.lookup_refs(pat, regex, base)
       if panel_visible() and cfg('lookup_panel', 1) ~= 0 then
         s.gen = s.gen + 1
         s.pinned = true
+        -- 패널이 보여 주는 말은 이제 이것이다 (:Gtags 의 show_results 와 같게). 예전에는 앞
+        -- 심볼이 남아, 고정이 풀린 뒤 머리줄에 그 이름이 뜨고 on_hold 가 그 심볼로 쉬어도
+        -- '같은 심볼' 이라며 다시 짓지 않았다
+        s.sym = pat
+        s.as_type = false
         s.note = ('색인된 파일에서 찾은 글자 %d건'):format(#refs)
         finish(s.gen, pat, root, gtags_mtime(root), {
           refs = refs,
@@ -7864,6 +7907,17 @@ function A.lookup_refs(pat, regex, base)
           refs_total = #refs,
           refs_truncated = refs.truncated,
         })
+        -- 커서는 첫 찾은 줄에 섰다 (render_rows). 미리보기가 떠 있으면 그 줄을 곧바로
+        -- 보여 준다 - 초점이 미리보기에 있으면 update_context 는 스스로 다시 그리지 않는다.
+        -- 미리보기가 없으면 커서를 바로 위 머리줄로: 첫 <C-n> 이 첫 찾은 줄로 가게
+        if ctx_visible() or big_visible() then
+          s.ctx_last = nil
+          update_context(true)
+        elseif s.win and api.nvim_win_is_valid(s.win) then
+          local c = api.nvim_win_get_cursor(s.win)[1]
+          pcall(api.nvim_win_set_cursor, s.win, { math.max(1, c - 1), 0 })
+          hl_cursor_row() -- 패널이 지금 창이 아니라 CursorMoved 가 안 온다
+        end
       else
         lookup_to_qf(root, pat, refs)
       end
@@ -8205,11 +8259,14 @@ for c in ('drsgPfaie'):gmatch('.') do
   GFLAG[c] = true
 end
 
-local function show_results(title, sym, results, truncated, origin)
+-- root: 결과가 나온 색인 루트 (:Gtags). 목록의 경로를 그 루트 기준으로 보인다 - 룩업
+-- (<C-/>)과 같게. grep 처럼 색인이 아닌 것은 nil (현재 디렉터리 기준)
+-- nomark: 찾은 말을 본문에 칠하지 않는다 (-f 처럼 찾을 말이 파일 이름일 때)
+local function show_results(title, sym, results, truncated, origin, root, nomark)
   s.gen = s.gen + 1
   kill_procs()
   s.tree = { kind = 'results', sym = sym, title = title, results = results,
-    truncated = truncated }
+    truncated = truncated, root = root }
   s.note = nil
   s.as_type = false
   s.sym = sym
@@ -8223,7 +8280,7 @@ local function show_results(title, sym, results, truncated, origin)
     if ctx_visible() then
       -- 칸을 하나 늘리므로 색도 하나 칠한다. 안 그러면 그 뒤 <C-t> 가
       -- 한 칸씩 밀려 엉뚱한 색을 지운다.
-      pcall(_G.vimide_jump_mark_push, sym)
+      pcall(_G.vimide_jump_mark_push, (not nomark) and sym or nil)
       ctx_enter_from(origin, nil, sym)
     else
       -- no preview: show the first hit in the edit window instead, the way
@@ -8296,6 +8353,7 @@ function A.grep(pattern, dir, origin)
   local function done(lines, err)
     if not lines then
       if panel_visible() then
+        s.note = nil
         render_msg(pattern, err or 'grep: no result')
       else
         vim.notify(err or 'grep: 결과 없음', vim.log.levels.WARN)
@@ -8475,6 +8533,7 @@ function A.find(pattern, dir)
     if #results == 0 then
       local msg = err or ('find: 결과 없음 - ' .. glob)
       if panel_visible() then
+        s.note = nil
         render_msg(pattern, msg)
       else
         vim.notify(msg, vim.log.levels.WARN)
@@ -8595,7 +8654,7 @@ function A.gtags(args, retried)
         end
       end
       goto_edit_slot()
-      gtags_orig(a)
+      A.with_file_db(function() gtags_orig(a) end)
     end
     return
   end
@@ -8619,30 +8678,65 @@ function A.gtags(args, retried)
   end
   local file = api.nvim_buf_get_name(sbuf)
   local origin = (vim.bo[sbuf].buftype == '' and file ~= '') and win or nil
-  local dir = file ~= '' and vim.fs.dirname(vim.fn.fnamemodify(file, ':p'))
-      or vim.fn.getcwd()
-  get_root(dir, function(root)
+  -- 찾을 말이 % / # 이면 gtags.vim 처럼 그 파일로 (:Gtags -f %). 고른 원본 창 기준.
+  -- 목록에 보이는 이름(label)도 그 파일로 - '%' 그대로면 % 글자를 다 칠했다
+  local query, label = pattern, pattern
+  if pattern == '%' or pattern == '#' then
+    local okx, e = pcall(api.nvim_win_call, win, function()
+      return vim.fn.expand(pattern .. ':p')
+    end)
+    if okx and e ~= '' then
+      query = e
+    end
+  end
+  local has_f = false
+  for _, f in ipairs(flags) do
+    if f:sub(2):find('f', 1, true) then
+      has_f = true
+    end
+  end
+  -- 어느 색인에 물을지는 관계 트리·<C-/> 와 같게 (root_for: 가장 바깥 색인). 예전에는
+  -- 가장 가까운 색인이라, 중첩 프로젝트에서 \s 가 트리에는 있는 호출자를 0 건이라 했고
+  -- 트리 열의 루트도 안쪽 프로젝트로 바뀌었다
+  local from = (file ~= '' and vim.bo[sbuf].buftype == '')
+      and vim.fn.fnamemodify(file, ':p') or (vim.fn.getcwd() .. '/x')
+  root_for(from, function(root)
     root = root or vim.fn.getcwd()
+    -- -f 의 파일: global 은 색인 루트에서 도므로 현재 디렉터리 기준·절대 경로를 루트
+    -- 기준으로 바꾼다 (루트 기준으로 친 것은 그대로 둔다)
+    if has_f and vim.fn.filereadable(query) == 1 then
+      query = rel_to(root, vim.fn.fnamemodify(query, ':p'))
+    end
+    if pattern == '%' or pattern == '#' then
+      label = query
+    end
     local argv = {}
     if not paths_only then
       argv[#argv + 1] = '--result=ctags-mod'
     end
     vim.list_extend(argv, flags)
-    argv[#argv + 1] = pattern
+    argv[#argv + 1] = query
     local cap = cfg('max_refs', 1000)
     run_global(argv, root, function(lines, err)
       if not lines then
-        render_msg(pattern, 'Gtags: ' .. (err or 'no result'))
+        s.note = nil
+        render_msg(label, 'Gtags: ' .. (err or 'no result'))
         return
       end
       local results = {}
+      -- global 은 -a 가 없으면 색인 루트 기준 상대 경로를 준다. 패널은 경로를 현재
+      -- 디렉터리 기준으로 읽으므로 루트를 붙인다 (프로젝트 밖에서 켰을 때 미리보기가
+      -- 비었다). 플래그는 사용자가 친 것이라 -a 를 넣는 대신 여기서 고친다
+      local function abs(p)
+        return p:sub(1, 1) == '/' and p or (root .. '/' .. p)
+      end
       for _, l in ipairs(lines) do
         if paths_only then
-          results[#results + 1] = { name = basename(l), path = l, line = 1 }
+          results[#results + 1] = { name = basename(l), path = abs(l), line = 1 }
         else
           local path, lno, text = l:match('^([^\t]+)\t(%d+)\t(.*)$')
           if path then
-            results[#results + 1] = { name = pattern, path = path,
+            results[#results + 1] = { name = label, path = abs(path),
               line = tonumber(lno), text = (text or ''):gsub('^%s+', '') }
           end
         end
@@ -8661,8 +8755,8 @@ function A.gtags(args, retried)
           end
         end)
       end
-      show_results('Gtags ' .. tostring(args), pattern, results,
-        math.max(0, #lines - #results), origin)
+      show_results('Gtags ' .. tostring(args), label, results,
+        math.max(0, #lines - #results), origin, root, has_f)
     end, cap + 200)
   end)
 end
@@ -8670,6 +8764,66 @@ end
 -- gtags.vim is loaded after this file, so take the command over once
 -- everything is up; nvim_get_commands hands us the original function to
 -- fall back on (call s:RunGlobal(<q-args>, '')).
+-- gtags.vim(패널이 닫혔을 때의 :Gtags 와 \g \s \e ..., :GtagsQf, <C-\><C-]> 의
+-- GtagsCursor, <C-]> 가 태그로 못 찾았을 때의 :Gtags -d)은 global 을 nvim 의 현재
+-- 디렉터리에서 돌리고, global 은 거기서 위로만 색인을 찾는다. 여러 프로젝트를 담은 상위
+-- 디렉터리에서 nvim 을 켰으면 'GTAGS not found' 로 다 실패했다 (패널과 <C-/> 은 파일의
+-- 색인 루트에서 돌아 됐다). 그때만 GTAGSROOT/GTAGSDBPATH 로 그 파일의 색인을 알려 준다 -
+-- global 은 그래도 현재 디렉터리 기준 경로로 답하므로 quickfix 도 그대로 맞는다. 현재
+-- 디렉터리의 색인이 그 파일을 담고 있거나, 사용자가 그 변수를 직접 정해 두었으면 예전 그대로.
+-- (최상위 지역 변수가 한계(200)에 닿아 있어 A 에 단다)
+function A.with_file_db(fn)
+  local function real(b)
+    return vim.bo[b].buftype == '' and api.nvim_buf_get_name(b) or ''
+  end
+  local file = real(api.nvim_get_current_buf())
+  if file == '' then
+    local sw = pick_src_win()
+    if sw and api.nvim_win_is_valid(sw) then
+      file = real(api.nvim_win_get_buf(sw))
+    end
+  end
+  if file == '' or vim.env.GTAGSROOT or vim.env.GTAGSDBPATH then
+    return fn()
+  end
+  file = vim.fn.fnamemodify(file, ':p')
+  local croot = db_root(vim.fn.getcwd())
+  if croot and file:sub(1, #croot + 1) == croot .. '/' then
+    return fn()
+  end
+  local root
+  root_for(file, function(r) root = r end)
+  if not root then
+    return fn()
+  end
+  vim.env.GTAGSROOT, vim.env.GTAGSDBPATH = root, db_path(root)
+  local ok, ret = pcall(fn)
+  vim.env.GTAGSROOT, vim.env.GTAGSDBPATH = nil, nil
+  if not ok then
+    error(ret, 0)
+  end
+  return ret
+end
+
+-- :Gtags / :GtagsQf 의 Tab 완성. gtags.vim 의 GtagsCandidate 도 global -c 를 현재
+-- 디렉터리에서 돌려, 색인 위에서 켰으면 아무것도 안 나왔다 (global 의 오류 줄은 뺀다).
+-- 앞글자로 다시 거르지 않는다: global -c 와 glob 이 이미 골랐고, 글자 그대로 거르면
+-- -i (대소문자 무시)와 -f src/*.c 의 후보가 떨어져 나갔다
+function A.gtags_complete(lead, line, pos)
+  local ok, out = pcall(A.with_file_db, function()
+    return vim.fn.GtagsCandidate(lead, line, pos)
+  end)
+  local res = {}
+  if ok and type(out) == 'string' then
+    for _, x in ipairs(vim.split(out, '\n', { trimempty = true })) do
+      if not x:match('^global: ') then
+        res[#res + 1] = x
+      end
+    end
+  end
+  return res
+end
+
 local function capture_gtags()
   if cfg('capture_gtags', 1) == 0 then
     return
@@ -8684,8 +8838,20 @@ local function capture_gtags()
       vim.fn.string(tostring(args))))
   end
   api.nvim_create_user_command('Gtags', function(o) A.gtags(o.args) end,
-    { nargs = '*', complete = 'custom,GtagsCandidate',
+    { nargs = '*', complete = A.gtags_complete,
       desc = 'gtags search - into the relation panel while it is open' })
+  -- GtagsCursor 도 gtags.vim 이 현재 디렉터리에서 global 을 돌린다 (with_file_db)
+  local cmds = api.nvim_get_commands({ builtin = false })
+  for _, name in ipairs({ 'GtagsCursor', 'GtagsCursorAndJump' }) do
+    local cc = cmds[name]
+    local fname = cc and cc.script_id and (cc.definition or ''):match('^call s:([%w_]+)%(%)$')
+    if fname then
+      local call = string.format('call <SNR>%d_%s()', cc.script_id, fname)
+      api.nvim_create_user_command(name, function()
+        A.with_file_db(function() vim.cmd(call) end)
+      end, { nargs = 0, desc = 'gtags.vim ' .. name .. ' (in the file\'s index)' })
+    end
+  end
 end
 
 api.nvim_create_autocmd('VimEnter', { group = group, callback = capture_gtags })
@@ -8697,14 +8863,17 @@ api.nvim_create_autocmd('VimEnter', { group = group, callback = capture_gtags })
 -- relationview.lua 가 없는 진짜 vim 8.1 에서 E477 이 난다. 이름을 따로
 -- 두면 .vimrc 가 exists(':GtagsQf') 하나로 갈라 쓸 수 있다.
 api.nvim_create_user_command('GtagsQf', function(o)
-  if gtags_orig then
-    gtags_orig(o.args)
-  else
-    -- 덮어쓰기를 못 잡았으면 원래 :Gtags 가 그대로 살아 있다는 뜻이다
-    pcall(vim.cmd, 'Gtags ' .. o.args)
-  end
-end, { nargs = '*', complete = 'custom,GtagsCandidate',
-  desc = 'gtags search - always into the quickfix window' })
+  A.with_file_db(function()
+    if gtags_orig then
+      gtags_orig(o.args)
+    else
+      -- 덮어쓰기를 못 잡았으면 원래 :Gtags 가 그대로 살아 있다는 뜻이다
+      pcall(vim.cmd, 'Gtags ' .. o.args)
+    end
+  end)
+end, { nargs = '*', complete = function(a, l, p)
+  return vim.fn.exists('*GtagsCandidate') == 1 and A.gtags_complete(a, l, p) or {}
+end, desc = 'gtags search - always into the quickfix window' })
 
 api.nvim_create_user_command('RelationViewUnpin', function()
   if not A.unpin() then

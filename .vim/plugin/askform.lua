@@ -34,6 +34,31 @@ local function acp(on)
   end
 end
 
+-- 입력 모드로 연 부동 창을 닫은 뒤 입력 모드를 끝낸다. stopinsert 가 돌아간 창의 커서를
+-- <Esc> 처럼 한 칸 왼쪽으로 미는 것을 InsertLeave 에서 되돌린다 (그 자동명령은 커서를
+-- 민 뒤, 다음 키를 읽기 전에 돈다). findreplace.lua 도 쓴다
+function _G.vimide_leave_insert_keep_cursor()
+  if vim.fn.mode():sub(1, 1) ~= 'i' then
+    vim.cmd('stopinsert')
+    return
+  end
+  local cw = api.nvim_get_current_win()
+  local cc = api.nvim_win_get_cursor(cw)
+  local id = api.nvim_create_autocmd('InsertLeave', {
+    once = true,
+    callback = function()
+      if api.nvim_get_current_win() == cw then
+        pcall(api.nvim_win_set_cursor, cw, cc)
+      end
+    end,
+  })
+  vim.cmd('stopinsert')
+  -- 어떤 까닭으로 InsertLeave 가 안 왔으면 남은 자동명령을 치운다
+  vim.schedule(function()
+    pcall(api.nvim_del_autocmd, id)
+  end)
+end
+
 function _G.vimide_ask(spec, on_ok)
   spec = spec or {}
   local fields = spec.fields or {}
@@ -96,7 +121,12 @@ function _G.vimide_ask(spec, on_ok)
       pcall(api.nvim_win_close, win, true)
     end
     acp(true)
-    vim.cmd('stopinsert')
+    -- 창은 입력 모드로 열려 있어서, 닫은 뒤의 stopinsert 는 돌아간 창에서 <Esc> 처럼
+    -- 커서를 한 칸 왼쪽으로 민다. 쓸 때마다 밀려, 낱말 첫 글자에서 <C-/> 을 두 번째로
+    -- 누르면 찾을 말이 비었다. 그 창의 커서를 지금(아직 밀리기 전) 잡아 두고 입력 모드를
+    -- 나가는 그 순간(InsertLeave) 되돌린다 - vim.schedule 로 미루면 뒤이어 온 키(매크로,
+    -- 한 번에 온 'Enter j')가 먼저 돌고 복원이 그 이동을 되돌렸다
+    _G.vimide_leave_insert_keep_cursor()
     if vals and on_ok then
       vim.schedule(function() on_ok(vals) end)
     end

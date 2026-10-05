@@ -80,6 +80,16 @@ local function close(win)
   end
 end
 
+-- 입력 모드로 연 창을 닫은 뒤의 stopinsert 는 돌아간 창에서 <Esc> 처럼 커서를 한 칸
+-- 왼쪽으로 민다 (쓸 때마다 밀렸다). askform.lua 의 것으로 되돌린다
+local function leave_insert()
+  if _G.vimide_leave_insert_keep_cursor then
+    _G.vimide_leave_insert_keep_cursor()
+  else
+    vim.cmd('stopinsert')
+  end
+end
+
 -- 자동완성을 잠깐 재운다.
 --
 -- 이 창에서는 두 글자만 치면 되는데 AutoComplPop 이 목록을 띄우고,
@@ -227,7 +237,7 @@ local function ask_new(old)
     local o, n = field(1), field(2)
     close(win)
     acp(true)
-    vim.cmd('stopinsert')
+    leave_insert()
     if o == '' then
       vim.notify('찾을 말이 비어 있습니다', vim.log.levels.WARN)
       return
@@ -252,7 +262,7 @@ local function ask_new(old)
   local function cancel()
     close(win)
     acp(true)
-    vim.cmd('stopinsert')
+    leave_insert()
   end
   local function other()
     goto_line(api.nvim_win_get_cursor(win)[1] == 1 and 2 or 1)

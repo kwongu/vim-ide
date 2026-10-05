@@ -859,10 +859,21 @@ back in 0.068 s.
 Where the list lands depends on what is open. With the relation window up it
 goes there, grouped by file (`group_refs` falls back to grouping by path when
 a hit has no enclosing function, which is exactly the Source Insight shape),
-and `<CR>` jumps. With the panel closed it goes to the quickfix list instead,
-with absolute paths so it resolves wherever the cwd happens to be. The
-Definition section is dropped for a text search - it is a string, not a
-symbol, and `(no definition)` was just noise.
+and `<CR>` jumps. The cursor starts on the first hit, so the context view
+shows it straight away - it used to stay on whatever row the previous list
+had it on, often a header, and the context view kept showing the old file.
+(With the context view closed it waits on the section line instead, so the
+first `Ctrl+n` goes to the first hit.) Resting on the word you searched for
+keeps the list (the pin only lets go when you rest on a different symbol);
+`p` or `:RelationViewUnpin` brings that symbol's relation tree back.
+With the panel closed it goes to the quickfix list instead. Both lists carry
+absolute paths, so they resolve wherever the cwd happens to be: started in a
+directory that holds several checkouts (above every index root), the panel
+used to read `global`'s root-relative paths against the cwd and the context
+view stayed empty. The Definition section is dropped for a text search - it
+is a string, not a symbol, and `(no definition)` was just noise. The text
+list is not cached as the symbol's tree either: resting on that symbol later
+shows its Definition and Callers again, not the old hits.
 
 `Ctrl+/` works from the side windows as well (quickfix, the RelationView list,
 the context view, aerial, neo-tree). The index it searches is the one over the
@@ -2904,6 +2915,23 @@ big index is still searchable.
 |---|---|
 | `'root'` (default) | the outermost indexed root, whatever `:pwd` is |
 | `'cwd'` | the old behaviour: the index nearest `:pwd`, then the one nearest the file |
+
+`:Gtags` into the panel (`<leader><leader>s` and the rest of those maps while
+it is open) asks the same index as the tree and `Ctrl+/`. It used to ask the
+nearest one, so in a nested project `<leader><leader>s` could report 0
+callers that the tree right above it listed. `:Gtags -f %` works in the panel
+too (`%` and `#` are expanded the way gtags.vim does, and a file named from
+the cwd is passed to `global` relative to the root).
+
+With the panel closed the search is gtags.vim's own, and gtags.vim runs
+`global` in the cwd - which only looks for an index from there upwards.
+Started above every index root, each quickfix search (the `<leader><leader>`
+maps, `:GtagsQf`, `<C-\><C-]>`, and `<C-]>` when the tags have no answer)
+said `GTAGS not found`. When the cwd's index does not hold the file, vim-ide
+now sets `GTAGSROOT`/`GTAGSDBPATH` to the file's index for that one call -
+`global` still answers relative to the cwd, so the quickfix entries open as
+usual. Started inside a project, nothing changes; a `GTAGSROOT` you set
+yourself is left alone.
 
 ## Relation window (nvim only)
 
