@@ -142,13 +142,14 @@ function _G.aerial_select_range()
   api.nvim_set_current_win(src_win)
   -- 점프 전 자리를 jumplist 에 남긴다 - C-o 로 돌아올 수 있게
   pcall(vim.cmd, "normal! m'")
-  api.nvim_win_set_cursor(src_win, { top, 0 })
-  vim.cmd('normal! V')
+  -- 끝에서 시작해 첫 줄로 올라오며 잡는다: 커서가 블록의 첫 줄에 서고, 그 줄을 창
+  -- 맨 위로 올린다(zt). 예전에는 첫 줄에서 끝으로 내려가며 잡아 커서가 끝 줄에 섰고,
+  -- 긴 함수면 화면이 함수 끝으로 가서 잡은 블록의 머리가 안 보였다 (zt 도 커서인 끝 줄을
+  -- 맨 위로 올렸다). 짧은 함수도 첫 줄이 맨 위에 와서 블록이 통째로 보인다. 끝으로는 o
   api.nvim_win_set_cursor(src_win, { last, 0 })
-  -- 화면에 다 안 들어오면 시작 줄이 보이도록
-  if last - top + 1 > api.nvim_win_get_height(src_win) then
-    vim.cmd('normal! zt')
-  end
+  vim.cmd('normal! V')
+  api.nvim_win_set_cursor(src_win, { top, 0 })
+  vim.cmd('normal! zt')
   return true
 end
 
