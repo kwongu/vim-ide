@@ -142,8 +142,9 @@ RelationView tree) without reopening anything - projectfiles fires
 `User ProjectFilesChanged` and each view repaints. The notice says what really
 changed (`색인 추가: 9개 (1개는 이미 들어 있었음)`), `=` over a visual selection
 says how many of the selected files are in, and a removal asks first only when
-20 or more files that are actually in the index would go
-(`g:projectfiles_confirm_drop`). Removing the last file turns the project to
+the preset entries it deletes plus the files it excludes from a directory entry
+that stays reach 20 (`g:projectfiles_confirm_drop`) - `-` on a whole directory
+entry is one entry and does not ask. Removing the last file turns the project to
 `none` - not indexed - rather than back to "everything"; the preset is backed
 up first. Paths inside `.tags`, `.git`, `.repo` and the other always-pruned
 directories are refused, since they could never produce a file.
@@ -571,9 +572,14 @@ updates the database for that one file (`global --single-update`, a few
 milliseconds, in the background), so a function added or removed is
 searchable the moment `:w` returns - no re-index and nothing to wait for. A
 file the list does not know yet is the only case that needs more: if it was
-created under a *directory* entry of the preset, the list is expanded again
-and that single file is added (0.36 s + 0.04 s on this kernel index, once, a
-second after the last save). Created anywhere else, nothing runs at all -
+created under a *directory* entry of the preset, it goes into the list without
+expanding the preset again and only that file is indexed (0.04 s on this
+kernel index; expanding first used to add 0.36 s). That happens once, a second
+after the last save, and takes every new file saved in that second together:
+`:wa`, or `foo.c` and then `foo.h`, is one list write and one index request
+per project. Before, only the last save's path was looked at, so the first
+new file stayed out of the list, GTAGS and ctags until the next `\fR` or
+start. Created anywhere else, nothing runs at all -
 expanding the list could not have brought it in, so there is no point paying
 for a `find`. `g:projectfiles_index_new_on_save = 0` switches that second
 half off; the per-file update is autoindex's and stays.
@@ -652,9 +658,9 @@ along with it, so this rarely has to trigger. The preset is written out
 before the indexer builds its file list, so even the very first index of a
 project obeys it.
 
-Dropping the last entry puts the project back in auto mode rather than
-leaving an empty list behind (an empty list would index nothing, and the old
-index would sit there stale).
+Dropping the last entry switches the project to `none` rather than leaving
+an empty list behind; the index that was there is left as it is and nothing
+is rebuilt (see "none means none" below).
 
 Adding, dropping or switching reindexes immediately (an incremental
 `gtags -i`, which also drops what left the list), and saving a file that is
@@ -1031,8 +1037,7 @@ The same three keys work in **neo-tree**
 read `g:projectfiles_tree_add_key` and friends, so a key changed in one
 place changes both, and both call the same entry points
 (`_G.projectfiles_add` / `_remove` / `_status`) - so a range is one commit
-there too. What neo-tree does not have yet is the marks; those need a
-custom renderer component, and this added only the four operations.
+there too. neo-tree shows the same marks: `[●]` for a file in the list, `[·]` for a directory with listed files under it, and nothing in auto mode. A visual range goes to `_G.projectfiles_add_many` / `_remove_many`, so each project gets one preset write, one list update and one reindex.
 
 Select lines with `v`, `V` or `<C-v>` and `+` / `-` act on the whole
 range - though `<C-v>` only started working in the F6 buffer list and in
@@ -1120,14 +1125,14 @@ Four things now stand in the way of that:
 | | |
 |---|---|
 | the count | `제거: <path> (항목 487개)` - the message says how much went |
-| a question | dropping `g:projectfiles_confirm_drop` entries or more (20) asks first. A visual range asks once at the end, not per line; headless says it and continues |
+| a question | asks first when the preset entries deleted plus the files excluded from a directory entry that stays reach `g:projectfiles_confirm_drop` (20). `-` on a whole directory entry deletes one entry and does not ask, however many files it held; the root entry `.` asks by the files it drops. A visual range does not ask per line: it reports the total once at the end; headless says it (WARN) and continues |
 | a copy | every write keeps the previous file under `<presets>/.backup/<name>.<stamp>.json`, newest 20 (`g:projectfiles_backups`) |
 | a way back | `:ProjectFilesRestore` lists those with their entry counts and the delta against now; `:ProjectFilesRestore 20260909-004155` takes one straight away |
 
 The copy is taken on the path that used to lose the most, too: dropping the
-last entry deletes my copy of the preset and falls back to auto mode, and
-that delete now backs up first. It also writes the name to
-`.tags/preset.last`, because the restore needs a name and auto mode has
+last entry deletes my copy of the preset and switches the project to none,
+and that delete now backs up first. It also writes the name to
+`.tags/preset.last`, because the restore needs a name and none mode has
 none - so `:ProjectFilesRestore` still works right after the list went
 empty, and turns the preset back on when it restores.
 
@@ -1135,10 +1140,11 @@ Two smaller things that came out of the same reading. Entries are
 normalised and deduplicated on write: `grep -rl … .` answers with `./` on
 the front, `add_for_symbol` stored that verbatim, and a `./x` entry could
 not be matched by `x` - so it could not be removed and a second copy of it
-could be added. And when you take one file out of a directory entry, the
-entry is rewritten as the files that remain; that list is now deduplicated
-against what the preset already had, which is where 21 doubled entries
-under `sound/soc/telechips_dpcm/` came from.
+could be added. Taking one file out of a directory entry
+used to rewrite the entry as the files that remain (21 doubled entries under
+`sound/soc/telechips_dpcm/` came from that); it now keeps the entry and
+records the path under `"exclude"` - see "Dropping one file out of a
+directory" below.
 
 ### What the list costs to build
 
@@ -1183,6 +1189,228 @@ project only being known once the session is up.
 
 Sourcing the plugin in that project went **153 ms → 88 ms**, and the file it
 writes is byte-for-byte the same 1,452 lines.
+
+### Adding and dropping is incremental
+
+`+` and `-` (tree, `\fo` / `\fx`, quickfix, buffer list, the `:ProjectFiles*` commands) change only what changed. Adding a file costs one `stat` and the binary check. Adding a directory runs one `find` over that directory. Dropping a path removes it, and everything under it, from the list without touching the disk. The list is then written once, and only if its content changed. It is written next to `.tags/files` and renamed into place, so the indexer never reads a half-written list.
+
+Before, every `+`/`-` expanded the whole preset twice: a `find` over every directory entry plus a `stat` of every listed file, once in projectfiles and once more when autoindex asked for the list. Measured on a 6,500-file preset, one `+` took 13,000-43,000 `stat` calls and 0.23-0.42 s. With 100 µs added to each `stat` to imitate the Linux server it took 1.7-4.7 s. Now it takes 40-46 `stat` calls and 14-30 ms either way. A 50-line range into a 6,000-entry preset went from 0.7 s (4.6 s on slow stat) to 40-90 ms. The preset is written once per range, not once per line.
+
+The whole list is still re-expanded by `:ProjectFilesReindex` (`\fR`, now in the background too - see "`\fR` no longer freezes the screen" below), by a preset or mode switch, and once per session in the background (see below). One thing is given up: a file that appears under a directory entry while nvim is running (`git pull`, a build) is no longer picked up by the next unrelated `+`. `\fR` picks it up, and so do saving it, `+` on it, and the next start.
+
+`+` on a file that a directory entry already covers no longer adds a redundant file entry; it says `이미 있습니다`. If the file is new and not in the list yet, it goes into the list and the preset stays as it is.
+
+### Dropping one file out of a directory
+
+`-` on a path under a directory entry keeps the directory entry. The path is recorded in the preset's new `"exclude"` list:
+
+```json
+{
+  "name": "kernel",
+  "entries": [
+    {"kind": "dir", "path": "include"}
+  ],
+  "exclude": [
+    "include/linux/foo.h"
+  ]
+}
+```
+
+It used to rewrite the directory as one file entry per remaining file. One `-` turned `include/` (6,000 headers) into 6,001 entries and a 350 KB preset, and made every later `+`/`-` three times as slow. It also meant that files created later in that directory were never added on save.
+
+The closest rule wins, walking up from the file:
+
+- `+` on an excluded path takes the exclusion away (`다시 넣음`).
+- With `include/linux` excluded, `+` on `include/linux/bar.h` adds just that file.
+- `+` on `include/linux` or `include` takes away every exclusion under it.
+- `-` on the directory entry itself drops it together with its exclusions.
+- A second `-` on an excluded path answers `목록에 없습니다`.
+
+Exclusions follow renames, and `:ProjectFilesRestore` brings them back with the rest of the preset. `"exclude"` is written only when it is not empty, so presets without exclusions are byte-for-byte what they were. An older vim-ide checkout ignores the key and indexes the excluded files again; nothing breaks, and its next save of that preset drops the key. Presets that already split into file entries are left as they are.
+
+### Starting nvim does not re-read the list
+
+The plugin no longer expands the preset while it loads. If `<root>/.tags/files` exists it is used as it is. Once the screen is up, one background check expands the preset again: `find` runs in a child process, the per-file `stat` runs on the main loop in 8 ms slices, and the list (and the index, told which files changed) is rewritten only when something differs.
+
+`<root>/.tags/files.key` records what the list was built from: the preset's contents and the settings that decide what is listed. A file that was in a list built that way, and whose inode has not changed since (ctime older than the list, minus a minute), skips the 1 KB binary check. Only new files are opened.
+
+Measured on a 6,500-file preset:
+
+| | before | after |
+|---|---|---|
+| sourcing projectfiles.lua | 0.6-1.1 s | 3 ms |
+| first screen | 0.84-1.29 s | 0.21-0.25 s |
+| first screen, 100 µs per stat | 2.6-2.7 s | 0.25-0.27 s |
+| longest freeze in the first seconds | 0.49-0.89 s | 50-60 ms |
+| files opened per start | 6,506 | 6 |
+
+The list is still built before the screen when it is missing (gutentags reads it at the first `BufReadPost`). It is also rebuilt then when it belongs to a different preset (the mode was switched elsewhere). A list built from an older version of the same preset, for example after a `git pull` changed a shared preset, is used and corrected in the background.
+
+### Messages: one line per action
+
+Every `ProjectFiles` command (`:ProjectFilesAdd`, `AddDir` and `Remove` with an argument, and the rest), every tree key and every picker action prints one line. Two lines inside an Ex command raised `Press ENTER`, and while that prompt is up nvim runs no scheduled callback. The `gtags -i` that follows a change waited for the key: 3-16 s measured.
+
+The separate `색인 대상: …` line is gone, because every result line already ends in `→ <root>/.tags [preset]`. When the path belongs to another project than the one you are looking at, `(보고 있던 곳: …)` is added to the same line. The mode dialog redraws before it reports.
+
+### `:ProjectFilesAdd <file>`
+
+The related files (headers, files defining the symbols it uses) are worked out first and added together with the file in one commit: one preset write and one refresh, reported as `추가: x (+연관 파일 N개, 항목 a -> b)`. In preset mode the index is not asked: it is built from the list, so it can only name files already in it. Headers next to the file are still found. In auto mode, all `global -P` / `global -d` queries run in one child process instead of one nvim fork each (up to 60 before). Files already in the list, including those under a directory entry, are not added again as file entries.
+
+### none means none
+
+Dropping the last entry, or the last ones that exist in this checkout, switches the project to `none` and no longer starts a refresh. That refresh found no list and indexed the whole project through `git ls-files` (50 → 6,500 files while in none mode); gutentags did the same for ctags. The existing index is left as it is. `:ProjectFilesReindex` in none or unset mode says so instead of indexing. This replaces the older sentence "Dropping the last entry puts the project back in auto mode".
+
+### Smaller changes
+
+- New Lua entry points: `_G.projectfiles_add_many(paths)` and `_G.projectfiles_remove_many(paths)`. They take absolute paths from any number of projects, group them by project and commit once per project. `_G.projectfiles_add` / `_G.projectfiles_remove` with a list now do the same; before, every path went to the first path's project. Ranges, `<Tab>` selections and quickfix use this.
+- The index refresh after a change is told which files entered and left the list: `_G.autoindex_refresh(root, true, why, { added = {...}, removed = {...} })`.
+- Saving a new file under a directory entry adds that one file to the list without re-expanding. Before this took 0.36 s on the kernel index, and longer as the list grows. This also works for a root (`.`) entry and respects exclusions. Paths under pruned directories (`.git`, `out`, …) are never added this way.
+- `+` checks whether a path is inside a nested project by looking for `.tags` on the way up: at most `g:projectfiles_nested_depth` `lstat`s instead of the whole-tree `find`. The first `+` after anything changed the root directory used to wait for that `find`: 0.2 s to 8 s. `+` on the nested project's directory itself now says so too. The startup scan for nested projects is skipped in unset and none projects; it used to create `<root>/.tags`, even in `$HOME`.
+- `=` answers from the same set as the tree marks: 20 presses on a 6,000-entry preset took 83 ms and now take 4-17 ms. It also names `none` and `미설정`.
+- `\fM` counts how many entries exist in this tree by reading each parent directory once instead of a `stat` per entry.
+- Preset JSON and `.tags/preset` are read once and remembered until the file changes. One `+` used to parse the same preset 4-9 times.
+
+### Keeping the index in step with + and -
+
+A change to the list now reaches GTAGS by the shortest route, and is never lost.
+
+**Adding is immediate.** autoindex keeps a copy of the list the database was last built from, `.tags/files.indexed`. Its first line records the state of GPATH, which only changes when files enter or leave the database. When a `+` only adds a few files (up to `g:autoindex_fast_add_max`, 8), those files go in one at a time with `global --single-update`, which takes tens of milliseconds whatever the size of the list. No `gtags -i` follows. `Ctrl+]` pressed right after `+` waits for that, up to `g:autoindex_tagfunc_wait_ms` (1500 ms, 0 = never), instead of answering from the old database. Before, it said "정의를 찾지 못했습니다" or landed on the prototype. A `-`, or a larger change, still runs `gtags -i` on the list, because single-update cannot take a file out. When the list matches the copy, nothing runs. If something outside autoindex changed the database's file set, the copy is not trusted and `gtags -i` brings the database back in line with the list.
+
+Measured on a 6,500-file preset: from the key to the database holding a new file went from 0.84 s to 0.12 s. autoindex's own work on the keypress went from 67-70 ms (6,500 `stat`s) to 7-15 ms (about 20 `stat`s). With 100 µs per `stat` it went from 0.72 s to about 10 ms.
+
+**The preset list is read as it is.** In preset mode autoindex reads `.tags/files` itself and gives a snapshot of it to gtags, without `indexfiles.sh`. `indexfiles.sh` also prints `.tags/files` without checking it again (gutentags uses it on every save). `projectfiles.lua` has already removed binaries and files over the size limit. The check took 0.5-0.9 s at 6,500 files and now takes 0.03 s. Set `INDEXFILES_TRUST_LIST=0` to filter it again. `.indexfiles`, `git ls-files`, `cscope.files` and `find` keep their filters.
+
+**Nothing is dropped when another nvim is indexing.** A list change made while another nvim holds `.tags/.autoindex.lock` used to be skipped silently: the tree showed `[●]`, but `global` never found the file. Now it waits until the lock is free and then applies the change. It checks every second for the first 30 seconds, then after 2, 4, 8, 15 and 30 seconds and every 30 seconds from then on, and says once: `… 은 다른 nvim 이 색인 중 (pid@host) - 끝나면 반영합니다`. Every forced refresh also leaves `.tags/refresh.pending`, which is removed only once the database has been built from a list read after the request. That covers three cases:
+- If you quit before the refresh ran, the next start applies it.
+- If the other nvim finishes first, it runs once more for you, even if you have already quit.
+- If the refresh fails, it is retried twice (after 2 s and 30 s), and after that the next start tries again.
+
+`:GtagsIndexRefresh!` also waits rather than skipping. `:GtagsIndexStatus` lists what is waiting, what is queued, and any pending request.
+
+**A preset list is followed, not second-guessed.** The rule "an automatic refresh that would shrink the index by more than half is skipped" no longer applies to a preset's list. Presets are shared between projects and machines. When a preset was trimmed elsewhere, every later start printed `색인 6430개 -> 266개 축소, 자동 갱신 생략` and went on answering from removed files. Now it prints one line, `색인 N개 -> M개 (preset 목록을 따름)`, and follows the list. The guard still applies to `git`, `cscope.files` and `.indexfiles` lists, and its message now suggests `:GtagsIndexRefresh!`.
+
+**Fixes that came with it:**
+- Removing the last entry of a preset (none mode) no longer indexes the whole project through `git ls-files`. The same applies to a preset whose list could not be written.
+- Switching to an empty preset now empties the database instead of leaving the old index answering.
+- Starting nvim in a preset project no longer runs `indexfiles.sh` at all (it ran three times at 6,500 files). In auto mode, the three callers at startup now share one run.
+- The list cache that decides whether a saved file belongs to the index now notices rewrites within the same second. A file removed with `-` and then saved no longer creeps back into the index.
+- A queued forced refresh is no longer turned into a plain one by a later `:GtagsIndexRefresh`.
+- Saves (`global --single-update`) take the same lock as `gtags -i` and never run at the same time as it, in this nvim or another.
+- With the gutentags cache under `/tmp`, the big-tree ctags snapshot was rebuilt on every start, because `'wildignore'` hid the path. It is now written once.
+
+**ctags follows the list.** After `+`/`-` from any place (the tree, quickfix, telescope, the command line), the tags file of that project is refreshed in the buffer gutentags manages for it. If an update is already running, one more runs after it, so quick `+ +` both arrive. Buffers opened before a mode was picked get gutentags attached first. Big trees that gutentags does not handle keep their weekly snapshot (`:CtagsIndex`). Set `g:autoindex_ctags_follow = 0` to turn this off.
+
+For plugins:
+- `User VimIdeIndexUpdated` fires after every change that reached the database, with `data = { root, kind = 'build' | 'update' | 'single', paths }`.
+- `_G.autoindex_refresh(root, force, why, changes)` takes `changes = { added = {…}, removed = {…} }` (absolute paths); `nil` means a full refresh.
+- `_G.autoindex_ctags_refresh(root)` and `_G.autoindex_single_update(root, paths)` route through the same queue and lock.
+
+```vim
+let g:autoindex_fast_add_max = 8        " adds put in one by one (0 = always gtags -i)
+let g:autoindex_tagfunc_wait_ms = 1500  " Ctrl+] waits for a + still going in
+let g:autoindex_ctags_follow = 1        " refresh ctags after a list change
+```
+```sh
+INDEXFILES_TRUST_LIST=0                 # filter .tags/files again in indexfiles.sh
+```
+
+### Marks in neo-tree cost nothing per row
+
+The marks are no longer part of neo-tree's rendering. The `projectfiles_index` component in the neo-tree setup only reserves the column: a blank of constant width, the mark plus one space. A decoration provider then overlays the mark on the rows that are actually on screen, when they are drawn. Before, the component worked out the mark for every row whenever neo-tree rendered, and a `+` or `-` re-rendered the whole tree twice. Each row stat'ed `.tags/files`, and after a change each row ran `realpath` again.
+
+Measured per `+`/`-` with 2,090 rows expanded (one 2,000-file directory):
+
+| | before | now |
+|---|---|---|
+| neo-tree re-renders | 2 | 0 (only the tree window is redrawn) |
+| `fs_stat` / `realpath` in the tree's part | 4,195 / 2,090 | 6 / 0-1 |
+| list changed -> mark on screen | 124-145 ms | 1-6 ms |
+| same, with 0.1 ms added to every stat (slow server) | 753-788 ms | 1-5 ms |
+| expanding the 2,000-file directory | 2,077 stats + 2,031 realpaths | 26 stats + 2 realpaths (neo-tree's own) |
+
+The cost now depends on the window height. It no longer depends on how many rows are expanded or how long the list is: 300 and 6,500 listed files measured the same. With the slow-stat setting, the index on a 300-file preset also caught up sooner, 258-264 ms after the key instead of 913-929 ms. The main loop is no longer held up by the two re-renders.
+
+- The list file is stat'ed once per draw, not once per row, and the check includes nanoseconds and size. A list rewritten by another nvim shows up at the tree's next redraw.
+- Real paths are cached per directory and kept when the list changes. Only nodes that are links themselves, or of unknown type, are resolved one by one. Files under a symlinked directory are still marked.
+- Marks follow the list, not the index. A `+` or `-` in the tree redraws the tree window inside the key, and the index catches up in the background. The tree window is also redrawn, only if the list or the project actually changed, when:
+  - the list is changed elsewhere (quickfix, RelationView, `:ProjectFilesAdd`);
+  - you `:cd`;
+  - an index refresh rewrites the list (`User VimIdeIndexUpdated`), for example new files under a directory entry after a `git pull`.
+- The column has a constant width, so names line up. Before, neo-tree put an extra space after `]` on marked rows only, so marked names sat one column to the right of unmarked ones. Unmarked rows now move one column right instead.
+
+There are no new options. `g:projectfiles_tree_mark_file` / `_mark_dir`, `g:projectfiles_mark_hl`, `g:projectfiles_mark_color` and `g:projectfiles_neotree = 0` work as before. The column widens by itself for a wider mark glyph. Marks in neo-tree need nvim 0.10 or later, which `projectfiles.lua` already requires.
+
+### Saves, renames and preset names
+
+**Saving a new file keeps the index current, even mid-refresh.** A file saved under a directory entry of the preset goes into the list as before. Now it is handed to autoindex, which indexes it under the same lock as everything else, with no `gtags -i`. Before, projectfiles ran its own `global --single-update`, which knew nothing about a `gtags -i` already running. If the save landed during a refresh (the startup refresh, a `+`/`-` just before, seconds on the server), that refresh finished with the old list and removed the file again. Nothing retried, and the file stayed out of GTAGS until the next unrelated change or restart. Now the request is recorded (`.tags/refresh.pending`) and runs right after the current refresh, or after another nvim releases the lock. The same applies to "add the file that defines this symbol" (the relation window and SiHl after a failed jump). It adds the file with one single-update, without the duplicate update and the full `gtags -i` it used to cause. The retried jump waits until the file is really in the index. If autoindex is switched off (`g:autoindex_gtags = 0`) or missing, the old one-at-a-time queue is used.
+
+**One ctags rebuild per `+`/`-`.** Only autoindex regenerates the gutentags snapshot after a list change, when its refresh ends. Each `+`/`-` used to regenerate the whole tags file twice (0.4 s each on a 3,300-file preset). When the current buffer belonged to another project, it also rebuilt that project's tags for nothing. `:ProjectFilesReindex` (`\fR`) still rebuilds ctags when the list did not change.
+
+This also holds with two nvims. When another nvim indexed this nvim's change, this one skips its own rebuild only if the shared tags file has already been rebuilt from the current list: whoever starts a whole-list rebuild records next to the tags file which list it read (`<tags>.followed`). While a tags update is running (`<tags>.lock`), it waits and looks again. The first version went by the tags file's time instead, and a save in this nvim - gutentags rewriting the tags of that one file - counted as "already rebuilt". When the other nvim had no gutentags buffer for the project, nobody rebuilt it and the added file stayed out of ctags for the rest of the session. The first list in a project that has no tags yet now builds ctags once: gutentags' own build when it attaches counts as the rebuild, where a second whole rebuild used to follow it.
+
+**`+` on a directory that is already in rescans it.** On a directory entry, or a directory under one, `+` runs one `find` over that directory, adds what is new and drops listed files that are gone: `다시 훑음: drivers/net (새 파일 1개, 사라진 파일 2개)`. `이미 있습니다: drivers/net (다시 훑음, 새 파일 없음)` means nothing was added or removed. Files created or deleted there by a shell, `git pull` or a build no longer wait for `\fR` or the next start. Removals reach GTAGS through `gtags -i`, because a single-update cannot take a file out. Before, a rescan only added: a deleted file stayed in the list, `\fo` still offered it and GTAGS answered from it until the next `gtags -i`, while the message said there was nothing new. With exclusions under it, `다시 넣음` also picks up the new files and drops the vanished ones. This adds "or `+` on its directory" to the list of things that pick up such a file.
+
+A listed file that this `find` cannot reach is kept as long as it is still a regular file. That is a file another entry brings in: an entry inside a pruned directory (`drivers/net/out/gen`, `node_modules/x` - the rescan's `find` skips `out/`, the full expansion runs `find` on the entry itself), one reached through a symlinked directory, or a file entry. Only files that are really gone are dropped, so normally only those are `stat`ed. Without that check such files were dropped from the list, GTAGS and ctags while they were still on disk, with `사라진 파일 N개`; `\fR` put them back and the next `+` dropped them again. A file that `find` did return but that the rules now refuse (it became binary or too big) is dropped, the same as a full expansion does.
+
+**`:ProjectFilesPreset <name>` only takes presets that exist.** A name with no preset file now gets one line, `그런 preset 이 없습니다: 'kp1x' (새로 만들려면 \fm 의 '새 preset 만들기')`. `auto`, `none` and the name already in use are always accepted. A typo used to switch to an empty, never-saved preset: the list was written empty, GTAGS went to 0 files, the ctags file to its 24-line header, and the message looked like any other switch. New presets are started from `\fm` / `:ProjectFilesMode` (`새 preset 만들기`) or with `:ProjectFilesSave <name>`. For autoindex, `_G.projectfiles_list_intended_empty(root)` says whether an empty list means "index nothing". It does only for a saved preset with zero entries, not for a name that was never saved.
+
+**Moving an excluded path keeps it out.** A file or directory taken out with `-` and then renamed or moved (neo-tree `r` / `m`) stays out of the index. Moving it out of the directory entry no longer adds the new place as a file entry.
+
+**The `-` question counts files and entries separately.** It now reads `'drivers/net/phy' 를 빼면 목록에서 파일 50개가 빠집니다 (목록 3200개 중; preset 항목은 9개 중 0개)` instead of "항목 50개 (전체 9개)". When it asks has not changed: the preset entries being deleted plus the files excluded from a directory entry that stays must reach `g:projectfiles_confirm_drop` (20). So `-` on a 50-file directory inside the `drivers/net` entry asks, and so does `-` on a directory that holds 25 file entries. `-` on a whole directory entry (`sound/soc`, 30 files) deletes one entry and does not ask, because that is the everyday `+`/`-` in the tree. Entries count even when the path is missing from this checkout, because it still disappears from the shared preset. The root entry `.` is the exception: it is one entry but the whole project (and, as the last entry, it deletes the preset and turns the project to none), so `-` on it asks when the files leaving the list reach the limit - that is the files the other entries no longer cover. When it asks, the files leaving the list are counted from the list itself.
+
+**Adding a symbol's file while switching presets.** If the preset changes while the definition is being searched for (a few seconds of `git grep` on a kernel), nothing is added: `'sym' 정의를 찾는 사이 preset 이 바뀌어 (kp -> kp2) 담지 않았습니다`. Before, the old preset was overwritten with the new preset's entries plus the file.
+
+**`g:projectfiles_nested_presets = 1` still checks the list at startup.** The background check after startup also runs in this mode, and drops files under nested projects the same way a full build does. Files created or deleted under directory entries between sessions used to stay wrong until `\fR`.
+
+**No Press ENTER on the first start of a preset project.** When the list has to be built at startup and some files are skipped (`색인 제외: 바이너리 1`), that notice now comes once the screen is up. It used to stack with autoindex's `indexing …` line into Press ENTER. Until the key was pressed, the first GTAGS build (0.1 s of work) could not move its database in or release its lock.
+
+### The index after `+`, saves and crashes
+
+**A `+` during a full refresh costs one single-update.** A `+` made while `:GtagsIndexRefresh!`, `\fR`, a preset switch or the startup refresh is running is applied when that refresh ends, with `global --single-update` for the new file only. It used to inherit the running request's "full" flag and run the whole `gtags -i` a second time. `.tags/refresh.pending` now records which request first asked for a full pass (a 4th field). The nvim that served it clears the flag. A full request made after the pass started still gets its own full pass.
+
+**A new file saved during a refresh is indexed after it.** Saves and "add the file that defines this symbol" now go through autoindex's own queue and lock. If a `gtags -i` is running, in this nvim or another one, the file goes in right after it finishes.
+
+`_G.autoindex_single_update(root, paths)` works the same way:
+- It uses the same queue and lock as saves.
+- It waits behind a running refresh or another nvim's lock.
+- It ignores files that are not in `.tags/files`.
+- When a file enters the database, `files.indexed` is updated too, so the next `+` stays a single-update.
+- If nvim quits while updates are still queued, `refresh.pending` is left behind and the next nvim applies them.
+
+**`Ctrl+]` no longer stalls while a `+` is queued.** `Ctrl+]` and `:tag` answer from the current database first. They wait (`g:autoindex_tagfunc_wait_ms`, 1500 ms) only when the symbol is not found and the added file is being put in at that moment, and only once per `+`. Before, every lookup of any symbol froze for 1.5 s while the `+` waited behind another job (startup refresh, `:GtagsIndexRefresh!`, a long build).
+
+**A list without a final newline works.** `.tags/files` written by hand, or by a script using `$(…)`, can lack its final newline. Before, autoindex treated such a list as half-written and silently retried every 300 ms for ever: no startup refresh, `:GtagsIndex` said "다른 nvim 이 쓰는 중". Now only a list changed within the last 2 seconds counts as being written. If a list keeps changing while it is read, autoindex retries for about 6 s (`g:autoindex_torn_retries`, 20) and then says so once:
+`.tags/files 가 읽는 동안 계속 바뀝니다 - 색인 갱신을 미룹니다 (:ProjectFilesReindex 로 다시 쓰기)`.
+`:GtagsIndexStatus` shows the retries and any queued single-updates.
+
+**An empty list empties the index only when you meant it.** A saved preset with no entries empties GTAGS and ctags. An empty list for a name that was never saved, or for a deleted preset, leaves both alone. gutentags is not attached to such a project until the list is usable, because attaching rebuilds the tags file from that list.
+
+**ctags only follows the list.**
+- A ctags update queued before switching to `none` no longer builds tags for the whole tree.
+- Saving a file that is not in the preset list (for example one removed with `-`) no longer adds its tags to the tags file. In `none` mode a save no longer rebuilds tags. Buffers stay attached, so `:tag` still works there.
+- Each `+`/`-` still rebuilds tags once. That now also happens when a rebuild (`:GtagsCompact`) has already put the change into GTAGS.
+
+**A crashed nvim cannot undo your `+`.** If an nvim is killed while indexing (SIGKILL, OOM, a dropped session), its `gtags -i` keeps running. The next nvim used to take over the lock at once, and the late `gtags -i` then removed the file that had just been added. Now `.tags/.autoindex.worker` records the indexing process. The next nvim waits for it to finish, says `… 은 다른 nvim 이 색인 중 (pid …) - 끝나면 반영합니다`, and then applies the current list.
+
+**No Press ENTER on the first start.** autoindex notices printed while nvim starts (`indexing … (no GTAGS yet)`, `tags NMB - ctags 는 여기서 직접 만듭니다`) are shown one by one after the screen is up, and all stay in `:messages`. Two of them used to stack into Press ENTER. Until the key was pressed, the first build could not move its database in or release the lock: 0.2 s of work showed up as 150 s.
+
+```vim
+let g:autoindex_torn_retries = 20   " retries of a list that keeps changing while read (300 ms apart)
+```
+
+### Reindexing, waits and late answers
+
+**`\fR` no longer freezes the screen.** `:ProjectFilesReindex` now expands the preset the way the startup check does: `find` runs in a child process and the per-file `stat` runs on the main loop in 8 ms slices. When that is done the list is written, the index is refreshed and the same one line comes (`재색인 시작`, with `색인 제외: …` in front when files are skipped), with the same result as before. Before, the key held the screen for the whole expansion, a `stat` per listed file. Measured on a 6,500-file preset with 100 µs added to each `stat`, the longest freeze went from 0.72-0.74 s to 15-19 ms (66-77 ms to 15-30 ms at normal `stat` speed), while the message, `gtags -i` and the ctags rebuild finish about when they did (the message at 0.74 s instead of 0.73 s). If anything changes the preset or the list while it expands - a `+`/`-`, a preset switch, a new file saved, another nvim - or `\fR` is pressed again, it starts over from what is current. Writing the older expansion would undo that change - in a test without this check, a new file saved 0.1 s into a slow `\fR` went out of the list, GTAGS and ctags again. Two `\fR` in a row now cost one `gtags -i` and one ctags rebuild, not two.
+
+**A preset that expands to nothing is not a big tree.** A preset whose paths do not exist in this checkout (another checkout's preset, or every entry inside a nested project) is warned about once per session, after the screen is up, with no Press ENTER: `preset 'kz' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다 …`. Every caller that looked for the list used to expand it again and say it again - five times in one session, twice before the screen came up, which raised Press ENTER and held the startup refresh until a key was pressed. It also no longer counts as 'big tree': that excluded the root from gutentags, so even after the first `+` brought a file in there was no ctags at all. The choice between gutentags and autoindex's own ctags now waits until a list exists.
+
+**Switching presets counts the files again.** Whether a project gets gutentags or autoindex's ctags snapshot (`g:autoindex_ctags_max_files`, 5000) is decided again after a preset switch. Before, the first decision lasted the whole session: switching from a small preset to a big one left gutentags rewriting the big list's whole tags file on every save, and because the count runs in the background, gutentags could already be attached to the first buffer of a big preset. A project that became big is treated as detached (saves no longer rewrite its tags; the snapshot is built from the new list). One that became small leaves the exclusion, its old snapshot is removed, and gutentags builds tags from the new list. Only what the count itself decided is undone. The tags-size guard (`g:autoindex_ctags_max_bytes`, `tags NMB - ctags 는 여기서 직접 만듭니다`) and the user's own entries in `g:gutentags_exclude_project_root` survive a switch: the project stays excluded and gutentags does not come back; autoindex rebuilds its own ctags snapshot from the new list instead (if it had one), so `'tags'` and the SiHl colours do not keep the old preset's files. The first version took any root on that list as "was big", so a switch removed those exclusions too and deleted the tags. gutentags then reattached and rewrote the oversized tags on every save (181 MB per `:w` in bcc).
+
+**When another nvim finishes first.** A waiting nvim now looks at the lock every second for the first 30 seconds (see "Nothing is dropped when another nvim is indexing"). It used to back off from the start and looked at 1, 3, 7 and 15 s, so an nvim that finished at 8 s was noticed at 15 s: measured, 7.4 s after the other nvim finished, now 0.4 s. When the other nvim has already done what this one was waiting for, this nvim now also announces it (`User VimIdeIndexUpdated`), so the relation window's "add the defining file" retry, the SiHl colours and the tree follow at that point. Before, nothing was announced here, and the retry came only when its 20 s timeout ran out. A `:GtagsIndexRefresh` you type during such a wait runs after it, as its message says (`… 끝나면 반영합니다`). It used to be dropped without a word once the other nvim was done, even when that nvim had only put in its own added file, so edits made outside nvim stayed out of GTAGS. (One case is still missed: `gtags -i` decides by modification time, so a file edited outside nvim *before* the other nvim updated the database looks older than the database and is not read again. `:GtagsIndexUpdate` in that file, or `:GtagsIndex` (a build from scratch), takes it in.) The automatic refresh at startup is still dropped then - the other nvim has just indexed the current list.
+
+**A `.tags` you cannot write is left alone.** In another user's tree or on a read-only mount the lock file cannot be created, and there is no lock to wait for. The startup refresh used to treat that as "another nvim holds the lock" and tried again every second for the whole session, while `:GtagsIndexStatus` showed `waiting for another nvim` with no other nvim running. Now it gives up quietly, as it did before the wait was added. A `:GtagsIndexRefresh` you type, or a first build, says so in one line (`… 의 색인 디렉터리에 쓸 수 없습니다 — 건너뜁니다`) and stops; a save there queues nothing either.
+
+**A late answer no longer jumps.** Adding the file that defines a symbol answers only once the file is in the index: seconds behind a running refresh or another nvim's lock, at most `g:projectfiles_single_update_timeout` (20 s). The jump that is retried then is dropped if you have moved on - another jump, or a different window, buffer, line or word under the cursor. Before, a retry that came 8 s late replaced the newer jump, took the focus to the preview, and with the preview closed ran `<C-]>` on whatever word was under the cursor by then. This covers the relation window (its preview, the panel's `:Gtags` search, member jumps) and the relation view switched off, where `<C-]><C-]>` (or `<C-]>` with `g:vimide_jump_target = 'ctx'`) runs `:Gtags -d` again once the file is in: a late one filled quickfix and moved the cursor. Pressing again on the same word in the same place is not a new jump - the second add finds the file already in and answers at once, so the first request is kept and lands once. `:SiHlIndexAdd` only recolours the windows on screen when its answer comes, which is right whenever it comes.
 
 ### NERDTree's keys inside neo-tree
 
@@ -2687,8 +2915,11 @@ wrong:
   synchronously. Scheduling the `KILL` 500ms later through `defer_fn` loses
   it when nvim exits in between - one `global` was left running at 98% CPU
   on the shared server that way.
-- A reindex drops only the `missing` half of the cache. Dropping all of it
-  made every black mark vanish and slowly return after each `:w`.
+- An index change drops the `missing` half of the cache and moves the found
+  half aside to be re-checked while it keeps painting. Dropping all of it
+  made every black mark vanish and slowly return after each `:w`; keeping
+  it, as before, left a function you removed from the list green for the
+  rest of the session.
 
 | | |
 |---|---|
@@ -2698,7 +2929,8 @@ wrong:
 | `:SiHlIndexWhy` | why *this* name is that colour: which database was asked, what the cache holds, what `global` says right now, and how many files the index list covers |
 | `g:sihl_index_budget` | `global` processes per minute, default 30 |
 | `g:sihl_index_delay` / `_pad` / `_batch` / `_names` / `_timeout` | 200ms, 20 lines, 2 batches, 40 names each, 5s watchdog |
-| `g:sihl_index_db` | `'near'` (default) asks the nearest database above the file, `'root'` the outermost |
+| `g:sihl_index_db` | `'chain'` (the module default) asks the database above the file, then the ones above it; `'near'` only the nearest, `'root'` only the outermost - vim-ide's `.vimrc` sets `'root'` |
+| `g:sihl_index_nodb_ttl` | seconds a "no GTAGS above this file" verdict is trusted, default 30 (0 = until `:SiHlIndexClear` or the next index this nvim builds) |
 | `g:sihl_index_nice` | 0 drops the `nice`/`ionice` prefix |
 | `g:sihl_index_member_budget` | ms per paint spent resolving struct members, default 25 (0 = no limit). The rest are left untouched, as while an answer is pending, and the next paint 60 ms later carries on - after an edit every member on screen is resolved again, which on a 6,600-line file held the screen for 60 ms and more. In insert mode a pass that runs out of budget does not re-arm itself; the rest is painted on leaving insert mode |
 | `g:sourceinsight_local_color` | a different colour for the local uses, e.g. `'#6b8e23'` for the old yellow-green |
@@ -2761,6 +2993,20 @@ against - but colour has to agree with where `Ctrl+]` actually lands, which
 is the nearest database above the file (`Ctrl+]` then tries the ones above it,
 up to four, so a symbol only the outer index knows is still found).
 `g:sihl_index_db = 'root'` restores the old choice.
+
+**Colour follows the index when the list changes.** After `+` / `-` in the tree, `\fx`, `:ProjectFilesAdd` / `:ProjectFilesRemove`, a preset switch or a reindex, the colours catch up as soon as the index has been rewritten, even while the focus stays in the tree. Before, a `-` never took the green away, because the module assumed a reindex only adds definitions. A `+` showed only once the cursor moved in a C window: measured, 28 s in the tree with nothing changing. autoindex now announces every finished GTAGS change (`User VimIdeIndexUpdated`, with the root and whether it was a full build, an incremental update or a single-file save), and every visible C/C++ window in the tab is checked again:
+
+- Green names are not wiped. They keep their colour while they are re-checked, so nothing flickers; only the answer changes them. The names most likely to have changed go first: definitions in a file that just left the list (or that you just saved), then names that were black. So a `-` turns its functions black in one small query. Measured on a 300-file preset: about 110 ms after the index update, 270-310 ms after the keypress; 70-90 ms at 6,500 files with stat slowed to 100 µs. A `+` brings its names back with the next batch: 0.5-0.8 s with about 45 unknown names on screen, about 0.2 s at 6,500 files.
+- A save re-checks only what that file defined, plus the black names, as before. A list change, or an index change nobody announced (another nvim, a `gtags` run in the shell), re-checks everything on screen.
+- An answer computed while the database was being rewritten is thrown away and asked again once the database has been quiet for half a second. Such answers come from a half-written index, and asking during a long `gtags -i` would otherwise use up the per-minute `global` budget.
+- The ctags snapshot and `taglist()` answers now follow the preset too: a line from a file that is not in `<root>/.tags/files` is ignored. The snapshot is not rebuilt when you `-` from the tree, and it kept a removed function green ("ctags" in `:SiHlIndexWhy`) while `global -d` had nothing. Auto-mode projects (no list) are unaffected. `taglist()` is now asked in the buffer that wanted the answer, not in whichever window has the focus; from the tree it used to come back empty.
+- The database key includes the nanoseconds of GTAGS's mtime. Removing files never changes the file's size, so two updates within the same second used to look identical.
+
+**The first index of a project colours by itself.** A file opened before a mode was chosen used to remember "no GTAGS here" until `:SiHlIndexClear`. Picking a preset or pressing `+` then built the index, and the buffer stayed uncoloured. Now the finished index clears that memory: the first marks appear about 0.2 s after the index exists, and the whole screen about 0.6 s. A database built outside this nvim (another instance, a shell `gtags`) is noticed after `g:sihl_index_nodb_ttl` seconds. The chain of databases is also read again after `:cd`, after a list change, and when a database it relied on has disappeared. Before, that case meant three failed `global` runs and the feature switching itself off for the session.
+
+**When autoindex does not announce.** With an older autoindex that does not send `VimIdeIndexUpdated`, a list change starts a light watch on the database (one stat per root every 0.5 s, for at most 60 s) and recolours once the database has been rewritten, about 1 s later. The watch never runs once an announcement has been seen.
+
+The per-keystroke cost is unchanged: one `stat` and about 2 ms per repaint at both 300 and 6,500 listed files, with or without a 100 µs stat. Handling an index update costs 0.6-3 ms and two stats, including re-reading a 6,500-line list. `:SiHlIndexStatus` also counts the names waiting to be re-checked. `:SiHlIndexWhy` reads the chain from disk and shows such a name as "찾음 (색인이 바뀌어 다시 확인 중)".
 
 **Both passes run in the context window too**, on the same rules as the edit
 window - a preview that coloured its copy differently from the file would be

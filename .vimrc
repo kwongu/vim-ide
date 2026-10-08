@@ -1781,6 +1781,11 @@ let g:gutentags_ctags_exclude = ['.git', 'node_modules', 'build', 'out',
 "   let g:autoindex_startup = 0       " 시작 시 자동 색인 끄기
 "   let g:autoindex_startup_ctags = 0 " 시작 시 ctags 갱신만 끄기
 "   let g:autoindex_notify = 0        " 알림 끄기
+"   let g:autoindex_fast_add_max = 8       " + 로 들어온 파일이 이만큼까지면 하나씩 바로 색인
+"   let g:autoindex_tagfunc_wait_ms = 1500 " + 직후 못 찾은 심볼은 이만큼 기다려 본다 (0 = 안 기다림)
+"   let g:autoindex_torn_retries = 20      " 읽는 동안 바뀌는 목록을 다시 읽는 횟수 (300ms 간격)
+"   let g:projectfiles_single_update_timeout = 20  " 심볼 파일 추가 뒤 점프 다시 하기를 기다리는 초
+"   let g:sihl_index_nodb_ttl = 30         " '여기는 GTAGS 없음' 을 믿는 초 (0 = 다음 색인까지)
 " ------------------------------------
 
 " 색인은 가장 바깥 프로젝트 하나만 본다.
@@ -2565,7 +2570,51 @@ endif
 " 만들어야 하므로 남겨 둔다 - 걸려 있어도 해가 없다.
 nnoremap <silent> <C-LeftMouse> <LeftMouse>:call <SID>RvJumpPrimary()<CR>
 
+" 아래 :Gtags 길(뷰 Off)에서 '정의 파일 담고 다시 찾기' 가 볼 표 (R2 와 같은 규칙).
+"
+" 담기(add_for_symbol_async)는 이제 그 파일이 색인에 들어간 뒤에야 답한다 -
+" 도는 갱신이나 다른 nvim 의 락 뒤에 줄을 서면 몇 초, 길면 20초
+" (g:projectfiles_single_update_timeout). 예전에는 그 사이 다른 데로 갔어도
+" 늦게 온 답이 그때의 낱말로 'Gtags -d' 를 돌려 quickfix 를 채우고 커서를
+" 끌고 갔다. 그래서 누른 자리(창·버퍼·줄·낱말)를 잡아 두고, 답이 왔을 때
+" 그 뒤로 이 함수(s:RvCtxJump)로 새로 뛰지 않았고(s:rv_jump_gen) 그 자리
+" 그대로일 때만 다시 찾는다. g] 처럼 다른 길로 뛰었으면 커서가 옮겨 가서 자리가
+" 다르다. 같은 자리에서 다시 눌러 여기까지 온 것은 새 점프로 치지 않는다 -
+" 두 번째 담기는 '이미 담았다' 로 곧장 0 을 받으니, 기다리던 앞의 것이 이어
+" 받는다 (relationview 의 A.add_for_symbol 처럼). 돌려주는 것: 표 번호
+func! s:RvAddTicket(w) abort
+	let l:t = {'gen': get(s:, 'rv_jump_gen', 0), 'win': win_getid(),
+				\ 'buf': bufnr(''), 'line': line('.'), 'word': a:w}
+	let s:rv_add_wait = get(s:, 'rv_add_wait', {})
+	for l:p in values(s:rv_add_wait)
+		if l:p.win == l:t.win && l:p.buf == l:t.buf && l:p.line == l:t.line
+					\ && l:p.word ==# l:t.word
+			let l:p.gen = l:t.gen
+		endif
+	endfor
+	let s:rv_add_id = get(s:, 'rv_add_id', 0) + 1
+	let s:rv_add_wait[s:rv_add_id] = l:t
+	return s:rv_add_id
+endfunc
+
+" 담기가 끝났다 (n = 담은 파일 수). 표가 아직 그대로일 때만 다시 찾는다.
+func! s:RvAddLand(id, n) abort
+	let l:all = get(s:, 'rv_add_wait', {})
+	if !has_key(l:all, a:id)
+		return
+	endif
+	let l:t = remove(l:all, a:id)
+	if a:n <= 0 || l:t.gen != get(s:, 'rv_jump_gen', 0)
+				\ || win_getid() != l:t.win || bufnr('') != l:t.buf
+				\ || line('.') != l:t.line || expand('<cword>') !=# l:t.word
+		return
+	endif
+	try | execute 'Gtags -d ' . l:t.word | catch | endtry
+endfunc
+
 func! s:RvCtxJump() abort
+	" 새 점프다: 색인을 기다리던 앞의 다시 찾기는 이제 늦은 것이다 (s:RvAddTicket)
+	let s:rv_jump_gen = get(s:, 'rv_jump_gen', 0) + 1
 	let l:marked = s:RvMarkCword(1)
 	if has('nvim') && exists('*luaeval')
 		try
@@ -2639,7 +2688,11 @@ func! s:RvCtxJump() abort
 					if empty(getqflist()) && l:w =~# '^[A-Za-z_][A-Za-z0-9_]*$'
 						" 소스 전체 검색은 커널에서 1초를 훌쩍 넘긴다: 백그라운드로
 						" 돌리고, 파일이 추가되면 그때 다시 찾는다
-						call luaeval('_G.projectfiles_add_for_symbol_async ~= nil and (function() _G.projectfiles_add_for_symbol_async(_A, function(n) if n and n > 0 then vim.cmd("Gtags -d " .. _A) end end) return 1 end)() or 0', l:w)
+						" 답은 그새 사용자가 다른 데로 갔으면 버린다 (s:RvAddTicket)
+						let l:id = s:RvAddTicket(l:w)
+						if !luaeval('_G.projectfiles_add_for_symbol_async ~= nil and (function() _G.projectfiles_add_for_symbol_async(_A[1], function(n) vim.fn[_A[2]](_A[3], n or 0) end) return 1 end)() or 0', [l:w, get(function('s:RvAddLand'), 'name'), l:id])
+							call s:RvAddLand(l:id, 0)
+						endif
 					endif
 					return
 				endif

@@ -3442,6 +3442,9 @@ ctx_tag_jump = function(from_mouse)
   if not is_symbol(sym, true) then
     return
   end
+  -- 미리보기 안에서 더 파는 것도 새 점프다: 색인을 기다리던 앞의 다시 하기는
+  -- 이제 늦은 것이다 (A.jump_ticket, R2)
+  s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
 
   -- A parameter or a local variable is in no index; its declaration is in
   -- the function we are looking at. The preview holds only a slice of the
@@ -3655,6 +3658,83 @@ local function tag_loc(sym)
   return nil
 end
 
+-- 색인을 기다린 '다시 하기' 가 아직 그 요청의 것인가 (R2).
+--
+-- 정의 파일을 project files 에 넣고 다시 찾는 길(add_for_symbol_async)은 이제
+-- 그 파일이 색인에 들어간 뒤에야 답한다. 도는 갱신·빌드·다른 nvim 의 락 뒤에
+-- 줄을 서면 몇 초, 길면 g:projectfiles_single_update_timeout(20초)이다. 예전에는
+-- 0.1초 남짓이라 다시 하기는 세대를 보지 않았다. 이제는 그 사이 다른 심볼로
+-- 뛰었는데 늦게 온 다시 하기가 새 점프를 덮고 초점을 미리보기로 빼앗았고,
+-- 미리보기가 그새 닫혔으면 편집 창에서 '그때 커서 밑 낱말' 로 <C-]> 까지
+-- 쳤다 (실측: 8초 뒤). 패널의 :Gtags 다시 찾기와 멤버 점프도 같았다.
+--
+-- 새 요청마다 세대(s.ctx_jump_gen)를 올리고 누른 자리를 잡아 둔다. 돌려주는
+-- 함수는 다시 하기 직전에 부른다: 더 새 요청이 없고, 초점이 그 창에 그대로
+-- 있고, 커서를 본 창이 같은 버퍼·같은 줄의 같은 낱말 위에 있고, 패널과
+-- 미리보기도 그때 그 창일 때만 true 다. 하나라도 바뀌었으면 늦은 답이다.
+-- win: 커서를 볼 창 (기본: 지금 창). 둘째 값은 이 요청의 세대다.
+-- (최상위 지역 변수가 한계(200)에 닿아 있어 A 에 단다)
+function A.jump_ticket(win)
+  s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
+  local gen, cur = s.ctx_jump_gen, api.nvim_get_current_win()
+  win = win or cur
+  local function spot()
+    if not api.nvim_win_is_valid(win) then
+      return nil
+    end
+    local okw, word = pcall(api.nvim_win_call, win, function()
+      return vim.fn.expand('<cword>')
+    end)
+    -- 미리보기 안에서 누른 것이면 그때 보이던 파일 조각까지 본다: 같은 줄
+    -- 번호·같은 낱말이라도 다른 파일이나 다른 조각일 수 있다
+    local f = (win == s.ctx_win or win == s.big_win) and s.ctx_file or nil
+    return table.concat({ win, api.nvim_win_get_buf(win),
+      api.nvim_win_get_cursor(win)[1], okw and word or '',
+      panel_visible() and s.win or 0, ctx_visible() and s.ctx_win or 0,
+      f and (tostring(f.path) .. '@' .. tostring(f.off or 0)) or '' }, ':')
+  end
+  local here = spot()
+  return function()
+    return here ~= nil and gen == s.ctx_jump_gen
+        and api.nvim_get_current_win() == cur and spot() == here
+  end, gen
+end
+
+-- 같은 심볼의 '정의 파일 담기' 는 하나로 묶는다 (R2).
+--
+-- 색인을 기다리다 같은 심볼에 <C-]> 를 한 번 더 누르면, 두 번째 담기는 '이미
+-- 목록에 있다'(0개)로 곧장 끝나 '정의를 찾지 못했습니다' 를 냈다. 위의 표만
+-- 있으면 첫 것마저 새 요청에 밀려 버려지니 아무 데도 안 가게 된다. 같은 색인에서
+-- 같은 심볼을 기다리는 중이면 새로 부르지 않고 그 답을 같이 받는다 - 늦은 쪽은
+-- 각자 표로 걸러지고 마지막 요청만 뛴다. projectfiles 가 답을 영영 안 주는 일에
+-- 대비해, 제한 시간에 30초를 더 넘긴 기다림에는 묶지 않는다.
+function A.add_for_symbol(sym, cb)
+  local name = api.nvim_buf_get_name(0)
+  local key = sym .. '\0' .. ((name ~= '' and vim.bo.buftype == ''
+      and db_root(vim.fs.dirname(name))) or vim.fn.getcwd())
+  local limit = ((tonumber(vim.g.projectfiles_single_update_timeout) or 20)
+      + 30) * 1000
+  s.add_wait = s.add_wait or {}
+  local q = s.add_wait[key]
+  if q and uv.now() - q.t < limit then
+    q[#q + 1] = cb
+    return
+  end
+  q = { cb, t = uv.now() }
+  s.add_wait[key] = q
+  local ok = pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
+    if s.add_wait[key] == q then
+      s.add_wait[key] = nil
+    end
+    for _, f in ipairs(q) do
+      f(n)
+    end
+  end)
+  if not ok and s.add_wait[key] == q then
+    s.add_wait[key] = nil
+  end
+end
+
 function A.ctx_jump_from_edit()
   -- 패널이든 미리보기든, 우리 창이 하나라도 떠 있으면 우리가 처리한다.
   --
@@ -3694,6 +3774,9 @@ function A.ctx_jump_from_edit()
   if not is_symbol(sym, true) then
     return false
   end
+  -- 새 점프다: 색인을 기다리던 앞의 다시 하기는 이제 늦은 것이다 (A.jump_ticket).
+  -- 미리보기 없이 누른 것도 새 점프라 아래 갈림길보다 먼저 잡는다
+  local still, gen = A.jump_ticket(win)
   if not ctx_visible() then
     -- panel without a preview: the edit window does the jump (the builtin
     -- one, so the tag stack and C-t keep working) and the panel follows the
@@ -3717,6 +3800,12 @@ function A.ctx_jump_from_edit()
     if not api.nvim_win_is_valid(win) then
       return
     end
+    -- 늦게 온 다시 하기는 더 새 점프가 있었거나, 누른 자리를 떴거나, 미리보기가
+    -- 닫혔으면 버린다. 아래 builtin <C-]> 는 '지금 커서 밑 낱말' 로 뛰므로 다시
+    -- 하기에서는 치지 않는다 - 미리보기에 띄우려고 누른 것이었다 (R2)
+    if retried and not (still() and ctx_visible()) then
+      return
+    end
     if not ctx_visible() then
       api.nvim_win_call(win, function()
         pcall(vim.cmd, 'normal! ' ..
@@ -3733,11 +3822,15 @@ function A.ctx_jump_from_edit()
     if loc then
       s.pinned = true
       update(sym, loc.path, true, false, nil)
+      -- 이 패널의 세대. 담기의 답은 색인 뒤라 몇 초 ~ 20초 늦는다: 그 사이 패널이
+      -- 다른 것(찾기 결과, 다른 점프)을 띄웠으면 덮지 않는다 (R2)
+      local pgen = s.gen
       ctx_enter_from(win, { path = loc.path, line = loc.line, sym = sym }, sym)
       if not retried and _G.projectfiles_add_for_symbol_async then
         vim.defer_fn(function()
-          pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
-            if n and n > 0 and s.sym == sym and panel_visible() then
+          A.add_for_symbol(sym, function(n)
+            if n and n > 0 and s.sym == sym and panel_visible()
+                and s.gen == pgen then
               update(sym, loc.path, true, false, nil) -- now with callers
             end
           end)
@@ -3746,7 +3839,12 @@ function A.ctx_jump_from_edit()
       return
     end
     if not retried and _G.projectfiles_add_for_symbol_async then
-      pcall(_G.projectfiles_add_for_symbol_async, sym, function(n)
+      A.add_for_symbol(sym, function(n)
+        -- 기다리는 사이 더 새 점프가 있었거나 자리를 떴으면, 다시 하기도 '못
+        -- 찾았다' 도 없다 - 그 답은 이제 아무도 기다리지 않는다 (R2)
+        if not still() then
+          return
+        end
         if n and n > 0 then
           jump_via_gtags(true)
         else
@@ -3759,11 +3857,12 @@ function A.ctx_jump_from_edit()
     vim.notify('RelationView: ' .. sym .. ' 의 정의를 찾지 못했습니다',
       vim.log.levels.WARN)
   end
-  s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
-  local gen = s.ctx_jump_gen
+  -- 다시 하기도 세대를 본다. 예전에는 다시 하기면 아무것도 안 봐서, 늦게 온
+  -- 답이 그 사이의 새 <C-]> 를 덮고 초점을 가져갔다. 다시 하기는 자리까지 본다
+  -- (still: 초점·커서·미리보기가 누를 때 그대로인가) (R2)
   jump_via_gtags = function(retried)
   root_for(name, function(root)
-    if gen ~= s.ctx_jump_gen and not retried then
+    if gen ~= s.ctx_jump_gen or (retried and not still()) then
       return -- a newer C-] is on its way: that one wins
     end
     if not root or not ctx_visible() then
@@ -3772,7 +3871,7 @@ function A.ctx_jump_from_edit()
     end
     run_global({ '--result=ctags-mod', '-a', '-d', '-e', sym }, root,
       function(lines)
-        if gen ~= s.ctx_jump_gen and not retried then
+        if gen ~= s.ctx_jump_gen or (retried and not still()) then
           return
         end
         local d = parse_ctags_mod(lines, 4)[1]
@@ -5397,7 +5496,8 @@ end
 -- happens to share the name, or to an unrelated global - so resolve the type
 -- of the BASE variable and take the member out of that struct.
 -- Returns true when it took the jump on (the answer arrives asynchronously).
-member_jump = function(buf, line, col, cb, retried)
+-- still: 다시 하기가 볼 표 (A.jump_ticket). 첫 부름이 잡아 다시 하기에 넘긴다.
+member_jump = function(buf, line, col, cb, retried, still)
   local okc, base, fields = pcall(cursor_field, buf, line, col)
   if not okc or not base or not fields or #fields == 0 then
     return false
@@ -5412,11 +5512,18 @@ member_jump = function(buf, line, col, cb, retried)
     return false -- base is not a local we can type: let the others try
   end
   local want = fields[#fields]
+  -- 새 점프다: 표를 잡는다. 색인을 기다린 다시 하기는 몇 초 ~ 20초 뒤에 온다 -
+  -- 그 사이 더 새 점프가 있었거나 누른 자리를 떴으면, 늦은 답으로 미리보기를
+  -- 덮거나 초점을 가져가거나 편집 창을 옮기지 않는다 (R2)
+  still = still or A.jump_ticket()
   root_for(name, function(root)
-    if not root then
+    if not root or (retried and not still()) then
       return
     end
     resolve_chain(nil, root, ty, fields, 1, function(res)
+      if retried and not still() then
+        return
+      end
       local m = res and res.member
       local def = res and res.def
       if not (m and def and def.path) then
@@ -5425,10 +5532,15 @@ member_jump = function(buf, line, col, cb, retried)
         -- file that defines that type into the project and try once more.
         local missing = (res and res.type and res.type.name) or ty.name
         if not retried and missing and _G.projectfiles_add_for_symbol_async then
-          pcall(_G.projectfiles_add_for_symbol_async, missing, function(n)
+          A.add_for_symbol(missing, function(n)
+            if not still() then
+              return -- 늦은 답: 그 사이 다른 데로 뛰었거나 자리를 떴다
+            end
             if n and n > 0 then
               vim.defer_fn(function()
-                member_jump(buf, line, col, cb, true)
+                if still() then
+                  member_jump(buf, line, col, cb, true, still)
+                end
               end, 150)
             else
               vim.notify('RelationView: ' .. missing ..
@@ -9046,6 +9158,10 @@ function A.gtags(args, retried)
   -- 트리 열의 루트도 안쪽 프로젝트로 바뀌었다
   local from = (file ~= '' and vim.bo[sbuf].buftype == '')
       and vim.fn.fnamemodify(file, ':p') or (vim.fn.getcwd() .. '/x')
+  -- 빈 목록을 바꿔 줄 다시 찾기는 색인을 기다려 몇 초 ~ 20초 뒤에 온다 (R2).
+  -- 찾을 때의 자리를 잡아 둔다 - 패널에서 쳤으면 초점은 패널, 커서는 원본 창
+  local still = not retried and A.jump_ticket(win) or nil
+  local shown -- 이 찾기가 빈 목록을 띄운 패널 세대 (s.gen)
   root_for(from, function(root)
     root = root or vim.fn.getcwd()
     -- -f 의 파일: global 은 색인 루트에서 도므로 현재 디렉터리 기준·절대 경로를 루트
@@ -9095,14 +9211,19 @@ function A.gtags(args, retried)
         -- the project files may simply not contain it yet; the search for
         -- the defining file runs in the background, the empty list is shown
         -- meanwhile and replaced when it lands
-        pcall(_G.projectfiles_add_for_symbol_async, pattern, function(n)
-          if n and n > 0 then
+        A.add_for_symbol(pattern, function(n)
+          -- 그 사이 패널이 닫혔거나 (닫힌 패널의 :Gtags 는 편집 창을 옮긴다)
+          -- 다른 것을 띄웠거나, 더 새 점프·찾기가 있었거나 찾은 자리를 떴으면
+          -- 늦은 답은 버린다. 그대로 다시 찾으면 그 목록을 덮고 그때의 창에서
+          -- 미리보기로 초점을 가져갔다
+          if n and n > 0 and still() and panel_visible() and s.gen == shown then
             A.gtags(args, true)
           end
         end)
       end
       show_results('Gtags ' .. tostring(args), label, results,
         math.max(0, #lines - #results), origin, root, has_f)
+      shown = s.gen
     end, cap + 200)
   end)
 end

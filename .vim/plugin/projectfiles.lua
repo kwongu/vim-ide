@@ -176,15 +176,75 @@ local s = {
   win = nil,
   buf = nil,
   rows = {},       -- line -> { path = , entry = }
-  cache = {},      -- root -> { files = {...}, entries = {...}, preset = }
+  -- root -> { files = {...}(정렬), entries =, exclude =, preset =, 키들 }
+  -- (materialize 와 apply_delta 가 채운다. 키의 뜻은 cache_valid 참고)
+  cache = {},
   symbols = {},    -- root -> { key = <GTAGS mtime>, list = {...} }
+  collect = nil,   -- one_line 이 모으는 알림
 }
+
+-- 파일 stat 을 캐시 키로. 초 단위 mtime 만으로는 같은 초 안에 다시 쓴 것을
+-- 놓치고(같은 초에 + 와 - 를 하면 둘 다 그 초다), 크기는 같은 길이로 다시 쓴
+-- 것을 놓친다. 나노초와 inode 까지 넣는다 (목록은 이름 바꾸기로 쓰므로 쓸
+-- 때마다 inode 가 바뀐다).
+local function stat_key(st)
+  if not st then
+    return 'none'
+  end
+  return ('%d:%d:%d:%d'):format(st.mtime.sec, st.mtime.nsec or 0, st.size,
+    st.ino or 0)
+end
 
 local group = api.nvim_create_augroup('ProjectFiles', { clear = true })
 
 -- 폭을 넘는 한 줄 알림은 Press ENTER 가 뜨며 다음 키를 먹는다 (fitmsg.lua)
+--
+-- 한 번의 손짓(명령 하나, 키 하나)은 알림도 한 줄이다 (one_line).
+-- ':ProjectFilesAdd x' 처럼 Ex 명령 안에서 알림이 두 줄 쌓이면 Press ENTER 가
+-- 뜨고, 그게 떠 있는 동안 nvim 은 vim.schedule/defer_fn 을 하나도 돌리지 않는다.
+-- autoindex 의 indexfiles.sh -> gtags -i 사슬이 바로 그 콜백으로 이어지므로
+-- 색인 반영이 키를 누를 때까지 멈췄다 (실측 3~16초). 그래서 모아 두었다가
+-- 끝에서 한 줄로 낸다 - 화면은 fitmsg 가 폭에 맞게 줄이고, :messages 에는
+-- 다 남는다.
 local function notify(msg, level)
-  (_G.vimide_notify or vim.notify)('ProjectFiles: ' .. msg, level or vim.log.levels.INFO)
+  level = level or vim.log.levels.INFO
+  if s.collect then
+    s.collect[#s.collect + 1] = { msg = msg, level = level }
+    return
+  end
+  (_G.vimide_notify or vim.notify)('ProjectFiles: ' .. msg, level)
+end
+
+-- fn 이 내는 알림을 한 줄로 모은다. 겹쳐 부르면 바깥 것이 한 번만 낸다.
+local function one_line(fn, ...)
+  if s.collect then
+    return fn(...)
+  end
+  s.collect = {}
+  local ok, a, b = pcall(fn, ...)
+  local msgs = s.collect
+  s.collect = nil
+  if #msgs > 0 then
+    local parts, lvl = {}, vim.log.levels.INFO
+    for _, m in ipairs(msgs) do
+      parts[#parts + 1] = m.msg
+      if m.level > lvl then
+        lvl = m.level
+      end
+    end
+    notify(table.concat(parts, '  |  '), lvl)
+  end
+  if not ok then
+    error(a, 0)
+  end
+  return a, b
+end
+
+-- 사용자 명령: 알림은 한 줄로 (one_line)
+local function ucmd(name, fn, opts)
+  api.nvim_create_user_command(name, function(o)
+    return one_line(fn, o)
+  end, opts)
 end
 
 -- ---------------------------------------------------------------------------
@@ -339,9 +399,14 @@ local function cur_root()
   return root_from_dir(vim.fn.getcwd())
 end
 
+-- 디렉터리는 세션에 한 번만 만든다. preset_path 를 부를 때마다 mkdir -p 가
+-- 돌아서 + 한 번에 열 번 남짓 불렸다 (쓰기가 실패하면 preset_write 가 다시 만든다).
 local function presets_dir()
   local d = vim.fn.stdpath('data') .. '/vim-ide/presets'
-  vim.fn.mkdir(d, 'p')
+  if s.presets_dir ~= d then
+    vim.fn.mkdir(d, 'p')
+    s.presets_dir = d
+  end
   return d
 end
 
@@ -378,7 +443,7 @@ end
 -- create = this is a write ('ProjectFilesPresetShare'): make the directory
 -- if it is not there yet. Returns nil when sharing is off
 -- (g:projectfiles_shared_presets = '') - that answer is never overridden.
-local function shared_dir(create)
+local function shared_dir_find(create)
   local o = vim.g.projectfiles_shared_presets
   if o ~= nil then
     local p = expand_dir(o)
@@ -404,6 +469,22 @@ local function shared_dir(create)
     return (st and st.type == 'directory') and cands[1] or nil
   end
   return nil
+end
+
+-- 읽기(create 없이)의 답은 옵션 값별로 기억한다: 이 파일의 realpath 와 후보
+-- 디렉터리 stat 을 preset 을 읽을 때마다 다시 할 이유가 없다. 만드는 쪽
+-- (create)은 늘 새로 보고 기억도 지운다.
+local function shared_dir(create)
+  local mk = tostring(vim.g.projectfiles_shared_presets)
+  s.shared_memo = s.shared_memo or {}
+  if create then
+    s.shared_memo = {}
+    return shared_dir_find(true)
+  end
+  if s.shared_memo[mk] == nil then
+    s.shared_memo[mk] = shared_dir_find(false) or false
+  end
+  return s.shared_memo[mk] or nil
 end
 
 -- The file name is the sanitised preset name, but a preset dropped into the
@@ -466,17 +547,80 @@ local function preset_list()
   return out
 end
 
+-- preset JSON 을 읽은 결과를 파일 stat 으로 기억한다.
+--
+-- + 한 번에 같은 JSON 을 4~9번 읽고 풀었다(add_path, materialize 두 번,
+-- 배치 앞뒤 ...). 6,500항목짜리에서 그것만 +마다 13~33ms 였다. 키는
+-- mtime 나노초·크기·inode 까지 - 초 단위로는 같은 초 안의 다시 쓰기를 놓친다.
+--
+-- 돌려주는 것은 늘 새 사본이다. add_path 와 add_for_symbol 은 받은 목록에
+-- 제자리로 덧붙이는데, 기억해 둔 표를 그대로 주면 쓰기가 실패했을 때 디스크에
+-- 없는 항목이 기억에만 남는다 (반대 심문: preset 을 읽기 전용으로 두고 + 하니
+-- 목록에는 들어가고 preset 에는 없었고, 다시 + 하면 '이미 있습니다').
+s.preset_memo = {}  -- 파일 -> { key =, data = }
+
+-- "exclude": 디렉터리 항목 아래에서 뺀 경로들 (C5). 'entries' 와 따로 두는
+-- 것은 예전 vim-ide 사본(다른 장비, 같은 저장소의 공용 preset)이 이 키를
+-- 모르고 지나가게 하려는 것이다 - 그쪽은 뺀 파일을 조금 더 색인할 뿐 깨지지
+-- 않는다. entries 안에 새 kind 로 넣으면 예전 코드는 그것을 '담을 경로'로
+-- 읽어 바로 그 파일을 색인한다.
+local function clean_exclude(x)
+  local out, seen = {}, {}
+  for _, p in ipairs(type(x) == 'table' and x or {}) do
+    if type(p) == 'string' then
+      p = p:gsub('/+', '/'):gsub('^%./', ''):gsub('/+$', '')
+      if p ~= '' and p ~= '.' and not seen[p] then
+        seen[p] = true
+        out[#out + 1] = p
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function copy_preset(d)
+  local e = {}
+  for i, x in ipairs(d.entries) do
+    e[i] = { kind = x.kind, path = x.path }
+  end
+  local x = {}
+  for i, p in ipairs(d.exclude or {}) do
+    x[i] = p
+  end
+  return { name = d.name, entries = e, exclude = x }
+end
+
 local function read_preset_file(f)
-  if not f or not uv.fs_stat(f) then
+  if not f then
     return nil
+  end
+  local st = uv.fs_stat(f)
+  if not st then
+    s.preset_memo[f] = nil
+    return nil
+  end
+  local key = stat_key(st)
+  local c = s.preset_memo[f]
+  if c and c.key == key then
+    return copy_preset(c.data)
   end
   local ok, data = pcall(function()
     return vim.json.decode(table.concat(vim.fn.readfile(f), '\n'))
   end)
   if not ok or type(data) ~= 'table' or type(data.entries) ~= 'table' then
+    s.preset_memo[f] = nil
     return nil
   end
-  return data
+  local entries = {}
+  for _, e in ipairs(data.entries) do
+    if type(e) == 'table' and type(e.path) == 'string' then
+      entries[#entries + 1] = { kind = e.kind or 'file', path = e.path }
+    end
+  end
+  data = { name = data.name, entries = entries, exclude = clean_exclude(data.exclude) }
+  s.preset_memo[f] = { key = key, data = data }
+  return copy_preset(data)
 end
 
 -- same set of entries? (order does not matter: the pickers append)
@@ -497,6 +641,15 @@ local function entries_differ(a, b)
   return false
 end
 
+-- 두 preset 이 다른가: 항목과, 디렉터리 항목에서 뺀 것(exclude)까지
+local function presets_differ(a, b)
+  if entries_differ(a.entries, b.entries) then
+    return true
+  end
+  return table.concat(clean_exclude(a.exclude), '\n')
+      ~= table.concat(clean_exclude(b.exclude), '\n')
+end
+
 -- using a preset whose local copy has drifted from the repository's: say so
 -- once, at the moment it starts being used, or a 'git pull' that updated it
 -- would look like it did nothing
@@ -507,7 +660,7 @@ local function announce_fork(name)
   local mine = read_preset_file(preset_file(presets_dir(), name))
   local sp = shared_path(name)
   local sh = sp and read_preset_file(sp) or nil
-  if mine and sh and entries_differ(mine.entries, sh.entries) then
+  if mine and sh and presets_differ(mine, sh) then
     local how = (#mine.entries == #sh.entries)
         and ('개수는 같지만 내용이 다릅니다 (%d개)'):format(#sh.entries)
         or ('%d개로 다릅니다'):format(#sh.entries)
@@ -524,15 +677,36 @@ end
 
 -- one entry per line, keys in a fixed order: a preset kept in git should
 -- produce a readable diff when a file is added or removed
-local function encode_preset(name, entries)
+-- "exclude" 는 있을 때만 적는다: 뺀 것이 없는 preset 은 예전과 글자 하나
+-- 다르지 않아야 공용 preset 의 diff 가 조용하다.
+local function encode_preset(name, entries, exclude)
+  -- 따옴표·역슬래시·제어 문자가 없는 경로는 vim.json.encode 와 같은 글자를
+  -- 손으로 만든다 (6,000항목이면 encode 가 12,000번이었다)
+  local function jstr(v)
+    v = tostring(v)
+    if v:find('[%c"\\]') then
+      return vim.json.encode(v)
+    end
+    return '"' .. v .. '"'
+  end
   local out = { '{', '  "name": ' .. vim.json.encode(name) .. ',',
     '  "entries": [' }
   for i, e in ipairs(entries) do
     out[#out + 1] = ('    {"kind": %s, "path": %s}%s'):format(
-      vim.json.encode(e.kind or 'file'), vim.json.encode(e.path or ''),
+      jstr(e.kind or 'file'), jstr(e.path or ''),
       i < #entries and ',' or '')
   end
-  out[#out + 1] = '  ]'
+  local x = clean_exclude(exclude)
+  if #x == 0 then
+    out[#out + 1] = '  ]'
+  else
+    out[#out + 1] = '  ],'
+    out[#out + 1] = '  "exclude": ['
+    for i, p in ipairs(x) do
+      out[#out + 1] = '    ' .. jstr(p) .. (i < #x and ',' or '')
+    end
+    out[#out + 1] = '  ]'
+  end
   out[#out + 1] = '}'
   return out
 end
@@ -552,7 +726,13 @@ end
 -- 생긴다. 저장 직전에 한 곳에서 다듬으면 어느 경로로 들어와도 같은 모양이
 -- 된다.
 local function norm_rel(path)
-  local p = tostring(path or ''):gsub('/+', '/')
+  local p = tostring(path or '')
+  -- 이미 다듬어진 모양이면 그대로 (preset 을 읽고 쓸 때마다 항목 수천 개가
+  -- 여기를 지나간다 - gsub 세 번이 6,000항목에 3ms 였다)
+  if not p:find('//', 1, true) and p:sub(1, 2) ~= './' and p:sub(-1) ~= '/' then
+    return p
+  end
+  p = p:gsub('/+', '/')
   while p:sub(1, 2) == './' do
     p = p:sub(3)
   end
@@ -637,7 +817,36 @@ end
 -- machine: from then on a 'git pull' that updates the shared preset changes
 -- nothing here. That fork is often not a deliberate save - C-] on a symbol
 -- outside the preset adds the file that defines it - so say it out loud.
-local function preset_write(name, entries)
+-- 어느 항목 아래에도 있지 않은 제외는 버린다. 덮던 디렉터리 항목이 빠진 뒤
+-- 남은 제외는 아무 일도 하지 않다가, 나중에 그 디렉터리를 다시 담으면 그
+-- 아래를 조용히 막는다.
+local function live_exclude(entries, exclude)
+  local inc = {}
+  for _, e in ipairs(entries) do
+    inc[norm_rel(e.path)] = true
+  end
+  local out = {}
+  for _, x in ipairs(clean_exclude(exclude)) do
+    if not inc[x] then
+      local p, covered = x, inc['.'] == true
+      while not covered do
+        p = p:match('^(.*)/[^/]+$')
+        if not p or p == '' then
+          break
+        end
+        covered = inc[p] == true
+      end
+      if covered then
+        out[#out + 1] = x
+      end
+    end
+  end
+  return out
+end
+
+-- exclude 가 nil 이면 지금 preset 의 것을 그대로 둔다 (그것을 모르는 호출부 -
+-- Prune, add_for_symbol - 가 뺀 것을 지우지 않게).
+local function preset_write(name, entries, exclude)
   local f = preset_path(name)
   local sp = shared_path(name)
   local forking = uv.fs_stat(f) == nil and sp ~= nil and uv.fs_stat(sp) ~= nil
@@ -647,11 +856,30 @@ local function preset_write(name, entries)
       dupes, #entries, #clean))
   end
   entries = clean
+  if exclude == nil then
+    local cur = read_preset_file(f) or (sp and read_preset_file(sp)) or nil
+    exclude = cur and cur.exclude or {}
+  end
+  exclude = live_exclude(entries, exclude)
   backup_preset(name)
-  if not write_json(f, encode_preset(name, entries)) then
+  local lines = encode_preset(name, entries, exclude)
+  local ok = write_json(f, lines)
+  if not ok then
+    -- 세션 중에 presets 디렉터리가 지워졌으면 한 번 만들고 다시 쓴다
+    -- (presets_dir 는 세션에 한 번만 mkdir 한다)
+    pcall(vim.fn.mkdir, vim.fs.dirname(f), 'p')
+    ok = write_json(f, lines)
+  end
+  if not ok then
+    s.preset_memo[f] = nil
     notify('preset 을 저장하지 못했습니다: ' .. f, vim.log.levels.ERROR)
     return false
   end
+  -- 방금 쓴 것을 기억해 둔다: 바로 뒤의 읽기가 JSON 을 다시 풀지 않게
+  s.preset_memo[f] = {
+    key = stat_key(uv.fs_stat(f)),
+    data = copy_preset({ name = name, entries = entries, exclude = exclude }),
+  }
   if forking then
     notify(("vim-ide 공용 preset '%s' 를 이 장비 사본으로 갈랐습니다. "):format(name)
       .. '앞으로 git pull 은 이 preset 을 바꾸지 않습니다 '
@@ -707,17 +935,29 @@ local MODE_NONE = 'none'
 local MODE_AUTO = 'auto'
 local MODE_UNSET = '\0unset'
 
+-- 모드 파일도 stat 으로 기억한다: target_label/active_preset 이 + 한 번에
+-- 여섯 번 남짓 이 파일을 읽었다.
+s.mode_memo = {}   -- 파일 -> { key =, mode = }
+
 local function mode_of(root)
   local f = active_file(root)
-  if not uv.fs_stat(f) then
+  local st = uv.fs_stat(f)
+  if not st then
+    s.mode_memo[f] = nil
     -- g:projectfiles_preset 을 정해 뒀으면 그것이 기본값이다
     local d = cfg('preset', nil)
     return d and tostring(d) or MODE_UNSET
   end
+  local key = stat_key(st)
+  local c = s.mode_memo[f]
+  if c and c.key == key then
+    return c.mode
+  end
   local l = (vim.fn.readfile(f)[1] or ''):gsub('%s+$', '')
   if l == '' then
-    return MODE_AUTO -- 예전 파일: 빈 줄이 '명시적 auto' 였다
+    l = MODE_AUTO -- 예전 파일: 빈 줄이 '명시적 auto' 였다
   end
+  s.mode_memo[f] = { key = key, mode = l }
   return l
 end
 
@@ -745,7 +985,11 @@ local function set_active(root, name)
   if v == nil or v == '' then
     v = MODE_AUTO
   end
-  pcall(vim.fn.writefile, { v }, f)
+  local ok, ret = pcall(vim.fn.writefile, { v }, f)
+  -- 쓴 것을 곧바로 기억한다. 'pfa' -> 'pfb' 처럼 같은 길이를 같은 초에 다시
+  -- 쓰면 초 단위 시각만 보는 파일 시스템에서는 stat 이 같아 보인다.
+  s.mode_memo[f] = (ok and ret == 0)
+      and { key = stat_key(uv.fs_stat(f)), mode = v } or nil
 end
 
 -- autoindex.lua 가 색인을 시작하기 전에 물어보는 자리.
@@ -762,6 +1006,22 @@ function _G.projectfiles_should_index(root)
     return false
   end
   return mode_indexes(root)
+end
+
+-- 빈 목록(.tags/files)이 정말 '아무것도 색인하지 않기'인가 (K3).
+--
+-- 저장된 preset 이 항목 0개일 때만 그렇다. 저장한 적 없는 이름(오타, 막 시작한
+-- 새 preset)의 목록도 비어 있지만, 그건 '아직 아무것도 고르지 않았다'이다.
+-- 예전에는 둘을 가리지 않아서 ':ProjectFilesPreset kp1x' 오타 한 번에 GTAGS 가
+-- 0개, ctags 가 머리말 24줄이 됐다 (F2). autoindex 는 빈 목록을 보면 이것을
+-- 묻고, false 면 색인을 그대로 둔다.
+function _G.projectfiles_list_intended_empty(root)
+  local name = root and root ~= '' and active_preset(root)
+  if not name then
+    return false
+  end
+  local p = preset_read(name)
+  return p ~= nil and #(p.entries or {}) == 0
 end
 
 -- 경로가 속한 프로젝트가 색인 대상인가. gutentags 는 자기 루트 판정
@@ -824,8 +1084,16 @@ local skipped = { big = 0, binary = 0, worst = nil }
 --
 --   let g:projectfiles_max_bytes = 0    " 크기 제한 없음
 --   let g:projectfiles_skip_binary = 0  " 내용 검사 안 함
-local function text_file(path)
-  local st = uv.fs_stat(path)
+--
+-- st: 부른 쪽이 이미 한 stat (nil 이면 여기서 한다). 파일 항목 하나가
+-- expand_all, expand_entry, 여기서 세 번 stat 되었다 - 느린 stat 의 서버에서
+-- 6,000개짜리 목록이면 그것만 +마다 1초 넘게였다 (P2).
+-- sk: 뺀 것을 세는 곳 (nil 이면 materialize 의 집계)
+local function text_file(path, st, sk)
+  sk = sk or skipped
+  if st == nil then
+    st = uv.fs_stat(path)
+  end
   -- 볼 수 없으면 판단하지 않는다: 여기서 거절하면 상대 경로로 불린
   -- 자리에서 멀쩡한 파일이 조용히 빠진다
   if not st or st.type ~= 'file' then
@@ -833,9 +1101,9 @@ local function text_file(path)
   end
   local max = tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0
   if max > 0 and st.size > max then
-    skipped.big = skipped.big + 1
-    if not skipped.worst or st.size > skipped.worst.size then
-      skipped.worst = { size = st.size, path = path }
+    sk.big = sk.big + 1
+    if not sk.worst or st.size > sk.worst.size then
+      sk.worst = { size = st.size, path = path }
     end
     return false
   end
@@ -851,6 +1119,14 @@ local function text_file(path)
   local isbin
   if hit and hit.key == key then
     isbin = hit.bin
+  elseif s.known_text and s.known_text[path] and st.ctime
+      and st.ctime.sec < s.known_text[path] then
+    -- 지난번에 쓴 목록에 있던 파일이고 그 뒤로 inode 가 바뀐 적이 없다
+    -- (ctime 은 내용·이름·권한이 바뀌면 함께 바뀌고 되돌릴 수 없다): 그때
+    -- 텍스트였으니 지금도 텍스트다. 세션을 새로 열 때마다 목록의 모든 파일
+    -- 앞 1KB 를 다시 읽던 것(6,500개에 6,500번 open)을 이것으로 건너뛴다 (P3).
+    isbin = false
+    s.bin_cache[path] = { key = key, bin = false }
   else
     local fd = uv.fs_open(path, 'r', 438)
     if not fd then
@@ -862,13 +1138,13 @@ local function text_file(path)
     s.bin_cache[path] = { key = key, bin = isbin }
   end
   if isbin then
-    skipped.binary = skipped.binary + 1
+    sk.binary = sk.binary + 1
     return false
   end
   return true
 end
 
-local function indexed(path)
+local function indexed(path, st, sk)
   local base = path:match('([^/]+)$') or path
   if cfg('all_files', 1) ~= 0 then
     -- 전부 넣고, 산출물/바이너리만 뺀다
@@ -879,13 +1155,13 @@ local function indexed(path)
     if e and EXCL[e:lower()] then
       return false
     end
-    return text_file(path)
+    return text_file(path, st, sk)
   end
   if BASE[base] then
-    return text_file(path)
+    return text_file(path, st, sk)
   end
   local e = base:match('%.([%w_]+)$')
-  return e ~= nil and EXT[e] == true and text_file(path)
+  return e ~= nil and EXT[e] == true and text_file(path, st, sk)
 end
 
 -- '/a/b/c' 처럼 더 손댈 것이 없는 절대 경로인가
@@ -1054,9 +1330,35 @@ local function nested_prefixes_async(root, cb)
 end
 
 -- 이 상대 경로가 하위 프로젝트 안인가 (그렇다면 그 프로젝트의 상대 접두어)
-local function nested_owner(root, rel)
-  for _, pre in ipairs(nested_prefixes(root)) do
+local function nested_owner_in(list, rel)
+  for _, pre in ipairs(list) do
     if rel:sub(1, #pre) == pre then
+      return (pre:gsub('/$', ''))
+    end
+  end
+  return nil
+end
+
+-- 경로 하나만 묻는 자리(add_path)는 위로 올라가며 '.tags' 를 직접 본다.
+--
+-- 목록 전체(nested_prefixes)를 구하는 것은 프로젝트 전체를 훑는 find 이고,
+-- 디스크 캐시는 루트의 mtime 이 바뀌면(빌드가 루트에 파일 하나만 만들어도)
+-- 버려진다. 그러면 그 뒤 첫 + 가 키를 누른 채 그 find 를 기다렸다 - 실측
+-- 1,057 디렉터리에 0.2초, 1만 2천 디렉터리에 4~8초 (P7). 여기서는 많아야
+-- nested_depth 번의 lstat 이고, 늘 지금 상태를 본다. 디렉터리 자신이 하위
+-- 프로젝트일 때도 잡는다 (README: 그 디렉터리를 담으면 그렇다고 말한다).
+local function nested_owner(root, rel, is_dir)
+  local depth = tonumber(cfg('nested_depth', 6)) or 6
+  if depth <= 0 or rel == '.' or rel == '' or rel:sub(1, 1) == '/' then
+    return nil -- 루트 자신의 .tags 는 하위 프로젝트가 아니다
+  end
+  local d = dbdir() or '.tags'
+  local parts = vim.split(rel, '/', { plain = true, trimempty = true })
+  local pre = ''
+  for i = 1, math.min(is_dir and #parts or #parts - 1, depth) do
+    pre = pre .. parts[i] .. '/'
+    local st = uv.fs_lstat(root .. '/' .. pre .. d)
+    if st and st.type == 'directory' then
       return (pre:gsub('/$', ''))
     end
   end
@@ -1074,6 +1376,22 @@ local function pruned_names()
   return out
 end
 
+-- 경로의 한 마디라도 가지치기 이름(.git, out ...)이나 색인 데이터베이스 자리
+-- (.tags)이면 그 이름을 돌려준다. find 를 거치지 않고 경로 하나를 목록에
+-- 넣는 자리(+, 저장)가 find 와 같은 것을 빼도록.
+local function pruned_part(rel)
+  local skip = { [dbdir() or '.tags'] = true }
+  for _, d in ipairs(pruned_names()) do
+    skip[d] = true
+  end
+  for part in rel:gmatch('[^/]+') do
+    if skip[part] then
+      return part
+    end
+  end
+  return nil
+end
+
 local function prune_expr()
   local prune = {}
   for _, d in ipairs(pruned_names()) do
@@ -1082,28 +1400,59 @@ local function prune_expr()
   return "\\( " .. table.concat(prune, ' -o ') .. " \\) -prune -o "
 end
 
--- files of one entry, relative to root
-local function expand_entry(root, entry)
-  local abs = entry.path:sub(1, 1) == '/' and entry.path
-      or (root .. '/' .. entry.path)
-  local st = uv.fs_stat(abs)
-  if not st then
-    return {}, false -- not in this project: skipped, not an error
+-- 항목 하나의 절대 경로. '.'(트리의 루트 줄에서 + 한 번)은 루트 자신으로:
+-- 'root/.' 로 find 하면 'root/./x' 가 나와 rel_to 가 파일마다 fnamemodify 로
+-- 떨어지고, 바이너리 판정 캐시의 키(경로)도 다른 모양이 되어 늘 빗나갔다.
+local function entry_abs(root, e)
+  local p = e.path or ''
+  if p == '.' or p == '' then
+    return root
   end
-  if st.type == 'file' then
-    return indexed(abs) and { rel_to(root, abs) } or {}, true
+  return p:sub(1, 1) == '/' and p or (root .. '/' .. p)
+end
+
+-- 무엇이 목록에 드는가: 항목(entries)과 제외(exclude, C5).
+--
+-- 경로 자신부터 위로 올라가며 처음 만나는 규칙이 이긴다 (gitignore 의 '!' 와
+-- 같은 모양). 'drivers' 를 담고 'drivers/net' 을 뺀 뒤 'drivers/net/a.c' 를
+-- 담으면 그 파일만 들어간다. 같은 자리에 둘 다 있으면 담는 쪽이 이긴다.
+local function make_rules(entries, exclude)
+  local inc, exc, any = {}, {}, false
+  for _, e in ipairs(entries or {}) do
+    inc[norm_rel(e.path)] = true
   end
-  local out = {}
-  -- 파일은 전부 찾고 indexed() 로 걸른다: 무엇을 넣을지 정하는 곳이 하나여야
-  -- '모든 파일' 모드와 허용목록 모드가 어긋나지 않는다.
-  local cmd = 'find ' .. vim.fn.shellescape(abs) .. ' ' .. prune_expr() ..
-      ' -type f -print 2>/dev/null'
-  for _, l in ipairs(vim.fn.systemlist(cmd)) do
-    if l ~= '' and indexed(l) then
-      out[#out + 1] = rel_to(root, l)
+  for _, x in ipairs(exclude or {}) do
+    exc[x] = true
+    any = true
+  end
+  return { inc = inc, exc = exc, any_exc = any }
+end
+
+-- true = 든다, false = 뺐다, nil = 어느 항목 아래도 아니다
+local function rule_of(rules, rel)
+  local p = rel
+  while p and p ~= '' do
+    if rules.inc[p] then
+      return true
     end
+    if rules.exc[p] then
+      return false
+    end
+    p = p:match('^(.*)/[^/]+$')
   end
-  return out, true
+  if rules.inc['.'] then
+    return true
+  end
+  return nil
+end
+
+-- rel 의 위에서(자신은 빼고) 처음 만나는 규칙: rel 을 다른 항목이 덮고 있나
+local function rule_above(rules, rel)
+  local p = rel:match('^(.*)/[^/]+$')
+  if p and p ~= '' then
+    return rule_of(rules, p)
+  end
+  return rules.inc['.'] and true or nil
 end
 
 -- 디렉터리 항목 여러 개를 find 한 번으로 편다.
@@ -1114,12 +1463,9 @@ end
 -- 1992개로 똑같다.
 --
 -- 명령줄이 너무 길면 실행 자체가 안 되므로(ARG_MAX) 끊어서 부른다.
-local function expand_dirs(root, dirs)
-  local out = {}
-  if #dirs == 0 then
-    return out
-  end
+local function find_cmds(dirs)
   local pe = prune_expr()
+  local cmds = {}
   local i = 1
   while i <= #dirs do
     local args, len = {}, 0
@@ -1128,40 +1474,151 @@ local function expand_dirs(root, dirs)
       args[#args + 1] = a
       len, i = len + #a + 1, i + 1
     end
-    local cmd = 'find ' .. table.concat(args, ' ') .. ' ' .. pe ..
+    cmds[#cmds + 1] = 'find ' .. table.concat(args, ' ') .. ' ' .. pe ..
         ' -type f -print 2>/dev/null'
-    for _, l in ipairs(vim.fn.systemlist(cmd)) do
-      if l ~= '' and indexed(l) then
-        out[#out + 1] = rel_to(root, l)
-      end
-    end
   end
-  return out
+  return cmds
+end
+
+-- 찾은 파일(절대 경로) 하나를 판정해 상대 경로를 돌려준다 (빠지면 nil).
+-- 파일은 전부 찾고 여기서 거른다: 무엇을 넣을지 정하는 곳이 하나여야 '모든
+-- 파일' 모드와 허용목록 모드가 어긋나지 않는다. 제외 규칙을 먼저 본다 - 뺀
+-- 것으로 정해진 경로에는 stat 도 하지 않는다.
+-- seen: 이미 판정한 상대 경로 (항목이 겹치면 - '.' 과 'drivers' - 같은 파일이
+-- 두 번 나온다. 두 번 stat 하고 '색인 제외' 를 두 번 세지 않게)
+local function keep_file(root, rules, abs, st, sk, seen)
+  local rel = rel_to(root, abs)
+  if seen then
+    if seen[rel] then
+      return nil
+    end
+    seen[rel] = true
+  end
+  if rules.any_exc and rule_of(rules, rel) ~= true then
+    return nil
+  end
+  if not indexed(abs, st, sk) then
+    return nil
+  end
+  return rel
 end
 
 -- preset 항목 전부를 편다. 디렉터리는 묶어서 한 번에 훑는다.
-local function expand_all(root, entries)
-  local out, dirs = {}, {}
+local function expand_all(root, entries, rules, sk)
+  local out, dirs, seen = {}, {}, {}
   for _, e in ipairs(entries) do
-    local abs = e.path:sub(1, 1) == '/' and e.path or (root .. '/' .. e.path)
+    local abs = entry_abs(root, e)
     local st = uv.fs_stat(abs)
     -- preset 의 kind 는 적어 둔 값일 뿐이고, 실제로 무엇인지는 파일 시스템이
     -- 답한다 - 디렉터리였던 것이 파일로 바뀌어 있을 수 있다
     if st and st.type == 'directory' then
       dirs[#dirs + 1] = abs
-    else
-      for _, f in ipairs((expand_entry(root, e))) do
-        out[#out + 1] = f
+    elseif st and st.type == 'file' then
+      -- 여기서 한 stat 을 그대로 넘긴다 (예전에는 같은 파일을 세 번 stat 했다)
+      local rel = keep_file(root, rules, abs, st, sk, seen)
+      if rel then
+        out[#out + 1] = rel
       end
     end
+    -- 그 밖(없는 경로, fifo 같은 특수 파일)은 예전처럼 아무것도 내지 않는다
   end
-  for _, f in ipairs(expand_dirs(root, dirs)) do
-    out[#out + 1] = f
+  for _, cmd in ipairs(find_cmds(dirs)) do
+    for _, l in ipairs(vim.fn.systemlist(cmd)) do
+      if l ~= '' then
+        local rel = keep_file(root, rules, l, nil, sk, seen)
+        if rel then
+          out[#out + 1] = rel
+        end
+      end
+    end
   end
   return out
 end
 
+-- expand_all 의 비동기판. 판정은 같은 keep_file 이라 결과가 같다.
+-- find 는 자식 프로세스가 하고, 파일마다의 stat 은 메인 루프에서 한 번에
+-- 몇 ms 씩만 한다 - 그 사이 키 입력이 처리된다. cb(rels, sk) (실패하면 nil)
+local function expand_async(root, entries, rules, cb)
+  local sk = { big = 0, binary = 0 }
+  local out, dirs, seen = {}, {}, {}
+  local function run(items, fn, done)
+    local i = 1
+    local function step()
+      local stop = uv.hrtime() + 8e6
+      while i <= #items do
+        fn(items[i])
+        i = i + 1
+        if uv.hrtime() >= stop then
+          break
+        end
+      end
+      if i <= #items then
+        vim.defer_fn(step, 1)
+      else
+        done()
+      end
+    end
+    vim.defer_fn(step, 1)
+  end
+  run(entries, function(e)
+    local abs = entry_abs(root, e)
+    local st = uv.fs_stat(abs)
+    if st and st.type == 'directory' then
+      dirs[#dirs + 1] = abs
+    elseif st and st.type == 'file' then
+      local rel = keep_file(root, rules, abs, st, sk, seen)
+      if rel then
+        out[#out + 1] = rel
+      end
+    end
+  end, function()
+    local cmds, k = find_cmds(dirs), 0
+    local function next_cmd()
+      k = k + 1
+      if k > #cmds then
+        return cb(out, sk)
+      end
+      local ok = pcall(vim.system, { 'sh', '-c', cmds[k] }, { text = true },
+        function(o)
+          vim.schedule(function()
+            run(vim.split(o.stdout or '', '\n', { trimempty = true }), function(l)
+              local rel = keep_file(root, rules, l, nil, sk, seen)
+              if rel then
+                out[#out + 1] = rel
+              end
+            end, next_cmd)
+          end)
+        end)
+      if not ok then
+        cb(nil)
+      end
+    end
+    next_cmd()
+  end)
+end
+
+-- 배치 중이면 { root =, msgs = {}, done =, pend =, delta =, emptied =, rules = }
+-- (in_batch)
+local batch = nil
+
+-- 지금 항목·제외의 규칙. 배치 중에는 한 번 만들고 add_path/remove_path 가
+-- 바꾼 만큼만 고쳐 쓴다 - 경로마다 새로 만들면 6,000항목에 경로당 몇 ms 씩,
+-- 50줄 범위면 그것만 수백 ms 였다.
+local function rules_for(root, entries, exclude)
+  if batch and batch.root == root then
+    if not batch.rules then
+      batch.rules = make_rules(entries, exclude)
+    end
+    return batch.rules
+  end
+  return make_rules(entries, exclude)
+end
+
 local function entries_of(root)
+  -- 배치 중에는 아직 쓰지 않은 항목이 지금 상태다 (preset 은 커밋에서 한 번 쓴다)
+  if batch and batch.root == root and batch.pend then
+    return batch.pend.entries, batch.pend.name, nil, batch.pend.exclude
+  end
   local name = active_preset(root)
   if not name then
     return nil, nil -- auto mode
@@ -1182,32 +1639,215 @@ local function entries_of(root)
         return nil, nil, true -- 세 번째 값 = 읽을 수 없다(손대지 마라)
       end
     end
-    return {}, name -- named but not saved yet: an empty preset to fill
+    return {}, name, nil, {} -- named but not saved yet: an empty preset to fill
   end
-  return p.entries, name
+  return p.entries, name, nil, p.exclude
+end
+
+-- ---------------------------------------------------------------------------
+-- '<root>/.tags/files' 와 그것을 무엇으로 만들었는지 (C1)
+-- ---------------------------------------------------------------------------
+local function list_path(root)
+  return root .. '/' .. (dbdir() or '.tags') .. '/files'
+end
+
+-- 목록 옆에 '이 목록을 어떤 preset 내용과 설정으로 만들었나'를 적어 둔다:
+--   1행 내용 키(preset 이름·항목·제외·설정의 sha256)  2행 목록 파일의 stat
+--   3행 설정 서명  4행 preset 이름
+-- 다음 세션이 같은 내용이면 목록을 다시 펴지 않고 그대로 받는다 (adopt).
+local function key_path(root)
+  return list_path(root) .. '.key'
+end
+
+-- 목록에 무엇이 드는지를 바꾸는 설정들 (한 줄짜리 해시로)
+local function cfg_sig()
+  local t = {}
+  for _, k in ipairs({ 'all_files', 'max_bytes', 'skip_binary', 'nested_presets',
+      'nested_depth', 'exts', 'exts_extra', 'names', 'names_extra',
+      'exclude_exts', 'exclude_exts_extra', 'exclude_names',
+      'exclude_names_extra', 'prune_dirs' }) do
+    t[#t + 1] = tostring(cfg(k, ''))
+  end
+  return vim.fn.sha256(table.concat(t, '\1')):sub(1, 16)
+end
+
+local function content_key(name, entries, exclude)
+  local t = { tostring(name), cfg_sig() }
+  for _, e in ipairs(entries or {}) do
+    t[#t + 1] = (e.kind or 'file') .. ' ' .. tostring(e.path)
+  end
+  t[#t + 1] = '!'
+  for _, x in ipairs(exclude or {}) do
+    t[#t + 1] = x
+  end
+  return vim.fn.sha256(table.concat(t, '\n'))
+end
+
+-- preset 파일(내 사본, 공용본)의 stat. 다른 nvim 이 preset 을 고쳤는지 본다.
+local function preset_key(name)
+  local sp = shared_path(name)
+  return stat_key(uv.fs_stat(preset_path(name))) .. '|'
+      .. stat_key(sp and uv.fs_stat(sp) or nil)
+end
+
+local function read_key(root)
+  local ok, l = pcall(vim.fn.readfile, key_path(root), '', 4)
+  if ok and l and #l >= 4 then
+    return { ckey = l[1], lkey = l[2], sig = l[3], name = l[4] }
+  end
+  return nil
+end
+
+-- 작은 파일이라 io 로 쓴다 (writefile 은 'fsync' 로 + 마다 몇 ms 를 더 썼다)
+local function write_key(root, ckey, st, name)
+  local k = read_key(root)
+  local lines = { ckey, stat_key(st), cfg_sig(), tostring(name) }
+  if k and k.ckey == lines[1] and k.lkey == lines[2] and k.sig == lines[3]
+      and k.name == lines[4] then
+    return
+  end
+  local fh = io.open(key_path(root), 'w')
+  if fh then
+    fh:write(table.concat(lines, '\n'), '\n')
+    fh:close()
+  end
+end
+
+-- 목록 파일을 쓴다. 내용이 같으면 쓰지 않는다 (P8).
+--
+-- 목록을 stat 키로 기억하는 쪽들(트리 표시, \fo, RelationView, autoindex)은
+-- 다시 쓰일 때마다 6,500줄을 다시 읽는데, 내용이 같은 목록을 시작할 때마다
+-- 두세 번, +/- 마다 두 번 다시 썼다. 비교는 디스크와 한다 - 기억(s.cache)만
+-- 믿으면 목록 파일이 지워졌거나 쓰기가 실패했을 때 다시 만들지 않는다
+-- (반대 심문: 그러면 indexfiles.sh 가 git ls-files 로 떨어져 preset 밖의
+-- 파일까지 색인했다).
+--
+-- 쓸 때는 옆에 쓰고 이름을 바꾼다. 제자리 쓰기는 파일을 먼저 비우므로, 그
+-- 순간 indexfiles.sh 가 읽으면 반쪽 목록으로 'gtags -i' 가 색인을 줄인다
+-- (6,500줄을 되풀이해 쓰는 동안 읽는 쪽이 784번 중 35번 잘린 목록을 봤다).
+-- 돌려주는 것: 바뀌었나, 성공했나, 쓴 뒤의 stat
+local function write_list(root, files)
+  local list = list_path(root)
+  local st = uv.fs_stat(list)
+  if st and st.type == 'file' then
+    local size = 0
+    for _, f in ipairs(files) do
+      size = size + #f + 1
+    end
+    if size == st.size then
+      local c = s.cache[root]
+      local cur
+      if c and c.files and c.list_key == stat_key(st) then
+        cur = c.files -- 디스크와 같다고 확인해 둔 기억
+      else
+        local ok, lines = pcall(vim.fn.readfile, list)
+        cur = ok and lines or nil
+      end
+      if cur and #cur == #files then
+        local same = true
+        for i = 1, #files do
+          if cur[i] ~= files[i] then
+            same = false
+            break
+          end
+        end
+        if same then
+          return false, true, st
+        end
+      end
+    end
+  end
+  pcall(vim.fn.mkdir, vim.fs.dirname(list), 'p')
+  local tmp = ('%s.%d.tmp'):format(list, uv.os_getpid())
+  local fh = io.open(tmp, 'w')
+  local ok = fh ~= nil
+  if fh then
+    ok = fh:write(table.concat(files, '\n'), #files > 0 and '\n' or '') ~= nil
+    ok = fh:close() and ok
+  end
+  ok = ok and uv.fs_rename(tmp, list) and true or false
+  if not ok then
+    pcall(os.remove, tmp)
+    return false, false, uv.fs_stat(list)
+  end
+  return true, true, uv.fs_stat(list)
+end
+
+-- 정렬된 목록에서 x 보다 작지 않은 첫 자리. 정렬된 목록에서는 한 접두어로
+-- 시작하는 줄이 한데 모여 있어서, 디렉터리 하나 아래를 반씩 나눠 찾을 수 있다.
+local function lower_bound(list, x)
+  local lo, hi = 1, #list + 1
+  while lo < hi do
+    local mid = math.floor((lo + hi) / 2)
+    if list[mid] < x then
+      lo = mid + 1
+    else
+      hi = mid
+    end
+  end
+  return lo
+end
+
+-- 지난번에 쓴 목록을 '그때 텍스트로 판정된 파일'로 기억한다 (text_file 이
+-- 그런 파일은 앞 1KB 를 다시 읽지 않는다). 목록을 쓰기 전 1분 안에 바뀐
+-- 파일은 다시 본다 - 펴는 동안 바뀌었을 수 있고, 시계가 조금 어긋나도 되게.
+local function learn_known(root, files, st)
+  s.known_text = s.known_text or {}
+  local cut = st.mtime.sec - 60
+  for _, f in ipairs(files) do
+    s.known_text[f:sub(1, 1) == '/' and f or (root .. '/' .. f)] = cut
+  end
+end
+
+-- 세션에서 처음 펼 때 한 번: 우리가 같은 설정으로 쓴 목록일 때만 믿는다
+local function load_known(root)
+  s.known_loaded = s.known_loaded or {}
+  if s.known_loaded[root] then
+    return
+  end
+  s.known_loaded[root] = true
+  local k = read_key(root)
+  local st = uv.fs_stat(list_path(root))
+  if not (k and st and k.sig == cfg_sig() and k.lkey == stat_key(st)) then
+    return
+  end
+  local ok, lines = pcall(vim.fn.readfile, list_path(root))
+  if ok then
+    learn_known(root, lines, st)
+  end
 end
 
 -- write '<root>/.tags/files' (preset mode) or remove it (auto mode)
-local function materialize(root)
-  local entries, name, bad = entries_of(root)
+-- 돌려주는 것: 목록(정렬됨, 못 만들었으면 nil), preset 이름, 바뀌었나
+-- got: 뒤에서 미리 편 것 { found =, sk =, pre =, ckey = } (:ProjectFilesReindex,
+-- P2). 그 사이 항목이 바뀌었으면(ckey 가 다르다) 쓰지 않고 여기서 다시 편다.
+local function materialize(root, got)
+  local entries, name, bad, exclude = entries_of(root)
   if bad then
     return nil, nil -- 읽을 수 없는 preset: 목록도 색인도 그대로 둔다
   end
-  local d = dbdir() or '.tags'
-  local list = root .. '/' .. d .. '/files'
+  local list = list_path(root)
   if not entries then
-    if uv.fs_stat(list) then
+    local had = uv.fs_stat(list) ~= nil
+    if had then
       pcall(vim.fn.delete, list)
     end
+    pcall(vim.fn.delete, key_path(root))
     s.cache[root] = { files = nil, entries = nil, preset = nil }
-    return nil, nil
+    return nil, nil, had
+  end
+  load_known(root)
+  if got and got.ckey ~= content_key(name, entries, exclude) then
+    got = nil
   end
   local files, seen = {}, {}
   -- preset 항목은 사람이 고른 것이라 기본적으로 걸르지 않는다 (위 설명 참고)
-  local pre = cfg('nested_presets', 0) ~= 0 and nested_prefixes(root) or {}
+  local pre = got and got.pre
+    or (cfg('nested_presets', 0) ~= 0 and nested_prefixes(root) or {})
   local dropped = 0
-  skipped = { big = 0, binary = 0, worst = nil }
-  for _, f in ipairs(expand_all(root, entries)) do
+  skipped = got and got.sk or { big = 0, binary = 0, worst = nil }
+  for _, f in ipairs(got and got.found
+      or expand_all(root, entries, make_rules(entries, exclude))) do
     if not seen[f] then
       local nested = false
       for _, q in ipairs(pre) do
@@ -1266,34 +1906,445 @@ local function materialize(root)
   -- preset 을 골랐을 때도 같은 일이 난다. 조용히 넘길 일이 아니다.
   if #files == 0 and #entries > 0 then
     -- 항목을 빼다 이렇게 된 경우는 부른 쪽(none_for_empty)이 따로 알린다
+    --
+    -- 한 세션에 (루트, preset, 내용)마다 한 번만 알린다 (R4). 이때는 목록도
+    -- 기억(s.cache)도 남지 않아서 목록을 찾는 쪽(autoindex 의 BufReadPre 세기,
+    -- 첫 빌드, 시작 갱신, VimEnter 뒤 확인)이 부를 때마다 다시 펴고 다시
+    -- 알렸다 - 한 세션에 같은 경고가 다섯 번. 화면이 뜨기 전에 난 것은 F6 처럼
+    -- VimEnter 뒤로 미룬다: 바로 내면 autoindex 의 알림과 쌓여 첫 화면에
+    -- Press ENTER 가 떴고, 키를 누를 때까지 시작 갱신이 멈췄다.
     if not s.quiet_empty then
-      notify(("preset '%s' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다"):format(
-          name or '?')
-        .. ' — 목록과 색인을 그대로 둡니다. 다른 체크아웃의 preset 이거나'
-        .. ' 전부 하위 프로젝트 안입니다.', vim.log.levels.WARN)
+      local key = root .. '\0' .. tostring(name) .. '\0'
+        .. content_key(name, entries, exclude)
+      s.empty_told = s.empty_told or {}
+      if not s.empty_told[key] then
+        s.empty_told[key] = true
+        local msg = ("preset '%s' 의 경로가 이 프로젝트에서 하나도 펼쳐지지 않았습니다"):format(
+            name or '?')
+          .. ' — 목록과 색인을 그대로 둡니다. 다른 체크아웃의 preset 이거나'
+          .. ' 전부 하위 프로젝트 안입니다.'
+        if s.collect or vim.v.vim_did_enter == 1 then
+          notify(msg, vim.log.levels.WARN) -- 모으는 중이면 모으는 쪽이 낸다
+        else
+          api.nvim_create_autocmd('VimEnter', { group = group, once = true,
+            callback = function()
+              vim.schedule(function()
+                notify(msg, vim.log.levels.WARN)
+              end)
+            end })
+        end
+      end
     end
     return nil, name
   end
   table.sort(files)
-  vim.fn.mkdir(root .. '/' .. d, 'p')
-  pcall(vim.fn.writefile, files, list)
-  s.cache[root] = { files = files, entries = entries, preset = name }
-  return files, name
+  local changed, ok, st = write_list(root, files)
+  if not ok then
+    s.cache[root] = nil
+    notify('색인 목록을 쓰지 못했습니다: ' .. vim.fn.fnamemodify(list, ':~'),
+      vim.log.levels.ERROR)
+    return files, name, false
+  end
+  local ckey = content_key(name, entries, exclude)
+  s.cache[root] = {
+    files = files, entries = entries, exclude = exclude, preset = name,
+    list_key = stat_key(st), pkey = preset_key(name), ckey = ckey,
+    verified = true,
+  }
+  write_key(root, ckey, st, name)
+  return files, name, changed
+end
+
+-- 바뀐 항목만큼만 목록을 고친다 (P1).
+--
+-- 예전에는 +/- 한 번마다 preset 전체를 두 번 다시 폈다 (여기서 한 번, 이어
+-- autoindex 의 refresh 가 _G.projectfiles_materialize 로 또 한 번). 디렉터리
+-- 항목마다 find, 목록의 파일마다 stat - 6,500개에 13,000번의 stat 이 키를
+-- 누른 채 돌았고, 느린 stat 의 서버를 흉내 내면 +/- 한 번이 1.7~4초였다.
+-- 여기서는 바뀐 경로 아래만 본다.
+--
+--   delta.drop  빠진 상대 경로들 (그 자신과 그 아래가 목록에서 빠진다)
+--   delta.add   새로 들 수 있는 경로들 { abs =, st = } (파일이면 그것,
+--               디렉터리면 그 아래를 find - 그 아래 목록은 찾은 것이 된다)
+-- 디스크의 preset 은 이미 바뀐 뒤이고, 판정은 바뀐 뒤의 규칙으로 한다. 빼는
+-- 것을 먼저, 더하는 것을 나중에 하면 배치로 모은 순서와 상관없이 통째로 편
+-- 것과 같다 (빼기는 그 경로 아래의 규칙만 바꾸고, 더하기는 그 경로 아래를
+-- 새 규칙으로 다시 찾는다).
+--
+-- 기억이 없거나 이 preset 것이 아니면 false: 부른 쪽이 통째로 편다. 디렉터리
+-- 항목 아래에 그새 생긴 파일은 여기서 보지 않는다 - :ProjectFilesReindex,
+-- 세션 시작(verify_async), 새 파일 저장이 잡는다.
+local function apply_delta(root, delta)
+  local c = s.cache[root]
+  if not (c and c.files) or cfg('nested_presets', 0) ~= 0 then
+    return false
+  end
+  local entries, name, bad, exclude = entries_of(root)
+  if bad or not name or name ~= c.preset or #entries == 0 then
+    return false
+  end
+  local files, removed, added = c.files, {}, {}
+  -- 빼기: 목록이 정렬돼 있으니 빠질 경로마다 그 자신과 'p/' 로 시작하는
+  -- 한 덩어리를 반씩 나눠 찾는다 (줄마다 조상을 훑지 않는다)
+  local del = {}
+  for _, p in ipairs(delta.drop or {}) do
+    if p == '.' or p == '' or p:sub(1, 1) == '/' then
+      return false -- 루트 항목이나 프로젝트 밖: 통째로
+    end
+    local i = lower_bound(files, p)
+    if files[i] == p then
+      del[i] = true
+    end
+    local pre = p .. '/'
+    i = lower_bound(files, pre)
+    while files[i] and files[i]:sub(1, #pre) == pre do
+      del[i] = true
+      i = i + 1
+    end
+  end
+  if next(del) then
+    local kept = {}
+    for i, f in ipairs(files) do
+      if del[i] then
+        removed[#removed + 1] = f
+      else
+        kept[#kept + 1] = f
+      end
+    end
+    files = kept
+  end
+  if #(delta.add or {}) > 0 then
+    local rules = make_rules(entries, exclude)
+    local have = {} -- 이번에 더한 것 (목록에 이미 있는지는 반씩 나눠 찾는다)
+    local found = {} -- 찾아서 남긴 것 전부 (목록에 이미 있던 것까지)
+    local turned = {} -- find 가 내놓았지만 지금 규칙이 거른 것 (바이너리가 됐다 등)
+    local sk = { big = 0, binary = 0 }
+    local dirs = {}
+    local function take(abs, st)
+      local rel = keep_file(root, rules, abs, st, sk)
+      if rel then
+        found[rel] = true
+      elseif not st then
+        turned[rel_to(root, abs)] = true
+      end
+      if rel and not have[rel] and files[lower_bound(files, rel)] ~= rel then
+        have[rel] = true
+        added[#added + 1] = rel
+      end
+    end
+    for _, a in ipairs(delta.add) do
+      local st = a.st or uv.fs_stat(a.abs)
+      if st and st.type == 'directory' then
+        dirs[#dirs + 1] = a.abs
+      elseif st and st.type == 'file' and not pruned_part(rel_to(root, a.abs)) then
+        take(a.abs, st) -- find 를 거치지 않으니 가지치기는 여기서 본다
+      end
+    end
+    local find_ok = true
+    for _, cmd in ipairs(find_cmds(dirs)) do
+      local out = vim.fn.systemlist(cmd)
+      if #out == 0 and vim.v.shell_error ~= 0 then
+        find_ok = false -- find 가 아예 못 돌았다: 아래에서 빼지 않는다
+      end
+      for _, l in ipairs(out) do
+        if l ~= '' then
+          take(l, nil)
+        end
+      end
+    end
+    -- 디렉터리를 다시 찾았으면 그 아래는 찾은 것이 전부다 (N3). 이미 담은
+    -- 디렉터리를 + 로 다시 훑을 때(F8) 새 파일만 더하고 셸이나 git 이 그새
+    -- 지운 파일은 목록에 남겨서, \fo 에 계속 보였고 GTAGS 도 다음 gtags -i
+    -- 까지 그것을 답했다 - 알림은 '새 파일 없음' 이라 맞는 것처럼 보였다.
+    --
+    -- 다만 'find 가 이번에 못 봤다' 가 곧 '지워졌다' 는 아니다 (D1). d 아래의
+    -- 다른 항목이 담은 것 중에 이 find 가 닿지 않는 것이 있다 - 가지치기 이름
+    -- 안의 항목(drivers/net/out/gen, node_modules/x: 이 find 는 out/ 를 쳐 내지만
+    -- 통째로 펴는 쪽은 그 항목 자체를 find 한다), 심볼릭 링크로 든 디렉터리,
+    -- 파일 항목. 예전에는 파일 항목만 stat 으로 지켜서 나머지는 디스크에 멀쩡히
+    -- 있는데도 목록과 GTAGS·ctags 에서 빠졌고, 알림은 '사라진 파일 N개' 였다
+    -- (\fR 이 도로 넣고, 다음 + 가 또 뺐다). 그래서 find 가 못 본 것은 전부 stat
+    -- 하고 더는 보통 파일이 아닐 때만 뺀다 - 보통은 지운 파일만 stat 된다. find 가
+    -- 내놓았는데 지금 규칙이 거른 것(바이너리·크기)은 통째로 펼 때처럼 뺀다.
+    if find_ok and #dirs > 0 then
+      local gone = {}
+      for _, d in ipairs(dirs) do
+        local r = rel_to(root, d)
+        local pre = r == '.' and '' or (r .. '/')
+        local i = lower_bound(files, pre)
+        while files[i] and files[i]:sub(1, #pre) == pre do
+          local f = files[i]
+          if turned[f] then
+            gone[i] = true
+          elseif not found[f] then
+            local fst = uv.fs_stat(f:sub(1, 1) == '/' and f or (root .. '/' .. f))
+            if not (fst and fst.type == 'file') then
+              gone[i] = true
+            end
+          end
+          i = i + 1
+        end
+      end
+      if next(gone) then
+        local kept = {}
+        for i, f in ipairs(files) do
+          if gone[i] then
+            removed[#removed + 1] = f
+          else
+            kept[#kept + 1] = f
+          end
+        end
+        files = kept
+      end
+    end
+    -- 담았지만 색인에서 빠진 것 (통째로 펼 때의 '색인 제외' 알림 대신)
+    if sk.big + sk.binary > 0 then
+      local parts = {}
+      if sk.binary > 0 then
+        parts[#parts + 1] = ('바이너리 %d'):format(sk.binary)
+      end
+      if sk.big > 0 then
+        parts[#parts + 1] = ('%.0fMB 초과 %d'):format(
+          (tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0) / 1048576, sk.big)
+      end
+      notify('색인 제외: ' .. table.concat(parts, ', '))
+    end
+  end
+  -- 빈 목록의 규칙(none 모드로 가기, 쓰지 않기)은 통째로 펴는 쪽이 정한다
+  if #files + #added == 0 then
+    return false
+  end
+  if #added > 0 then
+    -- 정렬된 둘을 합친다 (목록 전체를 다시 정렬하지 않는다)
+    table.sort(added)
+    local merged, i, j = {}, 1, 1
+    while i <= #files or j <= #added do
+      if j > #added or (i <= #files and files[i] < added[j]) then
+        merged[#merged + 1] = files[i]
+        i = i + 1
+      else
+        merged[#merged + 1] = added[j]
+        j = j + 1
+      end
+    end
+    files = merged
+  end
+  local changed, ok, st = write_list(root, files)
+  if not ok then
+    s.cache[root] = nil
+    return false
+  end
+  c.files, c.entries, c.exclude = files, entries, exclude
+  c.list_key, c.pkey = stat_key(st), preset_key(name)
+  c.ckey = content_key(name, entries, exclude)
+  write_key(root, c.ckey, st, name)
+  local function abs_list(rels)
+    local out = {}
+    for i, r in ipairs(rels) do
+      out[i] = r:sub(1, 1) == '/' and r or (root .. '/' .. r)
+    end
+    return out
+  end
+  return files, name, changed, { added = abs_list(added), removed = abs_list(removed) }
+end
+
+-- 지금 기억(s.cache)이 디스크의 이 preset 과 목록 그대로인가. 고치기 전에
+-- 본다: 다른 nvim 이 preset 이나 목록을 그새 바꿨으면 바뀐 만큼만 고칠 수
+-- 없다 - 그 기억에 고친 것을 얹으면 그쪽이 더한 것이 빠진다.
+local function cache_valid(root, name)
+  local c = s.cache[root]
+  return c ~= nil and c.files ~= nil and c.preset == name
+      and c.list_key == stat_key(uv.fs_stat(list_path(root)))
+      and c.pkey == preset_key(name)
+end
+
+local reindex -- 아래 (reindex what we just decided)
+
+-- 세션을 시작할 때 지난번 목록을 받는다. 다시 펴지 않고 그대로 쓰고,
+-- verify_async 가 뒤에서 한 번 다시 펴서 다른 것만 고친다.
+--   known = 같은 설정으로 우리가 쓴 그 목록이다(files.key) - 그 목록의
+--           파일은 바이너리 판정을 다시 하지 않는다 (learn_known)
+-- 정렬이 깨진 목록(손으로 고쳤다)은 받지 않는다 - apply_delta 가 정렬을 믿는다.
+local function adopt(root, name, entries, exclude, ckey, lst, known)
+  local ok, lines = pcall(vim.fn.readfile, list_path(root))
+  if not ok then
+    return false
+  end
+  for i = 2, #lines do
+    if lines[i - 1] >= lines[i] then
+      return false
+    end
+  end
+  if lines[#lines] == '' then
+    return false
+  end
+  s.cache[root] = {
+    files = lines, entries = entries, exclude = exclude, preset = name,
+    list_key = stat_key(lst), pkey = preset_key(name), ckey = ckey,
+    verified = false,
+  }
+  s.known_loaded = s.known_loaded or {}
+  if not s.known_loaded[root] then
+    s.known_loaded[root] = true
+    if known then
+      learn_known(root, lines, lst)
+    end
+  end
+  return true
+end
+
+-- 받아 둔 목록을 뒤에서 한 번 다시 편다 (세션마다 한 번).
+--
+-- 디렉터리 항목 아래에 세션 사이에 생기거나 없어진 파일(git pull, 빌드
+-- 산출물)을 잡는 자리다. 예전에는 플러그인을 읽는 순간 목록 전체를 동기로
+-- 다시 폈다 - 6,600개에 0.5~1초, 느린 stat 을 흉내 내면 3~4초 동안 첫 화면이
+-- 뜨지 않았다 (P3). 여기서는 find 는 자식 프로세스가, 파일마다의 stat 은
+-- 메인 루프에서 몇 ms 씩 나눠 한다. 달라진 것이 있을 때만 목록을 쓰고
+-- 재색인한다 (더하고 뺀 파일을 함께 넘긴다, C3).
+local function verify_async(root)
+  local c = s.cache[root]
+  if not c or not c.files or c.verified or c.verifying then
+    return
+  end
+  c.verifying = true
+  local ckey, entries = c.ckey, c.entries
+  -- 하위 프로젝트(자기 .tags 가 있는 디렉터리)를 거르는 설정
+  -- (g:projectfiles_nested_presets)에서도 확인한다 (INT6). 예전에는 그때 확인을
+  -- 건너뛰어서, 세션 사이에 디렉터리 항목 아래 생긴 파일이 다음 \fR 까지 목록과
+  -- 색인에 없었고 지운 파일은 남았다 (그 전 판은 시작할 때마다 통째로 폈다).
+  -- 거를 접두어도 materialize 와 같은 것을, 메인 루프를 잡지 않고 구한다.
+  local function check(pre)
+    expand_async(root, entries, make_rules(entries, c.exclude), function(found, sk)
+      c.verifying = false
+      if s.cache[root] ~= c then
+        return -- 그새 통째로 다시 폈다
+      end
+      if c.ckey ~= ckey then
+        return verify_async(root) -- 그새 +/- 가 있었다: 지금 항목으로 다시
+      end
+      c.verified = true
+      if not found then
+        return
+      end
+      local files, seen = {}, {}
+      for _, f in ipairs(found) do
+        if not seen[f] then
+          seen[f] = true
+          local nested = false
+          for _, q in ipairs(pre) do
+            if f:sub(1, #q) == q then
+              nested = true
+              break
+            end
+          end
+          if not nested then
+            files[#files + 1] = f
+          end
+        end
+      end
+      if (sk.big + sk.binary) > 0 then
+        s.skip_detail = {
+          root = root, big = sk.big, binary = sk.binary, worst = sk.worst,
+          max = tonumber(cfg('max_bytes', 2 * 1024 * 1024)) or 0,
+        }
+      end
+      if #files == 0 and #entries > 0 then
+        return -- 빈 목록은 쓰지 않는다 (materialize 와 같은 규칙)
+      end
+      if stat_key(uv.fs_stat(list_path(root))) ~= c.list_key then
+        return -- 그새 다른 손(다른 nvim)이 목록을 바꿨다
+      end
+      table.sort(files)
+      local added, removed = {}, {}
+      local old = {}
+      for _, f in ipairs(c.files) do
+        old[f] = true
+      end
+      for _, f in ipairs(files) do
+        if not old[f] then
+          added[#added + 1] = root .. '/' .. f
+        end
+        old[f] = nil
+      end
+      for f in pairs(old) do
+        removed[#removed + 1] = root .. '/' .. f
+      end
+      if #added == 0 and #removed == 0 then
+        -- 그대로다: 이 목록을 지금 내용과 설정으로 확인했다고 적어 둔다 - 다음
+        -- 세션이 바이너리 판정을 다시 하지 않는다 (예전 판이 쓴 목록이었어도)
+        write_key(root, c.ckey, uv.fs_stat(list_path(root)), c.preset)
+        return
+      end
+      local _, ok, st = write_list(root, files)
+      if not ok then
+        return
+      end
+      c.files, c.list_key = files, stat_key(st)
+      write_key(root, c.ckey, st, c.preset)
+      if reindex then
+        reindex(root, { added = added, removed = removed })
+      end
+    end)
+  end
+  if cfg('nested_presets', 0) ~= 0 then
+    nested_prefixes_async(root, check)
+  else
+    check({})
+  end
 end
 
 -- autoindex.lua calls this before it builds a file list, so a preset is in
 -- place BEFORE the first index runs (otherwise the very first build - the one
 -- that happens when a project has no index yet - would index the whole tree)
+--
+-- 같은 것을 두 번 펴지 않는다 (C1). +/- 는 목록을 고친 직후 autoindex 의
+-- refresh 를 부르고, refresh 는 목록을 만들기 전에 늘 이것을 부른다 - 그래서
+-- 키 한 번에 preset 이 두 번 펴졌다. 목록 파일·preset 파일·모드 파일의
+-- stat(mtime 나노초와 크기까지)이 마지막으로 편 뒤 그대로면 바로 돌아간다.
+-- 목록이 바뀌었으면 true, 아니면 false.
 function _G.projectfiles_materialize(root)
   if not root or root == '' then
     return false
   end
-  local entries, _, bad = entries_of(root)
-  if bad or not entries then
-    return false -- auto mode(또는 읽을 수 없는 preset): 쓸 것이 없다
+  local name = active_preset(root)
+  if not name then
+    return false -- auto/none/미설정: 쓸 목록이 없다
   end
-  materialize(root)
-  return true
+  local c = s.cache[root]
+  local lst = uv.fs_stat(list_path(root))
+  local lkey = stat_key(lst)
+  if c and c.files and c.preset == name and c.list_key == lkey
+      and c.pkey == preset_key(name) then
+    verify_async(root)
+    return false
+  end
+  local entries, nm, bad, exclude = entries_of(root)
+  if bad or not entries then
+    return false -- 읽을 수 없는 preset: 쓸 것이 없다
+  end
+  -- 같은 내용을 다시 쓴 것뿐이면(다른 nvim 이 같은 preset 을 저장했다) 다시
+  -- 펴지 않는다
+  local ckey = content_key(nm, entries, exclude)
+  if c and c.files and c.preset == nm and c.ckey == ckey and c.list_key == lkey then
+    c.pkey = preset_key(nm)
+    return false
+  end
+  -- 세션의 처음: 지난번 목록을 그대로 받고 뒤에서 확인한다 (P3). 그 목록이
+  -- 지금 preset 내용으로 만든 것이 아니어도(git pull 이 공용 preset 을 바꿨다)
+  -- 받는다 - 다른 것만 verify_async 가 곧 고친다. 다른 preset 의 목록이면
+  -- (모드를 그새 바꿨다) 지금 편다: 그 목록으로 색인을 시작하면 안 된다.
+  if not (c and c.files) and lst then
+    local k = read_key(root)
+    -- 우리가 같은 설정으로 쓴 그 목록인가 (그렇다면 그 파일들은 텍스트였다)
+    local known = k and k.lkey == lkey and k.sig == cfg_sig()
+    if (not k or k.name == nm)
+        and adopt(root, nm, entries, exclude, ckey, lst, known) then
+      verify_async(root)
+      return false
+    end
+  end
+  local _, _, changed = materialize(root)
+  return changed and true or false
 end
 
 -- ---------------------------------------------------------------------------
@@ -1303,12 +2354,25 @@ end
 -- bang: 'gtags -i' makes the database equal to the list (it drops what is no
 -- longer there), and the usual "this would shrink the index" guard must not
 -- get in the way.
-local function reindex(root)
+--
+-- changes = { added = {절대 경로}, removed = {절대 경로} } - 이번에 목록에
+-- 들고 빠진 파일 (C3). autoindex 는 이것으로 더한 파일을 먼저 색인해 둘 수
+-- 있다. nil 은 '모른다'(통째로 다시 편 경우) - 보통의 강제 갱신이다.
+-- 돌려주는 것: autoindex 가 맡았으면(또는 색인할 것이 없는 모드면) true
+reindex = function(root, changes)
   if s.symbols then
     s.symbols[root] = nil -- the symbol list is about to change
   end
   if type(_G.projectfiles_tree_invalidate) == 'function' then
     pcall(_G.projectfiles_tree_invalidate) -- 트리 표시도 다시 계산되게
+  end
+  -- none / 미설정 모드에서는 색인을 건드리지 않는다 (T2). 마지막 항목을 빼서
+  -- none 이 된 직후에도 이 강제 갱신이 돌았는데, 목록 파일이 없으니
+  -- indexfiles.sh 가 git ls-files 로 떨어져 프로젝트 전체를 색인했다 (실측:
+  -- 50개짜리 색인이 none 모드에서 6,500개가 됐다). gutentags 도 같은 길로
+  -- 트리 전체를 ctags 했다. 있던 색인은 그대로 둔다.
+  if not mode_indexes(root) then
+    return true
   end
   -- 루트를 그대로 넘긴다. ':GtagsIndexRefresh' 는 현재 버퍼에서 프로젝트를
   -- 다시 찾는데, 트리 창이나 telescope 프롬프트에서 부르면 그 버퍼에 이름이
@@ -1316,15 +2380,28 @@ local function reindex(root)
   -- 아무 것도 하지 않는다. 그래서 여기서 목록을 고친 프로젝트를 직접 준다.
   local done = false
   if type(_G.autoindex_refresh) == 'function' then
-    local ok, res = pcall(_G.autoindex_refresh, root, true, '목록 변경')
+    local ok, res = pcall(_G.autoindex_refresh, root, true, '목록 변경', changes)
     done = ok and res == true
   end
   if not done and vim.fn.exists(':GtagsIndexRefresh') == 2 then
     pcall(vim.cmd, 'GtagsIndexRefresh!')
   end
-  if vim.fn.exists(':GutentagsUpdate') == 2 and vim.b.gutentags_files ~= nil then
+  -- ctags(gutentags) 스냅숏은 autoindex 만 다시 만든다 (K2). 여기서도
+  -- GutentagsUpdate! 를 부르면 autoindex 의 ctags_follow 가 갱신이 끝날 때 또
+  -- 불러서 +/- 한 번에 ctags 전체가 두 번 돌았다 (INT2, 실측 0.4초 x 2). 게다가
+  -- 이 호출은 '지금 버퍼'의 프로젝트를 다시 만든다 - 다른 프로젝트의 트리
+  -- 창에서 + 하면 엉뚱한 tags 를 다시 썼다. autoindex 가 갱신을 맡았으면
+  -- (done) 그쪽이 끝나며 따라간다. 맡지 않았으면(꺼져 있다) 루트를 짚어 부탁한다.
+  -- autoindex 가 아예 없을 때만 예전처럼 직접 부른다.
+  if done then
+    return true
+  end
+  if type(_G.autoindex_ctags_refresh) == 'function' then
+    pcall(_G.autoindex_ctags_refresh, root)
+  elseif vim.fn.exists(':GutentagsUpdate') == 2 and vim.b.gutentags_files ~= nil then
     pcall(vim.cmd, 'silent! GutentagsUpdate!')
   end
+  return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -1332,11 +2409,12 @@ end
 -- ---------------------------------------------------------------------------
 -- 여러 경로를 한 번에 담거나 뺄 때(트리에서 범위를 골랐을 때) 쓰는 문맥.
 --
--- add_path 하나가 preset 쓰기 + 목록 다시 펼치기(디렉터리마다 find) +
--- 재색인까지 전부 한다. 50줄을 고르면 그게 50번 도는데, 중간 상태는 아무도
--- 보지 않는다. 그래서 배치 중에는 preset 파일만 갱신하고(다음 항목이 그걸
--- 읽어야 한다) 펼치기와 재색인은 끝에서 한 번만 한다. 알림도 모아서 한 줄로.
-local batch = nil   -- { root =, msgs = {}, emptied = }
+-- add_path 하나가 preset 쓰기 + 목록 고치기 + 재색인까지 전부 한다. 50줄을
+-- 고르면 그게 50번 도는데, 중간 상태는 아무도 보지 않는다. 그래서 배치
+-- 중에는 바뀐 항목을 메모리에만 두고(entries_of 가 그것을 돌려준다) preset
+-- 쓰기와 목록 고치기, 재색인을 끝에서 한 번만 한다. 알림도 모아서 한 줄로.
+-- (예전에는 preset 파일은 경로마다 다시 쓰고 다시 읽었다 - 50개를 6,500항목
+-- preset 에 담는 데 0.8초, 그중 preset 쓰기만 0.5초였다. S7)
 
 -- done = true 는 '경로 하나를 실제로 처리했다'는 뜻이다. 요약에서 세는 것은
 -- 이것뿐이다 - 모드 전환 같은 일회성 알림까지 세면 개수가 부풀려진다.
@@ -1356,12 +2434,30 @@ local function none_for_empty(root, name)
   set_last(root, name)
   set_active(root, MODE_NONE)
   materialize(root) -- none 모드: .tags/files 를 지우고 캐시를 비운다
-  reindex(root)
-  notify(("preset '%s' 의 남은 항목이 이 체크아웃에 없어 none 모드로 돌아갑니다 (preset 은 그대로)")
+  reindex(root) -- 표시만 다시 (none 이라 색인은 건드리지 않는다)
+  notify(("preset '%s' 의 남은 항목이 이 체크아웃에 없어 none 모드로 돌아갑니다 (preset 과 있던 색인은 그대로)")
     :format(name), vim.log.levels.WARN)
 end
 
-local function save_entries(root, name, entries)
+-- 목록을 고친다: 바뀐 만큼 고칠 수 있으면 그렇게(apply_delta), 아니면 통째로.
+-- 돌려주는 것: 목록, preset 이름, 바뀐 파일(모르면 nil)
+local function commit_list(root, delta)
+  if delta then
+    local files, nm, _, changes = apply_delta(root, delta)
+    if files then
+      return files, nm, changes
+    end
+  end
+  local files, nm = materialize(root)
+  return files, nm, nil
+end
+
+-- 항목을 저장하고 목록을 고친 뒤 재색인한다.
+--   exclude  nil 이면 지금 preset 의 것을 그대로 (preset_write)
+--   delta    바뀐 만큼 (apply_delta 참고). nil 이면 목록을 통째로 다시 편다
+--   opts.no_reindex  목록까지만 (add_for_symbol: 즉시 색인 뒤에 직접 부른다)
+-- 돌려주는 것: 목록, 바뀐 파일
+local function save_entries(root, name, entries, exclude, delta, opts)
   if #entries == 0 then
     -- an empty preset indexes nothing, and an empty file list makes the
     -- indexer skip its run - which would leave the old index in place and
@@ -1376,33 +2472,53 @@ local function save_entries(root, name, entries)
       -- 순간이고, 되돌리고 싶은 지점이 바로 여기다.
       backup_preset(name)
       pcall(vim.fn.delete, mine)
+      s.preset_memo[mine] = nil
     end
     set_last(root, name)
     -- 예전에는 여기서 auto 로 돌아갔다. 이제 none 이 있으니 그쪽이 맞다 -
     -- '담아 둔 것이 하나도 남지 않았다'가 '프로젝트 전체를 색인해라'로
     -- 바뀌는 것은 놀라운 일이다. :ProjectFilesRestore 로 되돌릴 수 있다.
     set_active(root, MODE_NONE)
-    if batch then
+    if batch and batch.root == root then
       batch.emptied = name
+      batch.pend = nil
+      batch.rules = nil
       return nil -- 커밋은 배치 끝에서
     end
     materialize(root)
-    reindex(root)
+    reindex(root) -- 표시만 다시: none 모드는 색인하지 않는다 (T2)
     local sp = shared_path(name)
     notify(sp and uv.fs_stat(sp)
       and ("목록이 비어 none 모드로 돌아갑니다 (내 '%s' 사본은 지웠고 vim-ide "
-        .. '공용본은 그대로입니다)'):format(name)
-      or '목록이 비어 none 모드로 돌아갑니다 (색인하지 않습니다)')
+        .. '공용본과 있던 색인은 그대로입니다)'):format(name)
+      or '목록이 비어 none 모드로 돌아갑니다 (더 색인하지 않고, 있던 색인은 그대로 둡니다)')
     return nil
   end
-  preset_write(name, entries)
-  if batch then
+  if batch and batch.root == root then
+    if exclude == nil then
+      exclude = select(4, entries_of(root)) or {}
+    end
+    batch.pend = { name = name, entries = entries, exclude = exclude }
+    if delta and batch.delta then
+      vim.list_extend(batch.delta.drop, delta.drop or {})
+      vim.list_extend(batch.delta.add, delta.add or {})
+    else
+      batch.delta = nil -- 모르는 변경이 섞였다: 끝에서 통째로 편다
+    end
+    if not delta then
+      batch.rules = nil -- 무엇이 바뀌었는지 모른다: 다음에 새로 만든다
+    end
     return nil -- 커밋은 배치 끝에서
+  end
+  -- 고치기 전의 기억이 디스크 그대로일 때만 바뀐 만큼 고친다
+  local valid = cache_valid(root, name)
+  if not preset_write(name, entries, exclude) then
+    valid = false -- 디스크의 preset 은 그대로다: 통째로 펴서 그것을 따른다
   end
   -- 뺄 때만: 더할 때(담은 경로에 색인할 파일이 없을 때)는 예전처럼 알리고
   -- 목록을 그대로 둔다 - 더하다가 none 모드로 바뀌면 안 된다 (반대 심문)
   s.quiet_empty = s.removing
-  local files, nm = materialize(root)
+  local files, nm, changes = commit_list(root, valid and delta or nil)
   s.quiet_empty = nil
   if not files and nm and s.removing then
     -- 남은 항목이 이 체크아웃에서 하나도 펼쳐지지 않는다 (다른 체크아웃에만 있는
@@ -1412,8 +2528,73 @@ local function save_entries(root, name, entries)
     none_for_empty(root, name)
     return nil
   end
-  reindex(root)
-  return files
+  if not (opts and opts.no_reindex) then
+    reindex(root, changes)
+  end
+  return files, changes
+end
+
+-- 항목은 그대로 두고 목록에만 더한다: 디렉터리 항목 안에 그새 생긴 파일을
+-- + 했을 때, 이미 담은 디렉터리를 다시 + 했을 때 (preset 을 다시 쓸 일이 없다)
+-- 돌려주는 것: 목록에 새로 든 파일 수, 빠진 파일 수 (디렉터리를 다시 훑으면
+-- 그새 지워진 것이 빠진다. 배치 중이거나 통째로 다시 폈으면 nil)
+local function list_add(root, abs, st)
+  local a = { abs = abs, st = st }
+  if batch and batch.root == root then
+    if batch.delta then
+      batch.delta.add[#batch.delta.add + 1] = a
+    end
+    batch.list_only = true
+    return nil
+  end
+  local files, _, changes = commit_list(root,
+    cache_valid(root, active_preset(root)) and { add = { a } } or nil)
+  if not files then
+    return 0, 0
+  end
+  if changes and #changes.added == 0 and #changes.removed == 0 then
+    return 0, 0 -- 목록이 그대로다: 색인도 그대로
+  end
+  reindex(root, changes)
+  if not changes then
+    return nil
+  end
+  return #changes.added, #changes.removed
+end
+
+-- 지금 목록 (기억이 디스크 그대로면 그것, 아니면 읽는다). 둘째 값: 정렬을 믿어도 되나
+local function listed_files(root)
+  local c = s.cache[root]
+  if c and c.files and c.list_key == stat_key(uv.fs_stat(list_path(root))) then
+    return c.files, true
+  end
+  local ok, lines = pcall(vim.fn.readfile, list_path(root))
+  return ok and lines or {}, false
+end
+
+-- 지금 목록에 rel 과 그 아래 파일이 몇 개 있나 (목록을 다시 펴지 않고).
+-- 기억한 목록은 정렬돼 있어서 'rel/' 로 시작하는 줄은 한데 모여 있다 -
+-- 반씩 나눠 찾는다 (범위의 50줄을 빼면 6,500줄을 50번 훑던 것).
+local function count_listed(root, rel)
+  local files, sorted = listed_files(root)
+  local pre = rel .. '/'
+  local n = 0
+  if sorted then
+    local i = lower_bound(files, rel)
+    n = files[i] == rel and 1 or 0
+    i = lower_bound(files, pre)
+    while files[i] and files[i]:sub(1, #pre) == pre do
+      n = n + 1
+      i = i + 1
+    end
+    return n
+  end
+  for _, f in ipairs(files) do
+    if f == rel or f:sub(1, #pre) == pre then
+      n = n + 1
+    end
+  end
+  return n
 end
 
 -- A path typed in the view is meant relative to the PROJECT (that is what
@@ -1432,10 +2613,16 @@ local function abs_of(root, path)
   return uv.fs_realpath(cand) or cand
 end
 
+-- p 가 base 자신이거나 그 아래 ('.' 은 루트 항목이라 모두를 덮는다)
+local function under_rel(p, base)
+  return base == '.' or p == base or p:sub(1, #base + 1) == base .. '/'
+end
+
+-- 무언가 바뀌었으면 true
 local function add_path(root, path)
-  local entries, name, bad = entries_of(root)
+  local entries, name, bad, exclude = entries_of(root)
   if bad then
-    return -- 읽을 수 없는 preset: 새 preset 을 시작해 버리면 더 나쁘다
+    return false -- 읽을 수 없는 preset: 새 preset 을 시작해 버리면 더 나쁘다
   end
   local abs = abs_of(root, path)
   local st = uv.fs_stat(abs)
@@ -1443,7 +2630,7 @@ local function add_path(root, path)
     -- check BEFORE switching modes: a typo must not turn the project into
     -- an empty preset (which would index nothing at all)
     bnotify('없는 경로: ' .. path, vim.log.levels.WARN)
-    return
+    return false
   end
   -- 아래 두 거절도 모드를 바꾸기 전에 한다. 예전에는 auto/미설정 프로젝트를
   -- 빈 preset 으로 먼저 바꿔 놓고 거절해서, 담지도 못한 채 그 프로젝트가
@@ -1457,31 +2644,26 @@ local function add_path(root, path)
   if rel:sub(1, 1) == '/' then
     bnotify(('이 프로젝트(%s) 밖의 경로는 담을 수 없습니다: %s'):format(
       vim.fn.fnamemodify(root, ':~'), rel), vim.log.levels.WARN)
-    return
+    return false
   end
   -- 색인 데이터베이스 자리(.tags)와 find 가 늘 가지치기하는 디렉터리(.git,
   -- .repo ...)는 담아도 파일이 하나도 나오지 않는다. 빈 항목만 쌓인다.
   do
-    local skip = { [dbdir() or '.tags'] = true }
-    for _, d in ipairs(pruned_names()) do
-      skip[d] = true
-    end
-    for part in rel:gmatch('[^/]+') do
-      if skip[part] then
-        bnotify(("'%s' 안은 색인에서 늘 빠지는 자리라 담지 않습니다: %s"):format(
-          part, rel), vim.log.levels.WARN)
-        return
-      end
+    local part = pruned_part(rel)
+    if part then
+      bnotify(("'%s' 안은 색인에서 늘 빠지는 자리라 담지 않습니다: %s"):format(
+        part, rel), vim.log.levels.WARN)
+      return false
     end
   end
   -- 하위 프로젝트 안의 경로라도, 직접 담으라고 한 것은 담는다. 다만 그
   -- 프로젝트가 자기 색인을 따로 갖고 있다는 사실은 알려 준다.
-  local owner = nested_owner(root, rel)
+  local owner = nested_owner(root, rel, st.type == 'directory')
   if owner then
     if cfg('nested_presets', 0) ~= 0 then
       bnotify(("'%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다 - "):format(owner)
         .. '거기서 담으세요', vim.log.levels.WARN)
-      return
+      return false
     end
     bnotify(("참고: '%s' 는 자기 색인(.tags)을 가진 하위 프로젝트입니다"):format(owner))
   end
@@ -1505,27 +2687,108 @@ local function add_path(root, path)
       end
       name = free
     end
-    entries = {}
+    entries, exclude = {}, {}
     set_active(root, name)
     -- none 이나 미설정에서 시작해도 'auto ->' 라고 적던 것을 바로잡는다
     bnotify(("%s -> preset '%s'"):format(
       was == MODE_NONE and 'none' or (was == MODE_UNSET and '미설정' or 'auto'), name))
   end
-  for _, e in ipairs(entries) do
-    if e.path == rel then
-      -- 배치에서는 '추가'로 세지 않는다. 예전에는 완료로 세어서, 이미 있던
-      -- 파일까지 '추가 27개 (항목 2 -> 27)' 처럼 보고했다.
-      if batch then
-        batch.same = (batch.same or 0) + 1
-      else
-        bnotify('이미 있습니다: ' .. rel .. '  →  ' .. target_label(root), nil, true)
-      end
-      return
+  -- 이 경로와 그 아래에서 뺀 것(exclude)은 푼다 - 다시 담으라는 뜻이다
+  local rules = rules_for(root, entries, exclude)
+  local ex2, lifted = {}, {}
+  for _, x in ipairs(exclude or {}) do
+    if under_rel(x, rel) then
+      lifted[#lifted + 1] = { abs = root .. '/' .. x, rel = x }
+    else
+      ex2[#ex2 + 1] = x
     end
   end
+  -- 배치의 규칙을 바뀐 만큼 고친다 (rules_for)
+  local function sync_rules(new_entry)
+    for _, l in ipairs(lifted) do
+      rules.exc[l.rel] = nil
+    end
+    if new_entry then
+      rules.inc[rel] = true
+    end
+    rules.any_exc = next(rules.exc) ~= nil
+  end
+  local same = false
+  for _, e in ipairs(entries) do
+    if e.path == rel then
+      same = true
+      break
+    end
+  end
+  -- 이미 항목이거나 다른 디렉터리 항목이 덮고 있으면 항목을 늘리지 않는다.
+  -- 예전에는 덮인 파일도 파일 항목으로 하나 더 담았다 - '-' 로 디렉터리를
+  -- 빼도 그 파일만 남는 군더더기였고, :ProjectFilesAdd 의 연관 파일이 그렇게
+  -- 디렉터리 안의 파일을 몇 개씩 다시 담았다 (S10).
+  local cover = not same and rule_above(rules, rel) == true
+  if same or cover then
+    -- 디렉터리면 그 아래를 한 번 다시 훑는다 (F8): 셸이나 빌드가 그새 만든
+    -- 파일이 함께 든다. 예전에는 '이미 있습니다' 로 끝나서, 그런 파일은 \fR 이나
+    -- 다음 시작까지 목록에 없었다 (+/- 는 바뀐 경로 아래만 본다).
+    local isdir = st.type == 'directory'
+    if #lifted > 0 then
+      sync_rules(false)
+      -- 뺐던 것은 다 이 경로 아래다: 디렉터리 하나를 찾으면 함께 들어온다
+      save_entries(root, name, entries, ex2,
+        { add = isdir and { { abs = abs, st = st } } or lifted })
+      bnotify(('다시 넣음: %s (뺐던 %d곳을 풂)  →  %s'):format(rel, #lifted,
+        target_label(root)), nil, true)
+      return true
+    end
+    if isdir then
+      local n, gone = list_add(root, abs, st)
+      if batch then
+        batch.same = (batch.same or 0) + 1 -- 새 파일은 커밋에서 목록에 든다
+        return false
+      end
+      -- 더한 것과 뺀 것을 따로 센다 (N3): 지워진 것만 빠졌는데 '새 파일 없음'
+      -- 이라고 하면 디렉터리가 목록과 맞는 것처럼 들린다
+      local parts = {}
+      if n and n > 0 then
+        parts[#parts + 1] = ('새 파일 %d개'):format(n)
+      end
+      if gone and gone > 0 then
+        parts[#parts + 1] = ('사라진 파일 %d개'):format(gone)
+      end
+      local fmt = '다시 훑음: %s  →  %s'
+      if #parts > 0 then
+        fmt = '다시 훑음: %s (' .. table.concat(parts, ', ') .. ')  →  %s'
+      elseif n == 0 then
+        fmt = '이미 있습니다: %s (다시 훑음, 새 파일 없음)  →  %s'
+      end
+      bnotify(fmt:format(rel, target_label(root)), nil, true)
+      return n ~= 0 or #parts > 0
+    end
+    -- 디렉터리 항목 안에 그새 만든 파일: 항목은 그대로, 목록에만 넣는다
+    if cover and st.type == 'file' and count_listed(root, rel) == 0 then
+      if not indexed(abs, st, { big = 0, binary = 0 }) then
+        bnotify('색인 규칙에서 빠지는 파일입니다 (바이너리·크기·확장자): ' .. rel,
+          vim.log.levels.WARN)
+        return false
+      end
+      list_add(root, abs, st)
+      bnotify('추가: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+      return true
+    end
+    -- 배치에서는 '추가'로 세지 않는다. 예전에는 완료로 세어서, 이미 있던
+    -- 파일까지 '추가 27개 (항목 2 -> 27)' 처럼 보고했다.
+    if batch then
+      batch.same = (batch.same or 0) + 1
+    else
+      bnotify('이미 있습니다: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+    end
+    return false
+  end
   entries[#entries + 1] = { path = rel, kind = st.type == 'directory' and 'dir' or 'file' }
-  save_entries(root, name, entries)
+  sync_rules(true)
+  -- 뺐던 것은 이 경로 아래이므로 이 경로 하나를 다시 찾으면 함께 들어온다
+  save_entries(root, name, entries, ex2, { add = { { abs = abs, st = st } } })
   bnotify('추가: ' .. rel .. '  →  ' .. target_label(root), nil, true)
+  return true
 end
 
 -- 한 번의 제거가 목록의 상당 부분을 지우려 하면 되묻는다.
@@ -1535,13 +2798,32 @@ end
 -- 빠진다), 그 규모를 말해 주지 않는 것은 의도가 아니었다.
 --   let g:projectfiles_confirm_drop = 0    " 되묻지 않기
 --   let g:projectfiles_confirm_drop = 100  " 100개 이상일 때만
-local function confirm_drop(root, rel, dropped, total)
+--
+-- 알림은 둘을 따로 말한다 (F9): 목록(.tags/files)에서 빠지는 파일, preset 에서
+-- 지워지는 항목. 예전에는 둘을 더해 '항목' 이라 부르고 전체는 항목 수로 적어서
+-- '항목 50개가 빠집니다 (전체 9개)' 가 나왔다 - 디렉터리 항목 안의 디렉터리를
+-- 빼면 지워지는 항목은 0개이고 빠지는 것은 파일 50개다.
+--
+-- 묻는 때는 예전 그대로다: 지워지는 항목 수 + 남는 디렉터리 항목에서 빼는(exclude)
+-- 파일 수(nexcl)가 한도에 닿을 때. 디렉터리 항목 하나를 통째로 빼는 것은 항목
+-- 1개라 묻지 않는다 - 트리에서 +/- 로 늘 하는 일이다. 빠지는 파일 수로 물으면
+-- 파일 30개짜리 디렉터리 항목을 뺄 때마다 새로 물음이 떴다 (병합 점검). 항목
+-- 수는 이 체크아웃에 없는 경로도 센다 - 파일로는 세어지지 않지만 다른 체크
+-- 아웃에서 쓰는 preset 에서는 사라진다.
+-- 단 루트 항목('.')은 빠지는 파일 수로 묻는다: 항목 하나지만 프로젝트 전체라,
+-- 마지막 항목이면 preset 이 지워지고 none 이 된다 (병합 점검: 1704개가 묻지
+-- 않고 빠졌다).
+local function confirm_drop(root, rel, nfiles, nent, total_ent, nexcl)
   local limit = tonumber(cfg('confirm_drop', 20)) or 20
-  if limit <= 0 or dropped < limit then
+  local n = nent + (nexcl or 0)
+  if rel == '.' then
+    n = math.max(n, nfiles)
+  end
+  if limit <= 0 or n < limit then
     return true
   end
-  local msg = ("'%s' 를 빼면 항목 %d개가 목록에서 빠집니다 (전체 %d개). "):format(
-    rel, dropped, total) .. target_label(root)
+  local msg = ("'%s' 를 빼면 목록에서 파일 %d개가 빠집니다 (목록 %d개 중; preset 항목은 %d개 중 %d개). ")
+    :format(rel, nfiles, #listed_files(root), total_ent, nent) .. target_label(root)
   -- 배치(비주얼 범위)는 끝에서 합계를 보고하고, 줄마다 물으면 쓸 수 없다.
   local uis = pcall(api.nvim_list_uis) and #api.nvim_list_uis() or 0
   if batch or uis == 0 then
@@ -1559,83 +2841,112 @@ local function confirm_drop(root, rel, dropped, total)
   return ans == 1
 end
 
+-- 무언가 바뀌었으면 true
 local function remove_path(root, path)
-  local entries, name, bad = entries_of(root)
+  local entries, name, bad, exclude = entries_of(root)
   if bad then
-    return
+    return false
   end
   if not name then
     local m = mode_of(root)
     bnotify(m == MODE_NONE and '색인하지 않는(none) 모드라 뺄 목록이 없습니다'
       or (m == MODE_UNSET and '아직 색인 모드를 정하지 않아 뺄 목록이 없습니다'
         or 'auto 모드(프로젝트 전체)에서는 뺄 목록이 없습니다'), vim.log.levels.WARN)
-    return
+    return false
   end
   local abs = abs_of(root, path)
   local rel = rel_to(root, abs)
-  local kept, dropped = {}, 0
+  local kept, dropped, gone = {}, 0, {}
   for _, e in ipairs(entries) do
     -- removing a directory drops the files under it too
     if e.path == rel or e.path:sub(1, #rel + 1) == rel .. '/' then
       dropped = dropped + 1
+      gone[#gone + 1] = norm_rel(e.path)
     else
       kept[#kept + 1] = e
     end
   end
-  -- 남은 디렉터리 항목이 이 경로를 덮고 있으면(그 위 디렉터리를 담아 두었으면)
-  -- 그 항목을 남은 파일들로 풀어 이 경로만 뺀다.
-  --
-  -- 두 가지를 바로잡았다(반대 심문에서 나온 것):
-  --   * 예전에는 위에서 정확히 맞는 항목을 하나라도 지우면 이 단계를 건너뛰었다.
-  --     neo-tree 에서 디렉터리와 그 안 파일을 함께 담은 뒤 파일을 빼면, 파일
-  --     항목만 지워지고 디렉터리 항목이 여전히 덮어서 색인에 그대로 남았다.
-  --   * 풀 때 'f == rel' 인 것만 걸렀다. rel 이 하위 디렉터리면 같은 파일이
-  --     없으니 아무것도 안 빠지고, 알림은 '항목 -4개' 가 됐다. 그 아래 파일도
-  --     걸러야 한다.
-  local excluded = 0
-  local expanded = {}
-  for _, e in ipairs(kept) do
-    -- '.' 은 프로젝트 루트 항목(트리의 루트 줄에서 + 한 번)이라 모든 경로를 덮는다
-    if e.kind == 'dir' and rel ~= '.' and (e.path == '.'
-        or rel:sub(1, #e.path + 1) == e.path .. '/') then
-      local keep_e = {}
-      local n = 0
-      for _, f in ipairs((expand_entry(root, e))) do
-        if f == rel or f:sub(1, #rel + 1) == rel .. '/' then
-          n = n + 1
-        else
-          keep_e[#keep_e + 1] = { path = f, kind = 'file' }
-        end
-      end
-      if n > 0 then
-        excluded = excluded + n
-        vim.list_extend(expanded, keep_e)
-      else
-        expanded[#expanded + 1] = e -- 덮지만 걸린 파일이 없다: 풀지 않는다
-      end
+  local rules = rules_for(root, entries, exclude)
+  -- 이미 빠진 경로(어느 항목 아래도 아니거나, 뺀 것 아래)에 다시 '-' 를 누르면
+  -- 아무것도 하지 않는다. 그 자리를 '제거' 로 답하면 이미 빠진 것이 또 빠진 것처럼 보인다.
+  if dropped == 0 and rule_of(rules, rel) ~= true then
+    bnotify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
+    return false
+  end
+  -- 이 경로 아래에서 뺀 것은 이 경로가 대신한다. 루트 항목('.')은 예외다 -
+  -- 그것을 빼도 그 아래의 다른 항목은 남으므로 그 항목들의 제외도 남는다
+  -- (덮는 항목이 없어진 제외는 preset_write 가 버린다).
+  local ex2, unex = {}, {}
+  for _, x in ipairs(exclude or {}) do
+    if rel == '.' or not under_rel(x, rel) then
+      ex2[#ex2 + 1] = x
     else
-      expanded[#expanded + 1] = e
+      unex[#unex + 1] = x
     end
   end
-  if excluded > 0 then
-    -- 펼치면서 이미 있던 항목과 겹칠 수 있다. 겹친 것을 그대로 두면
-    -- 목록에 같은 파일이 두 번 남는다.
-    kept = (dedupe_entries(expanded))
+  -- 목록에서 빠지는 파일 수 (confirm_drop 의 알림). rel 아래가 전부 빠진다 - 다만
+  -- 루트 항목('.')을 빼면 남은 항목이 덮는 것은 남는다.
+  local nfiles = 0
+  if rel ~= '.' then
+    nfiles = count_listed(root, rel)
+  elseif dropped > 0 then
+    local left = make_rules(kept, ex2)
+    for _, f in ipairs((listed_files(root))) do
+      if rule_of(left, f) ~= true then
+        nfiles = nfiles + 1
+      end
+    end
+  end
+  -- 남은 디렉터리 항목이 이 경로를 덮고 있으면(그 위 디렉터리를 담아 두었으면)
+  -- 이 경로를 '뺀 것'(exclude)으로 적는다.
+  --
+  -- 예전에는 그 디렉터리 항목을 남은 파일들로 풀어 썼다 (P5/T6/S3). 6,000개
+  -- 헤더를 담은 include/ 에서 파일 하나를 빼면 preset 이 3항목에서 6,001항목
+  -- (350KB)이 됐고, 그 뒤 모든 +/- 가 세 배로 느려졌다. 더 나쁜 것은 디렉터리
+  -- 항목이 사라져서, 그 디렉터리에 새로 만든 파일이 저장해도 목록에 들어가지
+  -- 않았다는 것이다. 이제 디렉터리 항목은 그대로 남는다.
+  -- 몇 개가 빠지는지는 지금 목록에서 센다 - 다시 펴지(find) 않는다.
+  -- (rel 자신과 그 아래만 바뀌므로, 덮는지는 지금 규칙으로 rel 의 위를 보면 된다)
+  local excluded = 0
+  if rel ~= '.' and rule_above(rules, rel) == true then
+    excluded = nfiles
+    if excluded == 0 then
+      -- 목록에는 아직 없지만 다시 펴면 들어올 파일(그새 만든 파일)도 뺀다
+      local st = uv.fs_stat(abs)
+      if st and st.type == 'file' and not pruned_part(rel)
+          and indexed(abs, st, { big = 0, binary = 0 }) then
+        excluded = 1
+      end
+    end
+    if excluded > 0 then
+      ex2[#ex2 + 1] = rel
+    end
   end
   if dropped == 0 and excluded == 0 then
     bnotify('목록에 없습니다: ' .. rel, vim.log.levels.WARN)
-    return
+    return false
   end
   -- 몇 개가 빠지는지 말한다. 디렉터리에 '-' 를 한 번 누르면 그 아래가 전부
   -- 빠지는데, 예전에는 '제거: <경로>' 한 줄만 나와서 487개가 사라진 것을
   -- 화면에서 알 수 없었다.
-  if not confirm_drop(root, rel, dropped + excluded, #entries) then
+  if not confirm_drop(root, rel, nfiles, dropped, #entries, excluded) then
     bnotify('제거를 취소했습니다: ' .. rel, vim.log.levels.WARN)
-    return
+    return false
   end
+  -- 배치의 규칙을 바뀐 만큼 고친다 (rules_for)
+  for _, p in ipairs(gone) do
+    rules.inc[p] = nil
+  end
+  for _, x in ipairs(unex) do
+    rules.exc[x] = nil
+  end
+  if excluded > 0 then
+    rules.exc[rel] = true
+  end
+  rules.any_exc = next(rules.exc) ~= nil
   -- 빼다가 남은 항목이 이 체크아웃에서 하나도 안 펼쳐지면 none 모드로 (save_entries)
   s.removing = true
-  local okS, errS = pcall(save_entries, root, name, kept)
+  local okS, errS = pcall(save_entries, root, name, kept, ex2, { drop = { rel } })
   s.removing = nil
   if not okS then
     error(errS)
@@ -1649,37 +2960,60 @@ local function remove_path(root, path)
   end
   bnotify(('제거: %s (%s)  →  %s'):format(rel, table.concat(parts, ', '),
     target_label(root)), nil, true)
+  return true
 end
 
 -- 여러 경로를 한 번의 커밋으로 처리한다. fn 안에서는 add_path/remove_path 를
--- 몇 번이든 불러도 되고, 목록 펼치기와 재색인은 여기서 한 번만 일어난다.
-local function in_batch(root, what, fn)
+-- 몇 번이든 불러도 되고, preset 쓰기·목록 고치기·재색인은 여기서 한 번만
+-- 일어난다. opts.head(b, before, after) 는 요약 줄을 바꿔 쓴다.
+local function in_batch(root, what, fn, opts)
   if batch then
     fn() -- 중첩: 바깥 배치가 커밋한다
     return
   end
+  if not s.collect then
+    return one_line(in_batch, root, what, fn, opts) -- 요약과 함께 한 줄로
+  end
   local before = #(entries_of(root) or {})
-  batch = { root = root, msgs = {}, done = 0 }
+  local name0 = active_preset(root)
+  -- 시작할 때의 기억이 디스크 그대로여야 끝에서 모은 만큼만 고칠 수 있다
+  local valid = cache_valid(root, name0)
+  batch = { root = root, msgs = {}, done = 0, delta = { add = {}, drop = {} } }
   local ok, err = pcall(fn)
   local b = batch
   batch = nil
 
-  if b.emptied then
-    -- 배치로 마지막 항목까지 빠졌다: 단일 경로와 같은 규칙으로 auto 복귀
-    save_entries(root, b.emptied, {})
-  else
+  if b.pend then
+    -- 모은 항목을 한 번에 쓴다 (preset 쓰기와 백업이 한 번)
+    if b.pend.name ~= name0 then
+      valid = false -- auto/none 에서 preset 을 새로 시작했다
+    end
+    if not preset_write(b.pend.name, b.pend.entries, b.pend.exclude) then
+      valid = false
+    end
     -- 이 배치가 실제로 뺀 것이 있을 때만 none 모드로 (아무것도 안 바뀐 배치가
     -- 모드를 바꾸면 안 된다 - 반대 심문). 더하는 배치는 예전 그대로.
     local removing = what == '제거' and (b.done or 0) > 0
     s.quiet_empty = removing
-    local files, nm = materialize(root)
+    local files, nm, changes = commit_list(root, valid and b.delta or nil)
     s.quiet_empty = nil
     if not files and nm and removing then
       none_for_empty(root, nm) -- 남은 항목이 이 체크아웃에 하나도 없다
     else
-      reindex(root)
+      reindex(root, changes)
+    end
+  elseif b.emptied then
+    -- 배치로 마지막 항목까지 빠졌다: 단일 경로와 같은 규칙으로 none 모드
+    save_entries(root, b.emptied, {})
+  elseif b.list_only then
+    -- 항목은 그대로, 목록에만 더했다 (디렉터리 항목 안의 새 파일, 다시 훑은
+    -- 디렉터리). 새로 든 것이 없으면 색인도 그대로 둔다.
+    local files, _, changes = commit_list(root, valid and b.delta or nil)
+    if files and not (changes and #changes.added == 0 and #changes.removed == 0) then
+      reindex(root, changes)
     end
   end
+  -- 아무것도 바뀌지 않은 배치는 목록도 색인도 건드리지 않는다
 
   -- 알림은 한 줄로. 경고는 몇 개만 보여 주고 나머지는 수만 알린다.
   local warns = {}
@@ -1689,9 +3023,10 @@ local function in_batch(root, what, fn)
     end
   end
   local after = #(entries_of(root) or {})
-  local head = ('%s %d개%s (항목 %d -> %d)  →  %s'):format(what, b.done,
-    (b.same or 0) > 0 and (', 이미 있음 %d개'):format(b.same) or '',
-    before, after, target_label(root))
+  local head = opts and opts.head and opts.head(b, before, after)
+      or ('%s %d개%s (항목 %d -> %d)  →  %s'):format(what, b.done,
+        (b.same or 0) > 0 and (', 이미 있음 %d개'):format(b.same) or '',
+        before, after, target_label(root))
   if #warns > 0 then
     local shown = {}
     for i = 1, math.min(#warns, 3) do
@@ -1783,6 +3118,9 @@ choose_mode = function(root, cb)
     prompt = '색인 모드 — ' .. short,
     format_item = function(it) return it.label end,
   }, function(choice)
+    -- 고르는 창(inputlist)이 남긴 줄 위에 알림을 쓰면 Press ENTER 가 뜨고, 그
+    -- 동안 색인이 멈춘다 (실측 4초 - 누를 때까지). 한 번 지우고 쓴다.
+    pcall(vim.cmd, 'redraw')
     if not choice or choice.name == SKIP then
       notify('색인을 건너뜁니다 (:ProjectFilesMode 로 다시 고를 수 있습니다)')
       cb(false)
@@ -1790,6 +3128,7 @@ choose_mode = function(root, cb)
     end
     if choice.name == NEW_PRESET then
       vim.ui.input({ prompt = '새 preset 이름: ' }, function(nm)
+        pcall(vim.cmd, 'redraw') -- 입력 줄 위에 쓰면 Press ENTER (위와 같다)
         nm = nm and nm:gsub('^%s+', ''):gsub('%s+$', '') or ''
         if nm == '' then
           cb(false)
@@ -1882,85 +3221,106 @@ local function tree_paths(arg)
   return out
 end
 
--- 트리 루트 자체는 건너뛴다. 범위를 크게 잡으면 루트 줄이 함께 들어오는데,
--- 그걸 담으면 preset 이 프로젝트 전체가 되어 고른 범위와 무관해진다.
-local function drop_root(paths)
-  local keep, dropped = {}, 0
-  for _, p in ipairs(paths) do
-    if p == tree_root(p) then
-      dropped = dropped + 1
-    else
-      keep[#keep + 1] = p
-    end
-  end
-  return keep, dropped
-end
-
 -- 대상 프로젝트가 지금 보고 있는 프로젝트와 다르면 그렇다고 말한다.
 --
 -- 경로는 스스로 어느 프로젝트에 속하는지 정한다(그래야 트리 창에서도 맞는
 -- 곳에 담긴다). 그 대신 '내가 보던 곳이 아닌 다른 프로젝트에 들어갔다'는
 -- 사실이 조용히 지나가면 안 된다 - 상위 트리에서 저장한 preset 이 하위
 -- 트리의 경로로 가득 찬 것을 아무도 눈치채지 못한 것이 그래서였다.
--- 어느 '.tags' 에 저장되는지 짧게 (피커 제목에도 같은 값을 넣는다)
-
--- 색인 목록을 고칠 때마다 어디에 쓰는지 말해 준다. 보고 있던 프로젝트와
--- 다르면 그것도 같이 - 그 침묵이 preset 이 엉뚱한 트리의 경로로 채워지는
--- 것을 눈치채지 못한 원인이었다.
+--
+-- 같은 프로젝트면 말하지 않는다: 결과 줄('추가: x  →  <루트>/.tags [preset]')
+-- 이 이미 어디에 썼는지 말한다. 예전에는 '색인 대상: …' 을 따로 한 줄 더
+-- 냈고, Ex 명령 안에서 그 두 줄이 쌓여 Press ENTER 가 떴다 (B2). 다를 때의
+-- 한 마디도 같은 줄에 붙는다 (one_line).
 local function announce_root(root)
   if not root then
     return
   end
   local ok, cur = pcall(cur_root)
   if ok and cur and root ~= cur then
-    notify(('색인 대상: %s   (보고 있던 곳: %s)'):format(
-      target_label(root), vim.fn.fnamemodify(cur, ':~')))
-  else
-    notify('색인 대상: ' .. target_label(root))
+    notify(('(보고 있던 곳: %s)'):format(vim.fn.fnamemodify(cur, ':~')))
   end
 end
 
-local function tree_apply(arg, what, one)
-  -- 루트 줄을 빼는 것은 범위(V 로 여러 줄)를 고른 경우만이다. 루트 줄에서
-  -- + 를 한 번 누른 것은 '루트를 담아라'다 (README) - 예전에는 한 줄도
-  -- 범위처럼 걸러서 '범위에 루트만 있었습니다' 라며 아무것도 안 했다 (QA).
+-- 여러 경로를 프로젝트별로 묶어 프로젝트마다 한 번씩 커밋한다 (C2).
+--
+-- 범위의 첫 경로가 프로젝트를 정하던 예전에는 다른 프로젝트의 경로가 '이
+-- 프로젝트 밖' 경고와 함께 버려졌다. 경로마다 root_of 는 위로 올라가며
+-- stat 하므로 디렉터리 단위로 기억한다.
+--
+-- 트리 루트 자체는 범위(경로 둘 이상)일 때만 건너뛴다. 범위를 크게 잡으면
+-- 루트 줄이 함께 들어오는데, 그걸 담으면 preset 이 프로젝트 전체가 되어 고른
+-- 범위와 무관해진다. 루트 줄에서 + 를 한 번 누른 것은 '루트를 담아라'다
+-- (README) - 예전에는 한 줄도 범위처럼 걸러서 '범위에 루트만 있었습니다'
+-- 라며 아무것도 안 했다 (QA).
+local function apply_many(arg, what, one)
   local all = tree_paths(arg)
-  local paths, dropped
-  if type(arg) == 'table' and #all > 1 then
-    paths, dropped = drop_root(all)
-  else
-    paths, dropped = all, 0
+  local ranged = type(arg) == 'table' and #all > 1
+  local by_dir, groups, order, dropped = {}, {}, {}, 0
+  for _, p in ipairs(all) do
+    -- root_of 와 같은 출발점으로 묶는다 (디렉터리는 ':p' 가 '/' 를 붙여 자기
+    -- 자신에서 출발한다 - 자기 .tags 를 가진 하위 디렉터리가 그렇다)
+    local dir = vim.fs.dirname(vim.fn.fnamemodify(p, ':p'))
+    local r = by_dir[dir]
+    if r == nil then
+      r = tree_root(p) or false
+      by_dir[dir] = r
+    end
+    if ranged and p == r then
+      dropped = dropped + 1
+    elseif r then
+      if not groups[r] then
+        groups[r] = {}
+        order[#order + 1] = r
+      end
+      table.insert(groups[r], p)
+    end
   end
-  if #paths == 0 then
+  if #order == 0 then
     if dropped > 0 then
       notify('트리 루트는 건너뜁니다 (범위에 루트만 있었습니다)',
         vim.log.levels.WARN)
     end
     return false
   end
-  local root = tree_root(paths[1])
-  announce_root(root)
-  if #paths == 1 then
-    one(root, paths[1])
-  else
-    in_batch(root, what, function()
-      for _, p in ipairs(paths) do
-        one(root, p)
+  one_line(function()
+    for _, root in ipairs(order) do
+      local paths = groups[root]
+      announce_root(root)
+      if #paths == 1 then
+        one(root, paths[1])
+      else
+        in_batch(root, what, function()
+          for _, p in ipairs(paths) do
+            one(root, p)
+          end
+        end)
       end
-    end)
-  end
-  if dropped > 0 then
-    notify('트리 루트 ' .. dropped .. '줄은 건너뜀')
-  end
+    end
+    if dropped > 0 then
+      notify('트리 루트 ' .. dropped .. '줄은 건너뜀')
+    end
+  end)
   return true
 end
 
 function _G.projectfiles_add(arg)
-  return tree_apply(arg, '추가', add_path)
+  return apply_many(arg, '추가', add_path)
 end
 
 function _G.projectfiles_remove(arg)
-  return tree_apply(arg, '제거', remove_path)
+  return apply_many(arg, '제거', remove_path)
+end
+
+-- 절대 경로 여러 개(프로젝트가 섞여도 된다)를 한 번에. 프로젝트마다 preset
+-- 쓰기 한 번, 목록 고치기 한 번, 재색인 한 번 (C2). 트리의 범위 선택과
+-- telescope/quickfix 의 여러 줄 선택이 이것을 쓴다.
+function _G.projectfiles_add_many(paths)
+  return apply_many(paths, '추가', add_path)
+end
+
+function _G.projectfiles_remove_many(paths)
+  return apply_many(paths, '제거', remove_path)
 end
 
 -- 트리에서 이름을 바꾸거나 옮긴 경로(neo-tree 의 r / m / x,p)를 색인 목록이
@@ -1992,7 +3352,7 @@ local function rename_path(src_abs, dst_abs)
     return 0
   end
   local root = root_of(src_abs)
-  local entries, name, bad = entries_of(root)
+  local entries, name, bad, exclude = entries_of(root)
   if bad or not name or #entries == 0 then
     return 0 -- auto / none / 미설정 / 읽을 수 없는 preset: 고칠 목록이 없다
   end
@@ -2005,7 +3365,7 @@ local function rename_path(src_abs, dst_abs)
   local function under(p, base)
     return base == '.' or p == base or p:sub(1, #base + 1) == base .. '/'
   end
-  local out, moved, cover_src, cover_dst = {}, 0, false, false
+  local out, moved, cover_dst = {}, 0, false
   for _, e in ipairs(entries) do
     local p = norm_rel(e.path)
     if under(p, src) then
@@ -2015,11 +3375,28 @@ local function rename_path(src_abs, dst_abs)
       end
     else
       out[#out + 1] = e
-      cover_src = cover_src or under(src, p)
       cover_dst = cover_dst or (not outside and under(dst, p))
     end
   end
-  if moved == 0 and not cover_src and not cover_dst then
+  -- 옮기기 전에 색인에 들어 있던 곳인가: 항목만이 아니라 뺀 것(exclude)까지 본다
+  -- (F3). 항목만 보면 '-' 로 뺀 drivers/net/net_040.c 도 'drivers/net 이 덮는
+  -- 곳'으로 읽혀서, 밖으로 꺼내면 아래의 '담아 둔 디렉터리에서 꺼냈다'가 새
+  -- 자리를 파일 항목으로 담았다 - 뺀 파일이 옮기기만 하면 색인에 다시 들어왔다.
+  local cover_src = rule_of(make_rules(entries, exclude), src) == true
+  -- 디렉터리 항목 아래에서 뺀 것(exclude)도 따라간다 - 이름을 바꾼 뒤에도
+  -- 빠진 채여야 한다. 프로젝트 밖으로 나갔으면 지운다.
+  local xout, xmoved = {}, 0
+  for _, x in ipairs(exclude or {}) do
+    if under(x, src) then
+      xmoved = xmoved + 1
+      if not outside then
+        xout[#xout + 1] = dst .. x:sub(#src + 1)
+      end
+    else
+      xout[#xout + 1] = x
+    end
+  end
+  if moved == 0 and xmoved == 0 and not cover_src and not cover_dst then
     return 0 -- 색인과 무관한 경로
   end
   local added = 0
@@ -2029,9 +3406,9 @@ local function rename_path(src_abs, dst_abs)
     added = 1
   end
   local removing = outside and (moved > 0 or cover_src)
-  if moved + added > 0 then
+  if moved + added + xmoved > 0 then
     s.removing = removing or nil
-    local ok, err = pcall(save_entries, root, name, out)
+    local ok, err = pcall(save_entries, root, name, out, xout)
     s.removing = nil
     if not ok then
       error(err)
@@ -2058,7 +3435,7 @@ local function rename_path(src_abs, dst_abs)
 end
 
 function _G.projectfiles_renamed(src, dst)
-  local ok, n = pcall(rename_path, src, dst)
+  local ok, n = pcall(one_line, rename_path, src, dst)
   if not ok then
     notify('색인 목록을 고치지 못했습니다: ' .. tostring(n), vim.log.levels.ERROR)
     return 0
@@ -2190,23 +3567,24 @@ function _G.projectfiles_status(path)
     return '(경로 없음)'
   end
   local root = tree_root(path)
-  local _, name = entries_of(root)
+  -- '=' 한 번에 preset JSON 을 통째로 풀고(이름만 쓰려고) 목록 파일을 처음부터
+  -- 읽어 훑었다 (S14). 이름은 모드 파일에서, 포함 여부는 트리 표시가 쓰는 것과
+  -- 같은 집합(flag_data, 목록 파일의 stat 으로 기억)에서 - 표시와 답이 어긋나지
+  -- 않는다.
+  local m = mode_of(root)
+  local name = active_preset(root)
   local rel = rel_to(root, abs_of(root, path))
-  local inlist = false
-  local d = dbdir() or '.tags'
-  local lf = root .. '/' .. d .. '/files'
-  if uv.fs_stat(lf) then
-    for _, l in ipairs(vim.fn.readfile(lf)) do
-      if l == rel or l:sub(1, #rel + 1) == rel .. '/' then
-        inlist = true
-        break
-      end
-    end
+  local c = flag_data(root)
+  local inlist
+  if c.preset then
+    inlist = c.files[rel] or c.dirs[rel] or false
   else
-    inlist = true -- auto 모드: 목록 파일이 없고 전체가 대상이다
+    -- 목록 파일이 없다: auto 는 전체가 대상이고, none/미설정은 아무것도 아니다
+    inlist = m == MODE_AUTO
   end
   return ("%s  |  모드: %s  |  색인: %s"):format(rel,
-    name and ("preset '" .. name .. "'") or 'auto',
+    name and ("preset '" .. name .. "'")
+    or (m == MODE_NONE and 'none' or (m == MODE_UNSET and '미설정' or 'auto')),
     inlist and '포함' or '제외')
 end
 
@@ -2372,6 +3750,13 @@ api.nvim_create_autocmd('VimEnter', {
       if not (ok and root) then
         return
       end
+      -- 모드를 정하지 않은(none 포함) 프로젝트는 훑지도 않는다. absorb_hint 가
+      -- 어차피 그런 곳에서는 아무것도 하지 않는데, 그 앞에서 depth 7 의 find 가
+      -- 배경에서 돌고 '<root>/.tags' 를 만들었다 - $HOME 에서 띄워도 홈 전체를
+      -- 걸었다 (P7).
+      if not mode_indexes(root) then
+        return
+      end
       nested_prefixes_async(root, function()
         pcall(absorb_hint, root)
       end)
@@ -2419,132 +3804,194 @@ local function global_lines(root, args, timeout)
   return vim.split(o.stdout, '\n', { trimempty = true })
 end
 
--- headers this file includes, as far as they exist inside the project
-local function includes_of(root, abs)
-  local out, dir = {}, vim.fs.dirname(abs)
-  local ok, lines = pcall(vim.fn.readfile, abs, '', 3000)
-  if not ok then
+-- 여러 global 질의를 셸 하나로 묻는다 (질의마다 줄 목록을 돌려준다).
+--
+-- 예전에는 질의마다 vim.system 으로 nvim 을 fork 해 기다렸다 - :ProjectFilesAdd
+-- 파일 하나에 '#include' 마다 'global -P', 쓰는 심볼마다 'global -d' 로
+-- 20~60번, 그동안 화면이 멎었다 (S10). 'global -d' 를 '^(a|b)$' 하나로 묶지
+-- 않는 것은, 앞이 고정되지 않은 정규식은 커널 크기 GTAGS 를 통째로 훑기 때문이다.
+--   qs: { {'-P', 경로 패턴} | {'-d', 심볼} ... }
+local function global_many(root, qs)
+  local out = {}
+  for i = 1, #qs do
+    out[i] = {}
+  end
+  local g = global_cmd()
+  if not g or #qs == 0 then
     return out
   end
+  local argv = { 'sh', '-c', 'g=$1; shift; while [ $# -gt 1 ]; do '
+    .. 'if [ "$1" = P ]; then "$g" -P "$2"; else "$g" --result=ctags-mod -d "$2"; fi; '
+    .. 'echo @@pf@@; shift 2; done', 'sh', g }
+  for _, q in ipairs(qs) do
+    argv[#argv + 1] = q[1] == '-P' and 'P' or 'D'
+    argv[#argv + 1] = q[2]
+  end
+  local ok, o = pcall(function()
+    return vim.system(argv, { text = true, cwd = root,
+      env = { GTAGSOBJDIR = dbdir() } }):wait(math.min(20000, 4000 + 200 * #qs))
+  end)
+  if not ok or not o or not o.stdout then
+    return out
+  end
+  local i = 1
+  for l in o.stdout:gmatch('[^\n]+') do
+    if l == '@@pf@@' then
+      i = i + 1
+    elseif out[i] then
+      table.insert(out[i], l)
+    end
+  end
+  return out
+end
+
+-- everything `abs` needs, as project-relative paths: the headers it
+-- includes (next to it, then through the index) and the files defining the
+-- symbols it uses (through the index)
+--
+-- use_global = false 면 색인에 묻지 않는다: preset 모드에서는 색인이 곧
+-- 목록이라 global 이 답할 수 있는 파일은 이미 목록에 있다 (옆 디렉터리의
+-- '#include "x.h"' 는 그대로 본다 - stat 하나다).
+local function related_of(root, abs, use_global)
+  if cfg('expand', 1) == 0 then
+    return {}
+  end
+  local ok, lines = pcall(vim.fn.readfile, abs, '', 3000)
+  if not ok then
+    return {}
+  end
+  local dir = vim.fs.dirname(abs)
+  local order, qs = {}, {} -- order: { p = 절대 경로 } 또는 { q = 질의 번호 }
   for _, l in ipairs(lines) do
     local inc = l:match('^%s*#%s*include%s*"([^"]+)"')
         or l:match('^%s*#%s*include%s*<([^>]+)>')
     if inc then
       local cand = dir .. '/' .. inc
-      if not uv.fs_stat(cand) then
-        cand = nil
+      if uv.fs_stat(cand) then
+        order[#order + 1] = { p = cand }
+      elseif use_global then
         -- ask the index where that header is: '-P' matches whole paths
-        local pat = '/' .. inc:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
-        for _, hit in ipairs(global_lines(root, { '-P', pat })) do
-          local p2 = hit:sub(1, 1) == '/' and hit or (root .. '/' .. hit)
-          if uv.fs_stat(p2) then
-            cand = p2
-            break
-          end
-        end
-      end
-      if cand then
-        out[#out + 1] = cand
+        qs[#qs + 1] = { '-P', '/' .. inc:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$' }
+        order[#order + 1] = { q = #qs }
       end
     end
   end
-  return out
-end
-
--- files defining the symbols this one uses
-local function symbol_files(root, abs)
-  local out, seen = {}, {}
-  local ok, lines = pcall(vim.fn.readfile, abs, '', 3000)
-  if not ok then
-    return out
+  local nsym0 = #qs
+  if use_global then
+    -- files defining the symbols this one uses
+    local max = tonumber(cfg('expand_max', 40)) or 40
+    local seen, n = {}, 0
+    for _, l in ipairs(lines) do
+      if not l:match('^%s*#') then
+        for w in l:gmatch('[A-Za-z_][A-Za-z0-9_]*') do
+          if not KEYWORD[w] and #w > 2 and not seen[w] and n < max then
+            seen[w] = true
+            n = n + 1
+            qs[#qs + 1] = { '-d', w }
+          end
+        end
+      end
+    end
   end
-  local max = tonumber(cfg('expand_max', 40)) or 40
-  local syms, n = {}, 0
-  for _, l in ipairs(lines) do
-    if not l:match('^%s*#') then
-      for w in l:gmatch('[A-Za-z_][A-Za-z0-9_]*') do
-        if not KEYWORD[w] and #w > 2 and not seen[w] and n < max then
-          seen[w] = true
-          n = n + 1
-          syms[#syms + 1] = w
+  local res = global_many(root, qs)
+  local cands = {}
+  for _, o in ipairs(order) do
+    if o.p then
+      cands[#cands + 1] = o.p
+    else
+      for _, hit in ipairs(res[o.q] or {}) do
+        local p2 = hit:sub(1, 1) == '/' and hit or (root .. '/' .. hit)
+        if uv.fs_stat(p2) then
+          cands[#cands + 1] = p2
+          break
         end
       end
     end
   end
   local self_rel = rel_to(root, abs)
-  local files, added = {}, {}
-  for _, sym in ipairs(syms) do
-    for _, hit in ipairs(global_lines(root, { '--result=ctags-mod', '-d', sym })) do
+  local added = {}
+  for i = nsym0 + 1, #qs do
+    for _, hit in ipairs(res[i] or {}) do
       local path = hit:match('^([^\t]+)')
       if path then
         local rel = path:sub(1, 1) == '/' and rel_to(root, path) or path
         if rel ~= self_rel and not added[rel] and uv.fs_stat(root .. '/' .. rel) then
           added[rel] = true
-          files[#files + 1] = rel
+          cands[#cands + 1] = root .. '/' .. rel
         end
       end
     end
   end
-  for _, f in ipairs(files) do
-    out[#out + 1] = root .. '/' .. f
+  local out, seen = {}, {}
+  for _, p in ipairs(cands) do
+    local rel = rel_to(root, p)
+    if indexed(p) and rel:sub(1, 1) ~= '/' and not seen[rel] then
+      seen[rel] = true
+      out[#out + 1] = rel
+    end
   end
   return out
 end
 
--- everything `abs` needs, as project-relative paths
-local function related_of(root, abs)
-  if cfg('expand', 1) == 0 then
-    return {}
+-- 지금 목록에 든 파일들 (집합). 기억이 디스크 그대로면 그것을, 아니면 읽는다.
+local function listed_set(root)
+  local set = {}
+  for _, f in ipairs((listed_files(root))) do
+    set[f] = true
   end
-  local out, seen = {}, {}
-  for _, list in ipairs({ includes_of(root, abs), symbol_files(root, abs) }) do
-    for _, p in ipairs(list) do
-      local rel = rel_to(root, p)
-      if indexed(p) and rel:sub(1, 1) ~= '/' and not seen[rel] then
-        seen[rel] = true
-        out[#out + 1] = rel
-      end
-    end
-  end
-  return out
+  return set
 end
 
 -- ---------------------------------------------------------------------------
 -- adding, with what the file needs
 -- ---------------------------------------------------------------------------
+-- 연관 파일을 먼저 구하고 본 파일과 함께 한 번에 담는다 (S10). 예전에는 본
+-- 파일을 담아 저장·목록 펴기·재색인을 한 번 하고, 연관 파일로 또 한 번 했다 -
+-- auto 모드에서 처음 담을 때는 첫 저장이 6,560개짜리 색인을 1개로 줄였다가
+-- 다시 늘려서 '자리 되찾기' 전체 빌드까지 불렀다.
 local function add_with_related(root, path)
-  local before = select(1, entries_of(root)) or {}
-  local n0 = #before
-  add_path(root, path)
-  local entries, name = entries_of(root)
-  if not name then
-    return -- add_path refused (bad path)
-  end
-  if #entries == n0 then
-    return -- nothing new
-  end
   local abs = abs_of(root, path)
   local st = uv.fs_stat(abs)
-  if not (st and st.type == 'file') then
-    return -- a directory already brings its own tree
+  if not (st and st.type == 'file') or cfg('expand', 1) == 0 then
+    return add_path(root, path) -- 디렉터리는 제 아래를 데려온다 / 없는 경로는 add_path 가 알린다
   end
-  local have = {}
-  for _, e in ipairs(entries) do
+  local main = rel_to(root, abs)
+  -- 이미 목록에 있는 것(디렉터리 항목 안의 파일 포함)은 다시 담지 않는다.
+  -- 예전에는 항목 경로만 보고 골라서, 디렉터리 항목이 이미 덮는 파일을 파일
+  -- 항목으로 또 담았고 그것이 두 번째 저장을 불렀다.
+  local have = listed_set(root)
+  for _, e in ipairs(entries_of(root) or {}) do
     have[e.path] = true
   end
+  if have[main] then
+    return add_path(root, path) -- '이미 있습니다' (또는 뺐던 것을 다시 넣음)
+  end
   local extra = {}
-  for _, rel in ipairs(related_of(root, abs)) do
-    if not have[rel] then
-      have[rel] = true
-      extra[#extra + 1] = { path = rel, kind = 'file' }
+  for _, r in ipairs(related_of(root, abs, active_preset(root) == nil)) do
+    if not have[r] and r ~= main then
+      have[r] = true
+      extra[#extra + 1] = r
     end
   end
   if #extra == 0 then
-    return
+    return add_path(root, path)
   end
-  vim.list_extend(entries, extra)
-  save_entries(root, name, entries)
-  notify(('연관 파일 %d개 함께 추가 (헤더/심볼 정의)'):format(#extra))
+  in_batch(root, '추가', function()
+    if not add_path(root, path) then
+      return -- 본 파일을 담지 못했으면 연관 파일도 담지 않는다
+    end
+    for _, r in ipairs(extra) do
+      add_path(root, root .. '/' .. r)
+    end
+  end, {
+    head = function(b, before, after)
+      if b.done == 0 then
+        return nil
+      end
+      return ('추가: %s (+연관 파일 %d개, 항목 %d -> %d)  →  %s'):format(main,
+        b.done - 1, before, after, target_label(root))
+    end,
+  })
 end
 
 -- ---------------------------------------------------------------------------
@@ -2857,9 +4304,76 @@ local function single_update(root, rels, done)
   update_step(root)
 end
 
--- 테스트용 진입점. 큐가 정말 하나씩 돌리고 시간이 지나면 죽이는지는
--- 가짜 'global' 을 PATH 앞에 두고 이걸 불러서 확인한다.
+-- autoindex 가 이 파일들(절대 경로)을 색인에 넣었다고 알리면 cb() 를 한 번 부른다.
+--
+-- 색인은 autoindex 한 곳이 한다 (K1). 위의 자체 큐는 autoindex 의 락도, 도는
+-- 중인 gtags -i 도 몰랐다. 저장한 새 파일을 그 큐가 넣는 사이 autoindex 의
+-- gtags -i 가 (그 파일이 없는 예전 목록으로) 끝나며 도로 지웠고, 표지
+-- (refresh.pending)도 없어 아무도 다시 하지 않았다 (F1/INT1). 이제 그 큐는
+-- autoindex 가 없을 때만 쓴다.
+--   single        넣은 파일을 paths 로 준다 - 다 왔으면 끝
+--   update/build  목록 전체를 다시 넣었다 - 그 안에 들었는지는 sym 의 정의를
+--                 물어 본다 (먼저 돌던 갱신의 끝일 수 있다: 그건 예전 목록이다)
+-- 다른 nvim 의 전체 빌드 뒤에 줄을 서면 몇 분이 걸린다. 부른 쪽(점프 다시
+-- 하기, sihlindex 의 '찾는 중')이 그만큼 묶이지 않게 시간 제한에서는 그냥 부른다.
+local function when_indexed(root, abs, sym, cb)
+  local want, left, fin, id = {}, 0, false, nil
+  for _, p in ipairs(abs) do
+    if not want[p] then
+      want[p] = true
+      left = left + 1
+    end
+  end
+  local function finish()
+    if fin then
+      return
+    end
+    fin = true
+    if id then
+      pcall(api.nvim_del_autocmd, id)
+    end
+    cb()
+  end
+  id = api.nvim_create_autocmd('User', {
+    pattern = 'VimIdeIndexUpdated',
+    callback = function(ev)
+      local d = type(ev.data) == 'table' and ev.data or {}
+      if fin or d.root ~= root then
+        return
+      end
+      if d.kind == 'single' then
+        for _, p in ipairs(d.paths or {}) do
+          if want[p] then
+            want[p] = nil
+            left = left - 1
+          end
+        end
+        if left <= 0 then
+          vim.schedule(finish)
+        end
+      elseif not sym or #global_lines(root, { '-d', sym }, 2000) > 0 then
+        vim.schedule(finish)
+      end
+    end,
+  })
+  vim.defer_fn(finish, (tonumber(cfg('single_update_timeout', 20)) or 20) * 1000)
+end
+
+-- 테스트용 진입점. autoindex 가 있으면 그쪽 큐(락 아래서 하나씩)로 넣는다 -
+-- 이 nvim 안에서도 한 DB 에 일꾼 둘이 붙지 않게 (K1). 없을 때의 자체 큐가
+-- 정말 하나씩 돌리고 시간이 지나면 죽이는지는 가짜 'global' 을 PATH 앞에
+-- 두고 이걸 불러서 확인한다.
 function _G.projectfiles_single_update(root, rels, cb)
+  if type(_G.autoindex_single_update) == 'function' then
+    local abs = {}
+    for i, r in ipairs(rels or {}) do
+      abs[i] = r:sub(1, 1) == '/' and r or (root .. '/' .. r)
+    end
+    if cb then
+      when_indexed(root, abs, nil, cb)
+    end
+    return _G.autoindex_single_update(root, abs)
+  end
   return single_update(root, rels, cb)
 end
 
@@ -2877,42 +4391,129 @@ api.nvim_create_autocmd('VimLeavePre', {
   end,
 })
 
+-- 심볼을 정의한 파일들(hits, 상대 경로)을 담는다. 목록까지만 고치고(바뀐
+-- 만큼만), 색인은 부른 쪽이 index_symbol_files 로 autoindex 에 맡긴다.
+-- 돌려주는 것: 색인할 파일들, 새로 담은 것, 바뀐 파일
+local function add_symbol_files(root, name, hits)
+  local entries, _, _, exclude = entries_of(root)
+  local listed = listed_set(root)
+  local have = {}
+  for _, e in ipairs(entries or {}) do
+    have[e.path] = true
+  end
+  local fresh, todo, adds = {}, {}, {}
+  for _, rel in ipairs(hits) do
+    rel = norm_rel(rel)
+    if not have[rel] then
+      have[rel] = true
+      if listed[rel] then
+        -- 이미 목록에 있는데(디렉터리 항목 안) 색인이 답하지 못했다: 항목은
+        -- 늘리지 않고 그 파일만 다시 색인한다. 예전에는 군더더기 파일 항목을
+        -- 하나 더 담으면서 그 즉시 색인으로 이 경우를 우연히 고쳤다.
+        todo[#todo + 1] = rel
+      else
+        entries[#entries + 1] = { path = rel, kind = 'file' }
+        fresh[#fresh + 1] = rel
+        todo[#todo + 1] = rel
+        adds[#adds + 1] = { abs = root .. '/' .. rel }
+      end
+    end
+  end
+  local changes
+  if #fresh > 0 then
+    -- 그 파일 자신을 뺐던 기록(exclude)은 지운다 (파일 항목이 이기기는 한다)
+    local isnew, ex2 = {}, {}
+    for _, r in ipairs(fresh) do
+      isnew[r] = true
+    end
+    for _, x in ipairs(exclude or {}) do
+      if not isnew[x] then
+        ex2[#ex2 + 1] = x
+      end
+    end
+    local _
+    _, changes = save_entries(root, name, entries, ex2, { add = adds },
+      { no_reindex = true })
+  end
+  return todo, fresh, changes
+end
+
+-- 담은 파일을 색인에 넣고, 들어가면 fin() (K1).
+--
+-- 예전에는 자체 큐로 'global --single-update' 를 돌린 뒤 reindex 를 불렀다.
+-- 그 단일 갱신이 GPATH 를 바꿔서 autoindex 가 사본(files.indexed)을 믿지
+-- 못하게 됐고, 이어진 reindex 가 같은 파일을 한 번 더 넣고 목록 전체로
+-- gtags -i 까지 돌렸다 (INT1: 실측 4초 동안 락). 이제는
+--   새로 담은 파일  목록이 바뀌었다 -> reindex(changes) -> autoindex_refresh 의
+--                   빠른 길이 락 아래서 그 파일만 넣는다
+--   이미 있던 파일  목록은 그대로다 -> _G.autoindex_single_update (락 아래서)
+-- autoindex 가 없거나 꺼져 있으면 예전처럼 자체 큐로 넣는다.
+local function index_symbol_files(root, sym, todo, fresh, changes, fin)
+  local isnew, abs, again, added = {}, {}, {}, {}
+  for _, r in ipairs(fresh) do
+    isnew[r] = true
+    added[#added + 1] = root .. '/' .. r
+  end
+  for _, r in ipairs(todo) do
+    abs[#abs + 1] = root .. '/' .. r
+    if not isnew[r] then
+      again[#again + 1] = root .. '/' .. r
+    end
+  end
+  -- changes 가 없으면(목록을 통째로 다시 폈다) 담은 것만이라도 알려 준다:
+  -- autoindex 는 어차피 목록을 색인 사본과 견주어 나머지를 찾는다
+  local took = #added == 0 or reindex(root, changes or { added = added })
+  if took and #again > 0 then
+    local ok, res = pcall(_G.autoindex_single_update, root, again)
+    took = ok and res == true
+  end
+  if took then
+    -- 알림(VimIdeIndexUpdated)은 예약된 콜백에서만 오므로 지금 걸어도 늦지 않다
+    when_indexed(root, abs, sym, fin)
+  else
+    -- autoindex 가 없거나 꺼져 있다 (g:autoindex_gtags = 0): 이 DB 에 다른
+    -- 일꾼이 없으니 예전처럼 자체 큐로 넣는다
+    single_update(root, todo, fin)
+  end
+end
+
 function _G.projectfiles_add_for_symbol_async(sym, cb)
   cb = cb or function() end
   if type(sym) ~= 'string' or not sym:match('^[A-Za-z_][A-Za-z0-9_]*$') then
     return cb(0)
   end
   local root = cur_root()
-  local entries, name = entries_of(root)
+  local _, name = entries_of(root)
   if not name then
     return cb(0) -- auto mode indexes everything already
   end
   grep_defining_async(root, sym, function(hits)
-    local have = {}
-    for _, e in ipairs(entries) do
-      have[e.path] = true
+    -- 찾는 사이(커널 트리의 git grep 은 몇 초) preset 을 바꿨으면 담지 않는다
+    -- (INT5). 항목은 지금 preset 에서 읽고 저장은 찾기 전의 이름으로 해서,
+    -- 바꾼 preset 의 항목이 예전 preset 을 덮어썼다 (kp 의 drivers·include 가
+    -- 사라졌다). 새 preset 에 몰래 담는 것도 부른 사람이 뜻한 게 아니다.
+    local now = active_preset(root)
+    if now ~= name then
+      local m = mode_of(root)
+      now = now or (m == MODE_UNSET and '미설정' or m)
+      cb(0)
+      -- 부른 쪽이 cb(0) 에서 '찾지 못했습니다' 를 낼 수 있다: 두 줄이 쌓이면
+      -- Press ENTER 가 뜨고 그동안 색인 콜백이 멈춘다. 지우고 이것을 남긴다.
+      pcall(vim.cmd, 'redraw')
+      notify(("'%s' 정의를 찾는 사이 preset 이 바뀌어 (%s -> %s) 담지 않았습니다"):format(
+        sym, name, now), vim.log.levels.WARN)
+      return
     end
-    local added = {}
-    for _, rel in ipairs(hits) do
-      if not have[rel] then
-        have[rel] = true
-        entries[#entries + 1] = { path = rel, kind = 'file' }
-        added[#added + 1] = rel
-      end
-    end
-    if #added == 0 then
+    local todo, fresh, changes = add_symbol_files(root, name, hits)
+    if #todo == 0 then
       return cb(0)
     end
-    preset_write(name, entries)
-    materialize(root)
     -- 새 파일을 지금 색인해 둔다: 이걸 부른 점프를 곧바로 다시 시도할 수
-    -- 있게. 한 번에 하나씩만 돌린다 (single_update 참고 - 동시에 띄우면
-    -- 같은 DB 를 붙들고 끝나지 않는다).
-    single_update(root, added, function()
-      reindex(root)
+    -- 있게. cb 는 색인에 들어간 뒤에 부른다.
+    index_symbol_files(root, sym, todo, fresh, changes, function()
       notify(("'%s' 정의 파일 %d개 추가: %s")
-        :format(sym, #added, table.concat(added, ', ')))
-      cb(#added)
+        :format(sym, #todo, table.concat(#fresh > 0 and fresh or todo, ', ')))
+      cb(#todo)
     end)
   end)
 end
@@ -2924,44 +4525,26 @@ function _G.projectfiles_add_for_symbol(sym)
     return 0
   end
   local root = cur_root()
-  local entries, name = entries_of(root)
+  local _, name = entries_of(root)
   if not name then
     return 0 -- auto mode indexes everything already
   end
-  local have = {}
-  for _, e in ipairs(entries) do
-    have[e.path] = true
-  end
   local hits = grep_defining(root, sym)
-  local added = {}
-  for _, rel in ipairs(hits) do
-    if not have[rel] then
-      have[rel] = true
-      entries[#entries + 1] = { path = rel, kind = 'file' }
-      added[#added + 1] = rel
-    end
-  end
-  if #added == 0 then
+  local todo, fresh, changes = add_symbol_files(root, name, hits)
+  if #todo == 0 then
     return 0
   end
-  preset_write(name, entries)
-  materialize(root)
   -- index the new files NOW so the jump that triggered this can be retried
-  -- immediately; the full refresh below keeps everything else in step
-  --
-  -- 예전에는 여기서 ':wait(5000)' 로 기다렸다. 5초가 지나면 손을 떼기만
-  -- 하고 죽이지 않아서, 늦게 끝나는 일꾼이 그대로 남아 다음 파일의 갱신과
-  -- 같은 DB 에서 겹쳤다. 지금은 큐가 하나씩 돌리고 시간이 지나면 죽인다.
-  single_update(root, added, function()
-    reindex(root)
+  -- immediately (autoindex 가 락 아래서 하나씩 넣는다 - index_symbol_files)
+  index_symbol_files(root, sym, todo, fresh, changes, function()
     notify(("'%s' 을(를) 정의한 파일 %d개를 추가했습니다: %s")
-      :format(sym, #added, table.concat(added, ', ')))
+      :format(sym, #todo, table.concat(#fresh > 0 and fresh or todo, ', ')))
   end)
-  return #added
+  return #todo
 end
 
 -- side-tree entries an earlier, less picky expansion may have pulled in
-api.nvim_create_user_command('ProjectFilesPrune', function()
+ucmd('ProjectFilesPrune', function()
   local root = cur_root()
   local entries, name = entries_of(root)
   if not name then
@@ -2992,7 +4575,7 @@ end, { desc = 'Drop tools//samples//scripts entries from the preset' })
 -- 저장 전마다 사본을 남기니(backup_preset), 잘못 지운 직후라면 그 사본이
 -- 지우기 전 상태다. 되돌리기 자체도 저장이므로 지금 상태의 사본이 먼저
 -- 남는다 - 되돌린 것을 다시 되돌릴 수 있다.
-api.nvim_create_user_command('ProjectFilesRestore', function(o)
+ucmd('ProjectFilesRestore', function(o)
   local root = cur_root()
   -- auto 로 돌아간 뒤에도 되돌릴 수 있어야 한다: 마지막으로 쓰던 이름을 본다
   local name = active_preset(root)
@@ -3043,7 +4626,7 @@ api.nvim_create_user_command('ProjectFilesRestore', function(o)
         if revive then
           set_active(root, name)
         end
-        save_entries(root, name, d.entries)
+        save_entries(root, name, d.entries, d.exclude or {})
         notify(('%s 로 되돌렸습니다 (항목 %d -> %d)%s'):format(it.stamp, now,
           #d.entries, revive and (" - preset '" .. name .. "' 을 다시 켰습니다") or ''))
         return
@@ -3072,13 +4655,13 @@ api.nvim_create_user_command('ProjectFilesRestore', function(o)
     if revive then
       set_active(root, name)
     end
-    save_entries(root, name, d.entries)
+    save_entries(root, name, d.entries, d.exclude or {})
     notify(('%s 로 되돌렸습니다 (항목 %d -> %d)  →  %s'):format(
       list[idx].stamp, now, #d.entries, target_label(root)))
   end)
 end, { nargs = '?', desc = 'Restore the preset from a backup taken before a write' })
 
-api.nvim_create_user_command('ProjectFilesAddSymbol', function(o)
+ucmd('ProjectFilesAddSymbol', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
   if _G.projectfiles_add_for_symbol(sym) == 0 then
     notify("'" .. sym .. "' 을(를) 정의한 파일을 찾지 못했습니다",
@@ -3148,7 +4731,7 @@ local function current_files(root)
     -- 목록도 그대로라고 보고 색인 stat 을 키로 삼는다. 색인을 다시 만들면
     -- (F2 / :GtagsIndex) 키가 바뀌어 자동으로 새로 읽는다.
     local st2 = db_stat(root)
-    local key = st2 and ('gt:%d:%d'):format(st2.mtime.sec, st2.size) or nil
+    local key = st2 and ('gt:' .. stat_key(st2)) or nil
     local c = key and files_cache[root]
     if cfg('files_cache', 1) ~= 0 and c and c.key == key then
       return c.list
@@ -3339,8 +4922,9 @@ end
 local paths_cache = {}   -- root -> { key =, set =, n = }
 
 local function indexed_paths(root)
-  local st = db_stat(root)
-  local key = st and ('%d:%d'):format(st.mtime.sec, st.size) or 'none'
+  -- 나노초까지: 'gtags -i' 는 파일을 빼도 GTAGS 크기가 그대로라, 초와 크기만
+  -- 보면 같은 초 안의 갱신을 놓친다 (T8)
+  local key = stat_key(db_stat(root))
   local c = paths_cache[root]
   if cfg('path_cache', 1) ~= 0 and c and c.key == key then
     return c.set, c.n
@@ -3374,6 +4958,23 @@ db_stat = function(root)
   return uv.fs_stat(root .. '/GTAGS')
 end
 
+-- autoindex 가 색인을 바꿀 때마다 알린다 (C4). 심볼·경로 목록은 GTAGS 의
+-- stat 으로도 버려지지만, 같은 틱 안의 두 번째 갱신처럼 stat 이 못 보는 것까지
+-- 여기서 확실히 버린다.
+api.nvim_create_autocmd('User', {
+  group = group,
+  pattern = 'VimIdeIndexUpdated',
+  callback = function(a)
+    local r = type(a.data) == 'table' and a.data.root or nil
+    if type(r) == 'string' and r ~= '' then
+      if s.symbols then
+        s.symbols[r] = nil
+      end
+      paths_cache[r] = nil
+    end
+  end,
+})
+
 -- A whole kernel tree in auto mode holds millions of definitions: dumping
 -- all of them would build millions of Lua tables and freeze nvim. Past this
 -- much database, the picker asks 'global' for the prefix that was typed
@@ -3384,10 +4985,7 @@ local function huge_db(st)
 end
 
 local function symbols_of(root, prefix)
-  local st = db_stat(root)
-  local key = st and (tostring(st.mtime.sec) .. ':' .. tostring(st.size))
-      or 'none'
-  key = key .. '\0' .. (prefix or '')
+  local key = stat_key(db_stat(root)) .. '\0' .. (prefix or '')
   local hit = s.symbols and s.symbols[root]
   if hit and hit.key == key then
     return hit.list
@@ -3737,7 +5335,7 @@ local function pick_find()
     -- 항목이 한꺼번에 많이 빠지면 물어보는 것은 배치 밖에서만 한다.
     local _, name, bad = entries_of(root)
     if bad or not name or #picks == 1 then
-      remove_path(root, picks[1].value)
+      one_line(remove_path, root, picks[1].value)
     else
       in_batch(root, '제거', function()
         for _, e in ipairs(picks) do
@@ -3817,7 +5415,7 @@ local function pick_add()
   local t = telescope()
   if not t then
     return fallback_select(items, '추가할 파일',
-      function(c) add_with_related(root, c) end)
+      function(c) one_line(add_with_related, root, c) end)
   end
   t.pickers.new({}, {
     prompt_title = ('Add to project files (%d)  →  %s   <Tab> 여러 개')
@@ -3839,12 +5437,14 @@ local function pick_add()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
-        announce_root(root)
-        -- <Tab> 으로 여러 개를 골랐으면 한 번만 펼치고 한 번만 재색인한다
-        in_batch(root, '추가', function()
-          for _, e in ipairs(picks) do
-            add_with_related(root, e.value)
-          end
+        -- <Tab> 으로 여러 개를 골랐으면 한 번만 쓰고 한 번만 재색인한다
+        one_line(function()
+          announce_root(root)
+          in_batch(root, '추가', function()
+            for _, e in ipairs(picks) do
+              add_with_related(root, e.value)
+            end
+          end)
         end)
       end)
       return true
@@ -3868,7 +5468,7 @@ local function dir_candidates(root)
   for _, l in ipairs(vim.fn.systemlist({ 'sh', '-c', cmd })) do
     if l ~= '' and l ~= '.' and not have[l]
         and not (cfg('nested_presets', 0) ~= 0
-          and nested_owner(root, l .. '/')) then
+          and nested_owner_in(nested_prefixes(root), l .. '/')) then
       out[#out + 1] = l
     end
   end
@@ -3883,7 +5483,7 @@ local function pick_add_dir()
   local t = telescope()
   if not t then
     return fallback_select(items, '추가할 디렉터리',
-      function(c) add_path(root, c) end)
+      function(c) one_line(add_path, root, c) end)
   end
   t.pickers.new({}, {
     prompt_title = ('Add directories (%d)  →  %s   <Tab> 여러 개')
@@ -3900,11 +5500,13 @@ local function pick_add_dir()
           picks = e and { e } or {}
         end
         t.actions.close(bufnr)
-        announce_root(root)
-        in_batch(root, '추가', function()
-          for _, e in ipairs(picks) do
-            add_path(root, e[1] or e.value)
-          end
+        one_line(function()
+          announce_root(root)
+          in_batch(root, '추가', function()
+            for _, e in ipairs(picks) do
+              add_path(root, e[1] or e.value)
+            end
+          end)
         end)
       end)
       return true
@@ -3939,7 +5541,7 @@ local function pick_preset()
     local p = mine or sh
     local tag = ''
     if sh and mine then
-      tag = entries_differ(mine.entries, sh.entries)
+      tag = presets_differ(mine, sh)
           and ('  [내 사본 ≠ vim-ide %d개]'):format(#sh.entries)
           or '  [vim-ide]'
     elseif sh then
@@ -4035,7 +5637,8 @@ end
 -- save the current entries under a name (existing one, or a new one)
 local function pick_save()
   local root = cur_root()
-  local entries = entries_of(root) or {}
+  local entries, _, _, exclude = entries_of(root)
+  entries = entries or {}
   if #entries == 0 then
     notify('저장할 항목이 없습니다 (트리에서 + 나 :ProjectFilesAdd 로 추가하세요)', vim.log.levels.WARN)
     return
@@ -4044,7 +5647,7 @@ local function pick_save()
     if not name or name == '' then
       return
     end
-    preset_write(name, entries)
+    preset_write(name, entries, exclude or {})
     set_active(root, name)
     materialize(root)
     notify(("preset '%s' 저장 (%d entries)"):format(name, #entries))
@@ -4095,7 +5698,7 @@ local function pick_remove()
   local items = items_of()
   local t = telescope()
   local function drop(label)
-    remove_path(root, (label:gsub('^%a+%s+', '')))
+    one_line(remove_path, root, (label:gsub('^%a+%s+', '')))
   end
   if not t then
     return fallback_select(items, '제거할 항목', drop)
@@ -4180,7 +5783,7 @@ api.nvim_create_user_command('ProjectFiles', function() pick_find() end,
 api.nvim_create_user_command('ProjectFilesFind', function() pick_find() end,
   { desc = 'Find a project file and jump to it' })
 
-api.nvim_create_user_command('ProjectFilesAdd', function(o)
+ucmd('ProjectFilesAdd', function(o)
   if o.args == '' then
     pick_add()
     return
@@ -4189,7 +5792,7 @@ api.nvim_create_user_command('ProjectFilesAdd', function(o)
 end, { nargs = '?', complete = 'file',
   desc = 'Add a file/directory (with the headers and definitions it uses)' })
 
-api.nvim_create_user_command('ProjectFilesRemove', function(o)
+ucmd('ProjectFilesRemove', function(o)
   if o.args == '' then
     pick_remove()
     return
@@ -4197,7 +5800,7 @@ api.nvim_create_user_command('ProjectFilesRemove', function(o)
   remove_path(root_for_arg(o.args), o.args)
 end, { nargs = '?', complete = 'file', desc = 'Remove a file/directory' })
 
-api.nvim_create_user_command('ProjectFilesAddDir', function(o)
+ucmd('ProjectFilesAddDir', function(o)
   if o.args == '' then
     pick_add_dir()
     return
@@ -4207,7 +5810,7 @@ end, { nargs = '?', complete = 'dir',
   desc = 'Add a directory (everything indexable under it)' })
 
 -- 모드를 지금 다시 고른다. 시작할 때 뜨는 것과 같은 다이얼로그다.
-api.nvim_create_user_command('ProjectFilesAbsorb', function()
+ucmd('ProjectFilesAbsorb', function()
   local root = cur_root()
   -- 손으로 부른 것은 늘 새로 본다. 하위에 프로젝트를 '방금' 만들었으면
   -- 루트의 mtime 은 그대로라 디스크 캐시가 그것을 놓친다 - 그 경우가
@@ -4219,7 +5822,7 @@ api.nvim_create_user_command('ProjectFilesAbsorb', function()
   absorb_nested(root, false)
 end, { desc = "Pull nested projects' index lists into this project's preset" })
 
-api.nvim_create_user_command('ProjectFilesMode', function()
+ucmd('ProjectFilesMode', function()
   local root = cur_root()
   choose_mode(root, function(ok)
     if ok then
@@ -4228,11 +5831,24 @@ api.nvim_create_user_command('ProjectFilesMode', function()
   end)
 end, { desc = 'Pick the indexing mode for this project (auto / a preset)' })
 
-api.nvim_create_user_command('ProjectFilesPreset', function(o)
+ucmd('ProjectFilesPreset', function(o)
   local root = cur_root()
   if o.args == '' then
     pick_preset()
     return
+  end
+  -- 저장된 적 없는 이름은 받지 않는다 (F2). 예전에는 오타('kp1x')도 '이름만
+  -- 정한 새 preset' 으로 받아 빈 목록을 썼고, 그 빈 목록이 GTAGS 를 0개로,
+  -- ctags 를 머리말 24줄로 비웠다 - 알림은 평소와 같은 한 줄이라 몰랐다.
+  -- 새 preset 은 \fm 의 '새 preset 만들기' 나 :ProjectFilesSave <이름> 으로.
+  -- (지금 쓰고 있는 이름은 그대로 받는다 - 바뀌는 것이 없다)
+  if o.args ~= MODE_AUTO and o.args ~= MODE_NONE and o.args ~= active_preset(root) then
+    local sp = shared_path(o.args)
+    if not (uv.fs_stat(preset_path(o.args)) or (sp and uv.fs_stat(sp))) then
+      notify(("그런 preset 이 없습니다: '%s' (새로 만들려면 \\fm 의 '새 preset 만들기')")
+        :format(o.args), vim.log.levels.WARN)
+      return
+    end
   end
   set_active(root, o.args)
   materialize(root)
@@ -4278,19 +5894,55 @@ local function pick_import()
   end
   local cur = active_preset(root)
   local items = {}
+  -- 항목이 이 트리에 있는지는 부모 디렉터리를 한 번씩 읽어(readdir) 본다.
+  -- 항목마다 stat 하면 모든 preset 의 항목 수만큼 stat 이 돈다 - 실측 46,800번,
+  -- stat 이 느린 서버에서는 그것만 수십 초다 (S14). readdir 은 거기서 싸다.
+  local listing = {} -- 디렉터리 -> { 이름 = 종류 } (없거나 못 읽으면 false)
+  local function exists(abs)
+    if abs == root then
+      return true
+    end
+    local dir, base = vim.fs.dirname(abs), vim.fs.basename(abs)
+    local l = listing[dir]
+    if l == nil then
+      l = false
+      local h = uv.fs_scandir(dir)
+      if h then
+        l = {}
+        while true do
+          local nm, ty = uv.fs_scandir_next(h)
+          if not nm then
+            break
+          end
+          l[nm] = ty or 'unknown'
+        end
+      end
+      listing[dir] = l
+    end
+    local ty = l and l[base]
+    if not ty then
+      return false
+    end
+    if ty == 'link' or ty == 'unknown' then
+      return uv.fs_stat(abs) ~= nil -- 끊어진 링크는 없는 것 (예전 stat 과 같게)
+    end
+    return true
+  end
   for _, n in ipairs(preset_list()) do
     local p = read_preset_file(preset_path(n)) or read_preset_file(shared_path(n))
     local es = p and p.entries or {}
     local here = 0
     for _, e in ipairs(es) do
-      local abs = e.path:sub(1, 1) == '/' and e.path or (root .. '/' .. e.path)
-      if uv.fs_stat(abs) then
+      local rel = norm_rel(e.path)
+      local abs = rel:sub(1, 1) == '/' and rel
+          or ((rel == '.' or rel == '') and root or (root .. '/' .. rel))
+      if exists(abs) then
         here = here + 1
       end
     end
     local pct = #es > 0 and math.floor(here * 100 / #es) or 0
     items[#items + 1] = {
-      name = n, entries = es, here = here,
+      name = n, entries = es, exclude = p and p.exclude or {}, here = here,
       label = ('%s%-46s %4d항목 중 %4d개가 이 트리에 있음  (%d%%)')
           :format(cur == n and '● ' or '  ', n, #es, here, pct),
     }
@@ -4326,7 +5978,7 @@ local function pick_import()
       if nm == '' then
         return
       end
-      preset_write(nm, it.entries)
+      preset_write(nm, it.entries, it.exclude)
       apply(nm)
     end
   end
@@ -4366,7 +6018,7 @@ local function pick_import()
   }):find()
 end
 
-api.nvim_create_user_command('ProjectFilesImport', function(o)
+ucmd('ProjectFilesImport', function(o)
   if o.args == '' then
     pick_import()
     return
@@ -4385,9 +6037,9 @@ api.nvim_create_user_command('ProjectFilesImport', function(o)
 end, { nargs = '?', complete = function() return preset_list() end,
   desc = '다른 프로젝트의 preset 목록을 이 프로젝트로 가져온다' })
 
-api.nvim_create_user_command('ProjectFilesSave', function(o)
+ucmd('ProjectFilesSave', function(o)
   local root = cur_root()
-  local entries, _, bad = entries_of(root)
+  local entries, _, bad, exclude = entries_of(root)
   if bad then
     return -- 읽을 수 없는 preset을 빈 목록으로 덮어쓰지 않는다
   end
@@ -4396,7 +6048,7 @@ api.nvim_create_user_command('ProjectFilesSave', function(o)
     pick_save()
     return
   end
-  preset_write(o.args, entries)
+  preset_write(o.args, entries, exclude or {})
   set_active(root, o.args)
   materialize(root)
   notify(("preset '%s' 저장 (%d entries)"):format(o.args, #entries))
@@ -4405,7 +6057,7 @@ end, { nargs = '?', desc = 'Save the current entries as a named preset' })
 -- put a preset into vim-ide itself, so the other machines (the Linux box)
 -- get it with the next 'git pull'. The repository copy is what every
 -- checkout reads; my own copy in stdpath('data') keeps shadowing it.
-api.nvim_create_user_command('ProjectFilesPresetShare', function(o)
+ucmd('ProjectFilesPresetShare', function(o)
   local name = o.args ~= '' and o.args or active_preset(cur_root())
   if not name or name == '' then
     notify('공유할 preset 이름을 지정하세요 (:ProjectFilesPresetShare <name>)',
@@ -4443,7 +6095,7 @@ api.nvim_create_user_command('ProjectFilesPresetShare', function(o)
       return
     end
   end
-  if not write_json(dst, encode_preset(name, p.entries)) then
+  if not write_json(dst, encode_preset(name, p.entries, p.exclude)) then
     notify('저장하지 못했습니다 (쓰기 권한을 확인하세요): ' .. dst,
       vim.log.levels.ERROR)
     return
@@ -4501,11 +6153,92 @@ api.nvim_create_user_command('ProjectFilesSkipped', function()
   vim.api.nvim_echo({ { table.concat(out, '\n') } }, true, {})
 end, { desc = '색인에서 뺀 파일과 그 이유' })
 
-api.nvim_create_user_command('ProjectFilesReindex', function()
+ucmd('ProjectFilesReindex', function()
   local root = cur_root()
-  materialize(root)
-  reindex(root)
-  notify('재색인 시작')
+  -- none / 미설정 모드에는 색인할 목록이 없다. 예전에는 여기서도 강제 갱신이
+  -- 돌아 git ls-files 로 프로젝트 전체를 색인했다 (T2)
+  if not mode_indexes(root) then
+    notify('색인하지 않는 모드입니다 (' .. target_label(root)
+      .. ') - <F2> 나 \\fm 으로 모드를 고르세요', vim.log.levels.WARN)
+    return
+  end
+  -- 손으로 부른 것은 늘 통째로 다시 편다: 디렉터리 항목 아래에 그새 생기거나
+  -- 없어진 파일까지 (+/- 는 바뀐 만큼만 고친다)
+  --
+  -- 펴기는 뒤에서 한다 (P2). 예전에는 키를 누른 채 목록 전체를 폈다 - 파일마다
+  -- stat 이라 6,500개, 느린 stat 의 서버를 흉내 내면 0.7초 동안 화면이 멎었다.
+  -- 시작할 때의 확인(verify_async)과 같은 길이다: find 는 자식 프로세스가,
+  -- 파일마다의 stat 은 메인 루프에서 몇 ms 씩. 다 펴면 예전과 같은 순서로
+  -- 목록을 쓰고 재색인하고 같은 알림을 한 줄로 낸다.
+  local function finish(got)
+    local changed = false
+    if got ~= false then
+      changed = select(3, materialize(root, got))
+    end
+    reindex(root)
+    -- ctags 도 다시 만든다. 목록이 바뀌었으면 autoindex 가 갱신을 끝내며 따라가고
+    -- (K2), 그대로면 따라가지 않으므로 여기서 부탁한다 - 예전에는 reindex 가 늘
+    -- GutentagsUpdate! 를 불러서 \fR 이 낡은 tags 를 고치는 길이기도 했다.
+    if not changed and type(_G.autoindex_ctags_refresh) == 'function' then
+      pcall(_G.autoindex_ctags_refresh, root)
+    end
+    notify('재색인 시작')
+  end
+  -- 도는 것이 있으면 묶는다. 1분이 넘도록 끝나지 않은 것(find 가 멈췄다)은
+  -- 믿지 않는다 - 그것의 답은 아래 표(mine)로 버려진다.
+  s.reindexing = s.reindexing or {}
+  local busy = s.reindexing[root]
+  if busy and uv.now() - busy.t < 60000 then
+    busy.again = true
+    return
+  end
+  local function run()
+    local entries, name, bad, exclude = entries_of(root)
+    if bad then
+      return one_line(finish, false) -- 읽을 수 없는 preset: 알림은 entries_of 가 냈다
+    end
+    if not (entries and name) then
+      return one_line(finish, nil) -- auto 모드: 펼 것이 없다 (materialize 가 목록을 지운다)
+    end
+    -- lkey: 펴기 시작할 때의 목록 파일. 그 사이 목록만 바뀐 것(새 파일 저장이
+    -- 그 파일을 넣었다, 다른 nvim)은 항목이 그대로라 아래 ckey 로는 모른다
+    local mine = { t = uv.now(), lkey = stat_key(uv.fs_stat(list_path(root))) }
+    s.reindexing[root] = mine
+    load_known(root)
+    local ckey = content_key(name, entries, exclude)
+    local function go(pre)
+      expand_async(root, entries, make_rules(entries, exclude), function(found, sk)
+        if s.reindexing[root] ~= mine then
+          return -- 더 새 \fR 이 맡았다
+        end
+        s.reindexing[root] = nil
+        -- 모드를 그새 none 으로 바꿨으면 그쪽이 할 일을 했다
+        if not mode_indexes(root) then
+          return
+        end
+        one_line(function()
+          -- 그 사이 또 불렀거나 항목이 바뀌었거나(+/-, 다른 preset) 목록이
+          -- 바뀌었으면 지금 것으로 처음부터 다시 편다 - 낡은 펴기로 목록을 쓰면
+          -- 그쪽이 고친 것이 빠진다 (펴기 전에 찾은 것만 쓰니 그새 저장한 새
+          -- 파일이 목록과 GTAGS 에서 도로 빠졌다)
+          local e2, n2, bad2, x2 = entries_of(root)
+          if mine.again or (not bad2 and e2 and n2
+              and content_key(n2, e2, x2) ~= ckey)
+              or stat_key(uv.fs_stat(list_path(root))) ~= mine.lkey then
+            return run()
+          end
+          -- found 가 nil: find 를 띄우지 못했다 - 예전처럼 여기서 편다
+          finish(found and { found = found, sk = sk, pre = pre, ckey = ckey })
+        end)
+      end)
+    end
+    if cfg('nested_presets', 0) ~= 0 then
+      nested_prefixes_async(root, go)
+    else
+      go({})
+    end
+  end
+  run()
 end, { desc = 'Rebuild the index for the current file list' })
 
 -- 새로 만든 파일을 저장하면 그것만 색인에 넣는다
@@ -4517,16 +6250,21 @@ end, { desc = 'Rebuild the index for the current file list' })
 -- 남는 것은 '목록에 없는 파일'이다. 새로 만든 파일이 대표적인데,
 -- autoindex 는 목록 밖이라 일부러 건너뛴다. preset 의 디렉터리 항목 아래에
 -- 생긴 파일이라면 목록에 들어가야 맞다. 그래서 그때만:
---   1) 목록을 다시 편다 (디렉터리 항목을 다시 훑는다)
---   2) 그 파일 하나만 'global --single-update' 로 넣는다
+--   1) 그 파일 하나만 목록에 넣는다 (다시 펴지 않는다)
+--   2) autoindex 에게 그 파일을 알린다 - 락 아래서 그 파일만
+--      'global --single-update' 로 넣는다 (K1)
 -- 전체 재색인('gtags -i')은 하지 않는다. 실측(개발서버, 목록 273개):
--- 다시 펴기 0.36초, 한 파일 넣기 0.04초.
+-- 한 파일 넣기 0.04초.
 --
 -- 디렉터리 항목 아래가 아니면 다시 펴 봐야 목록에 들어갈 수 없다. 그건
 -- 경로만 보고 미리 걸러서 아무 것도 하지 않는다 - 임시 파일을 저장할
 -- 때마다 find 가 도는 일이 없어야 한다.
 --
 -- 묶어서 한 번만 돈다. :wa 처럼 잇달아 저장해도 마지막 저장 뒤 한 번이다.
+-- 그 사이 저장한 경로는 전부 모아 두었다가(s.save_pending) 그 한 번에 함께
+-- 본다 (N1). 예전에는 마지막 저장의 경로 하나만 봤다 - 새 파일을 저장하고
+-- 1초 안에 다른 파일을 저장하면(:wa, foo.c 다음 foo.h) 앞의 새 파일은 목록에도
+-- GTAGS 에도 ctags 에도 들지 못했고, 다음 \fR 이나 다음 시작까지 그대로였다.
 --
 --   let g:projectfiles_index_new_on_save = 0     " 끈다
 --   let g:projectfiles_index_new_on_save_delay = 1000
@@ -4545,60 +6283,107 @@ api.nvim_create_autocmd('BufWritePost', {
     if not path then
       return
     end
+    s.save_pending = s.save_pending or {}
+    s.save_pending[path] = true
     save_gen = save_gen + 1
     local mine = save_gen
     local delay = tonumber(cfg('index_new_on_save_delay', 1000)) or 1000
     vim.defer_fn(function()
       if mine ~= save_gen then
-        return -- 그 사이 또 저장했다. 마지막 것이 한다.
+        return -- 그 사이 또 저장했다. 마지막 것이 모은 것을 다 한다.
       end
-      local root = root_of(path)
-      if not root or root == '' then
-        return
-      end
-      -- '색인하지 않는 모드' 는 사용자가 그렇게 고른 것이다. 건드리지 않는다.
-      if type(_G.projectfiles_should_index) == 'function'
-          and not _G.projectfiles_should_index(root) then
-        return
-      end
-      local list = root .. '/' .. (dbdir() or '.tags') .. '/files'
-      if not uv.fs_stat(list) then
-        return -- auto 모드(목록이 없다): autoindex 가 이미 넣었다
-      end
-      local rel = rel_to(root, path)
-      local c = s.cache[root]
-      local function listed(files)
-        for _, f in ipairs(files or {}) do
-          if f == rel then
-            return true
+      local saved = s.save_pending or {}
+      s.save_pending = nil
+      -- 프로젝트마다 한 번: 목록 고치기 한 번, autoindex 부르기 한 번
+      local function take(root, paths)
+        -- '색인하지 않는 모드' 는 사용자가 그렇게 고른 것이다. 건드리지 않는다.
+        if type(_G.projectfiles_should_index) == 'function'
+            and not _G.projectfiles_should_index(root) then
+          return
+        end
+        local list = root .. '/' .. (dbdir() or '.tags') .. '/files'
+        if not uv.fs_stat(list) then
+          return -- auto 모드(목록이 없다): autoindex 가 이미 넣었다
+        end
+        -- 목록이 정렬돼 있으니 반씩 나눠 찾는다
+        local function listed(files, rel)
+          return files ~= nil and files[lower_bound(files, rel)] == rel
+        end
+        -- 목록과 항목을 기억에 올린다 (세션의 처음이면 지난 목록을 받는다 -
+        -- 펴지 않는다)
+        pcall(_G.projectfiles_materialize, root)
+        local c = s.cache[root]
+        if not (c and c.files) then
+          return
+        end
+        -- 목록에 없고 지금 규칙으로 목록에 드는 것만 - 디렉터리 항목 아래이고
+        -- 빼 둔 곳(exclude)이 아니어야 한다. 아니면 다시 펴도 들어갈 수 없다.
+        -- (루트 항목 '.' 도 덮는다 - 예전 검사는 그것을 놓쳤다. .git 아래의
+        -- 커밋 메시지 같은 것은 find 가 늘 빼는 자리다.) 이미 목록에 있는 것은
+        -- autoindex 가 저장할 때 방금 갱신했다.
+        local rules = make_rules(c.entries, c.exclude)
+        local adds, rels = {}, {}
+        for _, p in ipairs(paths) do
+          local rel = rel_to(root, p)
+          if not listed(c.files, rel) and rule_of(rules, rel) == true
+              and not pruned_part(rel) then
+            local st = uv.fs_stat(p)
+            if st and st.type == 'file' then
+              adds[#adds + 1] = { abs = p, st = st }
+              rels[#rels + 1] = rel
+            end
           end
         end
-        return false
-      end
-      if listed(c and c.files) then
-        return -- 이미 목록에 있다: autoindex 가 방금 갱신했다
-      end
-      -- 아직 한 번도 펴 본 적이 없으면 목록 파일을 직접 본다
-      if not (c and c.files) and listed(vim.fn.readfile(list)) then
-        return
-      end
-      -- 디렉터리 항목 아래인가. 아니면 다시 펴도 들어갈 수 없다.
-      local under = false
-      for _, e in ipairs((c and c.entries) or {}) do
-        local p = tostring(e.path or '')
-        if p ~= '' and rel:sub(1, #p + 1) == p .. '/' then
-          under = true
-          break
+        if #adds == 0 then
+          return
+        end
+        -- 그 파일들만 목록에 넣는다. 예전에는 목록 전체를 다시 폈다 (실측
+        -- 0.36초, 느린 stat 의 서버에서는 목록 크기만큼 더).
+        local ok, files, _, changes = pcall(commit_list, root,
+          cache_valid(root, c.preset) and { add = adds } or nil)
+        if not ok then
+          return
+        end
+        local got, abs = {}, {}
+        for _, rel in ipairs(rels) do
+          if listed(files, rel) then
+            got[#got + 1] = rel
+            abs[#abs + 1] = root .. '/' .. rel
+          end
+        end
+        if #got == 0 then
+          return -- 목록에 못 들어갔다: 색인은 그대로 둔다
+        end
+        if type(_G.projectfiles_tree_invalidate) == 'function' then
+          pcall(_G.projectfiles_tree_invalidate) -- 표시도 따라오게
+        end
+        -- 색인은 autoindex 에 맡긴다 (K1). 예전에는 자체 큐로 그 파일만 넣었는데,
+        -- 그 큐는 autoindex 의 락을 몰라서 그때 돌던 gtags -i(예전 목록)가 끝나며
+        -- 이 파일을 도로 지웠고, 표지도 없어 아무도 다시 하지 않았다 (F1/INT1).
+        -- autoindex_refresh 는 표지를 남기고, 도는 갱신이 있으면 그 뒤에, 없으면
+        -- 락 아래서 이 파일들만 넣는다 (gtags -i 없이). reindex 는 부르지 않는다 -
+        -- 심볼 목록·트리 표시까지 버릴 일이 아니다 (트리는 위에서 고쳤다).
+        local okA, took = pcall(_G.autoindex_refresh, root, true, '새 파일 저장',
+          changes or { added = abs })
+        if not (okA and took == true) then
+          -- autoindex 가 없거나 꺼져 있다: 다른 일꾼이 없으니 자체 큐로
+          pcall(single_update, root, got)
         end
       end
-      if not under then
-        return
+      local by_root, order = {}, {}
+      for p in pairs(saved) do
+        local root = root_of(p)
+        if root and root ~= '' then
+          if not by_root[root] then
+            by_root[root] = {}
+            order[#order + 1] = root
+          end
+          table.insert(by_root[root], p)
+        end
       end
-      local ok, files = pcall(materialize, root)
-      if not (ok and listed(files)) then
-        return -- 목록에 못 들어갔다: 색인은 그대로 둔다
+      for _, root in ipairs(order) do
+        pcall(take, root, by_root[root])
       end
-      pcall(single_update, root, { rel })
     end, delay)
   end,
   desc = '새 파일을 저장하면 목록에 넣고 그것만 색인 (g:projectfiles_index_new_on_save)',
@@ -4607,13 +6392,44 @@ api.nvim_create_autocmd('BufWritePost', {
 -- a preset is applied as soon as the session knows which project it is in
 -- as early as possible (the indexer may start on the first BufReadPost),
 -- and again once the session is up and the real project is known
-local booted -- 시작할 때 이미 펼쳐 둔 '<root>\0<preset>'
+--
+-- 플러그인을 읽는 동안에는 목록을 펴지 않는다 (P3). 예전에는 여기서 목록 전체를
+-- 동기로 다시 폈다 - 바이너리 판정 캐시가 비어 있으니 목록의 모든 파일을 열어
+-- 앞 1KB 를 읽었고, 6,600개짜리 preset 에서 첫 화면이 0.5~1초(느린 stat 을
+-- 흉내 내면 3~4초) 늦게 떴다. 지난번 목록이 있으면 그것을 그대로 쓰고(adopt),
+-- VimEnter 뒤에 받아 두고 뒤에서 한 번 확인한다 (verify_async). 목록이 아예
+-- 없을 때만 여기서 만든다 - gutentags 가 첫 BufReadPost 에서 그것을 읽고,
+-- 없으면 git ls-files 로 트리 전체를 ctags 한다.
+--
+-- 이때 나는 알림('색인 제외: 바이너리 1', 하위 프로젝트 거르기)은 모아 두었다가
+-- 화면이 뜬 뒤 한 줄로 낸다 (F6). 바로 내면 곧이어 autoindex 의 'indexing …'
+-- 이 쌓여 첫 화면에 Press ENTER 가 떴고, 그게 떠 있는 동안 nvim 은 예약된
+-- 콜백을 하나도 돌리지 않는다 - 0.1초면 끝난 첫 gtags 빌드가 DB 를 옮기고 락을
+-- 푸는 마무리가 키를 누를 때까지(실측 10초 넘게) 멈췄다.
 pcall(function()
   local root = root_of(nil)
-  local name = active_preset(root)
-  if name then
-    materialize(root)
-    booted = root .. '\0' .. name
+  if active_preset(root) and not uv.fs_stat(list_path(root)) then
+    s.collect = {}
+    pcall(materialize, root)
+    local msgs = s.collect
+    s.collect = nil
+    if #msgs == 0 then
+      return
+    end
+    local function tell()
+      local parts, lvl = {}, vim.log.levels.INFO
+      for _, m in ipairs(msgs) do
+        parts[#parts + 1] = m.msg
+        lvl = math.max(lvl, m.level)
+      end
+      notify(table.concat(parts, '  |  '), lvl)
+    end
+    if vim.v.vim_did_enter == 1 then
+      vim.schedule(tell)
+    else
+      api.nvim_create_autocmd('VimEnter', { group = group, once = true,
+        callback = function() vim.schedule(tell) end })
+    end
   end
 end)
 
@@ -4621,21 +6437,14 @@ api.nvim_create_autocmd('VimEnter', {
   group = group,
   callback = function()
     vim.defer_fn(function()
+      -- 받아 두고(같은 preset 의 목록) 뒤에서 확인한다. autoindex 의 시작
+      -- 갱신도 곧 같은 것을 부르지만, autoindex 가 꺼져 있어도 목록이 세션마다
+      -- 한 번은 새로워지게 여기서도 부른다 (두 번째는 바로 돌아간다, C1).
+      -- 다른 프로젝트로 판명됐거나 목록이 없으면 이것이 목록을 만든다.
       local root = cur_root()
-      local name = active_preset(root)
-      local was = booted
-      booted = nil
-      if not name then
-        return
+      if active_preset(root) then
+        pcall(_G.projectfiles_materialize, root)
       end
-      -- 200ms 전에 같은 프로젝트, 같은 preset 으로 이미 펼쳤으면 결과가
-      -- 같다. 실제 SDK 트리에서 한 번이 150~250ms 라, 뜨자마자 그만큼
-      -- 멈칫하는 것이 그대로 보인다. 다른 프로젝트로 판명됐을 때만
-      -- 다시 만든다 - 그게 이 VimEnter 가 있는 이유다.
-      if was == root .. '\0' .. name then
-        return
-      end
-      materialize(root)
     end, 200)
   end,
 })

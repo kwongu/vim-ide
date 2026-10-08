@@ -225,8 +225,17 @@ filter_nested() {
 
 if [ -f .tags/files ]; then
 	# preset 모드: projectfiles.lua 가 만들어 둔 목록 (파일/디렉터리 preset).
-	# 그쪽에서 이미 걸렀지만, 목록을 손으로 고칠 수도 있으니 여기서도 본다.
-	grep -v '^[[:space:]]*$' .tags/files | filter_size | filter_binary
+	# 크기와 바이너리는 그쪽이 이미 걸렀다. 여기서 다시 거르면 목록의 파일
+	# 마다 stat 과 읽기(grep -I)가 한 번씩 더 든다 - 6,600개에서 0.5~1초,
+	# stat 이 느린 서버에서는 그 몇 배다. ctags(gutentags)가 저장마다 이걸
+	# 부른다. 손으로 고친 목록은 nvim 이 다음에 목록을 쓸 때 덮이므로 예전처럼
+	# 여기서 지킬 까닭이 없다. 빈 목록(빈 preset)도 실패가 아니다.
+	#   INDEXFILES_TRUST_LIST=0   예전처럼 여기서도 거르기
+	if [ "${INDEXFILES_TRUST_LIST:-1}" = 0 ]; then
+		grep -v '^[[:space:]]*$' .tags/files | filter_size | filter_binary
+	else
+		grep -v '^[[:space:]]*$' .tags/files || true
+	fi
 elif [ -f .indexfiles ]; then
 	grep -v '^[[:space:]]*$' .indexfiles | grep -v '^[[:space:]]*#' |
 		filter_size | filter_binary

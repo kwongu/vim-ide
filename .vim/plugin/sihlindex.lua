@@ -66,6 +66,8 @@
 --                            (ape_dbg, arpc_info, DIRAC_TRACE_ERR ...).
 --                            [] 로 두면 예전처럼 전부 빨강
 --   g:sihl_index_timeout  한 번의 global 감시 시간 ms (기본 5000)
+--   g:sihl_index_nodb_ttl  'GTAGS 가 없다'는 판정을 몇 초 믿을지 (기본 30,
+--                          0 이면 :SiHlIndexClear 나 색인 완료 전까지 계속)
 --   g:sihl_index_nice   0 이면 nice/ionice 를 붙이지 않는다 (기본 1)
 --   g:sihl_index_debug  1 이면 판단을 stdpath('cache')/sihlindex.log 에 남긴다
 --   :SiHlIndexToggle / :SiHlIndexClear / :SiHlIndexStatus
@@ -375,32 +377,167 @@ local function navy_name(name)
 end
 
 local s = {
-  cache = {},     -- root -> { key, found = {}, missing = {} }
+  cache = {},     -- root -> { key, found = {}, missing = {}, stale = {}, ... }
   snap_ok = {},   -- root -> 이 루트에서 ctags 스냅숏까지 봐도 되는가
   snaps = {},     -- root -> 그때 볼 스냅숏 경로들 (체인 전체의 것)
   busy = false,
   want = {},      -- root -> { sym -> true }
+  ask_bufs = {},  -- root -> { buf -> true }  답이 오면 다시 칠할 버퍼
+  want_buf = {},  -- root -> 마지막으로 물은 버퍼 (그 버퍼의 'tags' 로 taglist)
+  saved = {},     -- 절대 경로 -> 저장한 때(uv.now)
+  list_gen = 0,   -- User ProjectFilesChanged 마다 하나씩
+  tags_gen = 0,   -- 마지막 GutentagsUpdated 때의 list_gen
+  lists = {},     -- root -> { key, set }  preset 목록(.tags/files)
   tokens = {}, timer = nil, proc = nil, watchdog = nil, killed = false,
 }
 
 --------------------------------------------------------------------- 캐시
+-- 키에 nsec 까지 넣는다. GTAGS 는 지워도 크기가 그대로다 - Berkeley DB 는
+-- 페이지 단위로 잡아 둔 자리를 돌려주지 않아서, 6500개 -> 502개로 줄여도
+-- 3,629,056 바이트 그대로였다. 그러면 sec:size 는 사실상 '초' 하나뿐이고,
+-- 같은 초에 두 번 바뀌면(+ 하고 바로 -) 같은 키가 나왔다 (실측).
 local function dbkey(root)
   local st = uv.fs_stat(root .. '/.tags/GTAGS') or uv.fs_stat(root .. '/GTAGS')
-  return st and (tostring(st.mtime.sec) .. ':' .. tostring(st.size)) or '-'
+  return st and ('%d:%d:%d'):format(st.mtime.sec, st.mtime.nsec or 0, st.size)
+      or '-'
+end
+
+-- ctags 의 답도 preset 목록을 따라야 한다.
+--
+-- 스냅숏은 목록이 바뀐 뒤에도 한동안(트리에서 + / - 하면 다음 저장이나
+-- 재시작까지) 예전 파일을 담고 있다. 그래서 - 로 뺀 파일의 함수를 gtags 는
+-- 모른다고 하는데 스냅숏이 '있다'고 답해 초록으로 남았다 (실측: global -d
+-- 는 빈 답인데 how=ctags 로 찾음). preset 모드면 답한 줄의 파일이 그 루트의
+-- <root>/.tags/files 에 있을 때만 받는다. 목록이 없는 루트(auto)나 어느 루트
+-- 밑에도 없는 경로는 예전처럼 받는다 - 모르는 것을 검정으로 만들지는 않는다.
+local function list_set(root, memo)
+  if memo[root] ~= nil then
+    return memo[root] or nil
+  end
+  local lf = root .. '/' .. (vim.g.gtags_objdir or '.tags') .. '/files'
+  local st = uv.fs_stat(lf)
+  if not st then
+    s.lists[root] = nil
+    memo[root] = false
+    return nil
+  end
+  local key = ('%d:%d:%d'):format(st.mtime.sec, st.mtime.nsec or 0, st.size)
+  local c = s.lists[root]
+  if not (c and c.key == key) then
+    local set = {}
+    local ok, lines = pcall(vim.fn.readfile, lf)
+    for _, rel in ipairs(ok and lines or {}) do
+      if rel ~= '' then
+        set[rel] = true
+      end
+    end
+    c = { key = key, set = set }
+    s.lists[root] = c
+  end
+  memo[root] = c.set
+  return c.set
+end
+
+-- 이 파일이 아는 루트 중 하나의 색인 대상인가. 루트가 겹치면(프로젝트 안의
+-- 프로젝트) 하나라도 담고 있으면 된다 - 체인의 어느 DB 로든 C-] 가 닿는다.
+local function listed(path, memo)
+  if not path or path:sub(1, 1) ~= '/' then
+    return true
+  end
+  local inside = false
+  for r in pairs(s.cache) do
+    if path:sub(1, #r + 1) == r .. '/' then
+      inside = true
+      local set = list_set(r, memo)
+      if not set or set[path:sub(#r + 2)] then
+        return true
+      end
+    end
+  end
+  return not inside
+end
+
+-- 이 루트 밑에서 최근(1분 안)에 저장한 파일들
+local function saved_under(root)
+  local out, now, pre = {}, uv.now(), root .. '/'
+  for p, at in pairs(s.saved) do
+    if now - at > 60000 then
+      s.saved[p] = nil
+    elseif p:sub(1, #pre) == pre then
+      out[#out + 1] = p
+    end
+  end
+  return out
+end
+
+-- 색인이 바뀌었다: 이 DB 에 대한 판정을 다시 받게 한다.
+--
+-- 예전에는 '없음'만 버렸다. "재색인은 없던 것을 생기게 할 뿐"이라고 봤는데,
+-- 트리의 - 는 있던 것을 지운다. 그래서 - 로 뺀 파일의 함수가 세션 내내
+-- 초록으로 남았다 (global -d 는 빈 답인데 :SiHlIndexClear 전까지 그대로).
+--
+-- 그렇다고 '찾음'을 그냥 버리면 저장할 때마다 화면의 초록이 통째로 꺼졌다가
+-- 다시 켜진다. 그래서 '찾음'은 stale 로 옮긴다: 다시 물어서 답이 올 때까지는
+-- 그 색 그대로 칠하고(깜빡임 없음), 답이 오면 그 답으로 바뀐다.
+--
+-- 저장 한 번(single-update)이면 바뀐 것은 그 파일에 정의된 이름뿐이다. 그때는
+-- 그 파일에서 찾았던 이름만 다시 묻는다 - 저장할 때마다 화면의 초록을 전부
+-- 다시 물으면 공용 서버에서 global 이 두 배로 돈다. 단 목록이 바뀐 뒤(+/-)거나
+-- 왜 바뀌었는지 모르면(다른 nvim, 셸의 gtags) 전부 다시 묻는다.
+--
+-- 다시 묻는 차례도 정한다(urgent). 화면의 이름을 전부 다시 물으면 배치 몇
+-- 개가 되는데(global 은 이름당 15ms 안팎, 배치 하나에 40개), 아무 순서로나
+-- 물으면 - 로 뺀 함수가 세 번째 배치에서야 검정이 됐다 (실측 1.1초). 바뀔 수
+-- 있는 것부터 묻는다:
+--   1  정의가 있던 파일이 목록에서 빠졌거나(-) 방금 저장한 파일인 '찾음'
+--   2  '없음'이던 것 (+ 로 들어온 파일, 저장한 파일의 새 정의)
+--   나머지 '찾음'은 그 뒤에 확인만 한다.
+local function invalidate(b, root, kind)
+  for sym in pairs(b.missing) do
+    b.urgent[sym] = b.urgent[sym] or 2
+  end
+  b.missing = {}
+  local files = (kind == 'single' or kind == nil) and b.gen == s.list_gen
+      and saved_under(root) or {}
+  if #files > 0 then
+    for _, p in ipairs(files) do
+      for sym in pairs(b.by_file[p] or {}) do
+        if b.found[sym] ~= nil then
+          b.stale[sym], b.found[sym] = b.found[sym], nil
+          b.urgent[sym] = 1
+        end
+      end
+      b.by_file[p] = nil
+    end
+  else
+    local memo = {}
+    for p, syms in pairs(b.by_file) do
+      if not listed(p, memo) then
+        for sym in pairs(syms) do
+          b.urgent[sym] = 1
+        end
+      end
+    end
+    for sym, v in pairs(b.found) do
+      b.stale[sym] = v
+    end
+    b.found, b.by_file = {}, {}
+  end
+  b.gen = s.list_gen
 end
 
 local function bucket(root)
   local b = s.cache[root]
   local key = dbkey(root)
   if not b then
-    b = { key = key, found = {}, missing = {}, how = {} }
+    b = { key = key, found = {}, missing = {}, how = {}, stale = {},
+          by_file = {}, urgent = {}, gen = s.list_gen }
     s.cache[root] = b
   elseif b.key ~= key then
-    -- 색인이 바뀌면 '없음'만 버린다. 재색인은 없던 것을 생기게 할 뿐이고,
-    -- 있던 것이 사라지는 경우는 드물다. 전부 버리면 저장할 때마다 화면의
-    -- 검정이 통째로 사라졌다 다시 나타난다.
-    b.key, b.missing = key, {}
-    b.how = b.how or {}
+    -- 이 nvim 이 알려 주지 않은 변화(갱신이 아직 도는 중, 다른 nvim, 셸).
+    -- 이유를 모르므로 invalidate 가 최근 저장으로 설명되는지 본다.
+    b.key, b.key_at = key, uv.now()
+    invalidate(b, root, nil)
   end
   return b
 end
@@ -431,8 +568,18 @@ end
 --
 -- 시작점은 '현재 디렉터리의 프로젝트'다 (projectfiles 의 anchor_cwd 와 같은
 -- 규칙). 그 아래에 있는 preset 은 쓰지 않는다.
+--
+-- 'DB 가 없다'(빈 체인)는 영원히 믿지 않는다. 모드를 고르기 전에 연 파일은
+-- 빈 체인으로 담기는데, 예전에는 그게 :SiHlIndexClear 전까지 남아서 preset 을
+-- 고르거나 + 로 GTAGS 가 처음 생겨도 그 버퍼는 끝내 칠해지지 않았다 (실측:
+-- 색인이 생기고 12초 뒤에도 표시 0개). 이 nvim 이 만든 색인은 완료 알림
+-- (User VimIdeIndexUpdated)에서 체인을 통째로 비워 바로 잡고, 다른 nvim 이나
+-- 셸이 만든 것은 g:sihl_index_nodb_ttl 초가 지나면 다시 찾는다. 빈 체인을
+-- 아예 담지 않으면 칠할 때마다 위로 걸어 올라가며 stat 을 수십 번 한다(깊은
+-- 경로에서 81번) - stat 이 느린 서버에서 스크롤마다 그 값을 치르게 된다.
 local chain_cache = {}
-local function roots_of(buf)
+local chain_miss = {}   -- dir -> 빈 체인을 담은 때(uv.now)
+local function roots_of(buf, fresh)
   local name = api.nvim_buf_get_name(buf)
   if name:match('RelationView%-Context$') and _G.relationview_ctx_path then
     local ok, pth = pcall(_G.relationview_ctx_path)
@@ -444,8 +591,15 @@ local function roots_of(buf)
     return {}
   end
   local dir = vim.fs.dirname(name)
-  if chain_cache[dir] then
-    return chain_cache[dir]
+  local c = chain_cache[dir]
+  if c and not fresh then
+    if #c > 0 then
+      return c
+    end
+    local ttl = (tonumber(cfg('nodb_ttl', 30)) or 30) * 1000
+    if ttl <= 0 or uv.now() - (chain_miss[dir] or 0) < ttl then
+      return c
+    end
   end
   local mode = tostring(cfg('db', 'chain'))
   local out = {}
@@ -495,46 +649,8 @@ local function roots_of(buf)
     out = { out[#out] }
   end
   chain_cache[dir] = out
+  chain_miss[dir] = (#out == 0) and uv.now() or nil
   return out
-end
-
-local root_cache = {}
-local function root_of(buf)
-  local name = api.nvim_buf_get_name(buf)
-  -- 미리보기 버퍼는 파일의 사본이라 이름으로 루트를 못 찾는다. 지금 무엇을
-  -- 보여 주고 있는지 RelationView 에게 묻는다.
-  if name:match('RelationView%-Context$') and _G.relationview_ctx_path then
-    local ok, p = pcall(_G.relationview_ctx_path)
-    if ok and p and p ~= '' then
-      name = p
-    end
-  end
-  if name == '' then
-    return nil
-  end
-  local dir = vim.fs.dirname(name)
-  if root_cache[dir] ~= nil then
-    return root_cache[dir] or nil
-  end
-  local r
-  if tostring(cfg('db', 'near')) == 'root' and _G.relationview_root_for then
-    local ok, v = pcall(_G.relationview_root_for, name)
-    if ok then r = v end
-  end
-  if not r then
-    local d = dir
-    while d and d ~= '/' and d ~= '' do
-      if uv.fs_stat(d .. '/.tags/GTAGS') or uv.fs_stat(d .. '/GTAGS') then
-        r = d
-        break
-      end
-      local up = vim.fs.dirname(d)
-      if up == d then break end
-      d = up
-    end
-  end
-  root_cache[dir] = r or false
-  return r
 end
 
 ------------------------------------------------------------------ 프로세스
@@ -612,19 +728,71 @@ end
 
 local repaint, repaint_ctx  -- forward: 아래 drain() 이 둘 다 부른다.
 
+-- 이 버퍼들을 보여 주는 (지금 탭의) 창을 버퍼마다 하나씩 다시 칠한다.
+-- repaint(win) 은 같은 버퍼를 보여 주는 다른 창까지 함께 칠한다.
+--
+-- '지금 창'만 칠하면 안 된다. 트리에서 + / - 를 하면 답(색인 완료, global 의
+-- 답, 멤버 판정)이 올 때 지금 창은 트리라 repaint() 가 그냥 돌아갔다 - 실측:
+-- + 뒤 28초 동안 표시가 그대로였고 <C-w>l 로 들어가야 바뀌었다. 그래서 답을
+-- 기다리던 버퍼를 기억해 두고 그 버퍼를 칠한다.
+local function repaint_bufs(bufs)
+  if not next(bufs) then
+    return
+  end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local b = api.nvim_win_get_buf(w)
+    if bufs[b] then
+      bufs[b] = nil
+      pcall(repaint, w)
+    end
+  end
+end
+
+-- 지금 탭에 보이는 C/C++ 창 전부 (미리보기 포함) - 색인이 바뀌었을 때만 쓴다.
+-- 키 입력마다 도는 schedule() 은 예전처럼 지금 창만 칠한다.
+local function repaint_visible()
+  local bufs = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local b = api.nvim_win_get_buf(w)
+    local ft = vim.bo[b].filetype
+    if ft == 'c' or ft == 'cpp' then
+      bufs[b] = true
+    end
+  end
+  repaint_bufs(bufs)
+end
+
 -- 멤버 판정은 이름마다 따로 돌아온다. 돌아올 때마다 칠하면 화면 하나에
--- 스무 번을 칠하게 되므로 한 번으로 묶는다.
+-- 스무 번을 칠하게 되므로 한 번으로 묶는다. 칠할 버퍼를 받아 둔다(없으면
+-- 지금 버퍼) - 답이 올 때 초점이 트리로 옮겨 가 있어도 그 버퍼가 칠해지게.
 local redraw_pending = false
-local function redraw_soon()
+local redraw_set = {}
+local function redraw_soon(buf)
+  redraw_set[buf or api.nvim_get_current_buf()] = true
   if redraw_pending then
     return
   end
   redraw_pending = true
   vim.defer_fn(function()
     redraw_pending = false
-    pcall(repaint)
-    pcall(repaint_ctx)
+    local set = redraw_set
+    redraw_set = {}
+    repaint_bufs(set)
   end, 60)
+end
+
+-- 색인이 바뀌었을 때 보이는 창을 칠하는 것도 한 번으로 묶는다 (빌드 끝과
+-- 밀린 저장의 single-update 가 잇달아 올 수 있다).
+local visible_pending = false
+local function repaint_visible_soon(ms)
+  if visible_pending then
+    return
+  end
+  visible_pending = true
+  vim.defer_fn(function()
+    visible_pending = false
+    repaint_visible()
+  end, ms or 30)
 end
 -- 이 저장소에서 '정의가 사용처보다 뒤에 있어 nil 전역이 되는' Lua 함정을
 -- 세 번 밟았다. 쓰는 곳보다 앞에 선언해 둔다.
@@ -672,34 +840,58 @@ end
 -- followic 이면 정렬된 파일을 이분 탐색하지 못하고 훑는다: 7MB 스냅숏에서
 -- 이름당 7.01ms 대 0.16ms, 44배 차이였다(찾는 개수는 똑같다).
 --   let g:sihl_index_ctags = 0   " ctags 스냅숏은 보지 않는다
-local function in_tags(syms, allow)
-  local out = {}
-  if not allow or (tonumber(cfg('ctags', 1)) or 1) == 0
-      or #vim.fn.tagfiles() == 0 then
-    return out
+--   (스냅숏과 taglist 의 답은 위 listed() 로 preset 목록을 따른다)
+--
+-- buf: 이 이름을 물은 버퍼. taglist() 는 '지금 버퍼'의 'tags' 를 보므로,
+-- 답이 올 때 초점이 트리에 있으면 엉뚱한(대개 빈) 태그 파일을 보고 '없음'이
+-- 됐다 - 같은 이름이 C 창에서는 찾음, 트리에서는 없음으로 갈렸다.
+local function in_tags(syms, allow, buf, memo)
+  local out, where = {}, {}
+  if not allow or (tonumber(cfg('ctags', 1)) or 1) == 0 then
+    return out, where
   end
-  local save = vim.o.tagcase
-  vim.o.tagcase = 'match'
-  local ok = pcall(function()
-    for _, sym in ipairs(syms) do
-      local t = vim.fn.taglist('^' .. sym .. '$')
-      if t and #t > 0 then
-        -- ctags 의 kind 'd' 는 #define 이다
-        out[sym] = (t[1].kind == 'd')
-                and macro_kind(t[1].filename, sym, t[1].cmd)
-            or (t[1].kind == 'e' and 'enum')
-            or true
-      end
+  local function run()
+    if #vim.fn.tagfiles() == 0 then
+      return
     end
-  end)
-  vim.o.tagcase = save
-  if not ok then
-    return {}
+    local save = vim.o.tagcase
+    vim.o.tagcase = 'match'
+    pcall(function()
+      for _, sym in ipairs(syms) do
+        local t = vim.fn.taglist('^' .. sym .. '$')
+        -- 목록 밖 파일의 줄은 건너뛰고 첫 줄을 쓴다
+        for _, e in ipairs(t or {}) do
+          local file = e.filename
+          if file and file:sub(1, 1) ~= '/' then
+            file = vim.fn.fnamemodify(file, ':p')
+          end
+          if listed(file, memo) then
+            -- ctags 의 kind 'd' 는 #define 이다
+            out[sym] = (e.kind == 'd')
+                    and macro_kind(e.filename, sym, e.cmd)
+                or (e.kind == 'e' and 'enum')
+                or true
+            where[sym] = file
+            break
+          end
+        end
+      end
+    end)
+    vim.o.tagcase = save
   end
-  return out
+  if buf and api.nvim_buf_is_loaded(buf) and buf ~= api.nvim_get_current_buf() then
+    if not pcall(api.nvim_buf_call, buf, run) then
+      return {}, {}
+    end
+  else
+    run()
+  end
+  return out, where
 end
 
-local function run_batch(root, syms, done)
+-- key0: 물을 때의 DB 키. tbuf: taglist() 를 볼 버퍼 (nil 이면 지금 버퍼).
+-- done(dropped): dropped 면 묻는 동안 색인이 바뀌어 답을 버렸다.
+local function run_batch(root, syms, key0, tbuf, done)
   local g = prog()
   if not g then
     s.off = 'global 을 찾지 못했습니다'
@@ -724,16 +916,21 @@ local function run_batch(root, syms, done)
   -- 한 셸 안에서 네 개를 잇달아 물으면 사실상 0초였다(페이지 캐시).
   -- 이게 없으면 구조체 멤버(mbox_ch 같은)는 영영 검정이다: GNU Global 은
   -- 멤버를 색인하지 않고, 이 프로젝트에는 taglist 가 볼 파일이 없다.
+  --
+  -- 스냅숏의 줄은 셸에서 하나로 고르지 않고 (스냅숏마다 40줄까지) 전부
+  -- 넘긴다: 'TAG<스냅숏 번호>\t<줄>'. 어느 줄을 쓸지는 Lua 가 정한다 -
+  -- preset 목록 밖 파일의 줄은 버려야 하는데(위 listed), 셸이 먼저 한 줄을
+  -- 골라 버리면 그 줄이 목록 밖일 때 목록 안의 다른 정의를 못 본다.
+  -- 고르는 규칙은 예전 그대로다: 답이 있는 첫 스냅숏에서 '#define' 이 든
+  -- 줄을 먼저, 없으면 첫 줄.
   local script = 'for s in ' .. table.concat(syms, ' ') ..
       '; do o=$("$SIHL_G" -d --result=ctags-x "$s" 2>/dev/null | head -1);' ..
-      ' if [ -z "$o" ] && [ -n "$SIHL_SNAPS" ]; then' ..
-      ' for f in $SIHL_SNAPS; do [ -r "$f" ] || continue;' ..
-      ' a=$(LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$f" 2>/dev/null | head -40);' ..
-      ' [ -z "$a" ] && continue;' ..
-      ' o=$(printf \'%s\\n\' "$a" | grep -m1 "#define" );' ..
-      ' [ -z "$o" ] && o=$(printf \'%s\\n\' "$a" | head -1);' ..
-      ' o="TAG\t$o"; break; done; fi;' ..
-      ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; fi; done'
+      ' if [ -n "$o" ]; then printf \'%s\\t%s\\n\' "$s" "$o"; continue; fi;' ..
+      ' [ -n "$SIHL_SNAPS" ] || continue; i=0;' ..
+      ' for f in $SIHL_SNAPS; do i=$((i+1)); [ -r "$f" ] || continue;' ..
+      ' LC_ALL=C look -b "$(printf \'%s\\t\' "$s")" "$f" 2>/dev/null | head -40 |' ..
+      ' while IFS= read -r l; do printf \'%s\\tTAG%d\\t%s\\n\' "$s" "$i" "$l"; done;' ..
+      ' done; done'
   local argv = nice_prefix()
   vim.list_extend(argv, { 'sh', '-c', script })
   local env = db_env(root) or {}
@@ -756,43 +953,45 @@ local function run_batch(root, syms, done)
     end
   end
   dbg(('batch root=%s n=%d'):format(root, #syms))
+  -- 감시 타이머가 먼저 끝내도 죽은 프로세스의 콜백이 뒤따라 온다. done 은
+  -- 한 번만 부른다 (두 번 부르면 같은 화면을 두 번 칠하고 drain 이 겹친다).
+  local ended = false
+  local function finish(dropped)
+    if not ended then
+      ended = true
+      done(dropped)
+    end
+  end
   local ok, proc = pcall(vim.system, argv,
     { cwd = root, text = true, detach = true, env = env },
     vim.schedule_wrap(function(res)
-      s.proc = nil
-      if s.watchdog then
+      if not ended then
+        s.proc = nil
+      end
+      if s.watchdog and not ended then
         pcall(function() s.watchdog:stop(); s.watchdog:close() end)
         s.watchdog = nil
       end
       local b = bucket(root)
-      local hit, snap_hit = {}, {}
+      -- 묻는 동안 DB 가 바뀌었다(갱신이 도는 중이었다). 이 답은 옛 DB 의 것이라
+      -- 담지 않는다 - 담으면 방금 - 로 뺀 이름이 다시 '찾음'으로 굳는다.
+      -- 실패로 세지도 않는다: 쓰는 도중의 DB 는 'GTAGS seems corrupted' 를 낸다.
+      if b.key ~= key0 then
+        dbg(('batch dropped (db changed) root=%s'):format(root))
+        finish(true)
+        return
+      end
+      local hit, snap_hit, where = {}, {}, {}
+      local memo = {}
+      local cands = {}   -- name -> { {i =, line =}, ... } 스냅숏 줄
       if res and res.code == 0 and res.stdout then
         for line in res.stdout:gmatch('[^\n]+') do
           local name, rest = line:match('^([^\t]+)\t(.*)$')
           if name then
-            if rest:sub(1, 4) == 'TAG\t' then
-              snap_hit[name] = true
-              -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 검색패턴 ...
-              --
-              -- kind 필드로 판단하지 않는다. 이 설정은 --fields=+nS 라
-              -- 마지막 필드가 kind 가 아니고(line:123 이 뒤에 온다), 게다가
-              -- look 은 정렬 순서로 첫 줄을 주므로 MODULE_LICENSE 의 경우
-              -- '#define' 이 아니라 그것을 '쓰는' 줄이 먼저 나왔다. 그래서
-              -- 셸에서 '#define' 이 들어간 줄을 먼저 고르고, 여기서는
-              -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
-              local fields = vim.split(rest:sub(5), '\t', { plain = true })
-              local path = fields[2] or ''
-              -- 검색 패턴이 정의가 적힌 소스 줄이다. --fields=+nS 로 만든
-              -- 스냅숏은 그 필드를 '/^...$/;"' 로 끝내므로, 닫는 '/' 뒤에
-              -- 무엇이 오든 받아 준다. 예전 패턴은 '/' 로 끝나야만 맞아서
-              -- 여기서 늘 빈 문자열이 나왔고, 스냅숏 쪽 enum 판정이 죽어
-              -- 있었다.
-              local f3 = fields[3] or ''
-              local pat = f3:match('^/%^?(.-)%$?/') or ''
-              hit[name] = (rest:find('#define', 1, true)
-                    and macro_kind(path, name, rest))
-                  or (is_enum_const(name, (pat:gsub('^%s+', ''))) and 'enum')
-                  or true
+            local si, sl = rest:match('^TAG(%d+)\t(.*)$')
+            if si then
+              cands[name] = cands[name] or {}
+              table.insert(cands[name], { i = si, line = sl })
             else
               local path, src = rest:match('^%S+%s+%d+%s+(%S+)%s+(.*)$')
               -- 파싱이 어긋나도 path 를 nil 로 넘기지 않는다. 넘기면 경로로
@@ -801,7 +1000,56 @@ local function run_batch(root, syms, done)
               hit[name] = src:match('^%s*#%s*define')
                   and macro_kind(path, name, src)
                   or (is_enum_const(name, src) and 'enum' or true)
+              if path ~= '' then
+                where[name] = path:sub(1, 1) == '/' and path
+                    or (root .. '/' .. path:gsub('^%./', ''))
+              end
             end
+          end
+        end
+        for name, list in pairs(cands) do
+          -- 답이 있는 첫 스냅숏에서 목록 안의 줄만 보고, '#define' 줄을 먼저
+          local pick, cur
+          for _, c in ipairs(list) do
+            if pick and c.i ~= cur then
+              break
+            end
+            local fields = vim.split(c.line, '\t', { plain = true })
+            if listed(fields[2], memo) then
+              if not pick then
+                pick, cur = c, c.i
+              end
+              if c.line:find('#define', 1, true) then
+                pick = c
+                break
+              end
+            end
+          end
+          if pick and not hit[name] then
+            snap_hit[name] = true
+            -- ctags 스냅숏 한 줄: 이름 \t 경로 \t 검색패턴 ...
+            --
+            -- kind 필드로 판단하지 않는다. 이 설정은 --fields=+nS 라
+            -- 마지막 필드가 kind 가 아니고(line:123 이 뒤에 온다), 게다가
+            -- look 은 정렬 순서로 첫 줄을 주므로 MODULE_LICENSE 의 경우
+            -- '#define' 이 아니라 그것을 '쓰는' 줄이 먼저 나왔다. 그래서
+            -- 위에서 '#define' 이 들어간 줄을 먼저 고르고, 여기서는
+            -- gtags 쪽과 같은 규칙(검색패턴에 #define 이 있는가)을 쓴다.
+            local rest = pick.line
+            local fields = vim.split(rest, '\t', { plain = true })
+            local path = fields[2] or ''
+            -- 검색 패턴이 정의가 적힌 소스 줄이다. --fields=+nS 로 만든
+            -- 스냅숏은 그 필드를 '/^...$/;"' 로 끝내므로, 닫는 '/' 뒤에
+            -- 무엇이 오든 받아 준다. 예전 패턴은 '/' 로 끝나야만 맞아서
+            -- 여기서 늘 빈 문자열이 나왔고, 스냅숏 쪽 enum 판정이 죽어
+            -- 있었다.
+            local f3 = fields[3] or ''
+            local pat = f3:match('^/%^?(.-)%$?/') or ''
+            hit[name] = (rest:find('#define', 1, true)
+                  and macro_kind(path, name, rest))
+                or (is_enum_const(name, (pat:gsub('^%s+', ''))) and 'enum')
+                or true
+            where[name] = path ~= '' and path or nil
           end
         end
       elseif res and res.code ~= 0 then
@@ -825,7 +1073,8 @@ local function run_batch(root, syms, done)
         dbg(('batch ok n=%d found=%d'):format(#syms, nf))
       end
       -- rc ~= 0 이면 '모른다'로 둔다. 실패를 '없음'으로 적으면 패턴이 한 번
-      -- 길었던 것만으로 화면이 통째로 검정이 된다.
+      -- 길었던 것만으로 화면이 통째로 검정이 된다. stale 도 그대로 둔다 -
+      -- 다시 확인하지 못한 '찾음'은 다음에 칠할 때 또 묻는다.
       if res and res.code == 0 then
         -- gtags 가 못 찾은 것만 ctags 에 다시 물어본다
         local rest = {}
@@ -834,24 +1083,34 @@ local function run_batch(root, syms, done)
             rest[#rest + 1] = sym
           end
         end
-        local tags = #rest > 0 and in_tags(rest, s.snap_ok[root]) or {}
+        local tags, twhere = {}, {}
+        if #rest > 0 then
+          tags, twhere = in_tags(rest, s.snap_ok[root], tbuf, memo)
+        end
         for _, sym in ipairs(syms) do
           local v = hit[sym] or tags[sym]
+          b.stale[sym], b.urgent[sym] = nil, nil
           if v then
             b.found[sym] = v
             -- 어디가 답했는지 적어 둔다. :SiHlIndexWhy 가 'gtags 는 모르는데
             -- 캐시는 찾았다고 한다'로 보이지 않으려면 이게 있어야 한다.
             b.how[sym] = hit[sym] and (snap_hit[sym] and 'ctags' or 'gtags') or 'taglist'
+            -- 정의가 있는 파일. 그 파일만 저장했을 때 이 이름만 다시 묻는다.
+            local w = where[sym] or twhere[sym]
+            if w then
+              b.by_file[w] = b.by_file[w] or {}
+              b.by_file[w][sym] = true
+            end
           else
             b.missing[sym] = true
           end
         end
       end
-      done()
+      finish()
     end))
   if not ok then
     s.proc = nil
-    done()
+    finish()
     return
   end
   s.proc = proc
@@ -862,11 +1121,11 @@ local function run_batch(root, syms, done)
       pcall(function() s.watchdog:stop(); s.watchdog:close() end)
       s.watchdog = nil
     end
-    if s.proc then
+    if s.proc and not ended then
       dbg('watchdog kill')
       kill_group(s.proc.pid)
       s.proc = nil
-      done()
+      finish()
     end
   end))
 end
@@ -877,16 +1136,35 @@ local function pack(root)
     return nil
   end
   local b = bucket(root)
+  if b.key == '-' then
+    -- DB 가 사라졌다(지웠거나 비웠다). 물으면 global 이 실패해 세 번 만에
+    -- 이 기능이 세션 내내 꺼진다 - 묻지 않고, 체인은 칠할 때 다시 찾는다.
+    s.want[root], s.ask_bufs[root] = nil, nil
+    return nil
+  end
   local out = {}
   local cap = tonumber(cfg('names', 40)) or 40
-  for sym in pairs(want) do
-    if b.found[sym] == nil and b.missing[sym] == nil then
-      out[#out + 1] = sym
+  -- 바뀌었을 법한 것(invalidate 의 urgent)부터 따로 묶는다 - 섞어서 40개를
+  -- 채우면 정작 바뀐 이름의 답이 배치 몇 개 뒤로 밀린다.
+  local function take(level)
+    for sym in pairs(want) do
+      if level == nil or b.urgent[sym] == level then
+        if b.found[sym] == nil and b.missing[sym] == nil then
+          out[#out + 1] = sym
+        end
+        want[sym] = nil
+        if #out >= cap then
+          break
+        end
+      end
     end
-    want[sym] = nil
-    if #out >= cap then
-      break
-    end
+  end
+  take(1)
+  if #out == 0 then
+    take(2)
+  end
+  if #out == 0 then
+    take(nil)
   end
   if next(want) == nil then
     s.want[root] = nil
@@ -894,12 +1172,33 @@ local function pack(root)
   return #out > 0 and out or nil
 end
 
+-- 방금 DB 가 바뀐 것을 봤으면(이 nvim 이 알려 주지 않은 변화 - 갱신이 아직
+-- 쓰는 중일 수 있다) 잠잠해질 때까지 묻지 않는다. 쓰는 도중에 물은 답은
+-- 버려야 하고(run_batch 의 key0), 그렇게 버리는 질의도 분당 예산을 먹는다:
+-- 커널 트리의 gtags -i 는 수십 초를 쓰는데, 그동안 스크롤할 때마다 물으면
+-- 예산을 다 써서 정작 갱신이 끝난 뒤의 답을 못 받았다.
+local SETTLE_MS = 500
+local settle_pending = false
+
 local function drain()
   if s.busy or s.off then
     return
   end
   local root = next(s.want)
   if not root then
+    return
+  end
+  local b0 = bucket(root) -- 키를 지금 다시 본다 (바뀌었으면 여기서 key_at)
+  local wait = b0.key_at and (SETTLE_MS - (uv.now() - b0.key_at)) or 0
+  if wait > 0 then
+    dbg(('settle wait %dms root=%s'):format(wait, root))
+    if not settle_pending then
+      settle_pending = true
+      vim.defer_fn(function()
+        settle_pending = false
+        drain()
+      end, wait)
+    end
     return
   end
   local syms = pack(root)
@@ -915,13 +1214,23 @@ local function drain()
     return
   end
   s.busy = true
-  run_batch(root, syms, function()
+  -- taglist() 는 이 루트의 이름을 물은 버퍼에서 본다. 미리보기(이름 없는
+  -- 사본)면 'tags' 가 비어 있으므로 예전처럼 지금 버퍼를 쓴다.
+  local tb = s.want_buf[root]
+  if tb and not (api.nvim_buf_is_valid(tb) and vim.bo[tb].buftype == '') then
+    tb = nil
+  end
+  run_batch(root, syms, s.cache[root].key, tb, function()
     s.busy = false
-    -- 답이 왔으면 지금 보이는 화면을 무조건 다시 칠한다. 세대 검사로
+    -- 답이 왔으면 그 답을 기다리던 화면을 무조건 다시 칠한다. 세대 검사로
     -- 거르면 '스크롤을 멈춘 화면에 표시가 안 뜨다가 키를 누르면 뜨는'
-    -- 증상이 난다.
-    pcall(repaint)
-    pcall(repaint_ctx)
+    -- 증상이 난다. 지금 창이 아니라 물은 버퍼다 - 트리에서 + / - 를 하고
+    -- 기다리면 지금 창은 트리라서, 예전에는 C 창에 들어갈 때까지 그대로였다.
+    local bufs = s.ask_bufs[root] or {}
+    s.ask_bufs[root] = nil
+    -- 답을 버렸어도(묻는 동안 DB 가 바뀜) 같다: 칠하면서 다시 묻고, drain 이
+    -- DB 가 잠잠해질 때까지 기다렸다 보낸다.
+    repaint_bufs(bufs)
     drain()
   end)
 end
@@ -1079,6 +1388,25 @@ repaint = function(win)
   if #roots == 0 then
     return
   end
+  local buckets = {}
+  for i, r in ipairs(roots) do
+    buckets[i] = bucket(r)
+  end
+  -- 체인에 담아 둔 DB 가 사라졌으면(지웠거나 비웠다) 체인을 다시 찾는다.
+  -- 키는 위 bucket() 이 이미 stat 해 둔 것이라 따로 드는 값이 없다.
+  for _, bk in ipairs(buckets) do
+    if bk.key == '-' then
+      roots = roots_of(buf, true)
+      buckets = {}
+      for i, r in ipairs(roots) do
+        buckets[i] = bucket(r)
+      end
+      break
+    end
+  end
+  if #roots == 0 then
+    return
+  end
   -- 이 버퍼를 보여 주는 (지금 탭의) 창마다 그 창의 보이는 줄(+여유)을 칠한다 -
   -- 한 창 몫만 칠하면 같은 버퍼를 보여 주는 다른 창의 색이 통째로 지워졌다 (QA).
   -- 다른 탭은 그 탭에 들어갈 때 다시 칠해진다.
@@ -1123,10 +1451,6 @@ repaint = function(win)
       locals[k] = true
     end
   end
-  local buckets = {}
-  for i, r in ipairs(roots) do
-    buckets[i] = bucket(r)
-  end
   local prio = tonumber(vim.g.sihl_priority) or 200
   local decl_here = {}
 
@@ -1134,8 +1458,10 @@ repaint = function(win)
   --   하나라도 알면        -> 찾음 (그 종류를 쓴다)
   --   전부 '없음'이면      -> 검정
   --   아직 안 물어본 DB 가 있으면 -> 그 DB 에 물어본다 (칠하지 않는다)
+  --   색인이 바뀌기 전에 찾았던 것(stale) -> 그 색 그대로 칠하고 다시 묻는다
+  --     (세 번째 값이 물을 DB). 답이 오기 전에 지우면 깜빡인다.
   local function verdict(name)
-    local unasked
+    local unasked, old
     for i, bk in ipairs(buckets) do
       local v = bk.found[name]
       if v then
@@ -1144,11 +1470,47 @@ repaint = function(win)
       if bk.missing[name] == nil and not unasked then
         unasked = i
       end
+      if old == nil then
+        old = bk.stale[name]
+      end
     end
     if unasked then
+      if old ~= nil then
+        return 'found', old, unasked
+      end
       return 'ask', unasked
     end
     return 'missing'
+  end
+
+  -- i 번째 DB 에 이 이름을 묻도록 담는다. 물은 버퍼도 적어 둔다 - 답이 오면
+  -- 그 버퍼를 칠하고, taglist() 도 그 버퍼의 'tags' 로 본다.
+  local asked = false
+  local function want(i, name)
+    local r = roots[i]
+    s.want[r] = s.want[r] or {}
+    s.want[r][name] = true
+    s.ask_bufs[r] = s.ask_bufs[r] or {}
+    s.ask_bufs[r][buf] = true
+    s.want_buf[r] = buf
+    s.snap_ok[r] = (i == #roots)
+    if s.snap_ok[r] and not s.snaps[r] then
+      local list = {}
+      for _, rr in ipairs(roots) do
+        if _G.autoindex_ctags_file then
+          local okc, snap = pcall(_G.autoindex_ctags_file, rr)
+          if okc and snap and snap ~= '' and uv.fs_stat(snap) then
+            list[#list + 1] = snap
+          end
+        end
+      end
+      s.snaps[r] = list
+    end
+    asked = true
+  end
+  -- 멤버 판정의 답이 오면 이 버퍼를 칠한다 (그때 지금 창이 어디든)
+  local function member_cb()
+    redraw_soon(buf)
   end
 
   -- 캡처는 한 번만 모은다. 예전에는 같은 쿼리를 같은 범위에 두 번 돌렸다
@@ -1182,7 +1544,6 @@ repaint = function(win)
   -- 같은 이름에 함께 오는 식). 같은 자리를 두 번 칠하지 않는다.
   local done = {}
   local members_on = (tonumber(cfg('members', 1)) or 1) ~= 0
-  local asked = false
   -- 멤버 풀이(<C-]> 가 쓰는 타입 따라가기)에 한 번 칠하는 동안 쓸 시간.
   -- 자리마다 한 번씩 풀고 글자가 그대로인 동안 담아 두지만, 글자를 고치면
   -- 화면의 멤버를 전부 다시 푼다 - 6600줄 파일에서 멤버 78개, 한 번에
@@ -1226,9 +1587,9 @@ repaint = function(win)
         elseif name and #name > 1 and not KEYWORD[name]
             and (is_member or not locals[name])
             and name:match('^[A-Za-z_][A-Za-z0-9_]*$') then
-          local how, extra = verdict(name)
+          local how, extra, reask = verdict(name)
           if navy_name(name) then
-            how, extra = 'found', 'macrokw'
+            how, extra, reask = 'found', 'macrokw', nil
           end
           -- 멤버는 이름으로 물어서는 답이 안 나온다: GNU Global 의 기본
           -- 파서가 구조체 멤버를 색인하지 않기 때문이다(tsnd.h 의 멤버
@@ -1248,7 +1609,7 @@ repaint = function(win)
               mk_calls = mk_calls + 1
               local t0 = uv.hrtime()
               okm, known = pcall(_G.relationview_member_known, buf,
-                r1 + 1, c1, redraw_soon)
+                r1 + 1, c1, member_cb)
               member_ms = member_ms + (uv.hrtime() - t0) / 1e6
             end
             if okm and known == true then
@@ -1314,23 +1675,10 @@ repaint = function(win)
               hl_group = 'SiJumpFound', priority = prio,
             })
           elseif how == 'ask' and not navy_name(name) then
-            local r = roots[extra]
-            s.want[r] = s.want[r] or {}
-            s.want[r][name] = true
-            s.snap_ok[r] = (extra == #roots)
-            if s.snap_ok[r] and not s.snaps[r] then
-              local list = {}
-              for _, rr in ipairs(roots) do
-                if _G.autoindex_ctags_file then
-                  local okc, snap = pcall(_G.autoindex_ctags_file, rr)
-                  if okc and snap and snap ~= '' and uv.fs_stat(snap) then
-                    list[#list + 1] = snap
-                  end
-                end
-              end
-              s.snaps[r] = list
-            end
-            asked = true
+            want(extra, name)
+          end
+          if reask then
+            want(reask, name)
           end
         end
       end
@@ -1344,7 +1692,7 @@ repaint = function(win)
   if over then
     local m = api.nvim_get_mode().mode:sub(1, 1)
     if m ~= 'i' and m ~= 'R' then
-      redraw_soon() -- 못 푼 멤버를 이어서
+      redraw_soon(buf) -- 못 푼 멤버를 이어서
     end
   end
   if asked then
@@ -1388,12 +1736,194 @@ api.nvim_create_autocmd({ 'BufWipeout', 'BufUnload' }, {
   callback = function(a) ln_memo[a.buf] = nil end,
 })
 api.nvim_create_autocmd({ 'BufWinEnter', 'WinScrolled', 'CursorHold',
-                          'TextChanged', 'InsertLeave', 'ColorScheme' }, {
+                          'TextChanged', 'InsertLeave' }, {
   group = group,
   callback = function()
     local ft = vim.bo.filetype
     if ft == 'c' or ft == 'cpp' then
       schedule()
+    end
+  end,
+})
+-- 색 구성표는 지금 창과 상관이 없다 (트리에서 바꿔도 C 창이 다시 칠해지게)
+api.nvim_create_autocmd('ColorScheme', {
+  group = group,
+  callback = function() repaint_visible_soon(200) end,
+})
+
+-- 색인이 바뀐 것을 알아듣는 곳 -------------------------------------------
+--
+-- autoindex 는 GTAGS 를 바꿀 때마다(전체 빌드, 증분 갱신 gtags -i, 저장 한
+-- 번의 single-update) 끝나는 자리에서 알린다:
+--   User VimIdeIndexUpdated  data = { root =, kind = 'build'|'update'|'single' }
+-- 여기서 그 DB 의 판정을 다시 받게 하고(invalidate), 보이는 C 창을 칠한다.
+--
+-- ProjectFilesChanged 로는 안 된다: 그건 목록을 고친 순간(gtags -i 가 돌기
+-- 전)에 오므로, 그때 다시 물으면 옛 DB 가 옛 답을 준다 - 실측으로 빌드 전에
+-- 빈 체인을 또 담았다. 그쪽은 '목록이 바뀌었다'는 표시(list_gen)와 체인
+-- 비우기에만 쓴다.
+local function on_index_updated(root, kind)
+  if kind ~= 'single' then
+    -- 새 DB 가 생겼거나(첫 색인) 바뀌었을 수 있다: 체인과 스냅숏 목록을 다시
+    -- 찾는다. autoindex 도 자기 루트 캐시를 같은 이유로 통째로 비운다.
+    chain_cache, chain_miss = {}, {}
+    s.snaps = {}
+  end
+  for r, b in pairs(s.cache) do
+    local key = dbkey(r)
+    if key == '-' then
+      s.cache[r] = nil
+    elseif r == root or key ~= b.key then
+      -- 알림의 루트이거나(경로 표기가 달라도) 키가 바뀐 DB. 끝난 뒤의 DB 라
+      -- 잠잠해지기를 기다릴 것도 없다(key_at).
+      b.key, b.key_at = key, nil
+      invalidate(b, r, kind)
+    end
+  end
+  repaint_visible_soon()
+end
+
+api.nvim_create_autocmd('User', {
+  group = group,
+  pattern = 'VimIdeIndexUpdated',
+  callback = function(a)
+    s.has_event = true
+    local d = type(a.data) == 'table' and a.data or {}
+    on_index_updated(type(d.root) == 'string' and d.root or nil,
+      type(d.kind) == 'string' and d.kind or nil)
+  end,
+})
+
+-- 알림을 쏘지 않는 autoindex(예전 사본)와 함께 쓰일 때를 위한 대비.
+--
+-- 목록을 바꾼 뒤 DB 키를 0.5초마다 본다(최대 60초, 루트마다 stat 한두 번).
+-- 키가 바뀌고 한 번 더 볼 때까지 그대로면(다 썼다) 알림을 받은 것처럼
+-- 처리한다. 알림을 한 번이라도 받은 세션에서는 돌지 않는다 - 알림보다 먼저
+-- 쓰는 도중의 DB 를 보고 한 번 더 묻게 될 뿐이다. 아직 DB 가 없는 프로젝트
+-- (모드를 고르기 전에 연 파일)도 지켜본다 - 보이는 C 창의 프로젝트 루트.
+local poll = nil
+local function poll_after_list_change()
+  if s.has_event or poll then
+    return
+  end
+  local init, seen, since = {}, {}, uv.now()
+  for r, b in pairs(s.cache) do
+    init[r], seen[r] = b.key, b.key
+  end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local b = api.nvim_win_get_buf(w)
+    local ft = vim.bo[b].filetype
+    local name = api.nvim_buf_get_name(b)
+    if (ft == 'c' or ft == 'cpp') and name ~= '' and _G.projectfiles_root_of then
+      local ok, r = pcall(_G.projectfiles_root_of, name)
+      if ok and r and r ~= '' and not init[r] then
+        init[r] = dbkey(r)
+        seen[r] = init[r]
+      end
+    end
+  end
+  poll = uv.new_timer()
+  poll:start(500, 500, vim.schedule_wrap(function()
+    if not poll then
+      return
+    end
+    local settled = false
+    for r in pairs(init) do
+      local key = dbkey(r)
+      if key ~= init[r] and key == seen[r] then
+        settled = true
+      end
+      seen[r] = key
+    end
+    if settled or s.has_event or uv.now() - since > 60000 then
+      pcall(function() poll:stop(); poll:close() end)
+      poll = nil
+      if settled and not s.has_event then
+        on_index_updated(nil, 'build')
+      end
+    end
+  end))
+end
+
+-- 목록이 바뀌었다(+ / - / preset 바꾸기). 색인은 아직 그대로이므로 다시 묻지는
+-- 않는다 - 다음 색인 변화를 '저장 한 번'이 아니라 '목록 변경'으로 읽게 하고,
+-- 체인의 출발점(projectfiles_root_of)이 바뀌었을 수 있으니 체인만 비운다.
+api.nvim_create_autocmd('User', {
+  group = group,
+  pattern = 'ProjectFilesChanged',
+  callback = function()
+    s.list_gen = s.list_gen + 1
+    chain_cache, chain_miss = {}, {}
+    poll_after_list_change()
+  end,
+})
+
+-- 체인의 출발점은 현재 디렉터리의 프로젝트다 (anchor_cwd). 키는 파일의
+-- 디렉터리뿐이므로 :cd 하면 비운다.
+api.nvim_create_autocmd('DirChanged', {
+  group = group,
+  callback = function() chain_cache, chain_miss = {}, {} end,
+})
+
+-- 저장한 파일을 적어 둔다. 그 저장의 single-update 가 끝나면 그 파일에서
+-- 찾았던 이름만 다시 묻는다 (invalidate).
+api.nvim_create_autocmd('BufWritePost', {
+  group = group,
+  callback = function(a)
+    if vim.bo[a.buf].buftype == '' then
+      local p = api.nvim_buf_get_name(a.buf)
+      if p ~= '' then
+        s.saved[p] = uv.now()
+      end
+    end
+  end,
+})
+
+-- ctags 스냅숏이 다시 만들어졌다 (gutentags). 스냅숏이 답한 이름은 다시
+-- 확인한다 - 목록이 바뀐 뒤면 '없음'도 버린다(새 파일의 이름이 이제 있을 수
+-- 있다). 그냥 저장한 뒤의 갱신이면 그 파일에서 찾았던 것만: 저장마다 화면의
+-- 검정을 다시 물으면 single-update 뒤에 한 번, 여기서 또 한 번이 된다.
+api.nvim_create_autocmd('User', {
+  group = group,
+  pattern = 'GutentagsUpdated',
+  callback = function()
+    local all = s.tags_gen ~= s.list_gen
+    s.tags_gen = s.list_gen
+    local touched = false
+    for r, b in pairs(s.cache) do
+      local files = {}
+      if not all then
+        for _, p in ipairs(saved_under(r)) do
+          files[p] = true
+        end
+      else
+        for sym in pairs(b.missing) do
+          b.urgent[sym] = b.urgent[sym] or 2
+        end
+        b.missing = {}
+        touched = true
+      end
+      for sym, v in pairs(b.found) do
+        if b.how[sym] ~= 'gtags' then
+          local hit = all
+          if not hit then
+            for p in pairs(files) do
+              if (b.by_file[p] or {})[sym] then
+                hit = true
+                break
+              end
+            end
+          end
+          if hit then
+            b.stale[sym], b.found[sym] = v, nil
+            touched = true
+          end
+        end
+      end
+    end
+    s.snaps = {}
+    if touched then
+      repaint_visible_soon()
     end
   end,
 })
@@ -1419,20 +1949,21 @@ api.nvim_create_user_command('SiHlIndexToggle', function()
     vim.notify('SiHlIndex: off')
   else
     vim.notify('SiHlIndex: on')
-    schedule()
+    repaint_visible_soon()
   end
 end, { desc = '색인에 없는 심볼 검정 표시 켜고 끄기' })
 
 api.nvim_create_user_command('SiHlIndexClear', function()
-  s.cache, s.want, root_cache, chain_cache = {}, {}, {}, {}
-  s.snap_ok, s.snaps = {}, {}
+  s.cache, s.want, chain_cache, chain_miss = {}, {}, {}, {}
+  s.snap_ok, s.snaps, s.lists = {}, {}, {}
+  s.ask_bufs, s.want_buf = {}, {}
   s.off, s.fails, prog_cache = nil, 0, nil
   -- 멤버 판정은 relationview 쪽 캐시에 들어 있다
   if _G.relationview_member_cache_clear then
     pcall(_G.relationview_member_cache_clear)
   end
   vim.notify('SiHlIndex: 캐시를 비웠습니다')
-  schedule()
+  repaint_visible_soon()
 end, { desc = '색인 판정 캐시 비우기' })
 
 -- :SiHlIndexWhy - 커서 아래(또는 인자로 준) 이름이 왜 그 색인지 한 번에 본다.
@@ -1458,6 +1989,8 @@ local function forget(name)
   for _, b in pairs(s.cache) do
     b.missing[name] = nil
     b.found[name] = nil
+    b.stale[name] = nil
+    b.urgent[name] = nil
   end
 end
 
@@ -1512,10 +2045,7 @@ local function add_for(sym, quiet)
     adding = false
     if n and n > 0 then
       forget(sym)
-      vim.schedule(function()
-        pcall(repaint)
-        pcall(repaint_ctx)
-      end)
+      repaint_visible_soon()
     elseif not quiet then
       vim.notify(("'%s' 를 정의한 파일을 찾지 못했습니다"):format(sym),
         vim.log.levels.WARN)
@@ -1569,7 +2099,8 @@ api.nvim_create_autocmd('CursorHold', {
 api.nvim_create_user_command('SiHlIndexWhy', function(o)
   local sym = o.args ~= '' and o.args or vim.fn.expand('<cword>')
   local buf = api.nvim_get_current_buf()
-  local roots = roots_of(buf)
+  -- 담아 둔 체인이 아니라 지금 디스크를 본다 - 묻는 사람은 지금 답을 원한다
+  local roots = roots_of(buf, true)
   local out = { ('심볼: %s'):format(sym) }
   if #roots == 0 then
     out[#out + 1] = '이 파일 위에 GTAGS 가 없습니다 (색인되지 않은 트리)'
@@ -1582,7 +2113,9 @@ api.nvim_create_user_command('SiHlIndexWhy', function(o)
     local cached = b.found[sym] and ('찾음' .. (
         b.found[sym] == 'macro' and ' (매크로)'
         or b.found[sym] == 'macrokw' and ' (매크로/네이비)' or ''))
-        or (b.missing[sym] and '없음' or '아직 안 물어봄')
+        or (b.missing[sym] and '없음')
+        or (b.stale[sym] ~= nil and '찾음 (색인이 바뀌어 다시 확인 중)')
+        or '아직 안 물어봄'
     local live = '(global 없음)'
     if g then
       local r = vim.system({ g, '--result=ctags-x', '-d', sym },
@@ -1643,10 +2176,12 @@ end, { nargs = '?', desc = '이 심볼이 왜 그 색인지 설명' })
 api.nvim_create_user_command('SiHlIndexStatus', function()
   local out = {}
   for root, b in pairs(s.cache) do
-    local f, m = 0, 0
+    local f, m, st = 0, 0, 0
     for _ in pairs(b.found) do f = f + 1 end
     for _ in pairs(b.missing) do m = m + 1 end
-    out[#out + 1] = ('%s  찾음 %d / 없음 %d'):format(vim.fn.fnamemodify(root, ':~'), f, m)
+    for _ in pairs(b.stale) do st = st + 1 end
+    out[#out + 1] = ('%s  찾음 %d / 없음 %d / 다시 확인할 것 %d'):format(
+      vim.fn.fnamemodify(root, ':~'), f, m, st)
   end
   out[#out + 1] = ('진행 중: %s   global: %s'):format(s.busy and 'yes' or 'no',
     tostring(prog() or '(없음)'))
