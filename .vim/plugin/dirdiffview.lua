@@ -930,6 +930,17 @@ local function show_file(s, win, path, side)
     api.nvim_win_set_buf(win, scratch(s, side, {}))
     return
   end
+  -- 이 창에 이미 그 파일이 떠 있고 고친 채면 다시 읽지 않는다. :edit 이 같은 버퍼를
+  -- 다시 읽으려다 'E37: No write since last change' 를 냈다 - <C-r>/<C-l> 로 복사해
+  -- 놓고 트리에서 같은 줄을 o / Enter 로 다시 열 때 (서버에서 실제로 났다, 재현).
+  -- 고친 것을 그대로 두고 비교만 다시 맞춘다 (고치지 않았으면 디스크에서 다시 읽는다)
+  local cur = api.nvim_win_get_buf(win)
+  if vim.bo[cur].modified then
+    local rc, rp = uv.fs_realpath(api.nvim_buf_get_name(cur)), uv.fs_realpath(path)
+    if rc and rc == rp then
+      return
+    end
+  end
   -- 누구 버퍼인지는 열기 바로 앞에 본다 (비교를 시작할 때 한 번 찍어 둔 목록으로 보았더니,
   -- 그 뒤 사용자가 연 버퍼를 비교가 연 것으로 알고 지웠다). 이름으로 찾지 않고 연 뒤의 버퍼가
   -- 열기 전에도 있던 것인지로 본다: nvim 은 같은 파일이면 철자가 달라도(macOS 의 Foo.c/foo.c,
