@@ -554,7 +554,38 @@ EOF
 "   gitsigns  편집 중인 창의 왼쪽 기둥에 실시간 표시 + 헝크 단위 조작
 "
 "   <leader>s : Neogit 상태 화면(새 탭)  -  s/u 스테이징, cc 커밋, P 푸시
-"   <leader>v : DiffviewOpen (작업 트리 전체 diff)
+"   <leader>v : Diffview (작업 트리 전체 diff) - diffview 탭에서 누르면 닫는다
+"               둘 다 '지금 보고 있는 것'의 저장소를 연다 (nvim 의 cwd 가 아니라):
+"                 neo-tree    커서 밑 항목 (디렉터리 줄은 그 디렉터리, 파일 줄은 그 파일)
+"                 편집 창     그 파일 (이름 없는 버퍼는 예전처럼 지금 디렉터리)
+"                 그 밖의 창  이 탭 편집 창의 파일 (quickfix, aerial, RelationView ...)
+"               그 경로를 품은 가장 안쪽 저장소 - 저장소 안의 저장소, submodule,
+"               worktree 는 그 안쪽 것. 저장소가 아니면 한 줄로 알리고 열지 않는다.
+"               Neogit 상태 화면은 하나뿐이라 다른 저장소의 것은 (그 로그·커밋
+"               화면, d 팝업의 d s·d u diff 까지) 닫고 연다 - 그 탭에 다른 창이
+"               같이 있으면 상태 화면 창만. 그 저장소의 커밋 메시지를 쓰는 중이면
+"               넘어가지 않는다. diffview 는 저장소마다 작업 트리 diff 탭 하나 - 이미
+"               떠 있으면 그 탭으로 간다 (커밋 범위·--cached·경로를 좁힌 view, Neogit
+"               의 d 가 연 view 는 건드리지 않는다). 커밋 메시지 창(c c)에서는 그
+"               메시지의 저장소. 곁창(트리, RelationView 패널 ...)에서 누르면 이 탭
+"               편집 창으로 옮겨서 연다 - 곁창의 창 옵션(winfixbuf ...)이 새 탭에
+"               묻지 않게. (~/.vim/plugin/gitrepo.lua)
+"   Diffview 안에서
+"     <C-n>/<C-p> : diff 창에서는 다음/이전 변경(]c/[c), 파일 패널에서는 다음/이전 파일
+"     w           : 파일 패널(이력 패널은 높이)을 한 단계씩 넓혔다 되돌린다 - F9 트리,
+"                   RelationView 패널의 w 와 같다. diff 창마다 20칸(5줄)은 남긴다.
+"                   늘어난 만큼은 diff 창들만 낸다 - 그 탭에 나눠 둔 다른 창(:vsplit,
+"                   :vertical help, 터미널)은 크기 그대로. 넓힌 크기는 파일을
+"                   옮겨도, R 로 새로 고쳐도, \b 로 껐다 켜도 간다(화면이
+"                   줄었으면 거기 맞춰서). view(탭)마다 따로.
+"                   단계는 g:diffview_wide_steps / g:diffview_wide_height_steps
+"     q           : 닫기
+"   Neogit 의 커밋 창(로그에서 Enter)과 diff 창(c c 로 커밋할 때 옆에 뜨는 Staged
+"   Changes)에서
+"     <C-n>/<C-p> : 다음/이전 헝크의 머리 줄(@@ ...)로. 파일을 넘어 이어지고, 끝에서는
+"                   머문다 (diffview 의 <C-n>/<C-p> 와 같다). 상태 화면의 <C-n>/<C-p>
+"                   는 Neogit 의 다음/이전 절 그대로다.
+"   (w 와 <C-n>/<C-p> 가 하는 일은 ~/.vim/plugin/gitviewkeys.lua)
 "   <leader>ha: 커서 헝크를 스테이징       (비주얼로 고른 줄만도 된다)
 "   <leader>hr: 커서 헝크를 되돌린다       (비주얼도 같다)
 "   <leader>hv: 커서 헝크를 띄워 본다
@@ -589,6 +620,14 @@ local dv_actions = (function()
   local ok, a = pcall(require, 'diffview.actions')
   return ok and a or nil
 end)()
+-- 패널의 w: 한 단계씩 넓혔다 되돌린다 (F9 트리·RelationView 패널의 w 와 같다).
+-- 하는 일은 gitviewkeys.lua 에 있고, 그 파일이 없으면 아무 일도 하지 않는다.
+-- diffview 기본에는 패널의 w 가 없다. diff 창의 w 는 낱말 이동 그대로다.
+local function dv_wide()
+  if type(_G.vimide_diffview_wide) == 'function' then
+    _G.vimide_diffview_wide()
+  end
+end
 rv_setup('diffview', {
   keymaps = {
     view = {
@@ -612,9 +651,12 @@ rv_setup('diffview', {
       -- 패널에서는 '다음 변경'이 곧 '다음 파일'이다. 같은 키로 이어지게 한다.
       { 'n', '<C-n>', dv_actions and dv_actions.select_next_entry, { desc = '다음 파일의 diff' } },
       { 'n', '<C-p>', dv_actions and dv_actions.select_prev_entry, { desc = '이전 파일의 diff' } },
+      { 'n', 'w', dv_wide, { desc = '패널 폭 넓히기 (단계별, 마지막 다음은 처음 폭)' } },
     },
     file_history_panel = {
       { 'n', 'q', '<Cmd>DiffviewClose<CR>', { desc = 'Diffview 닫기' } },
+      -- 이력 패널은 아래에 가로로 눕는다 - w 는 높이를 늘린다
+      { 'n', 'w', dv_wide, { desc = '패널 넓히기 (아래 패널은 높이, 마지막 다음은 처음 크기)' } },
     },
   },
 })
@@ -634,44 +676,24 @@ rv_setup('gitsigns', {
   max_file_length = tonumber(vim.g.gitsigns_max_lines) or 40000,
   attach_to_untracked = false,
 })
+
+-- \s \v: 어느 저장소를 열지, diffview 의 git 2.31 검사와 열고 닫는 규칙은
+-- ~/.vim/plugin/gitrepo.lua 에 있다. 그 파일이 없으면(설치가 반쯤 된 경우) 예전처럼
+-- 지금 디렉터리의 저장소를 연다.
+local function git_key(fn, fallback)
+  return function()
+    local f = _G[fn]
+    if type(f) == 'function' then
+      return f()
+    end
+    vim.cmd(fallback)
+  end
+end
+vim.keymap.set('n', '<Leader>s', git_key('vimide_git_status', 'Neogit'),
+  { silent = true, desc = 'Neogit 상태 화면 (커서 밑 파일·트리 항목의 저장소)' })
+vim.keymap.set('n', '<Leader>v', git_key('vimide_git_diffview', 'DiffviewOpen'),
+  { silent = true, desc = 'Diffview 열기/닫기 (커서 밑 파일·트리 항목의 저장소)' })
 EOF
-nnoremap <silent> <Leader>s <Cmd>Neogit<CR>
-" diffview 는 git 2.31 이상이 필요하다.
-"
-" 개발서버의 git 은 2.25.1 이라 :DiffviewOpen 이 'Not a repo (or any parent),
-" or no supported VCS adapter!' 만 남기고 아무 일도 하지 않는다. 저장소가
-" 아니어서가 아니라 git 이 낡아서인데, 그 말로는 알 수가 없다. 대신 말해 준다.
-" (맥은 2.54 라 그냥 열린다. Neogit 과 gitsigns 는 낡은 git 에서도 된다)
-func! s:Diffview() abort
-	if !exists('s:diffview_git')
-		let s:diffview_git = matchstr(system('git --version'), '\d\+\.\d\+\(\.\d\+\)\?')
-		let l:p = split(s:diffview_git, '\.')
-		let s:diffview_ok = len(l:p) >= 2 &&
-					\ (str2nr(l:p[0]) > 2 ||
-					\  (str2nr(l:p[0]) == 2 && str2nr(l:p[1]) >= 31))
-	endif
-	" 이미 떠 있으면 닫는다. 같은 키로 열고 닫는 편이 손에 맞고, 'q 가
-	" 안 먹는다' 로 헤맬 일도 없다.
-	if has('nvim') && exists('*luaeval')
-		let l:open = luaeval('(function() local ok, l = pcall(require, "diffview.lib") '
-					\ . 'if not ok or type(l.views) ~= "table" then return 0 end '
-					\ . 'return #l.views > 0 and 1 or 0 end)()')
-		if l:open == 1
-			DiffviewClose
-			return
-		endif
-	endif
-	if !s:diffview_ok
-		echohl WarningMsg
-		echo printf('diffview 는 git 2.31 이상이 필요합니다 (여기는 %s). '
-					\ . 'Neogit(\s)과 gitsigns(\ha \hv)는 그대로 됩니다.',
-					\ empty(s:diffview_git) ? '알 수 없음' : s:diffview_git)
-		echohl None
-		return
-	endif
-	DiffviewOpen
-endfunc
-nnoremap <silent> <Leader>v :call <SID>Diffview()<CR>
 
 " 헝크 단위 조작. nvim 에서만 - gitsigns 가 없으면 아무 일도 하지 않는다.
 if has('nvim')
@@ -4144,6 +4166,19 @@ let g:relationview_wide_width = 0
 " neo-tree 기본에서 'w' 는 open_with_window_picker 다. 이 설정은 창
 " 고르개를 쓰지 않으므로(파일은 늘 직전 EDIT 창에 연다) 그 자리를 쓴다.
 let g:neotree_wide_steps = [25, 40]
+
+" Diffview(\v) 의 패널도 'w' 로 넓혔다 되돌린다 (gitviewkeys.lua).
+" 파일 패널(왼쪽, 기본 35칸)은 폭 단계, 파일 이력 패널(:DiffviewFileHistory,
+" 아래 16줄)은 높이 단계다 - 둘 다 화면의 %. 늘어난 만큼은 diff 창들만 똑같이
+" 나눠 낸다 (같은 탭의 다른 창은 크기 그대로, 되돌릴 때 diff 창은 처음 크기로) -
+" diff 창마다 20칸(5줄)은 남기고, 모자라면 그만큼 덜 넓힌다. 지금보다
+" 좁아지는 단계는 건너뛴다. 넓힌 크기는 파일을 옮기거나 패널을 껐다 켜도 가고,
+" 'w' 로 되돌리거나 그 view 를 닫을 때까지 간다(탭마다 따로).
+"   let g:diffview_wide_steps = []            " 이 기능을 쓰지 않는다
+let g:diffview_wide_steps = [25, 40]
+" 아래 이력 패널의 높이 단계. RelationView 를 아래 배치로 쓸 때 'w' 의 높이
+" 단계와 같다 (25% 는 50줄 화면에서 기본 16줄보다 작아서 넓히기가 안 된다).
+let g:diffview_wide_height_steps = [50, 75]
 " 1 (기본) <C-n>/<C-p> 로 목록을 옮길 때 그 자리를 보여주는 창으로 커서까지 간다.
 "          0 이면 미리보기만 하고 커서는 그대로 (엿보기용 <C-0>/<C-9> 와 같아진다).
 let g:relationview_step_focus = 1

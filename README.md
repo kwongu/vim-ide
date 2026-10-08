@@ -74,7 +74,7 @@ echo '' >> ${HOME}/.profile <br/>
 
   It fills gaps the way the machine allows: `brew` on macOS; `apt` on Debian/Ubuntu **only if sudo needs no password**, and otherwise into `$HOME/.local` alone, because the dev server is shared by 800+ people and an unattended `sudo` there is not mine to run; anywhere else it just prints the command to type. Git has a home-directory route (extracting the git-core PPA `.deb`, with a wrapper for `GIT_EXEC_PATH` - the Debian build hardcodes `/usr/lib/git-core` and would otherwise drive the old helpers). Universal Ctags built from a snapshot calls itself `0.0.0`, so ctags is judged by what it says it *is*, not by the number. tmux (3.2 or newer, for `extended-keys` - it is what lets `Ctrl+'` reach nvim inside tmux) has one too: Ubuntu 20.04's apt only has 3.0a, so without sudo, or when apt's version is too old, it builds the **latest tmux release** from the official tarball into `$HOME/.local/tmux-<version>` and puts a small wrapper at `~/.local/bin/tmux`, with libevent built statically beside it when the machine has no libevent headers (the dev server has none), so nothing extra is needed at run time. On macOS it is `brew install`/`brew upgrade tmux`. `VIMIDE_TMUX_VERSION=3.5a` pins a version instead of the latest. A tmux server that is already running stays the old version, and a new client cannot attach to it (`server version is too old for client` - with exit status 0, so `has-session` cannot tell). The wrapper checks for exactly that message on the socket you picked (default, `-L` or `-S`) and hands the call to the old client while the old server lives, so `tmux -2 a` keeps working; once you close that server (`tmux kill-server`), the next `tmux` starts the new one. The repository's `.tmux.conf` sets `extended-keys on` (not `always`, which sends extended keys to the shell too and breaks bash input) with `-q`, so an old tmux reads it without errors. `VIMIDE_DEPS=0 ./install.sh` skips installing, `VIMIDE_DEPS_SUDO=0` never tries sudo.
 
-* Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs and 3-way merges (`<leader>v`) and `gitsigns.nvim` for the gutter of the buffer you are editing - `<leader>ha` stages the hunk under the cursor (or, from visual mode, just the lines you selected), `<leader>hr` reverts it, `<leader>hu` unstages, `<leader>hv` previews it, `<leader>ht` toggles the blame of the current line, and `]h`/`[h` walk the hunks. That is partial staging without leaving the file, which is the half of Magit a status window cannot give you. The gutter is gitsigns' in nvim and `vim-signify`'s in real vim 8.1 (the dev server); running both draws the same column twice, so nvim turns signify off (`g:vimide_signify_in_nvim = 1` puts it back). Line blame is **off by default**: it runs `git blame` on the file every time the cursor rests, and this setup lives on 60k-file kernel trees, some of them over SMB - `<leader>ht` turns it on when you want it, `g:gitsigns_blame_on = 1` from the start.
+* Magit-style git UI (nvim only): `Neogit` opens the whole staging/commit/push workflow in a tab (`<leader>s`), with `diffview.nvim` for side-by-side diffs and 3-way merges (`<leader>v`) - both for the repository of the file or tree row in front of you, not nvim's working directory (see "Which repository" below) - and `gitsigns.nvim` for the gutter of the buffer you are editing - `<leader>ha` stages the hunk under the cursor (or, from visual mode, just the lines you selected), `<leader>hr` reverts it, `<leader>hu` unstages, `<leader>hv` previews it, `<leader>ht` toggles the blame of the current line, and `]h`/`[h` walk the hunks. That is partial staging without leaving the file, which is the half of Magit a status window cannot give you. The gutter is gitsigns' in nvim and `vim-signify`'s in real vim 8.1 (the dev server); running both draws the same column twice, so nvim turns signify off (`g:vimide_signify_in_nvim = 1` puts it back). Line blame is **off by default**: it runs `git blame` on the file every time the cursor rests, and this setup lives on 60k-file kernel trees, some of them over SMB - `<leader>ht` turns it on when you want it, `g:gitsigns_blame_on = 1` from the start.
   Measured, because it gets asked: the git stack is not what costs you time.
   Opening 20 files in the kernel tree takes 419 ms with everything on, 406 ms
   with gitsigns off (13 ms, 3%), and 31 ms with no config at all - so the git
@@ -89,7 +89,18 @@ echo '' >> ${HOME}/.profile <br/>
   next/previous, so the hand does not have to switch. They are bound on
   diffview's buffers only, so outside the diff those keys still walk the
   relation list; in the file panel they move to the next and previous file's
-  diff. `<leader>v` toggles: pressing it again closes the view. Inside it, `q`
+  diff. `<leader>v` inside a diffview tab closes that view; anywhere else it
+  goes to the tab already showing that repository's working-tree diff
+  (diffview refreshes it on the way in), or opens one, so two repositories
+  can each have a diff tab of their own. When the starting point is a file,
+  the diff opens with that file selected. Views opened some other way - a
+  commit range (`:DiffviewOpen HEAD~1..HEAD`), `--cached`, a path filter
+  (`-- x.c`), Neogit's `d` popup - are left alone even for the same
+  repository: they show something else, and while one was open
+  `<leader>v` used to jump there, so the working-tree diff could only be had
+  by closing it first. It used to mean "close whatever view is open", but
+  `:DiffviewClose` only closes the view of the current tab, so pressed from
+  any other tab it closed nothing. Inside the view, `q`
   closes too - diffview binds `q` only in its option and help panels, so in
   the file panel and the diff windows it did nothing at all (it started
   recording a macro), while every other panel in this setup closes with `q`.
@@ -97,6 +108,199 @@ echo '' >> ${HOME}/.profile <br/>
   used to print `Not a repo (or any parent)` and do nothing, which reads as
   "this is not a repository" when the real answer is "this git is too old", so
   `<leader>v` now says that instead. Neogit and gitsigns work on the old git.
+
+  The file panel is 35 columns, which cuts off a kernel path long before the
+  file name, so `w` in it widens it a step at a time and then snaps back -
+  the same key and the same feel as `w` in the F9 tree and the relation
+  panel. The steps are percentages of the screen (`g:diffview_wide_steps`,
+  `[25, 40]`); a step that would not make the panel wider than it is is
+  skipped (25% of a 120-column screen is 30 columns, narrower than 35), so
+  `w` only ever widens. "Than it is" means its real width: after one `w`, a
+  panel then widened by hand to 120 columns used to be cut to the next
+  step's 80; now no step is wider, so that press is the snap-back, as after
+  the last step (with no `w` before it, the press leaves the panel alone).
+  Only the diff windows pay for it, in equal shares (81 and 82 columns become
+  74 and 74), and nothing else in the tab moves: a `:vertical help`, a
+  `:vsplit` or a terminal beside them, neo-tree and the relation column keep
+  their width through every step, and the snap-back gives the diff windows
+  the widths they had before the first `w` (if diffview rebuilt them in
+  between, e.g. on a move to a conflict file, they share what comes back
+  equally). Left alone, nvim takes the columns from the window next to the
+  panel only, and a 200-column screen ends up with diff windows of 36 and
+  82; `wincmd =` evened out heights too (a `:help` split sized to 10 lines
+  above a diff became 23), and `horizontal wincmd =` evened out every window
+  in the tab (a `:vertical help` sized to 30 columns became 49, and 54 after
+  the snap-back) - the panel and the side columns only escaped because they
+  are fixed-width. The relation panel's `w` avoids `wincmd =` for the same
+  reason. (diffview itself still evens out the whole tab when it rebuilds
+  the layout or reopens the panel with `<leader>b`; it did that before, and
+  `w` does not undo it.) Each diff window keeps at least 20
+  columns (5 lines in the history panel), the floor the relation panel's `w`
+  leaves the edit area. It is measured, not computed: the panel is widened,
+  the diff windows beside it are measured, and the panel gives back what
+  they lack. The old limit was the screen width minus 20, which counted
+  neither the tab line, status lines and command line nor other side panels
+  in the tab - with neo-tree and the relation column beside the diff, the
+  second `w` left two diff windows of 2 columns each, and on a 24-line
+  screen the history panel's first `w` left 2 lines. In
+  `:DiffviewFileHistory` the panel lies along the bottom, so there `w` grows
+  its height (`g:diffview_wide_height_steps`, `[50, 75]`, the steps the
+  relation panel uses in its bottom layout: 25% would be smaller than the
+  panel's 16 lines on a 50-line screen); there only the row of diff windows
+  gives up height - they sit side by side and lose it together - while a
+  split you made above a diff window and anything below the panel keep
+  their height, so such a split can also stop the panel from growing
+  (before, only the panel was resized and nvim took the lines from below it
+  first: a 6-line window there went to 1, 22 and 13 lines on successive
+  presses, and an 8-line split above a diff window ended at 5). The
+  width you chose stays while you
+  move between files (`Tab`, `Ctrl+n`), refresh (`R`), switch tabs or hide
+  and show the panel (`<leader>b`), until `w` brings it back or the view is
+  closed, and each diffview tab keeps its own. That last part needed work:
+  diffview sets the panel back to the configured 35 columns every time it
+  opens it - `<leader>b`, or a switch between a two-way and a three-way
+  (conflict) file - reading the size from its config each time, so while a
+  panel is widened its own config reader hands back the wider size; other
+  views and diffview's global config are untouched. That size is fitted to
+  the screen of the moment: an 80-column panel widened on a 200-column
+  screen and reopened after the terminal shrank to 110 used to come back at
+  80 and squeeze the diff windows to 8 and 20 columns; now it comes back as
+  wide as leaves each diff window 20 columns (68 there), and at 80 again once
+  the screen is wide again. Inside the diff windows `w` is still the word
+  motion.
+
+  The same `Ctrl+n` / `Ctrl+p` walk the hunks in Neogit's commit view (`Enter`
+  on a commit in the log or the status screen) and in the "Staged Changes"
+  diff Neogit shows beside the message while you commit (`c c`). Both are
+  plain unified diffs, where `]c` means nothing. The cursor lands on the hunk
+  header (`@@ -12,7 +12,7 @@ func`) - the one line that says where the change
+  is, the line the hunk reads down from, and where Neogit's own `{` `}` stop
+  too. The walk crosses from file to file, stays put at the last and the
+  first hunk (no wrap and no message, as in the diff), takes a count
+  (`3 Ctrl+n`), and from the middle of a hunk `Ctrl+p` goes to that hunk's
+  header, as `[c` does. If the hunk runs past the bottom of the window its
+  header is scrolled to the top; if it fits, the screen stays where it is.
+  Files folded away with `Tab` are skipped, the way Magit's `n`/`p` skip a
+  collapsed section. Lines of the commit message never count, even when they
+  look like a hunk header - kernel commit messages carry Coccinelle rules
+  (`@@` lines) and quoted diffs. `{` and `}` are still there; they also stop
+  on the file header lines and always scroll. Neogit's `d` popup opens
+  diffview, not a Neogit buffer, so there `Ctrl+n`/`Ctrl+p` are diffview's.
+  In the status screen they stay Neogit's next/previous section, and
+  everywhere else they still walk the relation list. The code is
+  `~/.vim/plugin/gitviewkeys.lua`.
+
+  Which repository. `<leader>s` and `<leader>v` used to open the repository
+  of nvim's working directory, so with a file of another repository in front
+  of you - the kernel inside an SDK, a project nested in another, a
+  submodule - you got the wrong status screen and had to `:cd` first. Now
+  they start from what you are looking at:
+  - in neo-tree (F9, the F11 float, the RelationView tree - the filesystem,
+    buffers and git_status sources alike) the row under the cursor: a
+    directory row is that directory, a file row that file. A row whose path
+    is gone (a deleted file in git_status) uses the nearest directory that
+    still exists; a row with no path (hint lines, a terminal in the buffers
+    list) uses the tree's root.
+  - in an edit window, the file being edited. A new file not saved yet uses
+    its nearest existing directory, an unnamed buffer nvim's working
+    directory, as before. Git's own message and todo files -
+    `COMMIT_EDITMSG`, `MERGE_MSG`, `TAG_EDITMSG`, `git-rebase-todo`, which
+    is what Neogit's commit editor (`c c`) shows - count as the work tree of
+    the `.git` they sit in (a `git worktree add` checkout and a submodule
+    included), so from the commit message `<leader>s` goes back to the
+    status screen and `<leader>v` opens the diff, as `:Neogit` did before.
+  - in any other window - quickfix, aerial, tagbar, help, a terminal, the
+    RelationView panel and preview, the DirDiff tree, telescope - the file in
+    this tab's edit window, because what those windows show is a list, not a
+    file. With no edit window, the working directory.
+  - in a Neogit buffer, that buffer's repository: the window's own
+    directory, which Neogit sets on the status window and its log, refs and
+    commit views inherit (`<leader>s` in the status screen refreshes it).
+    Neogit's own idea of the current repository is only the fallback, since
+    it moves the moment another repository's status opens. In a diffview
+    tab, that view's repository.
+
+  From there git is asked for the top level (`git -C <dir> rev-parse
+  --show-toplevel`) - the question Neogit and diffview ask themselves, so the
+  answer cannot disagree with them - and the innermost work tree wins: a
+  repository nested inside another (not a submodule), a submodule and a
+  `git worktree add` checkout each open as themselves. Symlinks are followed
+  to the real file first: git resolves a symlinked directory by itself, but
+  asked from the directory a symlinked file sits in, it answers with the
+  repository of the link. Outside a work tree, or inside `.git/` (other than
+  the message files above), you get one line naming the path and nothing
+  opens - handed to Neogit, that path would get an `Initialize repository in
+  ...?` prompt, one `y` away from a stray `git init`. If git does not answer
+  within 10 seconds - a stalled SMB or network mount - the line says that
+  instead of blaming the path.
+
+  Neogit keeps a single status screen. Its buffer is always named
+  `NeogitStatus`, and every git command it runs goes to the last repository
+  it opened - so a second status screen would take over the first one's
+  buffer, and staging from the older screen would stage in the newer
+  repository. `<leader>s` for another repository therefore closes the open
+  status screen first (the way `q` does, which keeps its folds for the next
+  time) and opens the new one; for the same repository it goes to that tab
+  and refreshes. If the status screen's tab also holds other windows - a
+  file you `:vsplit` beside it - only the status window is closed: `q` there
+  is a `:tabclose`, which took those windows with it, the one you pressed
+  the key in included (a modified buffer was left hidden). The same goes
+  for the old repository's other Neogit views - log, reflog, refs, stash,
+  commit view, the git command history, a popup
+  left open in one of them: they are closed too, because their commands also
+  run in the last repository opened. Left behind, `Enter` on a commit in the
+  old log ran `git show` in the new repository and stopped at `Failed to
+  parse line` and a Press ENTER, and in a worktree that shares commits with
+  the new repository, `b` and `X` there would quietly check out or reset the
+  new one. Neogit's own diffs from its `d` popup - `d s`, `d u`, `d d` on
+  the staged or unstaged changes - are closed for the same reason: that view
+  reads its file list and contents from Neogit's last repository, so
+  entering its tab refilled it with the new repository's files, while its
+  `-` still staged in the old one (it put the new repository's file into the
+  old repository's index). Diffviews that hold their own repository stay:
+  `<leader>v`, `:DiffviewOpen`, `:DiffviewFileHistory`, and Neogit's `d w`,
+  `d r`, commit and stash diffs all run git in the top level they were
+  opened with, whichever repository Neogit moves to. Before, switching
+  repositories took a `:cd`; now one key on a tree
+  row does it, so those leftovers would be the common case. The one thing
+  that stops the switch is a message you are writing through Neogit for the
+  old repository (a commit, merge or tag message, a rebase todo): nothing is
+  closed, one line says so, and you finish or abort it first. Which
+  repository each of those open screens belongs to is decided without
+  asking git: Neogit already knows it for the status screen it opened, the
+  other views inherit that screen's directory, and otherwise the path
+  decides (the same directory is the same repository, a directory outside
+  it is another one, and inside it a `.git` on the way up means a nested
+  repository). git is asked about the repository you are opening only.
+  Before, it asked git about every open screen, so a status screen of a
+  repository on a stalled mount made `<leader>s` for a healthy one freeze
+  for 10 seconds with no message (20 with a message being written there).
+
+  Both open their tab from the edit window. diffview and Neogit build the
+  new tab as a copy of the current window (`:tab split`, `:tab sb`), window
+  options included, so pressed in a side window they carried that window
+  along. From the RelationView panel its `winfixbuf` came too: the second
+  `<leader>v` failed with E1513 and a Press ENTER and left a diff tab
+  showing the panel's list, and Neogit's status screen took the panel's
+  line highlight, where `Enter` on a file then opened nothing. From the tree
+  the diff windows came up without line numbers. Now a side window first
+  hands over to this tab's edit window (as the F11 float already did) and
+  the tab opens from there. Coming back to this tab you are in the edit
+  window - on purpose: Neogit's `Enter` and diffview's `gf` open the file in
+  whatever window that tab was left in, and in the panel they could not. In
+  a tab with no edit window (help only, say) they open where you are, with
+  `winfixbuf` off for that moment, and inside a diffview tab - all of its
+  windows are diffview's, and they pass nothing on - nothing moves, as
+  before.
+
+  diffview has
+  no such limit, hence one tab per repository there. diffview runs the
+  `-C <dir>` it is given through `expand()`, which
+  honours `'wildignore'` - and this setup's `*/tmp/*` turns any path with a
+  `tmp` directory in it (Yocto's `build/tmp`) into an empty string, which
+  would open the working directory's repository instead. The call clears
+  `'wildignore'` for that moment and backslash-escapes the path (spaces, `$`,
+  brackets, quotes). The code is `~/.vim/plugin/gitrepo.lua`.
 
 * Symbol outline (nvim only): `aerial.nvim` lists the current file's symbols in a side window (F10 or `<leader>o`, and only when you press it), built on treesitter so it needs no language server. `:Tagbar` stays as it was.
 
@@ -271,7 +475,7 @@ leaves `old_names` alone. `Ctrl+h` used to be "go to the window on the left";
 F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
-F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left). Inside the tree, `w` widens it a step at a time and then snaps back to its normal width, the same key and the same feel as `w` in the relation panel - the steps are percentages of the screen (`g:neotree_wide_steps`, `[25, 40]`), and the other sidebars keep their width; the edit window pays for it
+F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left). Inside the tree, `w` widens it a step at a time and then snaps back to its normal width, the same key and the same feel as `w` in the relation panel - the steps are percentages of the screen (`g:neotree_wide_steps`, `[25, 40]`), and the other sidebars keep their width; the edit window pays for it. Diffview's file panel takes `w` the same way (`g:diffview_wide_steps`, see the Magit-style git UI above)
 F10: Toggle the symbol outline of the current file on the left - aerial in
      nvim (see "The symbol outline" below), tagbar in vim or with
      `g:vimide_outline = 'tagbar'`. It closes neo-tree (F9, F11) and NERDTree
@@ -386,12 +590,14 @@ Ctrl+l, Ctrl+k, Ctrl+j:  Move to the split window on the right / above / below.
 <leader><leader>e: Find the egrep under the cursor, and disaplys the results via quickfix window
 <leader><leader>a: Find the assignments under the cursor, and disaplys the results via quickfix window
 
-<leader>s: Neogit - Magit style git status in a new tab (s stage, u unstage, c commit, P push, ? help)
+<leader>s: Neogit - Magit style git status in a new tab, for the repo of the file / tree node under the cursor (s stage, u unstage, c commit, P push, ? help)
 <leader>ha / <leader>hr: stage / revert the hunk under the cursor, or the selected lines in visual mode (gitsigns, nvim only)
 <leader>hu / <leader>hv: unstage that hunk / show it in a float
 <leader>ht: toggle the blame of the current line (off by default - it runs git blame on every cursor rest)
 ]h / [h: next / previous hunk (]c and [c stay vim's own diff-mode motions)
-<leader>v: DiffviewOpen - side by side diff of the working tree
+<leader>v: Diffview - side by side diff of the working tree of the repo of the file / tree node under the cursor (in a diffview tab: close it)
+w (Diffview file panel): widen the panel a step at a time, then back to its normal width; in the :DiffviewFileHistory panel at the bottom, its height (each diffview tab keeps its own). Only the diff windows give way; your own splits in that tab keep their size
+Ctrl+n / Ctrl+p (Neogit commit view, staged diff while committing): next / previous hunk header across files, stays put at the ends
 <leader>o: Toggle the aerial symbol outline of the current file
 <leader>t: Toggle the neo-tree file tree, same as F9 (a add, d delete, r rename)
 <leader>fs: Search every symbol in the project through the ctags index
