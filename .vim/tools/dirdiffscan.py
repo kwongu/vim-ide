@@ -30,8 +30,10 @@
 # 명령 (nvim -> 여기)
 #   {"cmd":"list","id":N,"dir":"rel"}        그 디렉터리의 자식들 (그리고 바뀌면 알려 달라)
 #   {"cmd":"unlist","dir":"rel"}             더는 알리지 않아도 된다
-#   {"cmd":"next","id":N,"from":"rel","step":1|-1}   다음/앞 '차이' 항목 (조상 목록째)
-#   {"cmd":"expand","id":N,"dir":"rel"}      아래의 '차이 있는' 디렉터리 목록을 한꺼번에
+#   {"cmd":"next","id":N,"from":"rel","step":1|-1[,"bits":B]}   다음/앞 '차이' 항목 (조상 목록째).
+#                                            bits 가 있으면 표시(mask)가 그 비트에 걸리는 항목 (보기)
+#   {"cmd":"expand","id":N,"dir":"rel"[,"bits":B]}  아래의 '차이 있는'(bits: 그 비트에 걸리는)
+#                                            디렉터리 목록을 한꺼번에
 #   {"cmd":"refresh","paths":["rel",...]}    그 항목만 다시 본다. 목록을 받아 간 부모는 'list' 로
 #                                            다시 보낸다
 #   {"cmd":"copy","id":N,"from":"a"|"b","paths":["rel",...]}
@@ -39,14 +41,16 @@
 #                                            다시 본다. 끝나면 'copied' 를 먼저, 그다음 부모 'list'
 #   {"cmd":"quit"}
 # 사건 (여기 -> nvim)
-#   {"ev":"list","id":N,"dir":rel,"entries":[[name,ka,kb,sa,sb,ma,mb,st,rerr],...]}
+#   {"ev":"list","id":N,"dir":rel,"entries":[[name,ka,kb,sa,sb,ma,mb,st,rerr,mask],...]}
 #   {"ev":"u","d":dir,"n":name,"s":st,"e":[...같은 항목...]}   목록을 받아 간 디렉터리 안
 #   {"ev":"reveal","id":N,"path":rel|null,"lists":{dir:[entries]}}
 #   {"ev":"lists","id":N,"lists":{dir:[entries]}}
 #   {"ev":"progress", ...}                    again: 끝난 뒤 복사·저장으로 다시 보는 중
+#                                            cats: {표시: 항목 수} (보기 메뉴의 수)
 #   {"ev":"copied","id":N,"files":n,"dirs":n,"skipped":[[rel,why]],"failed":[[rel,why]],
 #    "roots":[rel,...]}                      roots: 다시 본 곳 (그 아래 목록은 새로 받는다)
 # 상태: same diff onlyA onlyB pend   종류: d f l o (없으면 null)
+# 표시(mask): 보기(Beyond Compare 의 보기 거르기 - 좌측 최신, 고아 ...)에 쓴다. 아래 SAME ... UNK
 
 import collections
 import fnmatch
@@ -66,6 +70,14 @@ import unicodedata
 
 BAD = ('diff', 'onlyA', 'onlyB')
 started = time.monotonic()
+
+# 표시(mask): 항목이 무엇인지 비트로. nvim 은 이것으로 보기를 거른다 (dirdiffview.lua 의 MODES)
+#   SAME 같음   NA A 가 최신 (양쪽에 있고 내용이 다르고 A 의 수정 시각이 늦다)   NB B 가 최신
+#   DX 그 밖의 다름 (시각이 같거나 모름, 디렉터리 / 파일로 종류가 다름)   OA A 에만   OB B 에만
+#   PEND 아직 견주는 중   UNK 아직 훑지 않은 디렉터리 (아래에 무엇이 있을지 모른다)
+# 양쪽에 다 있는 디렉터리의 표시는 그 아래 항목들의 것을 합한 것이다 - '그 아래에 좌측 최신이 있는
+# 디렉터리' 만 보이려면 nvim 이 받아 가지 않은(접힌) 아래까지 알아야 해서 여기서 센다
+SAME, NA, NB, DX, OA, OB, PEND, UNK = 1, 2, 4, 8, 16, 32, 64, 128
 
 
 def opt(name, default):
@@ -101,7 +113,7 @@ def excluded(name):
 class Node:
     __slots__ = ('name', 'parent', 'ka', 'kb', 'sa', 'sb', 'ma', 'mb', 'status', 'kids',
                  'scanned', 'pend', 'bad', 'sub', 'depth', 'done', 'waiters', 'group',
-                 'queued', 'rerr', 'dead')
+                 'queued', 'rerr', 'dead', 'mask', 'agg')
 
     def __init__(self, name, parent):
         self.name = name
@@ -121,6 +133,8 @@ class Node:
         self.queued = 0           # 줄에 넣어 둔 일 (종류 x 급수 3 비트씩) - 같은 것을 또 넣지 않는다
         self.rerr = None          # 디렉터리를 못 읽은 쪽 'a' 'b' 'ab'
         self.dead = False         # refresh 로 모형에서 떼어 냈다 (늦게 온 결과는 버린다)
+        self.mask = 0             # 표시 (SAME ... UNK)
+        self.agg = None           # 훑은 '양쪽 디렉터리': 자식들의 표시 비트마다 그 비트를 가진 자식 수
 
     def rel(self):
         parts = []
@@ -164,8 +178,11 @@ def flush():
 
 
 counts = {'pend': 0, 'diff': 0, 'onlyA': 0, 'onlyB': 0, 'same': 0, 'dirs': 0, 'err': 0}
+masks = {}                # 표시 -> 항목 수 (counts 처럼 한쪽에만 있는 디렉터리 안은 세지 않는다)
+masks_ver = [0]
 root = Node('', None)
 root.ka = root.kb = 'd'
+root.mask = UNK
 # 일꾼과 주고받기. 처음에는 queue.Queue 와 일 하나마다 잠금·깨우기였는데, 일꾼 16 이
 # 잠금과 GIL 을 다투느라 결과가 5만 건씩 밀렸다 (실측) - 그래서
 #   * 일 넣기(submit)는 주 줄기에서만 - staged 에 모았다가 한 번에 (push_staged)
@@ -191,7 +208,7 @@ def post(item):
 
 
 def entry(n):
-    return [n.name, n.ka, n.kb, n.sa, n.sb, n.ma, n.mb, n.status, n.rerr]
+    return [n.name, n.ka, n.kb, n.sa, n.sb, n.ma, n.mb, n.status, n.rerr, n.mask]
 
 
 def is_item(n):
@@ -207,6 +224,93 @@ def count(n, st, sign):
 
 def visible(n):
     return n.sub or (n.parent is not None and n.parent.sub)
+
+
+def item_mask(n):
+    st = n.status
+    if st == 'same':
+        return SAME
+    if st == 'pend':
+        return PEND
+    if st == 'onlyA':
+        return OA
+    if st == 'onlyB':
+        return OB
+    if n.ka != n.kb:
+        # 한쪽은 디렉터리, 한쪽은 파일 (또는 못 읽은 쪽): 다름. 디렉터리인 쪽은 그쪽에만 있는
+        # 디렉터리이기도 하다 - 그 아래는 모두 그쪽 고아라, 고아 보기에서도 펼쳐 볼 수 있게
+        return DX | (OA if n.ka == 'd' else 0) | (OB if n.kb == 'd' else 0)
+    if n.ma is not None and n.mb is not None:
+        if n.ma > n.mb:
+            return NA
+        if n.mb > n.ma:
+            return NB
+    return DX
+
+
+def dir_mask(n):
+    if n.agg is None:
+        return UNK
+    m = DX if n.rerr else 0   # 못 읽은 쪽이 있다 - 그 자체로 '다름' (on_scan 의 unsure)
+    a = n.agg
+    for i in range(8):
+        if a[i]:
+            m |= 1 << i
+    return m
+
+
+def tally(m, sign):
+    masks[m] = masks.get(m, 0) + sign
+    masks_ver[0] += 1
+
+
+def agg_move(a, old, new):
+    # 자식 하나의 표시가 old -> new 로: 셈을 옮기고, 0 을 넘나든 비트가 있었는지 돌려준다
+    cross = False
+    d = old ^ new
+    i = 0
+    while d:
+        if d & 1:
+            if (new >> i) & 1:
+                a[i] += 1
+                cross = cross or a[i] == 1
+            else:
+                a[i] -= 1
+                cross = cross or a[i] == 0
+        d >>= 1
+        i += 1
+    return cross
+
+
+def mask_up(p, old, new):
+    # p 의 자식 하나의 표시가 바뀌었다. p 의 표시가 바뀔 때만 그 위로 - 비트가 생기거나 없어질
+    # 때만이다. 파일 하나가 정해질 때마다 맨 위까지 올라가지 않는다 (파일이 수십만이다)
+    while p is not None and p.agg is not None:
+        if not agg_move(p.agg, old, new):
+            return
+        m = dir_mask(p)
+        if m == p.mask:
+            return
+        old, new = p.mask, m
+        p.mask = m
+        notify_parent(p)
+        p = p.parent
+
+
+def remask(n):
+    # n 의 표시를 다시 셈한다. 바뀌었으면 True - n 자신의 줄은 부르는 쪽이 알린다
+    m = dir_mask(n) if n.both_dirs() else item_mask(n)
+    old = n.mask
+    if m == old:
+        return False
+    n.mask = m
+    p = n.parent
+    if p is not None and p.agg is not None:
+        if not n.both_dirs():
+            tally(old, -1)
+            tally(m, 1)
+        mask_up(p, old, m)
+    return True
 
 
 def tier(n, force_vis):
@@ -267,6 +371,8 @@ def set_status(n, st):
     if old == st or n.dead:
         return
     n.status = st
+    if not n.both_dirs():
+        remask(n)   # 알리기 전에 - 알리는 항목에 새 표시가 실린다
     count(n, old, -1)
     count(n, st, 1)
     notify_parent(n)
@@ -518,6 +624,7 @@ def on_scan(n, la, lb, err, fa=False, fb=False):
         n.rerr = rerr
     unsure = bool(rerr) and not orphan
     todo = []
+    agg = None if orphan else [0] * 8
     for name in set(la) | set(lb):
         c = Node(name, n)
         c.ka = la.get(name)
@@ -525,6 +632,14 @@ def on_scan(n, la, lb, err, fa=False, fb=False):
         st = judge(n, c, unsure)
         c.status = st
         count(c, st, 1)
+        if c.both_dirs():
+            c.mask = UNK
+        else:
+            c.mask = item_mask(c)
+            if agg is not None:
+                tally(c.mask, 1)
+        if agg is not None:
+            agg_move(agg, 0, c.mask)
         n.kids[name] = c
         if st == 'pend':
             pend += 1
@@ -542,6 +657,9 @@ def on_scan(n, la, lb, err, fa=False, fb=False):
     n.pend = pend
     n.bad = bad
     n.scanned = True
+    n.agg = agg
+    if remask(n):
+        notify_parent(n)   # UNK 에서 아래의 것으로 (판정이 그대로여도)
     if n.sub:
         want_info(n)
     if n.both_dirs():
@@ -561,6 +679,8 @@ def on_stat(n, kind, ra, rb, same_link):
     if rb:
         n.sb, n.mb = rb
     if kind == INFO or n.status != 'pend':
+        if not n.both_dirs():
+            remask(n)   # 날짜가 생기면 '최신' 쪽이 정해진다
         notify_parent(n)
         return
     if n.ka == 'l':
@@ -623,21 +743,30 @@ def path_key(rel):
     return list(reversed(parts))
 
 
-def items_in_order(n, prefix):
+def items_in_order(n, prefix, bits=None):
+    # bits: 보기의 비트 - 그 비트에 걸리는 항목만, 그런 것이 아래에 있는 디렉터리로만 내려간다
     for c in children(n):
         k = prefix + [sort_key(c)]
-        if is_item(c):
+        if bits is None:
+            if is_item(c):
+                yield k, c
+            elif c.both_dirs() and c.status == 'diff':
+                for x in items_in_order(c, k):
+                    yield x
+        elif c.both_dirs() and not (c.rerr and bits & DX):
+            if c.mask & bits and c.kids:
+                for x in items_in_order(c, k, bits):
+                    yield x
+        elif c.mask & bits:
             yield k, c
-        elif c.both_dirs() and c.status == 'diff':
-            for x in items_in_order(c, k):
-                yield x
 
 
 def cmd_next(msg):
     fk = path_key(msg.get('from') or '') or []
     step = msg.get('step', 1)
+    bits = msg.get('bits')
     best = None
-    for k, c in items_in_order(root, []):
+    for k, c in items_in_order(root, [], bits if isinstance(bits, int) and bits else None):
         if step > 0:
             if k > fk:
                 best = c
@@ -663,13 +792,16 @@ def cmd_next(msg):
 
 def cmd_expand(msg):
     n = find(msg.get('dir') or '')
+    bits = msg.get('bits')
+    if not (isinstance(bits, int) and bits):
+        bits = None
     lists = {}
     stack = [n] if n is not None and n.isdir() and n.scanned else []
     while stack and len(lists) < 2000:
         d = stack.pop()
         lists[d.rel()] = listing(d, lift=d is n) or []
         for c in reversed(children(d)):
-            if c.both_dirs() and c.scanned and c.bad > 0:
+            if c.both_dirs() and c.scanned and (c.bad > 0 if bits is None else c.mask & bits):
                 stack.append(c)
     emit({'ev': 'lists', 'id': msg.get('id'), 'lists': lists}, now=True)
 
@@ -687,7 +819,7 @@ def progress(done):
     with job_lock:
         waiting = len(jobs[0]) + len(jobs[1])
     snap = (done, counts['dirs'], counts['pend'], counts['diff'], counts['onlyA'],
-            counts['onlyB'], counts['same'], counts['err'])
+            counts['onlyB'], counts['same'], counts['err'], masks_ver[0])
     if done and snap == last_snap[0]:
         return
     last_snap[0] = snap
@@ -696,6 +828,7 @@ def progress(done):
           'pend': counts['pend'], 'diff': counts['diff'], 'onlyA': counts['onlyA'],
           'onlyB': counts['onlyB'], 'same': counts['same'], 'err': counts['err'],
           'ops': list(ops), 'backlog': len(inbox), 'again': again[0] and not done,
+          'cats': {str(k): v for k, v in masks.items() if v > 0},
           'sec': finished[0] if done else round(time.monotonic() - started, 1)})
 
 
@@ -720,6 +853,8 @@ def detach(n):
     while stack:
         x = stack.pop()
         count(x, x.status, -1)
+        if not x.both_dirs() and x.parent.agg is not None:
+            tally(x.mask, -1)
         if x.scanned:
             counts['dirs'] -= 1
         x.dead = True
@@ -730,6 +865,7 @@ def detach(n):
         p.pend -= 1
     elif n.status in BAD:
         p.bad -= 1
+    mask_up(p, n.mask, 0)
 
 
 def spelled(p, parent_rel, name):
@@ -778,7 +914,12 @@ def refresh_one(rel):
     st = judge(p, c, bool(p.rerr) and p.both_dirs())
     c.status = st
     count(c, st, 1)
+    c.mask = UNK if c.both_dirs() else item_mask(c)
     p.kids[name] = c
+    if p.agg is not None:
+        if not c.both_dirs():
+            tally(c.mask, 1)
+        mask_up(p, 0, c.mask)
     if st == 'pend':
         p.pend += 1
         submit_pending(c, p.sub)

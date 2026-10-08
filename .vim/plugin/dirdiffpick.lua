@@ -10,6 +10,9 @@
 -- 여러 줄은 V 로 골라도 된다. '=' 가 아닌 것은 트리의 = 가 이미 색인 목록
 -- 정보(projectfiles_neotree.lua)라서다. neo-tree 매핑은 .vimrc 의 neo-tree
 -- window.mappings ['<Tab>'] / ['<leader>d'] 에 있다.
+--
+-- DirDiff 의 비교 트리(dirdiffview.lua)의 Tab 도 같은 [A] 를 쓴다 (_G.vimide_dirdiff_pick_path):
+-- 비교 트리에서 [A], 다른 비교 탭이나 neo-tree 에서 [B] 도 된다. [A] 는 하나다.
 
 if vim.g.loaded_vimide_dirdiffpick then
   return
@@ -18,7 +21,7 @@ vim.g.loaded_vimide_dirdiffpick = 1
 
 local levels = vim.log.levels
 local api = vim.api
-local first = nil -- { path = ..., kind = 'dir' | 'file' }
+local first = nil -- { path = ..., kind = 'dir' | 'file', real = 링크를 푼 경로 }
 local ns = api.nvim_create_namespace('vimide_dirdiff_pick')
 
 api.nvim_set_hl(0, 'VimIdeDirDiffPickA', { link = 'Search', default = true })
@@ -87,11 +90,13 @@ api.nvim_set_decoration_provider(ns, {
   end,
 })
 
--- 고른 것이 바뀌면 트리 창들을 다시 그리게 한다 (바뀌지 않은 창은 다시 그리지 않으므로)
+-- 고른 것이 바뀌면 트리 창들을 다시 그리게 한다 (바뀌지 않은 창은 다시 그리지 않으므로).
+-- DirDiff 의 비교 트리도 - 거기서는 dirdiffview.lua 가 [A] 를 단다
+local TREE_FT = { ['neo-tree'] = true, vimidedirdiff = true }
 local function mark_all()
   for _, w in ipairs(api.nvim_list_wins()) do
     local b = api.nvim_win_get_buf(w)
-    if vim.bo[b].filetype == 'neo-tree' then
+    if TREE_FT[vim.bo[b].filetype] then
       if not pcall(api.nvim__redraw, { win = w, valid = false }) then
         vim.cmd('redraw!')
         return
@@ -153,19 +158,27 @@ local function exists(kind, path)
   return vim.fn.filereadable(path) == 1
 end
 
-function _G.vimide_dirdiff_pick(state)
-  local ok, node = pcall(function()
-    return state.tree:get_node()
-  end)
-  local path = ok and node and node.path
-  local t = ok and node and node.type
-  if not path or (t ~= 'directory' and t ~= 'file') then
-    return say('디렉터리나 파일 줄에서 누르세요', levels.WARN)
+-- 같은 것인가: 경로 그대로, 아니면 링크를 푼 것으로. DirDiff 의 비교 트리는 뿌리의 링크를
+-- 풀어 둔다 (macOS 의 /tmp -> /private/tmp) - neo-tree 에서 고른 [A] 를 비교 트리의 같은 줄에서
+-- 취소하려면 푼 경로로 견주어야 한다
+local function same_path(p)
+  if first.path == p then
+    return true
   end
-  local kind = t == 'directory' and 'dir' or 'file'
+  local r = (vim.uv or vim.loop).fs_realpath(p)
+  return r ~= nil and r == first.real
+end
+
+-- 지금 [A] (없으면 nil). dirdiffview.lua 가 비교 트리에 [A] 를 달 때 본다
+function _G.vimide_dirdiff_picked()
+  return first
+end
+
+-- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Tab 과 DirDiff 비교 트리의 Tab 이 같이 쓴다
+function _G.vimide_dirdiff_pick_path(path, kind)
   -- [A] 줄에서 다시 누르면 취소. 디스크에서 없어졌어도 - 파일 감시를 꺼 두어
   -- (use_libuv_file_watcher) 밖에서 지운 줄은 R 로 새로 고칠 때까지 트리에 남는다
-  if first and first.path == path then
+  if first and same_path(path) then
     first = nil
     mark_all()
     return say('고른 것을 취소했습니다')
@@ -181,7 +194,7 @@ function _G.vimide_dirdiff_pick(state)
     mark_all()
   end
   if not first then
-    first = { path = path, kind = kind }
+    first = { path = path, kind = kind, real = (vim.uv or vim.loop).fs_realpath(path) }
     mark_all()
     return say(('[A] %s: %s - 비교할 곳에서 %s ([B]). 같은 줄에서 다시 누르면 취소')
       :format(kind_name(kind), short(path), key()))
@@ -207,5 +220,25 @@ function _G.vimide_dirdiff_pick(state)
     -- 줄바꿈이 있으면 fnameescape 로도 줄이 갈라져 없는 'x\' 를 열고 나머지를 명령으로 돌렸다
     tab_from_edit({ cmd = 'tabnew', args = { a }, magic = { file = false } })
     vim.cmd.diffsplit({ args = { path }, magic = { file = false }, mods = { split = 'belowright', vertical = true } })
+    -- 창 머리(winbar)는 걷는다: nvim 은 버퍼를 새 창에 띄울 때 그 버퍼가 떠 있는(떠 있던) 창의 옵션을
+    -- 입힌다 - DirDiff 의 비교 트리에서 Tab/Tab 으로 연 vimdiff 는 DirDiff 편집 창의 머리(' B: …')를
+    -- 받아 [A]/[B] 와 거꾸로 보였다. diffsplit 의 창도 따로 받으므로 새 탭의 창 모두에서
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      pcall(api.nvim_win_call, w, function()
+        vim.cmd('setlocal winbar<')
+      end)
+    end
   end
+end
+
+function _G.vimide_dirdiff_pick(state)
+  local ok, node = pcall(function()
+    return state.tree:get_node()
+  end)
+  local path = ok and node and node.path
+  local t = ok and node and node.type
+  if not path or (t ~= 'directory' and t ~= 'file') then
+    return say('디렉터리나 파일 줄에서 누르세요', levels.WARN)
+  end
+  _G.vimide_dirdiff_pick_path(path, t == 'directory' and 'dir' or 'file')
 end

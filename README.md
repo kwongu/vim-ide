@@ -116,7 +116,17 @@ echo '' >> ${HOME}/.profile <br/>
 This section describes mapping keys for Vim IDE.
 
 ```
-F1: Show a man page for the keyword under the cursor.
+F1: Shortcut help - every key vim-ide has, in one telescope list you can
+     search: this list, the key tables of the other sections, every mapping
+     that is set right now and vim-ide's commands, with a preview of the
+     README text or the line that set the mapping (nvim, `:VimIdeKeys`). It
+     is gathered from this README and the live mappings each time it opens,
+     so a key shows up as soon as it is mapped or written down here - see
+     "Shortcut help (F1)" below. It works in insert and visual mode too,
+     and inside every telescope list, where that list's own keys come
+     first. In vim 8.1 it shows this list in a read-only tab
+\K: Show a man page for the keyword under the cursor. This was F1; vim's own
+     `K` does it too, but `K` resizes windows here (Shift+k, below)
 F2: Source files under the current path are indexed; `cscope.files` is written to the project root and the GPATH/GRTAGS/GTAGS database into `<root>/.tags/` (`:call Deltags()` removes both). With automatic indexing this is rarely needed.
 F3: Find an indexed file and open it, the same as `\fo` (nvim only). RelationView moved to F12
 F4: Mark the keyword under the cursor, the keyword is highlighted in different colors
@@ -262,7 +272,10 @@ F6: Toggle MiniBufExplorer, source file explorer on the top side
 F7: Search any symbol the index knows, the same as `\fs` (nvim only). It used to fold a function body; `zf` still does that, as do `za`/`zo`/`zc`
 F8: Stick a yellow mark on the symbol under the cursor, and take it off by pressing it again there (nvim only). It used to unfold (`zo`, which is still there)
 F9: Toggle neo-tree on the left (F11 used to be this one; aerial closes with it, since both want the left). Inside the tree, `w` widens it a step at a time and then snaps back to its normal width, the same key and the same feel as `w` in the relation panel - the steps are percentages of the screen (`g:neotree_wide_steps`, `[25, 40]`), and the other sidebars keep their width; the edit window pays for it
-F10: Toggle tagbar, source code browser on the right side
+F10: Toggle the symbol outline of the current file on the left - aerial in
+     nvim (see "The symbol outline" below), tagbar in vim or with
+     `g:vimide_outline = 'tagbar'`. It closes neo-tree (F9, F11) and NERDTree
+     first, since they share the left; `<leader>o` toggles aerial alone
      (the cursor or a mouse click on a symbol jumps to it in the edit window)
 F11: Toggle neo-tree as a float (F9 used to be this one)
 F12: Toggle RelationView, the Source Insight style relation window (nvim only;
@@ -351,7 +364,10 @@ Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
      same everywhere, so use those if your terminal stays silent.
 Shift+h, Shift+l, Shift+k, Shift+j:  Resize between split windows
-Ctrl+h, Ctrl+l, Ctrl+k, Ctrl+j:  Move between split windows
+Ctrl+l, Ctrl+k, Ctrl+j:  Move to the split window on the right / above / below.
+     Ctrl+h is no longer "left": it is find and replace (above), and
+     `<C-w>h` goes to the window on the left (`g:vimide_replace_ctrl_h = 0`
+     gives Ctrl+h back)
 ,e or ,r : Go to the tab on the left/right
 ,w: Save and close the current file. *Well~ we call it buffer in Vim*
 ,pa: Toggle paste option. This is useful if you want to cut or copy some text from one window and paste it in Vim. Don't forget to toggle paste again once you finish pastin
@@ -432,6 +448,148 @@ Where `{querytype}` corresponds to the actual cscope line interface numbers as w
 8 or i: Find files #including this file
 9 or a: Find places where this symbol is assigned a value
 ```
+
+## Keys in a telescope list
+
+Every list (`\ff`, `\fg`, `\fb`, `\fo`, `\fs`, the bookmarks, F1 ...) is a
+telescope picker, and they all take these keys. The prompt starts in insert
+mode; `Esc` goes to normal mode, where `j` / `k` move. The open, move and
+quickfix keys wait until the list has caught up with what was typed (see
+"Every telescope list" in the key list above).
+
+| in the prompt | |
+|---|---|
+| `Enter` | open the entry under the cursor - a file opens in the last edit window |
+| `Ctrl+x` / `Ctrl+v` / `Ctrl+t` | open it in a split / a vertical split / a new tab |
+| `Tab` / `Shift+Tab` | mark the entry (several can be marked) and move down / up |
+| `Ctrl+q` | send every listed entry to the quickfix list and open it |
+| `Alt+q` | send the marked entries to the quickfix list and open it |
+| `Ctrl+n` / `Ctrl+p` | next / previous entry (also `Down` / `Up`; `j` / `k` in normal mode) |
+| `Ctrl+u` / `Ctrl+d` | scroll the preview up / down; in `\fo`, `\fx` and the bookmarks `Ctrl+d` drops the entry instead (next row) |
+| `d` | in normal mode (`Esc` first) in `\fo`, `\fx` and the bookmarks: drop the entry, or every marked one; the list stays open. `Ctrl+d` does it in insert mode |
+| `Ctrl+/` / `?` | telescope's own list of this picker's keys (`?` in normal mode) |
+| `Esc` / `Ctrl+c` | `Esc`: insert to normal mode, and in normal mode close the list; `Ctrl+c` closes from insert mode |
+| `F1` | the shortcut help, with this prompt's own keys first |
+
+## Shortcut help (F1)
+
+F1 opens one telescope list of every key vim-ide has (`:VimIdeKeys`,
+`.vim/plugin/keyhelp.lua`). None of it is written down a second time: every
+time it opens, the list is gathered from
+
+- this README: the key list at the top of "Usage (shortcut)" - a line that
+  starts at column 0 with `Key: description` is an entry and indented lines
+  continue it; `A / B`, `A, B`, `A or B` and `A (or B)` name several keys -
+  the key tables of the other sections (rows like ``| `key` | meaning |`` in
+  a table whose first header cell is empty or reads "in the ..."; a count in
+  front of a key, as in `1<C-r>`, is shown but read as the key), and blocks
+  elsewhere with three or more `Key: description` lines (the relation panel's
+  keys). A table of another kind is not a list of keys, but when a key's text
+  points to its section by name in italics - the DirDiff tree's `f` says "see
+  *Views* below" - that table and the list right after it are searched as
+  part of the key's text and shown in its preview, so `최신`, `고아` or
+  `right-newer` find `f`;
+- the mappings that are set right now, in every mode - and when F1 is pressed
+  in a tree, the relation panel, quickfix, a telescope list or another special
+  window, that window's own mappings, listed first and labelled `이 창 ·` with
+  the window's filetype (or its buffer name, or a float's title), and joined
+  with that window's key table here, so neo-tree's `J` reads "first / last
+  sibling" and a telescope list's `Ctrl+v` reads as in "Keys in a telescope
+  list" (F1 in DirDiff's view menu closes the menu first, so the tree's keys
+  are listed). In a file buffer,
+  the mappings set for that buffer only (an ftplugin, LSP) are listed and
+  matched too - but one that shares no mode with the global mapping of the
+  same key is a different mapping and gets a row of its own (delimitMate's
+  insert-mode `Ctrl+h` is a backspace, not find and replace);
+- the commands: vim-ide's, the plugins', nvim's, and the ones defined for the
+  buffer F1 was pressed in (`:GutentagsUpdate`).
+
+Typing searches the whole text of a README entry, not only the first sentence
+shown in the list, and a key that appears in that text brings the entry up -
+`w` finds the F9 entry (its tree widens with `w`), `i+` the relation panel's
+entry. Vim notation works as well as the README's, in either case: `<C-]>`,
+`Ctrl+]` and `ctrl+]` all put the `Ctrl+]` row first, and `Shift+Tab`,
+`Ctrl+r` or `Space` find the rows written `<S-Tab>`, `<C-r>`, `<Space>` (the
+DirDiff tables, a window's own mappings). Of two keys that differ only in
+case, the one written the way you typed it comes first: `]q` puts `]q`
+(`:cnext`) above `]Q`, and `f` in the DirDiff tree puts `f` above `F`. Among
+rows whose key matches, the window F1 was pressed in comes first.
+
+A key that is documented here and also mapped is one row: the README text
+wins, the mode column shows the modes it is mapped in, and the preview adds
+the real right-hand side and the file and line that set it - so a line here
+that has gone stale is seen next to what the key really does. An empty mode
+column means there is no global mapping: a key that only works inside a tree
+or a panel, or one this README promises and nothing maps. Only the "Usage"
+list is matched against the global mappings; a table elsewhere is usually
+about the keys of one window (neo-tree's `K`, the DirDiff tree's `<C-n>`), so
+it is matched only for leader keys, F keys, `Ctrl-W`, `,` keys and
+commands - and for the keys DirDiff takes over in its edit windows
+(`<C-r>`, `<C-l>`, `<C-S-r>`, `<C-S-l>`), which are global mappings that act
+only inside a DirDiff tab: their rows in "in the edit windows" show the
+mapping (and only that one - not the same key's mapping in other modes), and
+every preview of those mappings says what the key does outside a DirDiff
+comparison: the mapping DirDiff wrapped, with the file and line that set it
+(`Ctrl+l`: `:wincmd l`), or nvim's default (`<C-r>`: redo). Mappings and
+commands this README does not mention are listed too, with their description
+or right-hand side: vim-ide's own first, then the plugins', then nvim's
+defaults (`let g:vimide_keyhelp_others = 0` leaves out the plugins' and nvim's
+mappings and commands; the mappings and commands of the buffer F1 was pressed
+in stay - an ftplugin's `[[`, delimitMate's, LSP's).
+
+The parsed README, and the files the previews and the read-only tabs show,
+are kept only while the file's modification time (to the nanosecond), size
+and inode stay the same, and the mappings and commands are read again every
+time, so a new key - mapped, or written down here - is in the next F1 without
+restarting. `:VimIdeKeys!` re-reads the files anyway. Measured here, with
+this 3,700-line README and about 770 rows: the list is on screen in about
+40 ms, 70-80 ms the first time in a session (telescope loading), and reading
+the README again after it changed costs about 20 ms of that. Filtering the
+whole text of every row as you type takes under a millisecond a key. The
+`:help` tag of an nvim default mapping is checked against a table read once
+from `$VIMRUNTIME/doc/tags` (5 ms for all of them), not by searching every
+help tag per row.
+
+| | |
+|---|---|
+| `<CR>` | a README row: open the README at that place in a read-only tab (`q` closes it). A mapping: open the file that set it, at that line, the same way; nvim's own defaults (`gcc`, `]q`, `[d`, `<C-W>d` ...) open their `:help`. A command: put `:Command ` on the command line |
+| `<C-y>` | copy the key in vim notation (`<F12>`, `<C-]>`, `\fo`) to the unnamed register; also to `+` / `*` when 'clipboard' has `unnamedplus` / `unnamed`. The list stays open, and its prompt title says what was copied for two seconds (in insert mode the message line is redrawn as `-- INSERT --` at once) |
+| `<C-q>` / `<M-q>` | the listed / the marked rows go to the quickfix list: the README line of each, or the line that set the mapping or command. A row with no such line (nvim's Lua defaults, a mapping set from Lua or typed on the command line, a Lua plugin's command) goes in as text only - not a place to jump to |
+| `<C-x>` / `<C-v>` / `<C-t>` | nothing here - a row is not a file to split open |
+
+F1 works in normal, visual and insert mode, and in every telescope list -
+including this one - where it closes that list and opens this one with the
+list's own keys first. Closing the list without choosing a row (`Esc`,
+`Ctrl+c`) goes back to where F1 was pressed, with the cursor where it was:
+in insert mode at the same place if that is where you were - in Replace or
+Virtual Replace (`gR`) mode if it was one of those, after an `i_CTRL-O` too,
+and also inside the `Ctrl+g` / `Ctrl+/` / `Ctrl+h` forms - and with the same
+selection if F1 was pressed in visual mode. The window you were in before
+stays the previous window (`Ctrl-W p`), so cancelling one of those forms
+afterwards still lands in the edit window it was opened from. Those forms
+float above everything else, so while the list is open they are hidden (nvim
+0.10 and later; before that the list is raised above them), and they come back
+when it closes. DirDiff's view menu
+(`f`) does not come back: F1 there closes it and opens the list from the tree
+the menu was opened from, so closing the list, or opening a row from it, goes
+to that tree.
+`q` in a read-only README or definition tab goes back to the tab and window F1
+was pressed in. Terminal mode leaves F1 to the program running there.
+The fugitive windows and, in nvim, tagbar no longer take F1 for their own
+help: theirs is `g?` and `?`. BufExplorer (F6) and vim's tagbar keep F1 - it
+is their only help key, their header says so, and vim's F1 page does not
+list their keys. In the command-line window (`q:`) F1 only says it cannot
+open there - close that window with `:q` first (`Ctrl+c` in normal mode is
+taken by another vim-ide key there). A mapping typed on the command line is
+labelled 명령줄; one set from Lua with no file nvim can name is labelled Lua.
+
+If the README cannot be read (`g:vimide_keyhelp_readme` names a file that is
+not there), the list says so in its prompt title and holds only the mappings
+and commands.
+
+In vim 8.1 (no telescope, no Lua) F1 shows the "Usage (shortcut)" section of
+this README in a read-only tab; `q` closes it and goes back to the tab and
+window F1 was pressed in. The man page F1 used to show is `\K` now.
 
 ## Theme
 
@@ -1880,6 +2038,9 @@ the `[A]` row cancels it, and the two can come from different trees (pick `[A]`
 in the F9 sidebar, `[B]` in the RelationView tree). `\d` is the same key under
 another name.
 
+The same `Tab` works in the DirDiff tree (below), and it is the same `[A]`:
+pick `[A]` in neo-tree and `[B]` in a comparison tree, or the other way round.
+
 ### The side-by-side tree (nvim)
 
 In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare: the two
@@ -1906,29 +2067,73 @@ progress and the totals.
 |---|---|
 | `<CR>` | file: show the pair in the edit windows and move the cursor there, on the first change. Folder: open / close |
 | `o` | show the pair, stay in the tree |
-| `<C-n>` / `<C-p>` | next / previous file that differs (or exists on one side only), opening folders on the way |
+| `<C-n>` / `<C-p>` | next / previous file that differs (or exists on one side only), opening folders on the way. In a view other than *all* and *differences*: the next entry that view is about |
 | `l` / `h` | open a folder / close it (or go to the parent) |
-| `O` / `X` | open every folder that has a difference / close all (the whole tree) |
-| `f` | only differences |
-| `<Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side works too). The status line says which |
+| `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree) |
+| `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below |
+| `F` | switch between *all* and *differences* |
+| `<Tab>` | pick something to compare, as `Tab` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Tab` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: vimdiff). `Tab` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
+| `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which |
 | `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
 | `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
 | `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
 | `q` | finish: closes the tab, goes back, removes the buffers it opened (an edited one is kept, and named) |
 | `?` | these keys |
 
-In the two edit windows `<C-n>` / `<C-p>` are `]c` / `[c` (next / previous
-change), and `<C-r>` / `<C-l>` copy the line under the cursor - or the lines of a
-visual selection, or a count of lines - to the right (B) / to the left (A).
-That is `:diffput` or `:diffget` for those lines, so the other buffer changes
-and `:w` saves it; each copy is one undo step there. On a line that is not
-itself changed but has lines that exist only on the other side right above or
-below it, that change is copied; on any other unchanged line nothing happens.
-When one side is not a file (the empty side of a one-sided file, a note) the
-keys refuse and point to the tree copy. `do` / `dp` still work, and a count
-works on `<C-n>` / `<C-p>` as on `]c` / `[c`. Outside the DirDiff tab `<C-r>`
-is redo and `<C-l>` moves to the right window, exactly as before
-(`let g:vimide_dirdiff_copy_keys = 0` leaves them alone everywhere).
+In the two edit windows:
+
+| in the edit windows | |
+|---|---|
+| `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c` |
+| `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
+| `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when the terminal reports Ctrl+Shift (iTerm2 with CSI u, tmux with `extended-keys`); Tera Term usually sends a plain `<C-r>` / `<C-l>` |
+| `1<C-r>` / `1<C-l>`, `N<C-r>`, visual | work in every terminal: a count copies that many lines from the cursor (`1<C-r>` is the cursor line, with the same rule on an unchanged line as `<C-S-r>`), a visual selection exactly its lines. Lines of the other side just above the first of those lines are not part of them (as with nvim's `:1,1diffget`); when nothing in the lines differs it says so |
+
+The copy goes into the other buffer and `:w` saves it. Unsaved edits on either side are what is compared and copied, and each copy is one undo step in the buffer it changed. When one side is not a file (the empty side of a one-sided file, a note - a binary or too large file too) the keys refuse and point to the tree copy. Block copies count the rows of both windows (filler lines included) and replace exactly the block's lines, instead of handing nvim a line range: with linematch, a range one line wider than the block also took the next piece and deleted lines on the other side, and nvim's own `:diffput` loses a line when the target is a file with a single empty line (or empties one partway through) and leaves a line behind on `u` after copying into an empty file. On a very large diff (counting takes over 0.25 s), or when `'diffopt'` has `iblank` or lacks `filler` (the rows of the two windows no longer line up), it falls back to `:diffput` / `:diffget` with a range around the block - except into an empty file, which is always filled directly (one `u` empties it again), and into a file holding a single empty line, where the few rows can still be told apart. `do` / `dp` still work. Outside the DirDiff tab `<C-r>` is redo and `<C-l>` moves to the right window, exactly as before, and `<C-S-r>` / `<C-S-l>` do what nvim does without a mapping (`let g:vimide_dirdiff_copy_keys = 0` leaves all four alone everywhere).
+
+#### Views
+
+`f` opens the views, as in Beyond Compare's view filter; the status line shows
+the current one in brackets.
+
+| view | id | shows |
+|---|---|---|
+| 모두 보이기 | `all` | everything |
+| 차이 보이기 | `diff` | what differs or exists on one side only |
+| 고아 없음 보이기 | `no-orphans` | everything that exists on both sides |
+| 고아 없는 차이 보이기 | `diff-no-orphans` | what exists on both sides and differs |
+| 고아 보이기 | `orphans` | what exists on one side only |
+| 좌측 최신 보이기 | `left-newer` | different, and newer in A |
+| 우측 최신 보이기 | `right-newer` | different, and newer in B |
+| 좌측의 최신과 고아 보이기 | `left-newer-orphans` | newer in A, or only in A |
+| 우측 최신과 고아 보이기 | `right-newer-orphans` | newer in B, or only in B |
+| 좌측 고아 보이기 | `left-orphans` | only in A |
+| 우측 고아 보이기 | `right-orphans` | only in B |
+| 동일 보이기 | `same` | identical |
+
+- An orphan is an entry that exists on one side only (a left orphan is only in
+  A). A folder that exists on one side only is an orphan itself, and so is
+  everything in it. *Newer* means the entry exists on both sides, the contents
+  differ, and that side's modification time is later; a difference with the
+  same time is in neither newer view. A name that is a folder on one side and a
+  file on the other is a difference, and its folder side also counts as an
+  orphan of that side.
+- A folder is shown when anything below it matches, opened or not (the helper
+  keeps a summary per folder), so *left newer* shows just the folders that lead
+  to files newer in A. A folder that exists on both sides also matches *no
+  orphans* by itself, and an identical one matches *same*.
+- While the comparison runs, entries not checked yet stay visible if they could
+  still match, and drop out as soon as they are known. Those rows are removed
+  one by one; the tree is not redrawn as a whole.
+- The menu counts the entries of each view (a one-sided folder counts as one,
+  as in the status line) and updates while the scan runs. `Enter` (or a double
+  click) picks a view; `q` / `Esc` closes the menu, and `F1` closes it and
+  opens the key help from the tree (closing the help puts the cursor back in
+  the tree). `F` in the tree is the quick switch between *all* and
+  *differences*.
+- `let g:vimide_dirdiff_filter = 'right-newer'` starts in that view (an id
+  from the table). `let g:vimide_dirdiff_only_diff = 1` still starts in
+  *differences*.
 
 Copying in the tree:
 
@@ -1951,11 +2156,26 @@ Copying in the tree:
 - Only what was copied is compared again (from the highest folder that did
   not exist on the target side), not the whole tree, and a pair shown in the
   edit windows is reopened with the new file once its new verdict is in.
+  Other comparison tabs that contain the copied paths (a nested `Tab` / `Tab`
+  comparison and the tab it was opened from) are updated the same way, as on
+  `:w`, and keep their cursor where it was (still in the tree after `gT` or
+  `q`); one whose compared folder lies inside a copied folder is compared
+  again as with `R`.
 
 - **Only in A / only in B.** The missing side is an empty buffer in diff
   mode, so the whole file shows as added: an A-only file on the left with an
   empty right side, a B-only file on the right with an empty left side. The
   window bar says `(없음)` on the empty side.
+- The window bars (`A: …` / `B: …`) and diff mode belong to the two edit
+  windows only. Opening a file shown there in another window or tab
+  (`:tabnew file`, `:e`, `:vsplit file`, `Enter` in neo-tree, a `Tab` / `Tab`
+  vimdiff) gives a plain window: nvim copies the options of the window that
+  shows the buffer, and the bar, `diff`, `scrollbind`, `cursorbind` and the
+  diff folds are taken off again there. A file the edit windows showed earlier
+  and that is still loaded - your own buffer after another pair replaced it,
+  an edited one kept after `q` or `:tabclose` - opens the same way, with
+  folding as usual and none of the comparison's folds. A `:diffsplit` or
+  vimdiff you start yourself still turns diff mode on.
 - Binary files and files over 20 MB (`g:vimide_dirdiff_max_mb`) are not
   loaded; the windows say so. So does a name that is a folder on one side and
   a file on the other.
@@ -1974,11 +2194,15 @@ Copying in the tree:
   waits for the other.
 - The excludes are the same `g:DirDiffExcludes` as below.
 - `:DirDiff A B` again for a pair already open goes to its tab; another pair
-  opens its own.
+  opens its own (so does `Tab` / `Tab` on two folders in a tree). Any number of
+  comparisons can be open side by side, each tab with its own tree, helper and
+  buffers; `q` or `:tabclose` on one leaves the others working.
 - `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again;
   `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
-  starts with only the differences, `g:vimide_dirdiff_list_height` sets the
-  tree height (default 40% of the screen).
+  starts with only the differences, `let g:vimide_dirdiff_filter = '<id>'`
+  with any view from *Views* (it wins over `only_diff`), and
+  `g:vimide_dirdiff_list_height` sets the tree height (default 40% of the
+  screen).
 
 ### The plugin's list (vim, `:DirDiffClassic`)
 

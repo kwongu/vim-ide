@@ -471,6 +471,9 @@ require'telescope'.setup{
 					local a = require('telescope.actions')
 					a.send_selected_to_qflist(b); a.open_qflist(b)
 				end),
+				-- F1 은 여기서도 단축키 도움말이다 (VimIdeKeyHelp, 아래 <F1> 설명).
+				-- 이 프롬프트의 키가 목록 맨 앞에 나온다. 기다리지 않는다(g 없이).
+				['<F1>'] = { '<Cmd>call VimIdeKeyHelp()<CR>', type = 'command' },
 			}
 			local i = vim.tbl_extend('force', keys, {
 				['<C-n>'] = g('move_selection_next'),
@@ -1930,20 +1933,29 @@ let g:vimide_dirdiff_tab = 1
 " 나머지만 내용을 읽는다. 제외는 위의 g:DirDiffExcludes 를 같이 쓴다.
 " 한쪽에만 있는 파일은 없는 쪽을 빈 버퍼로 두고 diff (A만: 왼쪽에 파일, B만: 오른쪽에).
 "   트리: <CR> 비교 열고 편집 창으로(디렉터리는 펼치기), o 열기만, <C-n>/<C-p> 다음/앞
-"         차이 파일, l/h 펼치기/접기, O/X 모두 펼치기/접기, f 차이만, R 다시, q 끝, ? 도움말
-"         <Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
+"         차이 파일(모두·차이 밖의 보기는 그 보기의 것), l/h 펼치기/접기, O/X 모두 펼치기/접기,
+"         R 다시, q 끝, ? 도움말
+"         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
+"         <Tab> 비교할 곳 고르기 ([A] 에서 Tab, [B] 에서 Tab -> 새 탭에서 비교. neo-tree 와 같은 [A])
+"         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
-"   편집 창: <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서 줄·고른 줄을 오른쪽/왼쪽으로
-"            (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
+"   편집 창: <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
+"            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term 처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
+"            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
+"            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
 "   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
 "   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
+"   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (all diff no-orphans diff-no-orphans orphans
+"                                          "  left-newer right-newer left-newer-orphans right-newer-orphans
+"                                          "  left-orphans right-orphans same, only_diff 보다 먼저)
 "   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
 "   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (기본: 화면의 40%)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
-"   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l> 을 가로채지 않기
+"   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
+let g:vimide_dirdiff_filter = ''
 let g:vimide_dirdiff_trust_mtime = 1
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
@@ -2102,6 +2114,34 @@ augroup VimIdeAcpGuard
     autocmd InsertEnter * call <SID>AcpGuard()
 augroup END
 
+" 터미널 버퍼에서는 ACP 의 i / a / R 을 쓰지 않는다.
+" ACP 는 normal 의 i, a, R 을 'i<C-r>=<SID>feedPopup()<CR>' 로 전역 매핑한다.
+" 터미널 버퍼에서 i 는 터미널 모드로 들어가는 키라 뒤의 글자가 그대로 그 안의
+" 프로그램으로 갔다 - 셸에 '^R=<SNR>70_feedPopup()' 이 찍히고 Enter 로 실행됐다
+" (QA, cat -v 로 실측 - nvim 도 vim 도). 플러그인에는 이것만 끄는 옵션이 없다
+" (g:acp_enableAtStartup 은 자동완성 전체를 끈다). 그 버퍼에만 원래 키를 건다 -
+" 버퍼 매핑이 전역 매핑보다 먼저라 AcpEnable 이 다시 걸어도 그대로다.
+" (매핑에는 <buffer=N> 이 없다 - 자동 명령에만 있다. nvim 은 버퍼를 집어 걸고,
+" vim 은 그 터미널이 지금 버퍼일 때 건다: ++hidden 으로 연 것은 빠진다)
+func! s:AcpTermKeys(buf) abort
+    for l:k in ['i', 'a', 'R']
+        if has('nvim')
+            call nvim_buf_set_keymap(a:buf, 'n', l:k, l:k,
+                        \ {'noremap': v:true, 'desc': '터미널 모드로 (ACP 매핑 대신)'})
+        elseif a:buf == bufnr('')
+            execute 'nnoremap <buffer> ' . l:k . ' ' . l:k
+        endif
+    endfor
+endfunc
+augroup VimIdeAcpTerminal
+    autocmd!
+    if has('nvim')
+        autocmd TermOpen * call <SID>AcpTermKeys(str2nr(expand('<abuf>')))
+    elseif exists('##TerminalOpen')
+        autocmd TerminalOpen * call <SID>AcpTermKeys(str2nr(expand('<abuf>')))
+    endif
+augroup END
+
 "==============================================================================
 " vim-smooth-scroll
 "==============================================================================
@@ -2130,6 +2170,10 @@ augroup END
 " delimitMate
 "==============================================================================
 let delimitMate_expand_cr=1
+" 텔레스코프 입력창에서는 짝 맞추기를 끈다 - F1 단축키 도움말에서 [c 를 치면
+" [c] 가, " 를 치면 "" 가 되어 그 키를 찾지 못했다 (병합 점검). 입력창은 BufEnter
+" 에서 짝 매핑이 걸렸다가, filetype 이 정해질 때(FileType) 이 목록을 보고 걷힌다.
+let g:delimitMate_excluded_ft = 'TelescopePrompt'
 
 
 "==============================================================================
@@ -5444,8 +5488,209 @@ func! NERDTree_and_Tagbar_Toggle()
 	:TagbarToggle
 endfunc
 
-"map <F1> :call Man()<cr><cr>
-map <F1> :!man <C-R>=expand("<cword>") <cr><cr>
+" <F1> 은 단축키 도움말이다.
+"   nvim     :VimIdeKeys (.vim/plugin/keyhelp.lua) - README 의 키 목록과 키 표,
+"            지금 걸린 매핑, vim-ide 의 명령을 telescope 창 하나에서 찾는다.
+"   vim 8.1  telescope 도 lua 도 없어서 README 의 '## Usage (shortcut)' 목록을
+"            읽기 전용 탭에 띄운다 (VimIdeKeyHelpBuf).
+" 따로 적어 둔 도움말이 없다 - 둘 다 누를 때마다 README 와 매핑을 새로 읽는다.
+" 키를 더하거나 바꾸고 README 에 적으면 다시 시작하지 않아도 F1 에 그대로 나온다.
+"
+" 예전 F1(:!man <cword>)은 \K 로 옮겼다. vim 의 K 가 원래 그 일(keywordprg)을
+" 하지만 여기서는 K 가 창 높이 줄이기(<S-k>)다.
+"
+" 먼저 해제한다: 예전 'map <F1>' 은 visual/operator 에도 걸려 있어서, 실행
+" 중에 :source ~/.vimrc 하면 nnoremap 이 normal 만 덮고 나머지에 man 이 남는다.
+"
+" README 는 이 .vimrc 옆의 것이다 (~/.vimrc -> ~/.vim-ide/.vimrc 를 풀어서).
+" expand() 의 두 번째 인자 1 은 'wildignore' 를 무시하라는 뜻이다 - 안 그러면
+" */tmp/* 아래에 있는 경로가 빈 글자가 된다.
+let s:vimide_dir = fnamemodify(resolve(expand('<sfile>:p', 1)), ':h')
+func! VimIdeKeyHelpReadme() abort
+	let l:p = get(g:, 'vimide_keyhelp_readme', '')
+	if l:p !=# ''
+		return expand(l:p, 1)
+	endif
+	for l:c in [s:vimide_dir . '/README.md', expand('~/.vim-ide/README.md', 1)]
+		if filereadable(l:c)
+			return l:c
+		endif
+	endfor
+	return ''
+endfunc
+
+" README 의 '## Usage (shortcut)' 절을 ``` 줄만 빼고 그대로 보여 준다.
+" 이미 떠 있으면 그 창에서 새로 채운다. q 로 닫는다.
+func! VimIdeKeyHelpBuf() abort
+	let l:p = VimIdeKeyHelpReadme()
+	if l:p ==# '' || !filereadable(l:p)
+		echohl WarningMsg | echo 'vim-ide: README.md 를 찾지 못했습니다' | echohl None
+		return
+	endif
+	let l:out = []
+	let l:in = 0
+	for l:l in readfile(l:p)
+		if l:l =~# '^## '
+			if l:in
+				break
+			endif
+			let l:in = l:l =~# '^## Usage'
+		endif
+		if l:in && l:l !~# '^```'
+			call add(l:out, l:l)
+		endif
+	endfor
+	if empty(l:out)
+		echohl WarningMsg | echo 'vim-ide: README.md 에 ## Usage 절이 없습니다' | echohl None
+		return
+	endif
+	call insert(l:out, '" ' . fnamemodify(l:p, ':~') . '   (q: 닫기)')
+	" q 가 돌아갈 창 (F1 을 누른 창). 탭을 닫으면 vim 은 오른쪽 탭으로 가서, 맨 끝이
+	" 아닌 탭에서 연 도움말을 q 로 닫으면 엉뚱한 옆 탭에 떨어졌다.
+	let l:from = win_getid()
+	let l:win = 0
+	for l:b in range(1, bufnr('$'))
+		if getbufvar(l:b, 'vimide_keyhelp', 0) && !empty(win_findbuf(l:b))
+			let l:win = win_findbuf(l:b)[0]
+			break
+		endif
+	endfor
+	if l:win
+		call win_gotoid(l:win)
+		" 이미 떠 있는 도움말을 다시 쓸 때도 돌아갈 자리는 이번 것 (도움말 안에서
+		" 누른 F1 은 그대로 둔다)
+		if l:win != l:from
+			let b:vimide_keyhelp_back = l:from
+		endif
+	else
+		" 곁창(트리)에서 탭을 열면 새 창이 그 창의 옵션을 물려받는다 - 편집 창에서 연다
+		call s:GotoEditSlot(1)
+		" vim 에는 nvim 의 편집 자리 추적(Lua)이 없어서 이 탭의 보통 파일 창을 찾아
+		" 간다. 곁창에서 그대로 :tabnew 하면 새 탭이 서지 않고 그 곁창이 도움말로
+		" 바뀌기도 했다 (vim 의 tagbar 창에서 실측).
+		if &buftype !=# '' || &winfixwidth || &previewwindow
+			for l:n in range(1, winnr('$'))
+				if getbufvar(winbufnr(l:n), '&buftype') ==# '' && !getwinvar(l:n, '&winfixwidth')
+							\ && !getwinvar(l:n, '&previewwindow')
+					execute l:n . 'wincmd w'
+					break
+				endif
+			endfor
+		endif
+		tabnew
+		setlocal buftype=nofile bufhidden=wipe noswapfile nobuflisted
+		let b:vimide_keyhelp = 1
+		let b:vimide_keyhelp_back = l:from
+		silent! execute 'file' fnameescape('[단축키 도움말]')
+		nnoremap <buffer> <silent> q :<C-u>call <SID>KeyHelpClose()<CR>
+		syntax match Title /\%1l.*/
+		syntax match Identifier /^\S.\{-,40}\ze:\%(\s\|$\)/
+	endif
+	setlocal modifiable noreadonly
+	silent %delete _
+	call setline(1, l:out)
+	setlocal nomodifiable readonly nomodified wrap linebreak nolist
+	call cursor(1, 1)
+endfunc
+
+" 도움말 탭의 q: 닫고 F1 을 누른 창으로 간다. 탭이 닫혔을 때만 - 도움말 탭을
+" 나눠 쓰던 중이면 그 창 하나만 닫고 탭에 남는다.
+func! s:KeyHelpClose() abort
+	let l:back = get(b:, 'vimide_keyhelp_back', 0)
+	let l:tabs = tabpagenr('$')
+	if winnr('$') > 1 || l:tabs > 1
+		close
+	else
+		bwipeout
+	endif
+	if l:back && tabpagenr('$') < l:tabs
+		call win_gotoid(l:back)
+	endif
+endfunc
+
+" 경고 한 줄. 화면 폭에서 12 칸(showcmd·ruler 자리)을 뺀 데까지 자른다 - 거기에
+" 닿기만 해도 'Press ENTER' 가 뜬다. echomsg 라 :messages 에도 남는다.
+" (타이머로 부를 때는 타이머 번호가 뒤에 붙어 온다)
+func! s:KeyHelpWarn(msg, ...) abort
+	let l:max = max([20, &columns - 12])
+	let l:m = a:msg
+	if strdisplaywidth(l:m) > l:max
+		let l:n = strchars(l:m)
+		while l:n > 0 && strdisplaywidth(strcharpart(l:m, 0, l:n)) > l:max - 3
+			let l:n -= 1
+		endwhile
+		let l:m = strcharpart(l:m, 0, l:n) . '...'
+	endif
+	echohl WarningMsg | echomsg l:m | echohl None
+endfunc
+
+func! VimIdeKeyHelp() abort
+	" 명령줄 창(q:)에서는 다른 창·탭으로 갈 수 없다 (E11). 닫는 키는 :q 다 -
+	" normal 의 Ctrl+c 는 vim-ide 에서 다른 일(RvUnpin)이라 이 창을 닫지 않는다.
+	" nvim 의 insert·visual 모드(<Cmd> 매핑)에서는 곧바로 다시 그리는 '-- INSERT --'
+	" ('-- VISUAL --')가 메시지를 지운다 - 그 모드를 끝내고 다음 틈(타이머)에 띄운다.
+	if getcmdwintype() !=# ''
+		let l:msg = 'vim-ide: q: 창에서는 F1 을 못 엽니다 - :q 로 닫고 F1'
+		if mode() =~# "^[iRvV\<C-v>]" && has('timers')
+			if mode() =~# '^[iR]'
+				stopinsert
+			else
+				execute "normal! \<Esc>"
+			endif
+			call timer_start(0, function('s:KeyHelpWarn', [l:msg]))
+		else
+			call s:KeyHelpWarn(l:msg)
+		endif
+		return
+	endif
+	if has('nvim') && exists(':VimIdeKeys') == 2
+		VimIdeKeys
+	else
+		" i_CTRL-O 다음의 F1: 이 명령이 끝나면 vim 이 insert 를 다시 시작해서, 읽기
+		" 전용 도움말 탭에서 insert 가 되었다 (치면 E21). insert 의 F1 처럼 normal
+		" 로 연다. (nvim 은 keyhelp.lua 가 돌아올 때 insert 로 되살린다)
+		if mode(1) =~# '^ni'
+			stopinsert
+		endif
+		call VimIdeKeyHelpBuf()
+	endif
+endfunc
+
+" normal 말고 visual, insert 에서도 F1 은 이 목록이다. insert 의 F1 은 원래
+" vim 의 :help 라서, insert 모드인 telescope 프롬프트(이 목록 자신도)에서 F1 을
+" 누르면 help.txt 가 뜨고 그 창이 닫혔다. nvim 은 <Cmd> 로 열고, 아무것도
+" 고르지 않고 닫으면(Esc, Ctrl+c) 그 자리에서 insert 로, visual 이면 같은 영역을
+" 고른 채로 돌아간다 (keyhelp.lua 의 back - 프롬프트를 닫으면 nvim 이 insert 를
+" 끝내서 따로 되살린다). visual 의 ':' 는 영역을 버리고 커서를 '< 로 옮겨서 nvim
+" 은 x 도 <Cmd> 다. 터미널 모드는 그대로 둔다: 그 안의 프로그램(mc, htop ...)이
+" F1 을 받는다.
+silent! unmap <F1>
+silent! iunmap <F1>
+nnoremap <silent> <F1> :<C-u>call VimIdeKeyHelp()<CR>
+if has('nvim')
+	xnoremap <silent> <F1> <Cmd>call VimIdeKeyHelp()<CR>
+	inoremap <silent> <F1> <Cmd>call VimIdeKeyHelp()<CR>
+else
+	xnoremap <silent> <F1> :<C-u>call VimIdeKeyHelp()<CR>
+	inoremap <silent> <F1> <Esc>:call VimIdeKeyHelp()<CR>
+endif
+" 플러그인 창도 F1 은 이 목록이다. fugitive 와 (nvim 의) tagbar 는 <F1> 을
+" 버퍼에 걸어 제 도움말을 띄웠다 - 둘 다 도움말 키가 따로 있어서(fugitive g?,
+" tagbar ?) F1 만 돌려받는다. 그 창의 키는 nvim 목록 맨 앞에 나온다.
+" (g:nremap 은 fugitive 가 버퍼 매핑을 걸 때 보는 표 - '' 은 걸지 말라는 뜻)
+" 그대로 두는 것:
+"   vim 의 tagbar (.vim/bundle/Tagbar) - 도움말 키가 <F1> 하나뿐이고 머리줄에
+"     'Press <F1> for help' 가 박혀 있다. vim 의 F1 목록(README Usage)에는
+"     tagbar 창의 키가 없어서 그 창에서는 tagbar 도움말이 더 쓸모 있다.
+"   BufExplorer(F6) - 같은 까닭 ('Press <F1> for Help').
+if has('nvim')
+	let g:tagbar_map_help = ['?']
+endif
+if type(get(g:, 'nremap', {})) == type({})
+	let g:nremap = extend(get(g:, 'nremap', {}), {'<F1>': ''})
+endif
+" man 페이지 (예전 F1)
+nnoremap <Leader>K :!man <C-R>=expand("<cword>")<CR><CR>
 " <F2> 는 \fm 과 같다: 이 프로젝트의 색인 모드를 고른다
 "   none  아무것도 하지 않는다 (기본 - .tags 가 없는 디렉터리)
 "   auto  프로젝트 전체

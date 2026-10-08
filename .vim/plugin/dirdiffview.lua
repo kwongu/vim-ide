@@ -13,20 +13,30 @@
 --   <CR>        파일: 위 두 창에 비교를 열고 커서를 편집 창(첫 차이)으로
 --               디렉터리: 펼치기/접기
 --   o           파일: 비교를 열되 커서는 트리에 그대로
---   <C-n>/<C-p> 다음/앞 '차이' 파일로 (접힌 디렉터리는 펼치며)
+--   <C-n>/<C-p> 다음/앞 '차이' 파일로 (접힌 디렉터리는 펼치며). 모두·차이 밖의 보기에서는 그
+--               보기가 보이는 것으로 (좌측 최신이면 A 가 최신인 파일, 동일이면 같은 파일)
 --   l / h       펼치기 / 접기(접혀 있으면 부모로)
---   O / X       차이 있는 디렉터리를 모두 펼치기 / 모두 접기 (트리 전체)
---   f           차이만 보기 켜기/끄기
---   <Tab>       A 쪽 / B 쪽 (커서가 그쪽 이름으로. 마우스로 눌러도 된다)
+--   O / X       차이 있는 디렉터리를 모두 펼치기 / 모두 접기 (트리 전체). 모두·차이 밖의 보기에서는
+--               그 보기가 보이는 것이 아래에 있는 디렉터리를
+--   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...)
+--   F           모두 보이기 <-> 차이 보이기
+--   <Tab>       비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 곧바로 새
+--               탭에서 비교 (디렉터리 둘이면 DirDiff, 파일 둘이면 vimdiff). [A] 줄에서 다시 Tab 은
+--               취소. neo-tree 의 Tab 과 같은 [A] 다 (dirdiffpick.lua) - 트리가 달라도 된다
+--   <S-Tab>     A 쪽 / B 쪽 (커서가 그쪽 이름으로. 마우스로 눌러도 된다)
 --   <Space>     지금 쪽의 항목 고르기/풀기 (다음 줄로)       U  고른 것 모두 풀기
 --   <C-r>/<C-l> A → B / B → A 로 파일·디렉터리 복사: 원본 쪽(A→B 면 A 트리)에서 고른 것,
 --               없으면 비주얼 줄, 그것도 없으면 커서 줄. 이름을 보이고 묻고 나서, 뒤쪽이
 --               항목마다 안전하게 한다 (같은 이름은 덮어쓰고 디렉터리는 합친다 - 지우지
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
---               복사한 곳만 다시 본다
+--               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
 --   R           다시 훑기        q  끝내기(탭을 닫는다)       ?  도움말
 -- 편집 창(비교 중인 두 창)에서는 <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
--- 커서 줄(비주얼이면 고른 줄)을 오른쪽(B)/왼쪽(A)으로 (diffput/diffget - 저장은 :w).
+-- 커서가 있는 차이 덩어리째 오른쪽(B)/왼쪽(A)으로 (diffput/diffget - 저장은 :w).
+-- <C-S-r>/<C-S-l> 은 커서 줄만 (터미널이 Ctrl+Shift 를 알려 줄 때 - iTerm2 CSI u, tmux
+-- extended-keys), 어디서나 되는 것은 횟수(1<C-r> = 커서 줄, N<C-r> = N 줄)와 비주얼(고른 줄).
+-- 커서 줄만(<C-S-r>, 1<C-r>)인데 그 줄이 바뀐 줄이 아니면, 바로 위(먼저)·아래에 끼인 줄(저쪽에만
+-- 있는 줄) 덩어리째다 - 여러 줄일 수 있다.
 -- 비교 탭 밖의 <C-r>(되돌리기 취소)·<C-l>(창 옮기기)은 그대로다.
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
@@ -34,12 +44,13 @@
 -- 내용을 읽는다. 편집기는 한 번도 기다리지 않는다.
 --
 --   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
---   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
+--   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이 보이기
+--   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (아래 MODES 의 id, only_diff 보다 먼저)
 --   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
 --   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (기본: 화면의 40%)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
---   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l> 을 가로채지 않기 (편집 창)
+--   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -52,11 +63,38 @@ local uv = vim.uv or vim.loop
 local ns = api.nvim_create_namespace('vimide_dirdiffview')
 local ns_open = api.nvim_create_namespace('vimide_dirdiffview_open')
 local ns_side = api.nvim_create_namespace('vimide_dirdiffview_side')
+local ns_pick = api.nvim_create_namespace('vimide_dirdiffview_pick')
 
 local M = {}
 local sessions = {} -- tabpage handle -> session
 
 local BAD = { diff = true, onlyA = true, onlyB = true }
+
+-- 보기 (Beyond Compare 의 보기 거르기). 항목의 표시(mask)는 뒤쪽이 매긴다 (dirdiffscan.py 의
+-- SAME ... UNK): 고아 = 한쪽에만 있는 것 (좌측 고아 = A 에만), 최신 = 양쪽에 있고 내용이 다른데
+-- 그쪽의 수정 시각이 늦은 것, 동일 = 같은 것. 양쪽에 있는 디렉터리의 표시는 그 아래 모두의 것을
+-- 합한 것이라, 그 아래에 보일 것이 있는 디렉터리만 보인다 (접혀 있어도)
+local band = bit.band
+local SAME, NA, NB, DX, OA, OB, PEND, UNK = 1, 2, 4, 8, 16, 32, 64, 128
+local MODES = {
+  { id = 'all', label = '모두 보이기' },
+  { id = 'diff', label = '차이 보이기', bits = NA + NB + DX + OA + OB },
+  { id = 'no-orphans', label = '고아 없음 보이기', bits = SAME + NA + NB + DX, both = true },
+  { id = 'diff-no-orphans', label = '고아 없는 차이 보이기', bits = NA + NB + DX },
+  { id = 'orphans', label = '고아 보이기', bits = OA + OB },
+  { id = 'left-newer', label = '좌측 최신 보이기', bits = NA },
+  { id = 'right-newer', label = '우측 최신 보이기', bits = NB },
+  { id = 'left-newer-orphans', label = '좌측의 최신과 고아 보이기', bits = NA + OA },
+  { id = 'right-newer-orphans', label = '우측 최신과 고아 보이기', bits = NB + OB },
+  { id = 'left-orphans', label = '좌측 고아 보이기', bits = OA },
+  { id = 'right-orphans', label = '우측 고아 보이기', bits = OB },
+  { id = 'same', label = '동일 보이기', bits = SAME },
+}
+local MODE = {}
+for i, md in ipairs(MODES) do
+  md.i = i
+  MODE[md.id] = md
+end
 
 local function ascii()
   return (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
@@ -95,6 +133,8 @@ local function set_hl()
   def('VimIdeDirDiffOpened', { link = 'Visual' })
   def('VimIdeDirDiffMark', { link = 'Search' })        -- Space 로 고른 항목
   def('VimIdeDirDiffSide', { underline = true, bold = true })  -- 커서 줄의 지금 쪽(A/B)
+  def('VimIdeDirDiffPickA', { link = 'Search' })      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
+  def('VimIdeDirDiffMenuNow', { link = 'Title' })     -- 보기 메뉴의 지금 보기
 end
 set_hl()
 api.nvim_create_autocmd('ColorScheme', {
@@ -162,6 +202,7 @@ local function send(s, obj)
 end
 
 local render, render_rows, schedule_render, on_event, open_pair_fn, goto_row, mark_side, copied_fn, entry_of_fn
+local menu_fill, step_bits, restart_fn, walk_fn
 
 local function start_job(s)
   local excl = vim.g.DirDiffExcludes or ''
@@ -245,9 +286,12 @@ local function store_list(s, rel, entries)
   local d = { entries = {}, idx = {} }
   for _, e in ipairs(entries) do
     local x = { name = e[1], ka = nz(e[2]), kb = nz(e[3]), sa = nz(e[4]), sb = nz(e[5]),
-      ma = nz(e[6]), mb = nz(e[7]), st = e[8], rerr = nz(e[9]) }
+      ma = nz(e[6]), mb = nz(e[7]), st = e[8], rerr = nz(e[9]), m = nz(e[10]) }
     d.entries[#d.entries + 1] = x
     d.idx[x.name] = x
+    if e[10] == nil then
+      s.nomask = true   -- 예전 뒤쪽 (표시를 보내지 않는다 - mask_of 가 어림한다, walk)
+    end
   end
   s.dirs[rel] = d
   s.loading[rel] = nil
@@ -281,6 +325,10 @@ on_event = function(s, ev)
     if s.reopen and ev.dir == s.reopen.parent then
       s.reopen.ready = true   -- 복사한 뒤의 새 판정이 왔다 - 이제 그 짝을 다시 연다
     end
+    if s.walk and s.walk.wait == ev.dir then
+      s.walk.wait = nil
+      walk_fn(s)              -- 예전 뒤쪽의 보기 <C-n>/<C-p>: 기다리던 목록이 왔다 (walk)
+    end
     -- R 뒤: 펼쳐 두었던 아래 디렉터리는 부모의 목록이 온 뒤에 청한다 (한꺼번에 청했더니
     -- 새 뒤쪽이 아직 부모를 훑지 않아 빈 목록을 돌려주었고, 펼친 폴더가 모두 비었다)
     for _, e in ipairs(s.dirs[ev.dir].entries) do
@@ -300,8 +348,13 @@ on_event = function(s, ev)
       s.reveal_path = path
       if not path then
         local done = s.prog and s.prog.done
-        say(s.reveal_step > 0 and (done and '마지막 차이입니다' or '아래로는 아직 찾은 차이가 없습니다 (훑는 중)')
-          or (done and '첫 차이입니다' or '위로는 아직 찾은 차이가 없습니다 (훑는 중)'))
+        if step_bits(s) then
+          say(s.reveal_step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)')
+            or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)'))
+        else
+          say(s.reveal_step > 0 and (done and '마지막 차이입니다' or '아래로는 아직 찾은 차이가 없습니다 (훑는 중)')
+            or (done and '첫 차이입니다' or '위로는 아직 찾은 차이가 없습니다 (훑는 중)'))
+        end
       end
     end
     if next(ev.lists or {}) ~= nil or not (path and s.row_of[path]) then
@@ -318,7 +371,7 @@ on_event = function(s, ev)
       e.st = ev.s
       local x = ev.e
       if type(x) == 'table' then
-        e.sa, e.sb, e.ma, e.mb, e.rerr = nz(x[4]), nz(x[5]), nz(x[6]), nz(x[7]), nz(x[9])
+        e.sa, e.sb, e.ma, e.mb, e.rerr, e.m = nz(x[4]), nz(x[5]), nz(x[6]), nz(x[7]), nz(x[9]), nz(x[10])
       end
       s.dirty[join(ev.d, ev.n)] = true
       schedule_render(s)
@@ -327,6 +380,9 @@ on_event = function(s, ev)
     s.prog = ev
     s.prog_dirty = true
     schedule_render(s)
+    if s.menu then
+      menu_fill(s)   -- 보기 메뉴의 수도 훑는 대로
+    end
   elseif k == 'error' then
     say(ev.msg or '?', vim.log.levels.WARN)
   end
@@ -336,11 +392,65 @@ end
 -- 그리기
 -- ---------------------------------------------------------------------------
 
+-- 지금 보기가 거르는가 (모두 보이기가 아닌가)
+local function filtering(s)
+  return MODE[s.mode].bits ~= nil
+end
+
+-- 표시가 없으면 (뒤쪽이 예전 것) 판정으로 어림한다 - 디렉터리는 '같음' 이 아니면 늘 보인다. '다름' 은
+-- 뒤쪽의 item_mask 처럼 날짜로 최신 쪽을 가린다 (예전 뒤쪽도 날짜는 보낸다): 모두 DX 로 두었더니 좌측·우측
+-- 최신 보기에 파일이 하나도 보이지 않았다
+local function mask_of(e)
+  if e.m then
+    return e.m
+  end
+  if both_dirs(e) then
+    -- '같음' 인 디렉터리는 그 아래를 다 훑었고 모두 같다 - 동일이다. 늘 UNK 로 두었더니 차이·고아·최신
+    -- 보기에도 같은 디렉터리(빈 것도)가 남았다 (예전 .lua 는 '같음' 을 걸렀다)
+    return e.st == 'same' and SAME or UNK
+  end
+  if e.st == 'diff' then
+    if e.ka ~= e.kb then
+      return DX + (e.ka == 'd' and OA or 0) + (e.kb == 'd' and OB or 0)
+    end
+    if e.ma and e.mb and e.ma ~= e.mb then
+      return e.ma > e.mb and NA or NB
+    end
+    return DX
+  end
+  return ({ same = SAME, onlyA = OA, onlyB = OB, pend = PEND })[e.st] or DX
+end
+
+-- 보기에 이 줄이 보이는가. 아직 모르는 것(견주는 중, 훑지 않은 디렉터리)은 될 수 있는 것이면
+-- 보인다 - 그래야 훑는 동안 줄이 새로 생기지 않고 빠지기만 해서, 바뀐 줄만 지우면 된다
+-- (render_dirty. 생기는 줄이 있으면 그때마다 트리 전체를 다시 그려야 한다)
 local function visible(s, e)
-  if not s.filter then
+  local bits = MODE[s.mode].bits
+  if not bits then
     return true
   end
-  return e.st ~= 'same'
+  local m = mask_of(e)
+  if band(m, bits) ~= 0 or band(m, UNK) ~= 0 then
+    return true
+  end
+  if both_dirs(e) then
+    -- 디렉터리 자신: 양쪽에 있으니 고아가 아니고, '같음' 이면 동일이다
+    if MODE[s.mode].both or (band(bits, SAME) ~= 0 and e.st == 'same') then
+      return true
+    end
+    return band(m, PEND) ~= 0 and band(bits, SAME + NA + NB + DX) ~= 0
+  end
+  if band(m, PEND) == 0 then
+    return false
+  end
+  -- 견주는 중인 파일: 고아는 아니다. 날짜를 알면 최신 쪽으로 좁힌다 - 그러지 않으면 좌측 최신
+  -- 보기에 B 쪽이 늦은 파일도 내용을 다 읽을 때까지 보인다
+  if band(bits, SAME + DX) ~= 0 then
+    return true
+  end
+  local known = e.ma and e.mb
+  return (band(bits, NA) ~= 0 and (not known or e.ma > e.mb))
+    or (band(bits, NB) ~= 0 and (not known or e.mb > e.ma)) or false
 end
 
 -- 펼친 디렉터리만 따라 내려가며 줄을 만든다
@@ -429,7 +539,9 @@ local function side_text(s, L, r, side)
   local ind = string.rep(' ', indw)
   local bad = e.rerr and e.rerr:find(side, 1, true) and ' (못 읽음)' or ''
   local name = fit(shown(e.name) .. (k == 'l' and ' @' or '') .. bad, namew)
-  return ind .. icon .. name .. tail, { name_start = #ind + #icon, name_end = #ind + #icon + #name, tail = #tail }
+  -- name_vis: 채운 빈칸을 뺀 이름 끝 (Tab 으로 고른 [A] 를 그 뒤에 단다)
+  return ind .. icon .. name .. tail, { name_start = #ind + #icon, name_end = #ind + #icon + #name, tail = #tail,
+    name_vis = #ind + #icon + #(name:gsub(' +$', '')) }
 end
 
 local function line_of(s, L, r)
@@ -510,8 +622,19 @@ local function status_text(s)
   if na + nb > 0 then
     parts[#parts + 1] = ('고름 A %d / B %d'):format(na, nb)
   end
-  return ' DirDiff  ' .. table.concat(parts, ' · ') .. (s.filter and '   [차이만]' or '')
+  return ' DirDiff  ' .. table.concat(parts, ' · ') .. '   [' .. MODE[s.mode].label .. ']'
     .. '   [' .. (s.side == 'b' and 'B' or 'A') .. ' 쪽]   (? 도움말)'
+end
+
+-- 보이는 줄이 하나도 없을 때
+local function empty_text(s)
+  if not (s.prog and s.prog.done) then
+    return '  (훑는 중…)'
+  end
+  if s.mode == 'all' or s.mode == 'diff' then
+    return '  (차이가 없습니다)'
+  end
+  return ('  (%s: 보일 것이 없습니다 - f 로 보기를 바꿉니다)'):format(MODE[s.mode].label)
 end
 
 local function winbar_text(s, L)
@@ -577,7 +700,7 @@ render = function(s)
     s.offb[i], s.offg[i] = ob, og
   end
   if #lines == 0 then
-    lines = { s.prog and s.prog.done and '  (차이가 없습니다)' or '  (훑는 중…)' }
+    lines = { empty_text(s) }
   end
   vim.bo[s.buf_l].modifiable = true
   api.nvim_buf_set_lines(s.buf_l, 0, -1, false, lines)
@@ -619,8 +742,8 @@ render = function(s)
   s.last_render = uv.now()
 end
 
--- 바뀐 줄만 다시 그린다. 거르기(차이만)가 켜져 있으면 '같음' 이 된 줄은 그 줄만(펼친 아래까지)
--- 지우고, 새로 보일 줄이 생길 때만 전부 그린다 - 처음에는 거르기가 켜져 있으면 늘 전부 그렸더니,
+-- 바뀐 줄만 다시 그린다. 보기가 거르고 있으면(차이 보이기 등) 보기에서 빠진 줄은 그 줄만(펼친
+-- 아래까지) 지우고, 새로 보일 줄이 생길 때만 전부 그린다 - 처음에는 거르기가 켜져 있으면 늘 전부 그렸더니,
 -- 훑는 동안 60ms 마다 트리 전체를 다시 만들어 편집기가 훑는 시간의 60% 동안 멎었다 (2만 파일
 -- 한 폴더, 실측)
 local function render_dirty(s)
@@ -629,7 +752,7 @@ local function render_dirty(s)
     return
   end
   local drop = {}
-  if s.filter then
+  if filtering(s) then
     for rel in pairs(s.dirty) do
       local i = s.row_of[rel]
       if not i then
@@ -720,9 +843,9 @@ schedule_render = function(s)
   -- 목록이 새로 오면 전부, 상태만 바뀌면 바뀐 줄만 - 60ms 씩 모아서
   vim.defer_fn(function()
     -- 트리에서 비주얼로 고르는 중에는 줄을 다시 쓰지 않는다 - 목록이 오며 줄이 밀리면
-    -- 비주얼 시작 줄은 그대로라 고르지 않은 줄까지 복사되었다 (거르기가 켜져 있으면 바뀐 줄만
-    -- 그려도 '같음' 이 된 줄이 빠지며 밀린다)
-    if (s.need_full or s.filter) and api.nvim_get_current_win() == s.win_l
+    -- 비주얼 시작 줄은 그대로라 고르지 않은 줄까지 복사되었다 (보기가 거르고 있으면 바뀐 줄만
+    -- 그려도 보기에서 빠진 줄이 지워지며 밀린다)
+    if (s.need_full or filtering(s)) and api.nvim_get_current_win() == s.win_l
         and api.nvim_get_mode().mode:match('^[vV\22]') then
       s.render_pending = false
       vim.defer_fn(function()
@@ -751,6 +874,18 @@ local function plain_window(win)
     pcall(api.nvim_win_call, win, function()
       vim.cmd('setlocal ' .. o .. '<')
     end)
+  end
+end
+
+-- :diffoff 는 foldmethod 가 manual 로 돌아오면 diff 가 만든 접기를 manual 접기로 남겨 두고 'foldenable' 을
+-- 끈다 - 그 접기를 지우고 'foldenable' 은 이 창의 전역 값으로 (새로 연 창과 같게). 지금 창에서, diff 였던
+-- 창의 :diffoff 바로 뒤에 부른다. 버퍼가 창에서 내려가거나 창이 닫히면 nvim 은 그 창의 옵션과 접기를
+-- 버퍼에 적어 두었다가(wininfo) 그 버퍼를 다음에 여는 창에 입힌다: 비교에서 내려간 버퍼(다른 짝으로
+-- 바꿨을 때의 사용자 버퍼, q 뒤에 남긴 고친 버퍼)를 다시 열면 nofoldenable 에 닫힌 diff 접기가 남아 있었다
+local function undiff_folds()
+  if vim.wo.foldmethod == 'manual' then
+    pcall(vim.cmd, 'normal! zE')
+    pcall(vim.cmd, 'let &l:foldenable = &g:foldenable')
   end
 end
 
@@ -905,6 +1040,10 @@ local function open_pair(s, r, jump)
     return ('  (%s 쪽은 %s: %s%s)'):format(side, NOTE[k], rel, to and (' -> ' .. shown(to)) or '')
   end
   local na, nb = note(ka, 'A', pa), note(kb, 'B', pb)
+  -- 다른 탭의 비교에서 짝을 다시 열 때(다른 탭에서 한 복사·저장 뒤) 그 탭의 지금 창을 지킨다: 아래
+  -- BufEnter 훅(BufExplorer 등)이 nvim_win_call 안에서 그 탭의 지금 창을 B 창으로 옮겨 놓아, gT·q 로
+  -- 돌아가면 커서가 트리가 아니라 B 창에 있었다 (f 는 f{char}, <C-r> 은 diffget 이 되었다)
+  local tab_win = s.tab ~= api.nvim_get_current_tabpage() and api.nvim_tabpage_get_win(s.tab) or nil
   -- 비교 창을 닫아 버렸으면 트리 위에 다시 만든다. 트리 창에서 가르면 트리 옵션
   -- (번호 끔 등)을 물려받으므로 plain_window 로 되돌리고, 트리 높이도 되돌린다
   local made = {}
@@ -925,9 +1064,18 @@ local function open_pair(s, r, jump)
   if #made > 0 and s.list_h then
     pcall(api.nvim_win_set_height, s.win_l, s.list_h)
   end
+  -- 창 머리(winbar)도 걷고 나서 버퍼를 바꾼다: nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을 적어
+  -- 두었다가(wininfo) 그 버퍼를 새 창에 띄울 때 입힌다 - 그대로 두었더니 앞에 본 파일을 다른 탭에서
+  -- 열면(Tab/Tab 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_head 가 단다
+  -- diff 접기도 같은 까닭으로 걷는다 (undiff_folds)
   for _, w in ipairs({ s.win_a, s.win_b }) do
     pcall(api.nvim_win_call, w, function()
+      local was = vim.wo.diff
       vim.cmd('diffoff')
+      if was then
+        undiff_folds()
+      end
+      vim.wo.winbar = ''
     end)
   end
   local max = (tonumber(vim.g.vimide_dirdiff_max_mb) or 20) * 1024 * 1024
@@ -988,7 +1136,12 @@ local function open_pair(s, r, jump)
   set_head(s.win_b, head('B', e.kb, s.b))
   sweep(s)
   s.opened_rel = r.rel
+  s.bin = bin   -- 두 창이 알림이다 (편집 창의 <C-r>/<C-l> 이 알린다)
   mark_open(s)
+  if tab_win and api.nvim_win_is_valid(tab_win) and api.nvim_tabpage_is_valid(s.tab)
+      and api.nvim_tabpage_get_win(s.tab) ~= tab_win then
+    pcall(api.nvim_tabpage_set_win, s.tab, tab_win)
+  end
   if jump then
     local w = pa and s.win_a or s.win_b
     api.nvim_set_current_win(w)
@@ -1052,12 +1205,200 @@ local function act_enter(s, jump)
   open_pair(s, r, jump)
 end
 
+-- <C-n>/<C-p>·O 가 찾을 것 (뒤쪽 next/expand 의 bits). 모두·차이 보기는 nil - 예전대로 '차이'.
+-- 다른 보기는 그 보기의 차이(최신·고아 ...)를, 차이가 없는 보기(동일)는 그 보기의 것을 - 보이지
+-- 않는 줄로 가면 커서가 갈 곳이 없다
+step_bits = function(s)
+  local bits = MODE[s.mode].bits
+  if not bits or s.mode == 'diff' then
+    return nil
+  end
+  local b = band(bits, NA + NB + DX + OA + OB)
+  return b ~= 0 and b or bits
+end
+
+-- 예전 뒤쪽(dirdiffscan.py 를 빼고 .lua 만 바꿔 넣었을 때 - 항목에 표시가 없다)에서 보기의 <C-n>/<C-p>.
+-- 그 뒤쪽의 next 는 bits 를 몰라 '차이' 만 돌려준다: 보기가 감춘 차이면 그 뒤부터 다시 묻게 했더니 감춘
+-- 것이 200 개를 넘으면 아무 말 없이 멈췄고, 동일 보기는 '같음' 을 받지 못해 늘 '마지막' 이었고, 물으며
+-- 지난 디렉터리(접어 둔 것도)가 모두 펼쳐졌다. 그래서 여기서 걷는다: 받은 목록을 트리 차례로 따라가며
+-- 그 보기의 항목(뒤쪽 items_in_order 의 기준 - 양쪽에 있는 디렉터리는 들어가 보고, 나머지는 표시로)을
+-- 찾는다. 목록이 없거나 옛것인(접혀 있어 'u' 를 받지 않는) 디렉터리는 청해 받고 이어 걷는다 (on_event
+-- 의 'list'). 펼치는 것은 찾은 항목의 조상만, 걸으며 받은 나머지 목록은 뒤쪽에 도로 내려 둔다(unlist)
+local function walk_hit(e, bits)
+  if both_dirs(e) then
+    return e.rerr ~= nil and band(bits, DX) ~= 0
+  end
+  return band(mask_of(e), bits) ~= 0
+end
+
+local function walk_into(e, bits)
+  return both_dirs(e) and e.rerr == nil and (e.st ~= 'same' or band(bits, SAME) ~= 0)
+end
+
+-- 걸으며 받은 목록 중 펼치지 않은 것은 뒤쪽이 더 따라가지 않게 (접을 때의 unlist 처럼)
+local function walk_drop(s, w)
+  for rel in pairs(w.fresh) do
+    if rel ~= '' and not s.expanded[rel] then
+      send(s, { cmd = 'unlist', dir = rel })
+    end
+  end
+end
+
+local function walk_end(s, w, path)
+  s.walk = nil
+  local p = path and path:match('^(.*)/[^/]+$')
+  while p do
+    s.expanded[p] = true
+    p = p:match('^(.*)/[^/]+$')
+  end
+  walk_drop(s, w)
+  if not path then
+    local done = s.prog and s.prog.done
+    return say(w.step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)')
+      or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)'))
+  end
+  render(s)
+  if s.row_of[path] and api.nvim_win_is_valid(s.win_l) then
+    goto_row(s, s.row_of[path])
+    mark_side(s)
+  end
+end
+
+-- 예전 뒤쪽에서 보기의 O 도 여기서 걷는다: 그 뒤쪽의 expand 는 bits 를 몰라 '차이' 가 있는 디렉터리를
+-- 모두 펼쳤다 - 동일 보기에서 보기가 감춘 차이의 디렉터리가 속이 빈 채 펼쳐지고, 보기의 것(같은 파일)이
+-- 든 디렉터리는 접힌 채였다. 양쪽에 있는 디렉터리를 들어가 보며(walk_into) 보기의 항목(walk_hit)이 든
+-- 디렉터리와 그 조상만 펼친다 (새 뒤쪽 cmd_expand 와 같은 것, 목록 2000 개까지). w.todo: 볼 디렉터리,
+-- w.open: 보기의 항목이 든 디렉터리. 걸으며 받은 나머지 목록은 도로 내려 둔다 (walk_drop)
+local function expand_walk(s)
+  local w = s.walk
+  while #w.todo > 0 do
+    local rel = w.todo[#w.todo]
+    local d = s.dirs[rel]
+    if not (d and (rel == '' or s.expanded[rel] or w.fresh[rel])) then
+      w.fresh[rel] = true
+      w.wait = rel
+      return request_list(s, rel)
+    end
+    w.todo[#w.todo] = nil
+    w.n = w.n + 1
+    for _, e in ipairs(d.entries) do
+      if walk_hit(e, w.bits) then
+        w.open[rel] = true
+      end
+      if walk_into(e, w.bits) and w.n + #w.todo < 2000 then
+        w.todo[#w.todo + 1] = join(rel, e.name)
+      end
+    end
+  end
+  s.walk = nil
+  for rel in pairs(w.open) do
+    while rel ~= '' do
+      s.expanded[rel] = true
+      rel = rel:match('^(.*)/[^/]+$') or ''
+    end
+  end
+  walk_drop(s, w)
+  render(s)
+end
+
+-- w.cur: 마지막으로 본 경로, w.down: 그 디렉터리 안을 볼 차례 (앞으로는 먼저, 뒤로는 그 디렉터리보다 먼저)
+local function walk(s)
+  local w = s.walk
+  if not w or w.wait then
+    return
+  end
+  if w.todo then
+    return expand_walk(s)   -- O 의 걷기 (on_event 의 'list' 가 이리로 이어 준다)
+  end
+  local function list(rel)
+    local d = s.dirs[rel]
+    if d and (rel == '' or s.expanded[rel] or w.fresh[rel]) then
+      return d
+    end
+    w.fresh[rel] = true
+    w.wait = rel
+    request_list(s, rel)
+  end
+  local function find(d, name)
+    for i, e in ipairs(d.entries) do
+      if e.name == name then
+        return i
+      end
+    end
+  end
+  while true do
+    local e, rel
+    if w.down then
+      local d = list(w.cur)
+      if not d then
+        return
+      end
+      w.down = false
+      local x = w.step > 0 and d.entries[1] or d.entries[#d.entries]
+      if x then
+        e, rel = x, join(w.cur, x.name)
+      end
+    end
+    if not e then
+      if w.cur == '' then
+        return walk_end(s, w, nil)
+      end
+      local parent, name = w.cur:match('^(.*)/([^/]+)$')
+      parent, name = parent or '', name or w.cur
+      local d = list(parent)
+      if not d then
+        return
+      end
+      local i = find(d, name)
+      if not i then
+        return walk_end(s, w, nil)
+      end
+      local x = d.entries[i + w.step]
+      if x then
+        e, rel = x, join(parent, x.name)
+      elseif w.step > 0 then
+        w.cur = parent   -- 이 디렉터리를 다 보았다 - 부모의 다음으로
+      else
+        -- 뒤로: 디렉터리 안을 다 본 뒤에 그 디렉터리 자신
+        w.cur = parent
+        local pp, pn = parent:match('^(.*)/([^/]+)$')
+        local pd = parent ~= '' and s.dirs[pp or '']
+        local pe = pd and pd.idx[pn or parent]
+        if pe and walk_hit(pe, w.bits) then
+          return walk_end(s, w, parent)
+        end
+      end
+    end
+    if e then
+      w.cur = rel
+      if w.step < 0 and walk_into(e, w.bits) then
+        w.down = true    -- 뒤로: 안의 것이 먼저
+      elseif walk_hit(e, w.bits) then
+        return walk_end(s, w, rel)
+      elseif w.step > 0 then
+        w.down = walk_into(e, w.bits)
+      end
+    end
+  end
+end
+walk_fn = walk
+
 local function act_step(s, step)
   local r = cur_row(s)
   local from = r and (r.loading and r.rel:gsub('/$', '') or r.rel) or ''
   s.req = s.req + 1
   s.reveal_step = step
-  send(s, { cmd = 'next', id = s.req, from = from, step = step })
+  if s.walk then
+    walk_drop(s, s.walk)   -- 아직 목록을 기다리던 앞의 것
+    s.walk = nil
+  end
+  if s.nomask and step_bits(s) then
+    local e = from ~= '' and entry_of_fn(s, from)
+    s.walk = { step = step, bits = step_bits(s), fresh = {}, cur = from,
+      down = from == '' or (step > 0 and e and walk_into(e, step_bits(s))) or false }
+    return walk(s)
+  end
+  send(s, { cmd = 'next', id = s.req, from = from, step = step, bits = step_bits(s) })
 end
 
 local function act_h(s)
@@ -1078,12 +1419,25 @@ end
 -- 디렉터리 아래만 했더니 맨 윗줄(한쪽에만 있는 디렉터리)에서 O 가 아무것도 펼치지 않았다
 local function act_expand_all(s)
   s.req = s.req + 1
-  send(s, { cmd = 'expand', id = s.req, dir = '' })
+  if s.walk then
+    walk_drop(s, s.walk)   -- 아직 목록을 기다리던 앞의 것 (act_step 처럼)
+    s.walk = nil
+  end
+  if s.nomask and step_bits(s) then
+    -- 예전 뒤쪽: 보기를 따라 여기서 걷는다 (expand_walk). 뒤쪽의 expand 는 '차이' 의 디렉터리를 펼친다
+    s.walk = { todo = { '' }, open = {}, fresh = {}, n = 0, bits = step_bits(s) }
+    return walk(s)
+  end
+  send(s, { cmd = 'expand', id = s.req, dir = '', bits = step_bits(s) })
 end
 
 local function act_collapse_all(s)
   local r = cur_row(s)
   local top = r and r.rel and r.rel:match('^[^/]+')
+  if s.walk then
+    walk_drop(s, s.walk)   -- 걷던 O·<C-n> 이 목록이 온 뒤에 도로 펼치지 않게
+    s.walk = nil
+  end
   for k in pairs(s.expanded) do
     if k ~= '' then
       s.expanded[k] = nil
@@ -1145,6 +1499,103 @@ local function act_mark(s)
     mark_side(s)
   end
 end
+
+-- ---------------------------------------------------------------------------
+-- 비교할 곳 고르기 (Tab: [A] -> [B], neo-tree 의 Tab 처럼). [A] 는 neo-tree 의 것과 같은 하나다
+-- - dirdiffpick.lua 가 들고 있고 [B] 에서 연다. 그래서 트리가 달라도 된다: 이 트리에서 [A],
+-- 다른 비교 탭의 트리나 neo-tree 에서 [B]
+-- ---------------------------------------------------------------------------
+
+local function act_pick(s)
+  local r = cur_row(s)
+  if not (r and r.e) then
+    return
+  end
+  cursor_side(s)
+  local side = s.side
+  local k
+  if side == 'a' then
+    k = r.e.ka
+  else
+    k = r.e.kb
+  end
+  if k == nil then
+    -- 다른 쪽에만 있는 줄의 빈칸: 고를 것이 없다
+    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 고르세요 (<S-Tab> 쪽 바꾸기)')
+      :format(side:upper(), side == 'a' and 'B' or 'A'))
+  end
+  if not _G.vimide_dirdiff_pick_path then
+    return say('dirdiffpick.lua 가 없습니다', vim.log.levels.WARN)
+  end
+  local path = s[side] .. '/' .. r.rel
+  -- 링크는 가리키는 것으로 (디렉터리를 가리키면 디렉터리)
+  local rk = real_kind(k, path)
+  local kind = (rk == 'd' or rk == 'ld') and 'dir' or ((rk == 'f' or rk == 'lf') and 'file') or nil
+  if not kind then
+    return say(('고를 수 없습니다 - %s 쪽은 %s: %s'):format(side:upper(), NOTE[rk] or '특수 파일', shown(r.rel)),
+      vim.log.levels.WARN)
+  end
+  local tab = api.nvim_get_current_tabpage()
+  _G.vimide_dirdiff_pick_path(path, kind)
+  -- [B] 로 새 탭을 열었다. 새 탭은 편집 창에서 연다 (M.open, dirdiffpick.lua 의 tab_from_edit) -
+  -- 그대로 두면 그 탭을 닫고 돌아왔을 때 이 탭의 커서가 위의 편집 창에 있다. 트리로 되돌려 둔다
+  -- (키는 모두 트리에 있다). 잠깐 오가는 것이라 autocmd 는 돌리지 않는다
+  if api.nvim_get_current_tabpage() ~= tab and api.nvim_win_is_valid(s.win_l) then
+    local w = api.nvim_get_current_win()
+    vim.cmd(('noautocmd call nvim_set_current_win(%d) | noautocmd call nvim_set_current_win(%d)'):format(s.win_l, w))
+  end
+end
+
+local function session_of_buf(buf)
+  for _, s in pairs(sessions) do
+    if s.buf_l == buf then
+      return s
+    end
+  end
+end
+
+-- [A] 를 그 줄의 그쪽 이름 바로 뒤에 (이름이 칸을 채웠으면 칸 끝에 겹쳐). 그릴 때마다 줄을
+-- 찾는다 (dirdiffpick.lua 와 같은 까닭): 트리는 펼치기·보기 바꾸기·훑은 결과로 줄을 통째로 다시
+-- 쓴다 - 표시를 버퍼에 박아 두면 다른 줄로 밀리거나 지워진다. 보기에서 빠져 줄이 없으면 달지 않는다
+local function pick_mark(s, buf, top, bot, first)
+  for _, p in ipairs({ first.path, first.real }) do
+    for _, side in ipairs({ 'a', 'b' }) do
+      local root = s[side] .. '/'
+      if p:sub(1, #root) == root then
+        local i = s.row_of[p:sub(#root + 1)]
+        local r = i and s.rows[i]
+        local has = r and r.e and ((side == 'a' and r.e.ka) or (side == 'b' and r.e.kb))
+        if has and i - 1 >= top and i - 1 <= bot then
+          local _, meta = side_text(s, layout(s), r, side)
+          local off = side == 'b' and (s.offb[i] or 0) or 0
+          local line = api.nvim_buf_get_lines(buf, i - 1, i, false)[1] or ''
+          local room = meta.name_end - meta.name_vis >= 4
+          local col = off + (room and meta.name_vis or meta.name_end)
+          local dcol = vim.fn.strdisplaywidth(line:sub(1, col)) - (room and 0 or 4)
+          api.nvim_buf_set_extmark(buf, ns_pick, i - 1, 0, {
+            virt_text = { { ' [A]', 'VimIdeDirDiffPickA' } }, virt_text_pos = 'overlay',
+            virt_text_win_col = math.max(0, dcol), hl_mode = 'combine', ephemeral = true,
+          })
+          return
+        end
+      end
+    end
+  end
+end
+
+api.nvim_set_decoration_provider(ns_pick, {
+  on_win = function(_, _, buf, top, bot)
+    if vim.bo[buf].filetype ~= 'vimidedirdiff' then
+      return false
+    end
+    local first = _G.vimide_dirdiff_picked and _G.vimide_dirdiff_picked()
+    local s = first and session_of_buf(buf)
+    if s then
+      pcall(pick_mark, s, buf, top, bot, first)
+    end
+    return false
+  end,
+})
 
 local function clear_marks(s)
   if next(s.marks.a) or next(s.marks.b) then
@@ -1320,14 +1771,35 @@ local function act_copy(s, dir, l1, l2)
   say(('복사하는 중… (%d 개)'):format(#paths))
 end
 
--- 뒤쪽의 'copied': 목록을 새로 받게 하고, 버퍼를 다시 읽고, 알린다
-local function on_copied(s, ev)
-  local c = s.copying
-  s.copying = nil
-  local to = c and c.to or 'b'
-  local from = c and c.from or 'a'
-  local roots = ev.roots or {}
-  for _, rr in ipairs(roots) do
+-- 디스크에서 바뀐 경로 하나(저장한 파일, 복사한 곳)가 비교 o 의 어디인가: 뿌리에서의 경로들 (A·B
+-- 양쪽에 들 수 있다), 그리고 그 경로가 o 의 뿌리이거나 그 위인지 (뿌리째 바뀌었다).
+-- 버퍼 이름 그대로가 먼저다: 트리가 연 파일은 트리의 이름으로 열려 있다. 링크를 푼 이름(rp - macOS
+-- 는 디스크의 철자, NFD·대소문자)으로 찾으면 트리에 없는 이름이 새 줄로 생긴다. 푼 이름은 그 경로가
+-- 뿌리 밖일 때(/tmp 와 /private/tmp 등)와, 파일 링크를 저장해 가리키는 파일이 바뀌었을 때만
+local function rels_in(o, full, rp, link)
+  local paths, whole = {}, false
+  for _, root in ipairs({ o.a, o.b }) do
+    local pre = root .. '/'
+    local mine = full:sub(1, #pre) == pre
+    if mine then
+      paths[#paths + 1] = full:sub(#pre + 1)
+    end
+    if (link or not mine) and rp ~= full and rp:sub(1, #pre) == pre then
+      paths[#paths + 1] = rp:sub(#pre + 1)
+    end
+    for _, p in ipairs({ full, rp }) do
+      if pre:sub(1, #p + 1) == p .. '/' then
+        whole = true
+      end
+    end
+  end
+  return paths, whole
+end
+
+-- 다시 볼 곳(rels: 뿌리에서의 경로)의 목록을 버린다 - 그 아래 펼쳐 둔 디렉터리는 부모의 새 목록이
+-- 온 뒤에 다시 청한다 (on_event 의 'list'). 보고 있던 짝이 그 안이면 부모의 새 목록이 온 뒤에 다시 연다
+local function forget(s, rels)
+  for _, rr in ipairs(rels) do
     for k in pairs(s.dirs) do
       if k == rr or k:sub(1, #rr + 1) == rr .. '/' then
         s.dirs[k] = nil
@@ -1335,6 +1807,29 @@ local function on_copied(s, ev)
       end
     end
   end
+  if s.opened_rel then
+    for _, rr in ipairs(rels) do
+      if s.opened_rel == rr or s.opened_rel:sub(1, #rr + 1) == rr .. '/' then
+        local parent = s.opened_rel:match('^(.*)/[^/]+$') or ''
+        s.reopen = { rel = s.opened_rel, parent = parent }
+        if parent ~= '' and not s.expanded[parent] then
+          request_list(s, parent)   -- 접혀 있어도 새 판정을 받아 온다
+        end
+        break
+      end
+    end
+  end
+  s.need_full = true
+end
+
+-- 뒤쪽의 'copied': 목록을 새로 받게 하고, 버퍼를 다시 읽고, 알린다
+local function on_copied(s, ev)
+  local c = s.copying
+  s.copying = nil
+  local to = c and c.to or 'b'
+  local from = c and c.from or 'a'
+  local roots = ev.roots or {}
+  forget(s, roots)
   -- 대상 쪽 버퍼를 새로 읽는다 (비교가 연 것은 BufRead 훅 없이)
   local base = s[to]
   local tops = {}
@@ -1359,24 +1854,44 @@ local function on_copied(s, ev)
       end
     end
   end
-  -- 보고 있던 짝이 복사한 곳 안이면, 그 부모의 새 목록이 온 뒤에 다시 연다
-  if s.opened_rel then
-    for _, rr in ipairs(roots) do
-      if s.opened_rel == rr or s.opened_rel:sub(1, #rr + 1) == rr .. '/' then
-        local parent = s.opened_rel:match('^(.*)/[^/]+$') or ''
-        s.reopen = { rel = s.opened_rel, parent = parent }
-        if parent ~= '' and not s.expanded[parent] then
-          request_list(s, parent)   -- 접혀 있어도 새 판정을 받아 온다
-        end
-        break
-      end
-    end
-  end
   if c and c.by_mark then
     s.marks[from] = {}
   end
-  s.need_full = true
   schedule_render(s)
+  -- 같은 곳이 든 다른 비교에도 알린다 (:w 의 BufWritePost 처럼) - Tab/Tab 으로 연 안쪽 비교에서
+  -- 복사했더니 바깥 비교 탭은 R 을 누를 때까지 옛 판정(=)·크기·수를 그대로 보였다. 복사한 디렉터리가
+  -- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (R. 그쪽도 복사하는 중이면 그 복사가 끝난 뒤에)
+  for _, o in pairs(sessions) do
+    if o ~= s and not o.done then
+      local rels, whole = {}, false
+      for _, rr in ipairs(roots) do
+        local full = base .. '/' .. rr
+        local r, w = rels_in(o, full, real(full), false)
+        vim.list_extend(rels, r)
+        whole = whole or w
+      end
+      if whole then
+        if o.copying then
+          o.rescan = true
+        else
+          restart_fn(o)
+        end
+      elseif #rels > 0 then
+        forget(o, rels)
+        schedule_render(o)
+        send(o, { cmd = 'refresh', paths = rels })
+      end
+    end
+  end
+  if s.rescan then
+    -- 이 뒤쪽이 이어 보내는 것(부모의 'list')을 다 받은 뒤에 바꾼다
+    s.rescan = nil
+    vim.schedule(function()
+      if not s.done then
+        restart_fn(s)
+      end
+    end)
+  end
   local skipped = vim.list_extend(vim.deepcopy(c and c.skipped or {}), {})
   for _, x in ipairs(ev.skipped or {}) do
     skipped[#skipped + 1] = shown(x[1]) .. ' - ' .. why_text(to, x[2])
@@ -1397,26 +1912,306 @@ local function on_copied(s, ev)
 end
 copied_fn = on_copied
 
--- 편집 창(비교 중인 두 창)에서 <C-r>/<C-l>: 커서 줄(또는 고른 줄)을 오른쪽/왼쪽으로.
--- 바뀐 줄이 아니면 바로 위·아래에 끼인 줄(다른 쪽에만 있는 줄)이 있을 때만 그 덩어리째
+-- 편집 창(비교 중인 두 창)에서 <C-r>/<C-l>: 커서가 있는 차이 덩어리째 오른쪽/왼쪽으로 (범위
+-- 없는 :diffput / :diffget 처럼). 횟수가 있으면 커서 줄부터 그만큼(1<C-r> = 커서 줄만), 비주얼이면
+-- 고른 줄만, <C-S-r>/<C-S-l> 도 커서 줄만. 커서 줄 하나(<C-S-r>, 1<C-r>)는 바뀐 줄이 아니면 바로
+-- 위·아래에 끼인 줄(다른 쪽에만 있는 줄)이 있을 때만 그 덩어리째 (여러 줄일 수 있다)
+--
+-- 'diff' 가 꺼진 편집 창도, 안내 버퍼(바이너리·큰 파일의 알림 - diffthis 를 하지 않는다)를 띄우고
+-- 있으면 받는다: 넘겼더니 <C-r> 은 되돌리기 취소(E21), <C-l> 은 창 옮기기가 되어 트리 복사를 알리지
+-- 못했다. 처음의 빈 창(아직 연 짝이 없다)과 사용자가 :e 로 띄운 파일은 넘긴다
 local function applies()
   local s = sessions[api.nvim_get_current_tabpage()]
   local w = api.nvim_get_current_win()
-  return s and (w == s.win_a or w == s.win_b) and vim.wo[w].diff and s or nil
+  if not (s and (w == s.win_a or w == s.win_b)) then
+    return nil
+  end
+  if vim.wo[w].diff or (s.opened_rel and vim.bo[api.nvim_win_get_buf(w)].buftype ~= '') then
+    return s
+  end
 end
 
-function _G.vimide_dirdiff_copy_lines(dir)
+-- 0 바이트 파일(빈 버퍼): 줄은 하나('')로 보이지만 diff 에는 줄이 없다 (그 자리 줄 위에 저쪽 줄
+-- 수만큼 끼인 줄이 붙는다). line2byte(1) 은 버퍼를 만든 길에 따라 -1 이 아니어서 바이트 수로 본다
+local function empty_buf(b)
+  return api.nvim_buf_line_count(b) == 1 and api.nvim_buf_get_lines(b, 0, 1, false)[1] == ''
+    and api.nvim_buf_call(b, function()
+      return vim.fn.wordcount().bytes
+    end) == 0
+end
+
+-- 0 바이트 파일(빈 버퍼)로: 이쪽에 줄이 없으니 저쪽 줄 모두가 한 덩어리다 - diffopt 와 상관없이 직접
+-- 넣는다 (한 번에 바꾸니 u 한 번에 빈 파일로). iblank·filler 없음에서는 행을 셀 수 없어 범위로(:diffput)
+-- 맡겼더니 nvim 의 그 탈(copy_rows 에 적은 둘째)이 돌아와 u 뒤에 줄 하나가 남았다. 덩어리째와 가져오기
+-- (커서가 빈 쪽)는 원본 전체, 보내기의 횟수·비주얼·커서 줄은 그 줄들 (copy_into_blank 와 같다).
+-- iblank 인데 원본이 빈 줄뿐이면 차이가 없다.
+-- 돌려주는 것: 바꿨으면 true, 차이가 없으면 false, 대상이 빈 버퍼가 아니면(또는 원본도 비었으면) nil
+local function copy_into_empty(put, whole, l1, l2, tb, sb)
+  if not empty_buf(tb) or empty_buf(sb) then
+    return nil
+  end
+  local src = api.nvim_buf_get_lines(sb, 0, -1, false)
+  if (',' .. vim.o.diffopt .. ','):find(',iblank,', 1, true) then
+    local any = false
+    for _, x in ipairs(src) do
+      if x:find('%S') then
+        any = true
+        break
+      end
+    end
+    if not any then
+      return false
+    end
+  end
+  if put and not whole then
+    src = vim.list_slice(src, l1, l2)
+  end
+  api.nvim_buf_set_lines(tb, 0, -1, false, src)
+  return true
+end
+
+-- (copy_rows 가 셀 수 없을 때) 지금 창에서 줄 l 이 든 차이 덩어리를 :r1,r2diffput 의 범위로: 바뀐
+-- 줄이 이어진 데와 그 사이·위·아래에 끼인 줄(이 창에는 줄 번호가 없다). l 이 바뀐 줄이 아니면 바로
+-- 위, 그다음 바로 아래에 끼인 줄의 덩어리. 끼인 줄은 그 아래 줄 앞에 붙어 있어서(diff_filler) 위에
+-- 끼인 줄은 한 줄 위부터, 아래에 끼인 줄은 한 줄 아래까지 잡는다 (그 줄이 다음 조각의 첫 줄이면
+-- 그 조각도 따라온다 - copy_rows 를 먼저 쓰는 까닭)
+local function hunk_range(l)
+  local n = vim.fn.line('$')
+  local function changed(x)
+    return x >= 1 and x <= n and vim.fn.diff_hlID(x, 1) ~= 0
+  end
+  local h1, h2
+  if changed(l) then
+    h1, h2 = l, l
+  elseif vim.fn.diff_filler(l) > 0 then
+    h1, h2 = l, l - 1
+  elseif vim.fn.diff_filler(l + 1) > 0 then -- l 이 마지막 줄이면 파일 끝 아래에 끼인 줄
+    h1, h2 = l + 1, l
+  else
+    return nil
+  end
+  while changed(h1 - 1) do
+    h1 = h1 - 1
+  end
+  while changed(h2 + 1) do
+    h2 = h2 + 1
+  end
+  -- 끼인 줄만인 덩어리는 위·아래가 같은 끼인 줄이라 범위가 h2,h1 이 된다
+  local r1 = vim.fn.diff_filler(h1) > 0 and h1 - 1 or h1
+  local r2 = vim.fn.diff_filler(h2 + 1) > 0 and h2 + 1 or h2
+  return { r1, r2, n }
+end
+
+-- 창의 행: 끼인 줄은 false, 진짜 줄은 줄 번호 (빈 버퍼의 자리 줄은 행이 아니다). diff_filler 는
+-- 줄마다 조각 목록을 처음부터 찾아서 줄 수 x 조각 수만큼 걸린다 - deadline 을 넘기면 nil
+local function rows_of(win, deadline)
+  local rows = {}
+  local done = api.nvim_win_call(win, function()
+    local n = empty_buf(0) and 0 or vim.fn.line('$')
+    for l = 1, n + 1 do
+      if l % 512 == 0 and uv.hrtime() > deadline then
+        return false
+      end
+      for _ = 1, vim.fn.diff_filler(l) do
+        rows[#rows + 1] = false
+      end
+      if l <= n then
+        rows[#rows + 1] = l
+      end
+    end
+    return true
+  end)
+  return done and rows or nil
+end
+
+-- 덩어리째 복사: 두 창의 행(끼인 줄 포함)을 처음부터 세어 맞추고 대상의 그 줄들을 직접 바꾼다.
+-- :diffput/:diffget 에 범위를 주어 맡기지 않는 까닭 (무작위 비교로 찾았다):
+--  - linematch(nvim 기본 diffopt)는 한 덩어리를 조각으로 나누고 같은 줄을 맞춰 보인다. 범위로는
+--    "줄 L 위에 끼인 줄"과 "줄 L 에서 시작하는 조각"을 가를 수 없어서, 덩어리 끝의 끼인 줄을 잡으려고
+--    한 줄 넓히면 옆 조각(같은 줄로 보이는 줄 뒤에 저쪽 줄이 더 붙은 것)까지 옮겨 저쪽 줄이 지워졌다.
+--    범위 없이 치면 커서가 있는 조각만 옮긴다
+--  - 대상이 빈 줄 하나뿐인 때(처음부터, 또는 조각을 옮기는 사이)를 만나면 그것을 빈 버퍼의 자리
+--    줄로 알고 넣은 줄 다음 줄을 지운다 (vim 도 같다). 0 바이트 파일에 넣은 것은 u 한 번에 줄
+--    하나가 남았다
+-- linematch 는 화면에 보이는 줄을 물을 때에야 조각낸다 - 이 창, 저 창, 다시 이 창 순으로 세어
+-- 조각이 굳은 뒤의 행을 쓴다. 너무 크면(250ms) nil - 범위로 옮긴다 (copy_hunk).
+-- 돌려주는 것: 바꿨으면 true, 덩어리가 없으면 false, 셀 수 없으면 nil.
+-- 행으로 셀 수 없는 diffopt: iblank 는 빈 줄만인 덩어리를 끼인 줄 없이 지우고(두 창의 행이 어긋난다),
+-- filler 가 없으면 끼인 줄이 아예 없다. 어긋난 것이 양쪽에서 비기면 행 수가 같아 아래 #rw ~= #ro 로도
+-- 못 걸렀고, 바뀌지 않은 줄을 덮어썼다 (A '\nx\ny\nw\n', B 'x\nz\nw\n\n' 의 y 에서 <C-r>: B 의 w 가
+-- y 로, z 는 그대로). 그때는 범위로 옮긴다 (copy_hunk - nvim 이 맞춘다). 0 바이트 파일로 넣는 것은
+-- 그 앞에서 copy_into_empty 가 한다 (범위로 맡기면 위의 둘째 탈이 돌아온다)
+local function copy_rows(w, other, put)
+  local dopt = ',' .. vim.o.diffopt .. ','
+  if dopt:find(',iblank,', 1, true) or not dopt:find(',filler,', 1, true) then
+    return nil
+  end
+  local deadline = uv.hrtime() + 250e6
+  local rw = rows_of(w, deadline)
+  local ro = rw and rows_of(other, deadline)
+  rw = ro and rows_of(w, deadline)
+  if not rw or #rw ~= #ro then
+    return nil
+  end
+  local function changed(i)
+    return rw[i] == false or ro[i] == false or vim.fn.diff_hlID(rw[i], 1) ~= 0
+  end
+  local c, cur = #rw + 1, vim.fn.line('.') -- 빈 버퍼의 자리 줄은 모든 행 아래에 있다
+  for i, l in ipairs(rw) do
+    if l == cur then
+      c = i
+      break
+    end
+  end
+  -- 커서 줄이 바뀐 줄이 아니면 바로 위(범위 없는 :diffput 처럼 위가 먼저), 바로 아래에 끼인 줄
+  local s, e
+  if c <= #rw and changed(c) then
+    s, e = c, c
+  elseif c > 1 and rw[c - 1] == false then
+    s, e = c - 1, c - 1
+  elseif c < #rw and rw[c + 1] == false then
+    s, e = c + 1, c + 1
+  else
+    return false
+  end
+  while s > 1 and changed(s - 1) do
+    s = s - 1
+  end
+  while e < #rw and changed(e + 1) do
+    e = e + 1
+  end
+  local src, dst = put and rw or ro, put and ro or rw
+  local first, cnt, a, b = 0, 0, nil, nil
+  for i = 1, e do
+    if dst[i] then
+      if i < s then
+        first = first + 1
+      else
+        cnt = cnt + 1
+      end
+    end
+    if i >= s and src[i] then
+      a, b = a or src[i], src[i]
+    end
+  end
+  local sb, tb = api.nvim_win_get_buf(put and w or other), api.nvim_win_get_buf(put and other or w)
+  local lines = a and api.nvim_buf_get_lines(sb, a - 1, b, false) or {}
+  if empty_buf(tb) then
+    api.nvim_buf_set_lines(tb, 0, -1, false, lines)   -- 자리 줄은 남기지 않는다
+  else
+    api.nvim_buf_set_lines(tb, first, first + cnt, false, lines)
+  end
+  return true
+end
+
+-- 덩어리째 복사를 범위로 (copy_rows 가 셀 수 없을 때 - 큰 파일): :r1,r2diffput (put: 이 창 -> 저 창).
+-- 파일 맨 위·맨 아래에 끼인 줄은 범위로 잡을 수 없다 (0 줄은 1 로 바뀌고 $+1 은 E16) - 그때는 저
+-- 창에서 거꾸로(put <-> get) 한다. 이 창의 그 끝이 끼인 줄이면 저 창의 그 끝은 진짜 줄이라서 저 창의
+-- 맨 위(맨 아래) 줄이 같은 덩어리에 든다. 저 창도 반대쪽 끝이 걸리면 덩어리가 파일 전체다
+local function copy_hunk(w, other, put, h)
+  local mine, theirs = api.nvim_win_get_buf(w), api.nvim_win_get_buf(other)
+  if h[1] >= 1 and h[2] <= h[3] then
+    vim.cmd(('%d,%d%s %d'):format(h[1], h[2], put and 'diffput' or 'diffget', theirs))
+    return true
+  end
+  local o = api.nvim_win_call(other, function()
+    return hunk_range(h[1] < 1 and 1 or vim.fn.line('$')) or false
+  end)
+  if not o then
+    -- 끼인 줄이 맞지 않는 diffopt(iblank 등): nvim 이 고르는 대로
+    vim.cmd((put and 'diffput' or 'diffget') .. ' ' .. theirs)
+  elseif o[1] >= 1 and o[2] <= o[3] then
+    api.nvim_win_call(other, function()
+      vim.cmd(('%d,%d%s %d'):format(o[1], o[2], put and 'diffget' or 'diffput', mine))
+    end)
+  else
+    local from, to = put and mine or theirs, put and theirs or mine
+    api.nvim_buf_set_lines(to, 0, -1, false, api.nvim_buf_get_lines(from, 0, -1, false))
+  end
+  return true
+end
+
+-- 줄 단위 복사에서 대상이 빈 줄 하나뿐("\n")이거나 빈 버퍼일 때 (copy_rows 에 적은 둘째 탈): 대상에
+-- 줄이 없거나 하나뿐이라 줄 맞춤이 쉽다 - 행으로 세어 직접 바꾼다. 행: 대상은 위에 끼인 줄 fa 개,
+-- 그 줄(k 행, 빈 버퍼면 자리 줄이라 행이 아니다), 아래에 끼인 줄. 원본에는 k 행에만 끼인 줄이 있을
+-- 수 있다 (대상의 빈 줄이 원본에 없는 줄일 때). 원본이 빈 버퍼면 넣을 줄이 없어 nvim 에 맡긴다.
+-- whole: 덩어리째 (copy_rows 가 셀 수 없는 diffopt - iblank, filler 없음 - 에서 빈 줄 하나뿐인 대상. 범위로
+-- 맡겼더니 nvim 의 :diffput 이 줄 하나를 잃었다). 그 줄이 바뀐 줄이면 저쪽 모두가 한 덩어리라 끼인 줄을
+-- 세지 않는다. 아니면 위(먼저)·아래에 끼인 줄 덩어리 - 보내기는 커서 줄이 든 쪽
+-- 돌려주는 것: 바꿨으면 true, 그 자리에 차이가 없으면 false, 행이 맞지 않으면 nil
+local function copy_into_blank(put, visual, l1, l2, tw, sw, whole)
+  local tb, sb = api.nvim_win_get_buf(tw), api.nvim_win_get_buf(sw)
+  if empty_buf(sb) then
+    return nil
+  end
+  local t = api.nvim_win_call(tw, function()
+    return { vim.fn.diff_filler(1), vim.fn.diff_filler(2), vim.fn.diff_hlID(1, 1) ~= 0 }
+  end)
+  local none = empty_buf(tb)
+  local fa, tch = t[1], t[3]
+  local k, total = fa + 1, fa + (none and 0 or 1) + t[2]
+  local src = api.nvim_buf_get_lines(sb, 0, -1, false)
+  if whole and tch and not none then
+    api.nvim_buf_set_lines(tb, 0, -1, false, src)
+    return true
+  end
+  local sk = total - #src
+  if sk < 0 or sk > 1 or (sk == 1 and not tch) or (none and (tch or t[2] > 0)) then
+    return nil
+  end
+  local function srow(i)
+    return i < k and i or i + sk
+  end
+  local x1, x2
+  if whole then
+    local r = put and srow(l1) or k
+    if r < k or (not put and fa > 0) then
+      x1, x2 = 1, fa
+    elseif r > k or (not put and total > k) then
+      x1, x2 = k + 1, total
+    end
+  elseif not put then                   -- 커서가 대상의 그 줄에
+    if tch then
+      x1, x2 = k, k
+    elseif fa > 0 then
+      x1, x2 = 1, fa
+    elseif total > k then
+      x1, x2 = k + 1, total
+    end
+  elseif visual or tch or srow(l1) ~= k then
+    x1, x2 = srow(l1), srow(l2)
+  end
+  if not x1 then
+    return false
+  end
+  local up, mid, down = {}, none and {} or { '' }, {}
+  for r = x1, x2 do
+    if r < k then
+      up[#up + 1] = src[r]
+    elseif r > k then
+      down[#down + 1] = src[r - sk]
+    else
+      mid = sk == 0 and { src[k] } or {}
+    end
+  end
+  api.nvim_buf_set_lines(tb, 0, -1, false, vim.list_extend(vim.list_extend(up, mid), down))
+  return true
+end
+
+-- one: <C-S-r>/<C-S-l> - 횟수가 없어도 커서 줄만
+function _G.vimide_dirdiff_copy_lines(dir, one)
   local s = applies()
   if not s then
     return
   end
   local w = api.nvim_get_current_win()
   local mode = api.nvim_get_mode().mode
+  local visual = mode:match('^[vV\22]') ~= nil
+  local whole = not visual and not one and vim.v.count == 0
   local count = vim.v.count1
   -- 횟수는 마지막 줄에서 멈춘다 (15dd 처럼). 그대로 두었더니 30,44diffput 이 E16 으로 실패해
   -- 있는 줄까지 하나도 복사되지 않았다
   local l1, l2 = vim.fn.line('.'), math.min(vim.fn.line('.') + count - 1, vim.fn.line('$'))
-  local visual = mode:match('^[vV\22]') ~= nil
   if visual then
     l1, l2 = vim.fn.line('v'), vim.fn.line('.')
     if l1 > l2 then
@@ -1437,26 +2232,85 @@ function _G.vimide_dirdiff_copy_lines(dir)
   -- 파일에 들어가거나 줄이 지워졌다
   for _, b in ipairs({ mine, theirs }) do
     if vim.bo[b].buftype ~= '' then
+      if s.bin then
+        return say('바이너리·큰 파일은 줄로 복사할 수 없습니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
+          vim.log.levels.WARN)
+      end
       local side = (b == s.empty_a or api.nvim_win_get_buf(s.win_a) == b) and 'A' or 'B'
       return say(side .. ' 쪽은 파일이 아닙니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
         vim.log.levels.WARN)
     end
   end
-  local cmd = put and 'diffput' or 'diffget'
+  -- 덩어리째는 대상 버퍼를 직접 바꾸므로(copy_rows) 미리 본다 - 그대로 두면 API 오류가 파일·줄
+  -- 번호를 단 채 나왔다 (:diffput 은 E21)
+  if not vim.bo[tb].modifiable then
+    return say(((tb == api.nvim_win_get_buf(s.win_a)) and 'A' or 'B')
+      .. " 쪽 버퍼는 고칠 수 없습니다 ('modifiable' 꺼짐)", vim.log.levels.WARN)
+  end
+  -- 저쪽 버퍼를 이름으로 준다: 이 탭에 diff 창이 셋 이상이면 이름 없는 :diffput 은 E101 이었다
+  local cmd = (put and 'diffput' or 'diffget') .. ' ' .. theirs
   local range
-  if visual or vim.fn.diff_hlID(l1, 1) ~= 0 then
+  if whole then
+    range = nil
+  elseif visual or l2 > l1 or vim.fn.diff_hlID(l1, 1) ~= 0 then
+    -- 여러 줄(비주얼, N<C-r>)은 그 줄들 - 커서 줄만 보았더니 N<C-r> 이 커서 줄이 바뀌지 않았으면
+    -- 범위를 버리고 '차이가 없다' 고 하거나 커서 옆에 끼인 줄 덩어리(범위 밖일 수도)를 옮겼다.
+    -- 마지막 줄에서 잘려 한 줄이 된 횟수는 아래의 커서 줄 규칙대로 (2<C-l> 이 그 아래 줄을 가져온다)
     range = ('%d,%d'):format(l1, l2)
   elseif vim.fn.diff_filler(l1) > 0 then
     range = ''                           -- 바로 위에 끼인 줄: 그 덩어리
   elseif vim.fn.diff_filler(l1 + 1) > 0 then
-    range = ('%d,%d'):format(l1, l1 + 1) -- 바로 아래에 끼인 줄
+    -- 바로 아래에 끼인 줄. 마지막 줄 아래는 범위로 못 잡는다(E16) - 범위 없는 :diffput 이
+    -- 마지막 줄에서는 그 아래를 잡는다
+    range = l1 < vim.fn.line('$') and ('%d,%d'):format(l1, l1 + 1) or ''
+  elseif not put and empty_buf(tb) then
+    range = ''   -- 빈 버퍼(0 바이트)의 자리 줄로 가져오기: filler 가 없어 끼인 줄이 안 보여도 저쪽 전체
   else
     return say('이 줄에는 차이가 없습니다')
   end
   local tick = vim.b[tb].changedtick
-  local ok, err = pcall(vim.cmd, range .. cmd)
+  local ok, res = pcall(function()
+    local into = copy_into_empty(put, whole, l1, l2, tb, put and mine or theirs)
+    if into ~= nil then
+      return into
+    end
+    if whole then
+      local done = copy_rows(w, other, put)
+      if done == nil and api.nvim_buf_line_count(tb) == 1 and api.nvim_buf_get_lines(tb, 0, 1, false)[1] == '' then
+        done = copy_into_blank(put, false, l1, l1, put and other or w, put and w or other, true)
+      end
+      if done ~= nil then
+        return done
+      end
+      local h = hunk_range(l1)
+      if not h then
+        return false
+      end
+      return copy_hunk(w, other, put, h)
+    end
+    if api.nvim_buf_line_count(tb) == 1 and api.nvim_buf_get_lines(tb, 0, 1, false)[1] == '' then
+      local done = copy_into_blank(put, visual or l2 > l1, l1, l2, put and other or w, put and w or other)
+      if done ~= nil then
+        return done
+      end
+    end
+    vim.cmd(range .. cmd)
+    return true
+  end)
   if not ok then
-    say(tostring(err):gsub('^.-(E%d+:)', '%1'), vim.log.levels.WARN)
+    say(tostring(res):gsub('^.-(E%d+:)', '%1'), vim.log.levels.WARN)
+  elseif not res or (not whole and vim.b[tb].changedtick == tick) then
+    -- 범위로 옮겼는데 바뀐 것이 없으면 그 줄들에 차이가 없는 것이다 - 비주얼·횟수는 아무 말이
+    -- 없었다 (범위 첫 줄 바로 위에 끼인 줄은 범위에 들지 않는다 - nvim 의 :1,1diffget 도 같다)
+    local msg = '이 줄에는 차이가 없습니다'
+    if whole then
+      msg = '커서가 차이 덩어리에 있지 않습니다 (다음·앞 차이는 <C-n>/<C-p>)'
+    elseif visual then
+      msg = '고른 줄에는 차이가 없습니다'
+    elseif l2 > l1 then
+      msg = ('커서 줄부터 %d 줄에는 차이가 없습니다'):format(l2 - l1 + 1)
+    end
+    return say(msg)
   elseif vim.b[tb].changedtick ~= tick then
     -- 복사 하나를 되돌리기 한 번으로 (그대로 두면 이어진 복사들이 한 번에 되돌려졌다)
     pcall(api.nvim_buf_call, tb, function()
@@ -1468,8 +2322,15 @@ end
 
 -- 전역 <C-r>/<C-l> 를 비교 창에서만 가로챈다. 그 밖에서는 원래대로 (<C-r> 되돌리기 취소,
 -- <C-l> 은 .vimrc 의 창 옮기기): expr 매핑이라 원래 키가 그 자리(쌓인 키 앞)에서 돈다 -
--- feedkeys 로 넘겼더니 빠르게 친 뒤의 키가 먼저 돌았다
-local TAKE = { ['<C-r>'] = 1, ['<C-l>'] = -1 }
+-- feedkeys 로 넘겼더니 빠르게 친 뒤의 키가 먼저 돌았다.
+-- 키 -> { 방향, 커서 줄만 }. <C-S-r>/<C-S-l> 은 터미널이 Ctrl+Shift 를 따로 알려 줄 때만 온다
+-- (iTerm2 의 CSI u, tmux 의 extended-keys) - Tera Term 등에서는 그냥 <C-r>/<C-l> 이 오므로
+-- 1<C-r>/1<C-l> 이 같은 일을 한다. 비교 창 밖의 <C-S-r>/<C-S-l> 도 그 키 그대로 넘긴다
+-- (매핑이 없을 때 nvim 은 <C-S-r> 을 <C-r> 처럼 되돌리기 취소로 친다)
+local TAKE = {
+  ['<C-r>'] = { 1 }, ['<C-l>'] = { -1 },
+  ['<C-S-r>'] = { 1, true }, ['<C-S-l>'] = { -1, true },
+}
 local prev_maps = {}
 
 function _G.vimide_dirdiff_prev_key(id)
@@ -1480,7 +2341,8 @@ function _G.vimide_dirdiff_prev_key(id)
 end
 
 local function take_over()
-  for lhs, dir in pairs(TAKE) do
+  for lhs, t in pairs(TAKE) do
+    local dir, one = t[1], t[2] == true
     for _, mode in ipairs({ 'n', 'x' }) do
       local prev = vim.fn.maparg(lhs, mode, false, true)
       if type(prev) == 'table' and prev.desc and prev.desc:match('^DirDiff 비교 창') then
@@ -1493,7 +2355,7 @@ local function take_over()
       local id = mode .. lhs
       vim.keymap.set(mode, lhs, function()
         if applies() then
-          return ('<Cmd>lua _G.vimide_dirdiff_copy_lines(%d)<CR>'):format(dir)
+          return ('<Cmd>lua _G.vimide_dirdiff_copy_lines(%d, %s)<CR>'):format(dir, tostring(one))
         end
         local p = prev_maps[id]
         if not p then
@@ -1504,7 +2366,8 @@ local function take_over()
         end
         return p.rhs
       end, { expr = true, silent = true, replace_keycodes = true,
-        desc = 'DirDiff 비교 창: 줄을 ' .. (dir > 0 and '오른쪽(B)' or '왼쪽(A)') .. '으로' })
+        desc = 'DirDiff 비교 창: ' .. (one and '커서 줄을 ' or '차이 덩어리를 ')
+          .. (dir > 0 and '오른쪽(B)' or '왼쪽(A)') .. '으로' })
     end
   end
 end
@@ -1516,20 +2379,193 @@ function _G.vimide_dirdiff_take_over()
 end
 _G.vimide_dirdiff_take_over()
 
+-- ---------------------------------------------------------------------------
+-- 보기 (f: 메뉴, F: 모두 <-> 차이) - Beyond Compare 의 보기 거르기
+-- ---------------------------------------------------------------------------
+
+local function set_mode(s, id)
+  if not MODE[id] or s.mode == id then
+    return
+  end
+  s.mode = id
+  render(s)
+end
+
+-- 처음 보기: g:vimide_dirdiff_filter (MODES 의 id), 없으면 g:vimide_dirdiff_only_diff.
+-- g:vimide_dirdiff_view 에 싣지 않은 것은 그 이름이 이미 ':DirDiff 를 이 트리로' (0/1) 라서다 -
+-- dirdifftab.vim 의 get(g:, 'vimide_dirdiff_view', 1) 은 'diff' 같은 글자를 0 으로 읽어
+-- :DirDiff 가 예전 목록이 된다
+local function start_mode()
+  local v = vim.g.vimide_dirdiff_filter
+  if type(v) == 'string' and v ~= '' then
+    if MODE[v] then
+      return v
+    end
+    local ids = {}
+    for _, md in ipairs(MODES) do
+      ids[#ids + 1] = md.id
+    end
+    say(('g:vimide_dirdiff_filter 를 모릅니다: %s (%s)'):format(v, table.concat(ids, ' ')), vim.log.levels.WARN)
+  end
+  return (tonumber(vim.g.vimide_dirdiff_only_diff) or 0) ~= 0 and 'diff' or 'all'
+end
+
+-- 보기마다 항목 수: 뒤쪽의 cats (표시 -> 수). 한쪽에만 있는 디렉터리는 하나로 센다 (상태줄처럼).
+-- 견주는 중인 것은 '모두' 에만 든다
+local function mode_count(s, md)
+  local cats = s.prog and s.prog.cats
+  if type(cats) ~= 'table' then
+    return nil
+  end
+  local n = 0
+  for k, v in pairs(cats) do
+    local m = tonumber(k)
+    if m and type(v) == 'number' and (not md.bits or band(m, md.bits) ~= 0) then
+      n = n + v
+    end
+  end
+  return n
+end
+
+menu_fill = function(s)
+  local mu = s.menu
+  if not (mu and api.nvim_buf_is_valid(mu.buf) and api.nvim_win_is_valid(mu.win)) then
+    s.menu = nil
+    return
+  end
+  local cnt, lw, cw = {}, 0, 0
+  for i, md in ipairs(MODES) do
+    local c = mode_count(s, md)
+    cnt[i] = c and commas(c) or ''
+    lw = math.max(lw, vim.fn.strdisplaywidth(md.label))
+    cw = math.max(cw, #cnt[i])
+  end
+  local dot = ascii() and '*' or '●'
+  local lines, width = {}, 0
+  for i, md in ipairs(MODES) do
+    lines[i] = (' %s %s  %s '):format(md.id == s.mode and dot or ' ', fit(md.label, lw), rjust(cnt[i], cw))
+    width = math.max(width, vim.fn.strdisplaywidth(lines[i]))
+  end
+  vim.bo[mu.buf].modifiable = true
+  api.nvim_buf_set_lines(mu.buf, 0, -1, false, lines)
+  vim.bo[mu.buf].modifiable = false
+  api.nvim_buf_clear_namespace(mu.buf, ns, 0, -1)
+  for i, md in ipairs(MODES) do
+    local l = lines[i]
+    local c1 = #l - 1
+    if cnt[i] ~= '' then
+      pcall(api.nvim_buf_set_extmark, mu.buf, ns, i - 1, c1 - #cnt[i],
+        { end_col = c1, hl_group = cnt[i] == '0' and 'Comment' or 'VimIdeDirDiffSize' })
+    end
+    if md.id == s.mode then
+      pcall(api.nvim_buf_set_extmark, mu.buf, ns, i - 1, 1, { end_col = c1 - #cnt[i], hl_group = 'VimIdeDirDiffMenuNow' })
+    end
+  end
+  local pend = s.prog and tonumber(s.prog.pend) or 0
+  local title = pend > 0 and (' 보기 · 확인 중 %s '):format(commas(pend)) or ' 보기 '
+  width = math.max(width, vim.fn.strdisplaywidth(title) + 2, vim.fn.strdisplaywidth(mu.footer) + 2)
+  pcall(api.nvim_win_set_config, mu.win, { title = title, title_pos = 'center', width = width })
+end
+
+local function open_menu(s)
+  if s.menu and api.nvim_win_is_valid(s.menu.win) then
+    return api.nvim_set_current_win(s.menu.win)
+  end
+  local buf = api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = 'wipe'
+  -- 이름·filetype 이 없으면 단축키 도움말(F1)이 이 창을 '이 창 · ' 으로만 불렀다
+  vim.bo[buf].filetype = 'vimidedirdiffmenu'
+  pcall(api.nvim_buf_set_name, buf, 'DirDiff 보기 #' .. buf)
+  local footer = ' Enter 고르기 · q 닫기 '
+  local h = #MODES
+  local border = ascii() and { '+', '-', '+', '|', '+', '-', '+', '|' } or 'rounded'
+  local win = api.nvim_open_win(buf, true, {
+    relative = 'editor', row = 0, col = 0, width = 30, height = h, style = 'minimal', border = border,
+    title = ' 보기 ', title_pos = 'center', footer = footer, footer_pos = 'center', zindex = 60,
+  })
+  vim.wo[win].cursorline = true
+  s.menu = { buf = buf, win = win, footer = footer }
+  menu_fill(s)
+  -- 트리 창 위, 가운데. 트리가 낮아도 화면 안에 들게
+  local tp = api.nvim_win_get_position(s.win_l)
+  local tw = api.nvim_win_get_width(s.win_l)
+  local width = api.nvim_win_get_width(win)
+  local row = math.max(0, math.min(tp[1] + 1, vim.o.lines - vim.o.cmdheight - h - 3))
+  local col = tp[2] + math.max(0, math.floor((tw - width - 2) / 2))
+  pcall(api.nvim_win_set_config, win, { relative = 'editor', row = row, col = col })
+  pcall(api.nvim_win_set_cursor, win, { MODE[s.mode].i, 1 })
+  local function close(back)
+    if not (s.menu and s.menu.buf == buf) then
+      return
+    end
+    s.menu = nil
+    if api.nvim_win_is_valid(win) then
+      pcall(api.nvim_win_close, win, true)
+    end
+    if back and api.nvim_win_is_valid(s.win_l) then
+      pcall(api.nvim_set_current_win, s.win_l)
+    end
+  end
+  local function choose()
+    local md = MODES[api.nvim_win_get_cursor(win)[1]]
+    close(true)
+    if md then
+      set_mode(s, md.id)
+    end
+  end
+  -- desc 가 없으면 단축키 도움말(F1)에 '(Lua 함수)' 로만 보였다
+  local function o(desc)
+    return { buffer = buf, nowait = true, silent = true, desc = desc }
+  end
+  for _, k in ipairs({ '<CR>', '<2-LeftMouse>', '<Space>' }) do
+    vim.keymap.set('n', k, choose, o('이 보기로 (보기 메뉴)'))
+  end
+  for _, k in ipairs({ 'q', '<Esc>', 'f' }) do
+    vim.keymap.set('n', k, function()
+      close(true)
+    end, o('보기 메뉴 닫기'))
+  end
+  -- F1(단축키 도움말)은 메뉴를 닫고 트리에서 연다: 메뉴에서 그대로 열었더니 목록이 뜨며 메뉴가 닫혀
+  -- (아래 WinLeave) 도움말을 닫은 뒤 커서가 돌아갈 창이 없어 트리가 아니라 편집 창 A 로 갔다.
+  -- VimIdeKeyHelp(.vimrc 의 F1)가 없으면 걸지 않는다 - 전역 F1 그대로
+  if vim.fn.exists('*VimIdeKeyHelp') == 1 then
+    vim.keymap.set('n', '<F1>', function()
+      close(true)
+      vim.fn.VimIdeKeyHelp()
+    end, o('단축키 도움말 (보기 메뉴를 닫고 트리에서)'))
+  end
+  -- 다른 창을 누르는 등으로 떠나면 닫는다 (메뉴 밖으로 간 것이니 트리로 끌고 오지 않는다)
+  api.nvim_create_autocmd('WinLeave', {
+    buffer = buf,
+    once = true,
+    callback = function()
+      vim.schedule(function()
+        close(false)
+      end)
+    end,
+  })
+end
+
 local function help()
   vim.notify(table.concat({
     'DirDiff 트리',
     '  <CR>        파일: 비교를 열고 편집 창으로 / 디렉터리: 펼치기·접기',
     '  o           비교를 열되 트리에 그대로',
-    '  <C-n> <C-p> 다음 / 앞 차이 파일',
+    '  <C-n> <C-p> 다음 / 앞 차이 파일 (모두·차이 밖의 보기: 그 보기가 보이는 것 - 동일이면 같은 파일)',
     '  l h         펼치기 / 접기(부모로)',
-    '  O X         차이 있는 디렉터리 모두 펼치기 / 모두 접기',
-    '  f           차이만 보기',
+    '  O X         차이 있는 디렉터리 모두 펼치기 (다른 보기: 그 보기가 보이는 것이 있는 디렉터리) / 모두 접기',
+    '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
+    '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기',
-    '  <Tab>       A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
+    '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
+    '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A])',
+    '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
     '편집 창: <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
-    '         <C-r> <C-l> 커서 줄·고른 줄을 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w)',
+    '         <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w)',
+    '         <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널에서는 1<C-r> 1<C-l>)',
+    '                   - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
+    '         N<C-r> N<C-l> 커서 줄부터 N 줄, 비주얼은 고른 줄만',
   }, '\n'))
 end
 
@@ -1558,7 +2594,23 @@ local function finish(s, stay)
   local here = api.nvim_get_current_tabpage()
   if api.nvim_tabpage_is_valid(s.tab) then
     api.nvim_set_current_tabpage(s.tab)
+    local was = {}
+    for _, w in ipairs({ s.win_a, s.win_b }) do
+      was[w] = api.nvim_win_is_valid(w) and vim.wo[w].diff
+    end
     pcall(vim.cmd, 'diffoff!')
+    -- 남는 버퍼(사용자 것, 고친 것)에 창 머리와 diff 접기가 적혀 남지 않게 (open_pair 의 winbar 와 같은
+    -- 까닭, undiff_folds)
+    for _, w in ipairs({ s.win_a, s.win_b }) do
+      if api.nvim_win_is_valid(w) then
+        pcall(function()
+          vim.wo[w].winbar = ''
+        end)
+        if was[w] then
+          pcall(api.nvim_win_call, w, undiff_folds)
+        end
+      end
+    end
     if #api.nvim_list_tabpages() > 1 then
       pcall(vim.cmd, 'tabclose')
     else
@@ -1611,7 +2663,7 @@ local function restart(s)
   end
   local r = cur_row(s)
   s.want_rel = r and r.e and r.rel or nil   -- 커서가 있던 줄로 돌아간다 (그 줄이 다시 생기면)
-  s.dirs, s.loading, s.dirty, s.prog = {}, {}, {}, nil
+  s.dirs, s.loading, s.dirty, s.prog, s.walk = {}, {}, {}, nil, nil
   if not start_job(s) then
     return
   end
@@ -1619,6 +2671,7 @@ local function restart(s)
   request_list(s, '')
   render(s)
 end
+restart_fn = restart
 
 local function map_list(s)
   local b = s.buf_l
@@ -1628,8 +2681,8 @@ local function map_list(s)
   m('<CR>', function() act_enter(s, true) end, '비교 열고 편집 창으로 / 펼치기')
   m('<2-LeftMouse>', function() act_enter(s, true) end, '비교 열기')
   m('o', function() act_enter(s, false) end, '비교 열기 (트리에 그대로)')
-  m('<C-n>', function() act_step(s, 1) end, '다음 차이')
-  m('<C-p>', function() act_step(s, -1) end, '앞 차이')
+  m('<C-n>', function() act_step(s, 1) end, '다음 차이 (보기에 따라)')
+  m('<C-p>', function() act_step(s, -1) end, '앞 차이 (보기에 따라)')
   m('l', function()
     local r = cur_row(s)
     if r and r.e and is_dir(r.e) then
@@ -1637,14 +2690,14 @@ local function map_list(s)
     end
   end, '펼치기')
   m('h', function() act_h(s) end, '접기 / 부모로')
-  m('O', function() act_expand_all(s) end, '차이 있는 디렉터리 모두 펼치기')
+  m('O', function() act_expand_all(s) end, '차이 있는 디렉터리 모두 펼치기 (보기에 따라)')
   m('X', function() act_collapse_all(s) end, '모두 접기')
-  m('f', function()
-    s.filter = not s.filter
-    render(s)
-  end, '차이만 보기')
+  m('f', function() open_menu(s) end, '보기 고르기')
+  m('F', function() set_mode(s, s.mode == 'all' and 'diff' or 'all') end, '모두 보이기 / 차이 보이기')
   m('R', function() restart(s) end, '다시 훑기')
-  m('<Tab>', function() act_side(s) end, 'A 쪽 / B 쪽')
+  m('<Tab>', function() act_pick(s) end, '비교할 곳 고르기 [A] -> [B]')
+  -- 쪽 바꾸기는 Tab 에서 옮겨 왔다 (Tab 은 neo-tree 처럼 비교할 곳 고르기)
+  m('<S-Tab>', function() act_side(s) end, 'A 쪽 / B 쪽')
   m('<Space>', function() act_mark(s) end, '고르기')
   -- <Esc> 로 두었더니 습관처럼 누르는 Esc 에 고른 것이 사라졌다
   m('U', function() clear_marks(s) end, '고른 것 모두 풀기')
@@ -1730,15 +2783,22 @@ function M.open(a, b)
     a = a, b = b, req = 0, dirs = {}, loading = {}, dirty = {},
     expanded = { [''] = true }, rows = {}, row_of = {}, opened = {}, unload = {},
     side = 'a', marks = { a = {}, b = {} }, offb = {}, offg = {},
-    filter = (tonumber(vim.g.vimide_dirdiff_only_diff) or 0) ~= 0, reveal_step = 1,
+    mode = start_mode(), reveal_step = 1,
     origin = api.nvim_get_current_tabpage(),
   }
   -- 곁창에서 :tabnew 하면 그 창 옵션을 물려받고 neo-tree 가 가져간다 - EDIT 창에서
+  local back = api.nvim_get_current_win()
   local w = _G.vimide_edit_slot and _G.vimide_edit_slot()
   if w and w ~= 0 and api.nvim_win_is_valid(w) then
     api.nvim_set_current_win(w)
   end
   vim.cmd('tabnew')
+  -- 떠난 곳이 비교 탭이면 그 탭의 지금 창은 도로 그 창으로: EDIT 창(편집 창 A)으로 옮긴 채 두었더니, 비교
+  -- 탭의 트리에서 :DirDiff 로 연 비교를 q 로 닫거나 gT 로 돌아가면 커서가 트리가 아니라 편집 창 A 에 있었다
+  if sessions[s.origin] and back ~= w and api.nvim_win_is_valid(back)
+      and api.nvim_win_get_tabpage(back) == s.origin then
+    pcall(api.nvim_tabpage_set_win, s.origin, back)
+  end
   s.tab = api.nvim_get_current_tabpage()
   s.win_a = api.nvim_get_current_win()
   local nb = api.nvim_get_current_buf()
@@ -1835,6 +2895,65 @@ api.nvim_create_autocmd('TabClosed', {
     end
   end,
 })
+-- :tabclose (또는 <C-w>c) 로 편집 창이 닫힐 때도 남는 버퍼(고친 것, 사용자 것)에 머리와 diff 접기가 적혀
+-- 남지 않게, 창이 닫히기 바로 앞에 걷는다 (finish 는 탭이 닫힌 뒤에 돌아 창이 이미 없다). 탭의 마지막 창은
+-- 여기 오기 전에 nvim 이 diff 를 이미 꺼 두어(nofoldenable, 접기는 남은 채) diff 였는지 묻지 않는다 - 편집
+-- 창의 manual 접기는 diff 가 남긴 것뿐이다. q 로 닫을 때는 finish 가 먼저 sessions 에서 뺀 뒤라 그냥 지나간다
+api.nvim_create_autocmd('WinClosed', {
+  group = group,
+  callback = function(ev)
+    local w = tonumber(ev.match)
+    for _, s in pairs(sessions) do
+      if w and (w == s.win_a or w == s.win_b) and api.nvim_win_is_valid(w) then
+        pcall(api.nvim_win_call, w, function()
+          vim.cmd('diffoff')
+          undiff_folds()
+          vim.wo.winbar = ''
+        end)
+      end
+    end
+  end,
+})
+-- 편집 창에 떠 있는 파일을 다른 창·탭에 띄우면 nvim 은 그 버퍼가 떠 있는 창(편집 창)의 옵션을 새 창에
+-- 입힌다: 비교의 머리(' A: …' winbar)에 diff·scrollbind·cursorbind·foldmethod=diff 까지 따라왔다
+-- (:tabnew 파일, :tabnew 뒤 :e, :vsplit 파일, neo-tree 의 Enter, Tab/Tab 의 vimdiff). 버퍼를 바꿀 때 머리를
+-- 걷는 것(open_pair, finish)은 내려간 버퍼에만 듣는다. 그래서 들어온 쪽에서 걷는다: 두 편집 창이 아닌 창이
+-- 편집 창과 같은 머리를 달고 있으면 거기서 받은 옵션이다 - 머리를 걷고 diff 였으면 :diffoff (그 창만,
+-- 묶기·접기도 diff 전으로). :diffoff 가 남긴 manual 접기와 'foldenable' 은 undiff_folds 가 되돌린다.
+-- 사용자가 :diffsplit·vimdiff 로 켜는 diff 는 그 명령이 버퍼를 띄운 뒤에 켜므로 남는다.
+-- 머리가 다른(사용자가 켠) diff 창은 건드리지 않는다
+local function strip_inherited()
+  if next(sessions) == nil then
+    return
+  end
+  local w = api.nvim_get_current_win()
+  local wb = vim.wo[w].winbar
+  if wb == '' then
+    return
+  end
+  local from = false
+  for _, s in pairs(sessions) do
+    if w == s.win_a or w == s.win_b then
+      return
+    end
+    for _, x in ipairs({ s.win_a, s.win_b }) do
+      if api.nvim_win_is_valid(x) and vim.wo[x].winbar == wb then
+        from = true
+      end
+    end
+  end
+  if from then
+    pcall(vim.cmd, 'setlocal winbar<')
+    if vim.wo[w].diff then
+      pcall(vim.cmd, 'diffoff')
+      undiff_folds()
+    end
+  end
+end
+api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
+  group = group,
+  callback = strip_inherited,
+})
 -- 비교가 연 버퍼를 사용자가 비교 탭 밖에서 띄우면 사용자 것이 된다 - 치우지 않는다
 api.nvim_create_autocmd('BufWinEnter', {
   group = group,
@@ -1860,23 +2979,10 @@ api.nvim_create_autocmd('BufWritePost', {
     end
     local full = vim.fn.fnamemodify(ev.match, ':p')
     local rp = real(full)
-    -- 버퍼 이름 그대로가 먼저다: 트리가 연 파일은 트리의 이름으로 열려 있다. 링크를 푼
-    -- 이름(macOS 는 디스크의 철자 - NFD·대소문자)으로 찾으면 트리에 없는 이름이 새 줄로
-    -- 생긴다. 푼 이름은 버퍼 이름이 뿌리 밖일 때(/tmp 와 /private/tmp 등)와, 파일 링크를
-    -- 저장해 가리키는 파일이 바뀌었을 때만
+    -- 어느 이름으로 찾는지는 rels_in 에 (트리 복사의 on_copied 와 같이 쓴다)
     local link = (uv.fs_lstat(full) or {}).type == 'link'
     for _, s in pairs(sessions) do
-      local paths = {}
-      for _, root in ipairs({ s.a, s.b }) do
-        local pre = root .. '/'
-        local mine = full:sub(1, #pre) == pre
-        if mine then
-          paths[#paths + 1] = full:sub(#pre + 1)
-        end
-        if (link or not mine) and rp ~= full and rp:sub(1, #pre) == pre then
-          paths[#paths + 1] = rp:sub(#pre + 1)
-        end
-      end
+      local paths = rels_in(s, full, rp, link)
       if #paths > 0 then
         send(s, { cmd = 'refresh', paths = paths })
       end
