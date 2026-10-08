@@ -946,9 +946,12 @@ local function show_file(s, win, path, side)
   -- 열기 전에도 있던 것인지로 본다: nvim 은 같은 파일이면 철자가 달라도(macOS 의 Foo.c/foo.c,
   -- NFC/NFD - 트리는 A 쪽 철자로 연다) 있던 버퍼를 쓰는데, 이름으로 찾았더니 그런 사용자 버퍼를
   -- 비교의 것으로 알고 치웠다 (bufnr() 는 이름을 무늬로 보아 쓰지 않는다)
+  -- buflisted() 로 본다. :bd 로 닫은(내려 둔) 버퍼의 옵션을 vim.bo 로 읽으면 nvim 이
+  -- 끝날 때 그 파일의 소문자 마크와 마지막 자리('")를 shada 에 적지 않는다 (실측) -
+  -- 비교 쌍을 열 때마다 모든 버퍼를 돌므로 그 파일들의 마크가 사라졌다
   local before = {}
   for _, x in ipairs(api.nvim_list_bufs()) do
-    before[x] = { listed = vim.bo[x].buflisted, loaded = api.nvim_buf_is_loaded(x), ours = vim.b[x].vimide_dirdiff }
+    before[x] = { listed = vim.fn.buflisted(x) == 1, loaded = api.nvim_buf_is_loaded(x), ours = vim.b[x].vimide_dirdiff }
   end
   -- noautocmd: 비교하려고 연 파일에서 vim-ide 의 BufRead 훅이 돌지 않게 - 색인이 없는
   -- 트리면 autoindex 가 그 트리 전체의 GTAGS 를 만들기 시작하고(트리 안에 .tags/ 를
@@ -997,7 +1000,9 @@ end
 
 -- 앞에서 열었던 파일 버퍼를 치운다 (이 비교에서 연 것, 고치지 않았고 어디에도 안 보이는 것)
 local function unused(b)
-  return api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 and not vim.bo[b].modified
+  -- getbufvar: :bd 로 닫은 버퍼를 vim.bo 로 읽으면 그 파일의 마크가 shada 에서 빠진다 (위 show_file)
+  return api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0
+    and vim.fn.getbufvar(b, '&modified') ~= 1
 end
 
 local function sweep(s)
@@ -2638,7 +2643,7 @@ local function finish(s, stay)
   local kept = {}
   for b in pairs(s.opened) do
     if api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then
-      if vim.bo[b].modified then
+      if vim.fn.getbufvar(b, '&modified') == 1 then
         kept[#kept + 1] = vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':~:.')
       else
         pcall(api.nvim_buf_delete, b, { force = false })

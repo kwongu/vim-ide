@@ -934,8 +934,10 @@ local function dirty_bufs()
     -- 그것을 쓰는데 vim 은 이것도 '저장 안 함' 으로 치고 :qa 를 E37 로 막는다.
     -- 안 세면 pcall 이 그 오류를 삼켜, 나갈 수도 없고 보여 줄 창도 없는
     -- 상태로 남는다.
-    local bt = vim.bo[b].buftype
-    if api.nvim_buf_is_loaded(b) and vim.bo[b].modified
+    -- 읽은 버퍼만 vim.bo 로 본다: :bd 로 닫은 버퍼를 읽으면 그 파일의 소문자 마크와
+    -- 마지막 자리가 shada 에서 빠진다 (실측). 내려 둔 버퍼는 고친 채일 수 없다
+    local bt = api.nvim_buf_is_loaded(b) and vim.bo[b].buftype or nil
+    if bt and vim.bo[b].modified
         and (bt == '' or bt == 'acwrite') then
       out[#out + 1] = b
     end

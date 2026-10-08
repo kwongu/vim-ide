@@ -272,7 +272,8 @@ end
 local function neogit_statuses()
   local out = {}
   for _, b in ipairs(api.nvim_list_bufs()) do
-    if api.nvim_buf_is_valid(b) and vim.bo[b].filetype == 'NeogitStatus' then
+    -- 읽은 버퍼만 본다: :bd 로 닫은 버퍼를 vim.bo 로 읽으면 그 파일의 마크가 shada 에서 빠진다
+    if api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == 'NeogitStatus' then
       local wins = vim.fn.win_findbuf(b)
       -- getcwd(창, 탭). nvim_win_call 안의 getcwd() 는 그 창의 lcd 가 아니라
       -- 전역 디렉터리를 준다 (실측).
@@ -846,9 +847,9 @@ local function neogit_wip(root)
   local ns = api.nvim_get_namespaces()
   local gd = gitdir_of(root)
   for _, b in ipairs(api.nvim_list_bufs()) do
-    local ft = vim.bo[b].filetype
-    if (ft == 'gitcommit' or ft == 'gitrebase') and api.nvim_buf_is_loaded(b)
-        and ns['neogit-buffer-' .. b] then
+    -- 읽은 버퍼만 vim.bo 로 본다 (neogit_statuses 와 같은 까닭 - shada 의 마크)
+    local ft = api.nvim_buf_is_loaded(b) and vim.bo[b].filetype or ''
+    if (ft == 'gitcommit' or ft == 'gitrebase') and ns['neogit-buffer-' .. b] then
       local name = api.nvim_buf_get_name(b)
       local mine
       if gd then
