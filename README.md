@@ -395,9 +395,9 @@ backspacing cannot eat them. Results land where they always did: the relation
 panel when it is open, quickfix otherwise. `g:vimide_grep_float = 0` and
 `g:vimide_lookup_float = 0` put the command line back.
 
-\' (Leader, then '), Ctrl+' or Ctrl+M twice: Named bookmarks and the marks you set, in a telescope picker - filter by mark, by file
-name or by the text of the line, and `<CR>` jumps there in the edit window
-(`:VimIdeMarks`; `<Esc>` then `d` deletes one and the picker stays open). `:marks` prints a table once
+\' (Leader, then '), Ctrl+' or Ctrl+M twice: Named bookmarks of this SDK and the marks you set, in a telescope picker - filter by name or mark, by
+path or by the text of the line, and `<CR>` jumps there in the edit window
+(`:VimIdeMarks`; `<Esc>` then `d` deletes one and the picker stays open; `Ctrl+s` shows every SDK's bookmarks). `:marks` prints a table once
 and leaves you to find the row with your eyes; twenty marks in, that is the
 job. Automatic marks are left out - `'`, `"`, `^`, `.` and especially `0`-`9`,
 which vim fills with recently closed files and which here means the index's
@@ -421,8 +421,8 @@ where you are. Opened with the cursor on a symbol, the row already reads
 `＋ 등록: <symbol>`; opened on blank space, type a name in the prompt and the
 row follows what you type. (The prompt is deliberately not pre-filled with the
 symbol - that would filter the list down to it just when you opened the picker
-to jump somewhere.) Bookmarks show as `★ name`, current project first, then the
-most recent, and are kept in `stdpath('data')/vim-ide/bookmarks.json` (name,
+to jump somewhere.) Bookmarks show as `★ name`, this SDK's only (see below), the
+most recent first, and are kept in `stdpath('data')/vim-ide/bookmarks.json` (name,
 file, line and that line's text) - vim's marks are only 26 and cannot be named.
 When edits move the line, the jump finds the saved text again nearby (then the
 name as a word, searching both ways, case-sensitive, then the saved line) and
@@ -444,6 +444,139 @@ quick `dd` removes one, not two. With the add row selected, the preview shows th
 would be saved. The file is never rewritten when it cannot be read (bad JSON,
 no permission), writes from several nvim at once take turns through a lock
 file, and a symlinked or restricted `bookmarks.json` keeps its link and mode.
+
+Each SDK has its own list of named bookmarks. The picker shows only the `★`
+rows of the SDK that the edit window's file is in (opened from a tree or a
+panel: the last edit window's file; no file at all: the current directory), so
+opening it in another SDK does not show the last one's. The SDK is the top
+directory holding `.repo` (an SDK checked out with repo - also when only
+`kernel/common` or `u-boot` inside it is indexed, or when one index above holds
+several such SDKs), else the outermost indexed project root holding the file -
+the root RelationView and the quickfix list shorten paths against, so
+`kernel/common` with its own index inside it is still that SDK - else the
+outermost directory marked by `.git`, `.project` or `.root`. None of this
+depends on where nvim was started, and home and `/` never count. A `.repo`
+checkout inside an SDK found by its index or marker (and an indexed directory
+inside one found by a marker) is an SDK of its own: its bookmarks show there,
+not in the outer one. Opened on a file in no SDK (`~/.vimrc`), it shows the
+bookmarks saved outside any SDK. Paths are compared with symlinks resolved too.
+Saving is unchanged: a bookmark belongs to the SDK of its file. The results
+title starts with the `Ctrl+s` hint and then names the SDK
+(`^s 모든 SDK   SDK  /home/B130111/work1/sdk`), with the path shortened to fit
+the window, so the hint is never cut off. `Ctrl+s` in the picker switches
+between this SDK's bookmarks and every SDK's (this SDK's first) for that one
+list - not `Ctrl+a`, which is the tmux prefix in vim-ide's `.tmux.conf` and
+never reaches nvim inside tmux; `let g:vimide_bookmarks_scope = 'all'` makes
+every SDK the default. The SDK of the file you open it from is looked up each
+time the picker opens, so an index built meanwhile counts at once. What it
+learns about the other bookmarks' and marks' directories - their SDK, their
+symlink-resolved path, and whether each directory on the way up holds `.repo`,
+an index or `.git`/`.project`/`.root` - is remembered for the session: no git
+call per row, a directory shared by many bookmarks is looked at once, and a slow
+or unreachable mount is touched once per session, not on every open.
+Symlinks are resolved once per SDK root, not per bookmark, and a directory under
+an SDK root already found is only checked up to that root. This is forgotten
+when this nvim builds an index, when what is found for the file you open from
+differs from what was remembered, and when the picker has not been opened for 5
+minutes (so an index another nvim built for another SDK shows up then); using
+it every few minutes keeps it. The first open of a session walks every
+bookmark's directory, wherever it is opened from, since a row's label is
+compared with every bookmark's SDK (below). Measured on a Mac with 300
+bookmarks in 300 directories of 5 SDKs (found by index, `.repo` and `.git`):
+the first open makes about 1230 stats and 6-7 realpaths (one per SDK root - a
+realpath of such a path costs about ten stats there) and takes 30-40 ms; later
+opens make 15-72 stats and 1-2 realpaths and take 9-12 ms - the original
+picker made 91 stats and 1 realpath on every open, 31-45 ms the first time and
+13-14 ms later. The count grows with the number of distinct
+directories and their depth, not with the number of bookmarks in one
+directory.
+
+Marks are not per SDK. `A`-`Z` always show, and so do `a`-`z` of every file,
+not only the current one - an `ma` set in a file of another SDK is there too,
+also after nvim is restarted, and the current file's come first. A file that
+still has a buffer in this nvim gives that buffer's marks - a loaded buffer, one
+read at least once, or one holding `a`-`z` marks, listed or not, also after
+`:bd` (the buffer keeps its marks and nvim writes them to shada at exit, so the
+list shows what will be written, not the older shada). Only for a file with no
+such buffer - not opened yet since the restart, or only added with `:badd` -
+are they read from the shada file, since nvim attaches a file's `a`-`z` only
+when it reads that file. The picker reads buffer options with `getbufvar()`:
+reading them with `vim.bo[b]` on a buffer closed with `:bd` makes nvim 0.12
+drop that file's marks from shada at exit. The shada file is
+the one nvim uses (`'shadafile'`, else the `n` item of `'shada'`, else
+`stdpath('state')/shada/main.shada`); it is only read, and read again only
+when its size or time changes (0.7 ms for a 37 KB shada of 100 files, 9 ms for
+1 MB; each marked file is read once, up to its lowest mark, for the line's
+text). Nothing is read when `'shada'` is empty or has `'0`, and an unreadable,
+locked or half-written shada leaves just the loaded buffers' marks, without a
+message. A mark whose file is gone is left out. Choosing one opens its file in
+the edit window at the mark; if the mark is not there once the file is open
+(another nvim deleted it meanwhile), it says `마크 'c' 가 그 파일에 없습니다`
+instead of going to the old line. `d` removes an `a`-`z` mark in its own buffer
+(also a buffer closed with `:bd`, without reading it again) and an `A`-`Z`
+mark globally; an `a`-`z` read from shada is removed by loading its file into a
+buffer (no window changes; the buffer is added to the buffer list, because nvim
+does not write the marks of a loaded buffer that is not listed at exit and
+that drops the file's other marks too) and deleting it there, so nvim writes
+the change to shada when it exits; the notice is
+`마크 'c' 를 지웠습니다 (파일을 버퍼로 읽음)`. If the mark is gone by then, the
+buffer it loaded is wiped again and the notice is
+`마크 'c' 를 지우지 못했습니다: 그 파일에 없습니다`. Notices are kept short (50
+cells or less) so that an 80-column terminal does not stop at Press ENTER; a
+longer one (a long bookmark name) is shortened on screen and kept whole in
+`:messages` (fitmsg.lua).
+
+A `★` row shows its path relative to the SDK root
+(`kernel/common/sound/soc/telechips/tcc_i2s.c`), a mark its absolute path
+(`/home/B130111/work1/sdk/.../file.c`), so you can tell which SDK it belongs
+to; with every SDK listed, other SDKs' bookmarks are absolute as well.
+Absolute paths are shown with the SDK root's symlinks resolved (`/tmp/x` and
+`/private/tmp/x` are one place; below the root the path is shown as stored, and
+a path in no SDK has its directory resolved), while the stored path is left as
+it is. The rows
+form a table: kind and name, path, line and the line's text start at the same
+screen column on every row. Widths are display cells (`strdisplaywidth` - a
+Korean character takes two), padded with spaces rather than tabs, since a tab
+stop misaligns the rows as soon as a column crosses it. A name longer than a
+quarter of the list is cut at its end. The path column goes before the text
+column (the preview shows the line anyway), and a path that still does not fit
+is cut with `…` at directory boundaries, never inside a directory name. A
+relative path loses its leading directories, so the file name stays
+(`…/soc/telechips/tcc_i2s.c`). An absolute path shortens its SDK root last,
+since the root is what tells the SDK: first the whole root stays and only the
+part below it is cut
+(`/home/B130111/work1/tsnd/dev/tsnd_2.1/Android14_IVI_1.1.0/…/telechips/tcc_i2s.c`);
+if even the root and `…/` and the file name do not fit, home is written as `~`
+with the rest of the root whole (`~/work1/tsnd/dev/tsnd_2.1/Android14_IVI_1.1.0/…/tcc_i2s.c`);
+only then is the root itself shortened, dropping middle directories first and
+keeping the one above the SDK's name and the first one under home longest
+(`~/work1/…/tsnd_2.1/Android14_IVI_1.1.0/…/tcc_i2s.c`). When another SDK
+with the same name is known - the SDK of any bookmark, listed or not (other
+SDKs' bookmarks hidden by the scope count too), of any mark including those read
+from shada, or the SDK you opened it from - the directories where their paths
+part (`work1` and `work2`, `tsnd_2.0` and `tsnd_2.1`) are kept, and they are
+what is kept longest: for a root outside home (`/private/tmp/...`,
+`/Volumes/<share>/...`) the directories before the first parting one go first
+(`/private/…/work2/…/tsnd_2.0/Android14_IVI_1.1.0`). So a row reads the same
+whatever else is listed, and deleting its twin does not change it while the
+picker is open. `Ctrl+s` measures the columns again for the other scope, so a
+row may be cut a little differently there, but the parting directories stay. To keep the root whole,
+the name column gives up cells down to 10 (names are cut at their end) when
+that is enough - else to fit the root with home as `~`, else to fit the
+shortest root that still has the parting directories and the SDK's whole
+name. Only when even that does not fit is the SDK's name cut in its middle,
+then left out while the parting directories stay
+(`~/work2/…/tsnd_2.0/…/tcc_i2s.c`), then only the first of them stays
+(`…/work2/…/tcc_i2s.c`); in a path column of about 20 cells or less that goes
+too. A path in no SDK is
+shown whole, then with home as `~`, then with its first directory and its end
+(`~/notes/…/a/b.md`).
+The preview shows the place either way. The columns are measured again after
+`d` and `Ctrl+s`, but within one open (and one scope) they never get narrower,
+so deleting the row with the longest name or root does not reshape the
+others. The preview is a little narrower here than in other lists
+(0.4 of the width) to leave the table room. Typing filters by name or mark,
+the whole path and the text.
 
 Ctrl+M twice opens it too. In a terminal Ctrl+M *is* Enter, so this is Enter
 twice - and it is done without waiting: a `<CR><CR>` mapping would make every
@@ -673,6 +806,7 @@ quickfix keys wait until the list has caught up with what was typed (see
 | `Ctrl+n` / `Ctrl+p` | next / previous entry (also `Down` / `Up`; `j` / `k` in normal mode) |
 | `Ctrl+u` / `Ctrl+d` | scroll the preview up / down; in `\fo`, `\fx` and the bookmarks `Ctrl+d` drops the entry instead (next row) |
 | `d` | in normal mode (`Esc` first) in `\fo`, `\fx` and the bookmarks: drop the entry, or every marked one; the list stays open. `Ctrl+d` does it in insert mode |
+| `Ctrl+s` | in the bookmarks: this SDK's named bookmarks only / every SDK's, for this list (`g:vimide_bookmarks_scope` sets which one it opens with; not `Ctrl+a`, the tmux prefix in vim-ide's `.tmux.conf`) |
 | `Ctrl+/` / `?` | telescope's own list of this picker's keys (`?` in normal mode) |
 | `Esc` / `Ctrl+c` | `Esc`: insert to normal mode, and in normal mode close the list; `Ctrl+c` closes from insert mode |
 | `F1` | the shortcut help, with this prompt's own keys first |

@@ -4404,9 +4404,20 @@ nnoremap <silent> <leader>fM :ProjectFilesImport<CR>
 " 목록은 화살표나 <Esc> 뒤 j/k 로 옮겨 <CR>.
 "
 " 대문자(mA)로 찍으면 파일을 넘나들고, 소문자(ma)는 그 파일 안에서만이다.
+" 목록에는 둘 다 어느 SDK 에서 열든 뜬다 - 소문자는 이 nvim 에 있는 버퍼의
+" 것(:bd 로 닫은 버퍼도)과, 한 번도 읽지 않은 파일(nvim 을 다시 켠 뒤 아직 안
+" 연 파일)은 shada 에 적힌 것.
 " 0-9 와 ' " ^ . 같은 자동 표시는 뺀다. 특히 0-9 는 '최근에 닫은 파일'이라
 " 이 설정에서는 .tags/files 같은 색인 내부 파일이 올라온다
 " (g:vimide_marks_auto = 1 이면 같이 보여준다).
+"
+" 이름 붙은 북마크(★)는 SDK 마다 따로 본다. 창을 연 파일이 든 SDK(.repo 를
+" 가진 맨 위, 없으면 가장 바깥 색인 루트, 없으면 가장 바깥 .git 같은 프로젝트
+" 루트)의 것만 뜨고, 경로는 그 SDK 기준 상대 경로다. 마크는 절대 경로로 보인다.
+" 창 안에서 <C-s> 를 누르면 그 창에서만 이 SDK / 모든 SDK 를 바꾼다
+" (<C-a> 는 vim-ide 의 tmux prefix 라 tmux 안에서는 nvim 까지 오지 않는다).
+"   'sdk' (기본) 이 SDK 의 ★ 만      'all' 모든 SDK 의 ★ (이 SDK 것이 먼저)
+let g:vimide_bookmarks_scope = 'sdk'
 "
 "
 " 왜 <C-m> 이 아닌가
