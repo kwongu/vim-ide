@@ -75,8 +75,9 @@
 --   화면 칸(strdisplaywidth - 한글은 한 글자가 두 칸)으로 잰다. 탭 문자는
 --   쓰지 않는다 - 칸 폭이 탭 자리를 넘나들면 줄마다 어긋난다.
 --   경로 칸이 그 줄의 글보다 먼저다(글은 미리보기에도 보인다). 그래도 넘치면
---   디렉터리 단위로 줄인다. 상대 경로는 앞을 '…/' 로 잘라 파일 이름 쪽을
---   남긴다. 절대 경로는 SDK 루트를 맨 나중에 줄인다 (clip_abs):
+--   디렉터리 단위로 줄인다. 상대 경로는 처음과 끝을 남기고 가운데를 '…' 로
+--   ('subcore/build/…/git/src/tsnd_arpc.c' - 첫 디렉터리와 파일 이름도 안
+--   들어가면 앞을 '…/' 로 자른다). 절대 경로는 SDK 루트를 맨 나중에 줄인다 (clip_abs):
 --     SDK 루트는 통째로, 그 아래만 앞을 자른다
 --       '/home/B130111/work1/tsnd/dev/tsnd_2.1/Android14_IVI_1.1.0/…/telechips/tcc_i2s.c'
 --     루트와 '…/파일 이름'도 안 들어가면 홈을 ~ 로 (루트의 나머지는 통째로)
@@ -1051,6 +1052,33 @@ local function clip(str, w, where)
     end
     return table.concat(parts)
   end
+  if where == 'dirmid' then
+    -- 경로의 처음과 끝을 남기고 가운데 디렉터리를 '…' 로 (요청: 앞을 자르면
+    -- 'subcore/build/' 같은 어디 밑인지가 사라졌다). 끝(파일 쪽)과 앞을 번갈아
+    -- 디렉터리 단위로 늘린다 - 'subcore/build/…/git/src/tsnd_arpc.c'.
+    -- 첫 디렉터리와 파일 이름도 다 안 들어가면 예전처럼 앞을 자른다('head')
+    local p = vim.split(str, '/', { plain = true })
+    if #p >= 3 then
+      local function width(hh, tt)
+        return dw(table.concat(p, '/', 1, hh)) + dw('/…/') + dw(table.concat(p, '/', #p - tt + 1, #p))
+      end
+      local h, t = 1, 1
+      if width(h, t) <= w then
+        local grew = true
+        while grew and h + t < #p - 1 do
+          grew = false
+          if h + t < #p - 1 and width(h, t + 1) <= w then
+            t, grew = t + 1, true
+          end
+          if h + t < #p - 1 and width(h + 1, t) <= w then
+            h, grew = h + 1, true
+          end
+        end
+        return table.concat(p, '/', 1, h) .. '/…/' .. table.concat(p, '/', #p - t + 1, #p)
+      end
+    end
+    where = 'head'
+  end
   if where == 'head' then
     -- 경로는 디렉터리 이름 가운데서 자르지 않는다. 잘린 조각('…g/alignment',
     -- '…mmon/sound')이 진짜 디렉터리 이름처럼 보였다(반대 심문). 잘린 첫 조각을
@@ -1393,7 +1421,7 @@ local function cols_at(L, width)
   for _, e in ipairs(L.list) do
     if e.kind ~= 'add' then
       local s = e.abs and clip_abs(e.shown, e.sdk, cap, L.labels[e.sdk])
-        or clip(e.shown, cap, 'head')
+        or clip(e.shown, cap, 'dirmid')
       c.paths[e] = s
       c.wp = math.max(c.wp, dw(s))
     end
@@ -1410,7 +1438,7 @@ local function label(e, L, width)
   local c = cols_at(L, width or 120)
   local text = vim.fn.strcharpart(e.text or '', 0, 300)
   return pad(glyph(e), L.glyph) .. ' ' .. pad(clip(e.name, c.wn, 'tail'), c.wn) .. GAP
-    .. pad(c.paths[e] or clip(e.shown, c.wp, 'head'), c.wp) .. GAP
+    .. pad(c.paths[e] or clip(e.shown, c.wp, 'dirmid'), c.wp) .. GAP
     .. string.rep(' ', L.line - #tostring(e.lnum)) .. tostring(e.lnum) .. GAP .. text
 end
 

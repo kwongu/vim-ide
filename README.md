@@ -541,8 +541,10 @@ stop misaligns the rows as soon as a column crosses it. A name longer than a
 quarter of the list is cut at its end. The path column goes before the text
 column (the preview shows the line anyway), and a path that still does not fit
 is cut with `…` at directory boundaries, never inside a directory name. A
-relative path loses its leading directories, so the file name stays
-(`…/soc/telechips/tcc_i2s.c`). An absolute path shortens its SDK root last,
+relative path keeps its beginning and its end and loses the directories in
+the middle (`subcore/build/…/git/src/tsnd_arpc.c`), so both where it lives and
+the file name stay; only when even the first directory and the file name do
+not fit is it cut at the start (`…/src/tsnd_arpc.c`). An absolute path shortens its SDK root last,
 since the root is what tells the SDK: first the whole root stays and only the
 part below it is cut
 (`/home/B130111/work1/tsnd/dev/tsnd_2.1/Android14_IVI_1.1.0/…/telechips/tcc_i2s.c`);
