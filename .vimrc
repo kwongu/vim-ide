@@ -162,6 +162,17 @@ endif
 "   let g:vimide_ascii_icons = 0   " 늘 Nerd Font 로
 if !exists('g:vimide_ascii_icons')
     let g:vimide_ascii_icons = ($TERM ==# 'xterm-color')
+    " tmux 안의 $TERM 은 그 창(셸)을 만들 때의 값이라 지금 보고 있는 터미널과 다를 수
+    " 있다 - 서버의 .profile 이 TERM 을 늘 xterm-color 로 만들던 때 열어 둔 창에서는
+    " 맥 iTerm2(xterm-256color)로 붙어도 ASCII 로 그렸다 (2026-10-10). 그럴 때만
+    " 지금 붙은 tmux 클라이언트의 터미널을 묻는다 (그 밖에는 tmux 를 부르지 않는다)
+    if g:vimide_ascii_icons && !empty($TMUX) && executable('tmux')
+        let s:tmux_term = trim(system('tmux display-message -p "#{client_termname}"'))
+        if v:shell_error == 0 && s:tmux_term =~# '256color\|-direct'
+            let g:vimide_ascii_icons = 0
+        endif
+        unlet s:tmux_term
+    endif
 endif
 
 " set the runtime path to include Vundle and initialize
@@ -971,9 +982,11 @@ endif
 "     nvim 은 한 칸으로 세는데(ambiwidth=single) CJK 글꼴을 쓰는 터미널은
 "     두 칸으로 그린다. 그 어긋남이 '펑퍼짐'으로 보인다.
 "
-" 구별은 TERM 으로 한다. 실측: 사용자의 서버 세션 6개가 모두
-" TERM=xterm-color 였다 - Tera Term 이 자기를 그렇게 알린다(iTerm2 는
-" xterm-256color). 어림짐작이므로 언제든 직접 정할 수 있다.
+" 구별은 TERM 으로 한다 (위 160줄 근처 - tmux 안이면 붙은 클라이언트의 터미널).
+" Tera Term 은 xterm-color 로, iTerm2 는 xterm-256color 로 알린다. 예전에 서버
+" 세션이 모두 xterm-color 였던 것은 서버 .profile 이 terminfo 를 /usr/share 에서만
+" 찾아 TERM 을 늘 xterm-color 로 만든 탓이었다 (2026-10-10 고침). 어림짐작이므로
+" 언제든 직접 정할 수 있다.
 "   let g:vimide_ascii_icons = 1   " 늘 ASCII 로
 "   let g:vimide_ascii_icons = 0   " 늘 Nerd Font 로
 if !exists('g:vimide_ascii_icons')
