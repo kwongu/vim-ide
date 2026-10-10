@@ -46,8 +46,9 @@
 -- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
 -- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
 -- 커서가 있는 차이 덩어리째 오른쪽(B)/왼쪽(A)으로 (diffput/diffget - 저장은 :w).
--- <C-S-r>/<C-S-l> 은 커서 줄만 (터미널이 Ctrl+Shift 를 알려 줄 때 - iTerm2 CSI u, tmux
--- extended-keys), 어디서나 되는 것은 횟수(1<C-r> = 커서 줄, N<C-r> = N 줄)와 비주얼(고른 줄).
+-- <C-S-r>/<C-S-l> 은 커서 줄만 (Ctrl+Shift 가 nvim 까지 따로 올 때 - 아래 TAKE 의 설명: tmux 안이면
+-- tmux '서버'가 3.2 이상이어야 한다), 어디서나 되는 것은 횟수(1<C-r> = 커서 줄, N<C-r> = N 줄)와
+-- 비주얼(고른 줄).
 -- 커서 줄만(<C-S-r>, 1<C-r>)인데 그 줄이 바뀐 줄이 아니면, 바로 위(먼저)·아래에 끼인 줄(저쪽에만
 -- 있는 줄) 덩어리째다 - 여러 줄일 수 있다.
 -- 비교 탭 밖의 <C-r>(되돌리기 취소)·<C-l>(창 옮기기)은 그대로다.
@@ -2707,6 +2708,26 @@ local function copy_into_blank(put, visual, l1, l2, tw, sw, whole)
   return true
 end
 
+-- tmux 안이고 그 서버가 extended-keys(3.2+)를 모르면 그 판('3.0a'), 아니면 false. 한 번만 묻는다.
+-- 그런 서버 안에서는 Ctrl+Shift+R/L 이 <C-r>/<C-l> 로 온다 (TAKE 의 설명). #{version} 은 서버의 판이다
+-- (tmux -V 는 클라이언트의 판). 개발서버의 ~/.local/bin/tmux 래퍼는 옛 서버에는 옛 클라이언트로 묻는다
+local tmux_old_v, tmux_told
+local function tmux_old()
+  if tmux_old_v == nil then
+    tmux_old_v = false
+    if (vim.env.TMUX or '') ~= '' and vim.system and vim.fn.executable('tmux') == 1 then
+      local ok, r = pcall(function()
+        return vim.system({ 'tmux', 'display-message', '-p', '#{version}' }, { text = true }):wait(1000)
+      end)
+      local maj, min = (ok and r.code == 0 and vim.trim(r.stdout or '') or ''):match('^(%d+)%.(%d+)')
+      if maj and (tonumber(maj) < 3 or (tonumber(maj) == 3 and tonumber(min) < 2)) then
+        tmux_old_v = vim.trim(r.stdout)
+      end
+    end
+  end
+  return tmux_old_v
+end
+
 -- one: <C-S-r>/<C-S-l> - 횟수가 없어도 커서 줄만
 function _G.vimide_dirdiff_copy_lines(dir, one)
   local v = applies()
@@ -2827,14 +2848,27 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
     end)
   end
   pcall(vim.cmd, 'diffupdate')
+  -- 옛 tmux 서버 안에서 덩어리째 복사했으면 한 번 알린다 - Ctrl+Shift+R 을 눌렀어도 여기로 온다
+  if ok and whole and not tmux_told and vim.b[tb].changedtick ~= tick and tmux_old() then
+    tmux_told = true
+    say(('덩어리째 복사했습니다 - 이 tmux 서버(%s)는 Ctrl+Shift+R/L 도 <C-r>/<C-l> 로 넘깁니다.'
+      .. ' 커서 줄만은 1<C-r>/1<C-l> (Ctrl+Shift 는 tmux 3.2 이상 서버에서)'):format(tmux_old()))
+  end
 end
 
 -- 전역 <C-r>/<C-l> 를 비교 창에서만 가로챈다. 그 밖에서는 원래대로 (<C-r> 되돌리기 취소,
 -- <C-l> 은 .vimrc 의 창 옮기기): expr 매핑이라 원래 키가 그 자리(쌓인 키 앞)에서 돈다 -
 -- feedkeys 로 넘겼더니 빠르게 친 뒤의 키가 먼저 돌았다.
--- 키 -> { 방향, 커서 줄만 }. <C-S-r>/<C-S-l> 은 터미널이 Ctrl+Shift 를 따로 알려 줄 때만 온다
--- (iTerm2 의 CSI u, tmux 의 extended-keys) - Tera Term 등에서는 그냥 <C-r>/<C-l> 이 오므로
--- 1<C-r>/1<C-l> 이 같은 일을 한다. 비교 창 밖의 <C-S-r>/<C-S-l> 도 그 키 그대로 넘긴다
+-- 키 -> { 방향, 커서 줄만 }. <C-S-r>/<C-S-l> 은 Ctrl+Shift 가 nvim 까지 따로 올 때만 온다 -
+-- Tera Term 등에서는 그냥 <C-r>/<C-l> 이 오므로 1<C-r>/1<C-l> 이 같은 일을 한다.
+-- iTerm2 는 따로 켤 것이 없다: nvim(또는 tmux)이 modifyOtherKeys 2 를 달라고 하면 Ctrl+Shift+R 을
+-- CSI 27;6;82~ 로 보낸다 (Profiles > Keys 의 'Apps can change how keys are reported', 기본 켜짐).
+-- tmux 안이면 tmux '서버'가 3.2 이상이고 extended-keys on 이어야 한다. 3.0a(Ubuntu 20.04 apt 판)는
+-- iTerm2 에 아무것도 달라고 하지 않아 Ctrl+Shift+R 이 그냥 0x12(<C-r>)로 와서 덩어리째 복사된다
+-- (iTerm2 를 흉내 낸 pty 로 tmux 3.0a / 3.7c 를 실측). ~/.local/bin/tmux 래퍼는 옛 서버가 떠 있는
+-- 동안 그 서버에 옛 판으로 붙으므로, 깔아 둔 새 판은 그 서버를 끝낸 뒤에야 쓰인다 - 그 사이에는
+-- 덩어리째 복사할 때 한 번 알리고(tmux_old) 도움말에도 적는다.
+-- 비교 창 밖의 <C-S-r>/<C-S-l> 도 그 키 그대로 넘긴다
 -- (매핑이 없을 때 nvim 은 <C-S-r> 을 <C-r> 처럼 되돌리기 취소로 친다)
 local TAKE = {
   ['<C-r>'] = { 1 }, ['<C-l>'] = { -1 },
@@ -3104,10 +3138,22 @@ local HELP_PAIR = {
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
   '  <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w - 트리 판정도 다시)',
-  '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널에서는 1<C-r> 1<C-l>)',
+  '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널·tmux 3.2 미만 서버에서는 1<C-r> 1<C-l>)',
   '                - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
   '  N<C-r> N<C-l> 커서 줄부터 N 줄, 비주얼은 고른 줄만',
 }
+
+-- 옛 tmux 서버 안이면 지금 Ctrl+Shift 가 안 온다는 줄을 붙인다
+local function help_pair()
+  local old = tmux_old()
+  if not old then
+    return HELP_PAIR
+  end
+  return vim.list_extend(vim.list_extend({}, HELP_PAIR), {
+    ('  ! 지금 tmux 서버(%s)는 Ctrl+Shift 를 넘기지 못해 <C-S-r> <C-S-l> 이 <C-r> <C-l> 로 온다'):format(old),
+    '    - 커서 줄만은 1<C-r> 1<C-l>. tmux 3.2 이상 서버(extended-keys on)에서는 그대로 된다',
+  })
+end
 
 local function help()
   local lines = {
@@ -3126,7 +3172,7 @@ local function help()
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
   }
-  vim.list_extend(lines, HELP_PAIR)
+  vim.list_extend(lines, help_pair())
   vim.notify(table.concat(lines, '\n'))
 end
 
@@ -3287,7 +3333,7 @@ local function open_fmenu(v)
   end
   vim.keymap.set('n', '?', function()
     close(true)
-    vim.notify(table.concat(HELP_PAIR, '\n'))
+    vim.notify(table.concat(help_pair(), '\n'))
   end, o('비교 창의 키 (도움말)'))
   -- F1: 메뉴를 닫고 비교 창에서 연다 (트리의 f 메뉴와 같은 까닭 - 떠난 창이 없어져 엉뚱한 창으로 갔다)
   if vim.fn.exists('*VimIdeKeyHelp') == 1 then

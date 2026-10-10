@@ -1986,7 +1986,7 @@ let g:vimide_dirdiff_tab = 1
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
 "            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도),
 "            <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
-"            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term 처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
+"            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term, tmux 3.2 미만 서버처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
 "            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
 "            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
 "   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로

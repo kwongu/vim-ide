@@ -2467,10 +2467,29 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same). While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c` |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
-| `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when the terminal reports Ctrl+Shift (iTerm2 with CSI u, tmux with `extended-keys`); Tera Term usually sends a plain `<C-r>` / `<C-l>` |
+| `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when Ctrl+Shift reaches it as its own key - see *Ctrl+Shift in tmux* below; Tera Term usually sends a plain `<C-r>` / `<C-l>` |
 | `1<C-r>` / `1<C-l>`, `N<C-r>`, visual | work in every terminal: a count copies that many lines from the cursor (`1<C-r>` is the cursor line, with the same rule on an unchanged line as `<C-S-r>`), a visual selection exactly its lines. Lines of the other side just above the first of those lines are not part of them (as with nvim's `:1,1diffget`); when nothing in the lines differs it says so |
 
 The copy goes into the other buffer and `:w` saves it. Unsaved edits on either side are what is compared and copied, and each copy is one undo step in the buffer it changed. When one side is not a file (the empty side of a one-sided file, a note - a binary or too large file too) the keys refuse and point to the tree copy. Block copies count the rows of both windows (filler lines included) and replace exactly the block's lines, instead of handing nvim a line range: with linematch, a range one line wider than the block also took the next piece and deleted lines on the other side, and nvim's own `:diffput` loses a line when the target is a file with a single empty line (or empties one partway through) and leaves a line behind on `u` after copying into an empty file. On a very large diff (counting takes over 0.25 s), or when `'diffopt'` has `iblank` or lacks `filler` (the rows of the two windows no longer line up), it falls back to `:diffput` / `:diffget` with a range around the block - except into an empty file, which is always filled directly (one `u` empties it again), and into a file holding a single empty line, where the few rows can still be told apart. `do` / `dp` still work. Outside the DirDiff tab `<C-r>` is redo and `<C-l>` moves to the right window, exactly as before, and `<C-S-r>` / `<C-S-l>` do what nvim does without a mapping (`let g:vimide_dirdiff_copy_keys = 0` leaves all four alone everywhere).
+
+**Ctrl+Shift in tmux.** In iTerm2 nothing has to be turned on: when nvim, or the
+tmux in between, asks for modifyOtherKeys level 2, iTerm2 sends Ctrl+Shift+R as
+`CSI 27;6;82~` (*Profiles > Keys > Apps can change how keys are reported*, on by
+default). Inside tmux it is the tmux **server** that has to know extended keys:
+3.2 or newer with `set -s extended-keys on` (the repository `.tmux.conf` has it).
+tmux 3.0a - the apt package of Ubuntu 20.04 - never asks iTerm2 for it and cannot
+tell Ctrl+Shift+R from Ctrl+R, so the key arrives as a plain `<C-r>` and the whole
+change is copied. That was measured by standing in for iTerm2 with a pty: 3.0a
+copied the whole block, 3.7c with the same `.tmux.conf` copied the cursor line
+(`tmux display -p '#{pane_key_mode}'` in that pane reads `Ext 2`). A Mac tmux in
+front of the server's tmux does not help while the inner one is 3.0a. `tools/deps.sh`
+builds a new tmux into `~/.local`, but the `~/.local/bin/tmux` wrapper keeps
+attaching to a 3.0a server that is already running - `tmux display -p '#{version}'`
+shows which one you are in - so the new one is used only after that server has been
+ended (save the sessions with tmux-resurrect first, restore them in the new server).
+Until then `1<C-r>` / `1<C-l>` copy the cursor line; inside such a server the first
+whole-block copy of a session says so once, and the `?` help adds a line about it.
+`:JumpKeyTest` followed by Ctrl+Shift+R shows `<C-S-R>` when the key gets through.
 
 #### Compare tabs
 
