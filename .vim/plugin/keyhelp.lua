@@ -1099,7 +1099,7 @@ local MODES = { 'n', 'x', 's', 'o', 'i', 'c', 't' }
 -- (dirdiffview.lua 의 take_over: prev_maps[id], id = 'n<C-l>').
 local SCOPED = {
   { desc = '^DirDiff 비교 창', sect = 'comparing directories', hdr = 'edit window',
-    where = 'DirDiff 탭의 비교 창에서만', up = { 'prev_maps', 'id' } },
+    where = 'DirDiff 의 비교 창(비교 탭, 트리 위 편집 창)에서만', up = { 'prev_maps', 'id' } },
 }
 local function scope_of(d)
   for _, sc in ipairs(SCOPED) do
@@ -1314,6 +1314,7 @@ end
 -- filetype 이 사람이 읽을 이름이 아닌 창 (목록 칸이 좁아 'vimid…' 로 잘렸다)
 local WIN_NAME = {
   vimidedirdiffmenu = 'DirDiff 보기 메뉴',
+  vimidedirdifffile = 'DirDiff 비교 보기 메뉴',   -- 비교 창의 \d
 }
 
 -- '이 창 · <이름>' 의 이름: filetype(WIN_NAME), 없으면 버퍼 이름, 그것도 없으면
@@ -1353,6 +1354,7 @@ local WIN_SECTION = {
   relationview = { 'relation window' },
   vimidedirdiff = { 'side-by-side tree' },
   vimidedirdiffmenu = { 'views' },
+  vimidedirdifffile = { 'view modes' },
   nerdtree = { 'nerdtree' },
   TelescopePrompt = { 'keys in a telescope list' },
 }

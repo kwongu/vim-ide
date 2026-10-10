@@ -428,6 +428,12 @@ local FOREIGN_FT = {
 }
 
 local function foreign_tab()
+  -- DirDiff 의 비교 탭(dirdiffview.lua - 짝마다 탭 하나): 두 창에 빈·알림 버퍼(nofile)를 띄웠다가 파일을
+  -- 싣는다. 그 창을 곁창으로 적어 두었다가 '곁창에 파일이 실렸다' 고 파일을 새 EDIT 창으로 빼내, 탭에
+  -- 창이 셋(A 파일 | 빈 A | 빈 B) 생겼다. 탭 변수로 가린다 - 버퍼로는 파일을 다 실은 뒤에 가릴 수 없다
+  if vim.t.vimide_dirdiff_pair then
+    return true
+  end
   local ok, wins = pcall(api.nvim_tabpage_list_wins, 0)
   if not ok then
     return false

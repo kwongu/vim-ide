@@ -1,18 +1,29 @@
 -- dirdiffview.lua - Beyond Compare 처럼: 두 디렉터리를 나란한 트리로, 바로
 --
---   :DirDiff <A> <B>        새 탭: 위는 편집 창 둘(A | B, diff), 아래는 비교 트리
+--   :DirDiff <A> <B>        새 탭에 비교 트리. 파일을 고르면 비교 탭(A | B, diff)이 따로 열린다
 --   neo-tree 에서 \d 두 번  같은 것 (dirdiffpick.lua)
 --   :DirDiffClassic <A> <B> 예전 DirDiff.vim 목록 (dirdifftab.vim)
 --
--- 아래 창(비교 트리)은 왼쪽이 A, 오른쪽이 B 의 트리다. 같은 줄에 같은 이름이
+-- 트리 창은 왼쪽이 A, 오른쪽이 B 의 트리다. 같은 줄에 같은 이름이
 -- 오고, 한쪽에만 있으면 다른 쪽은 비어 있다. 가운데 칸이 판정이다:
 --   =  같다      ≠(x) 다르다      ◀(<) A 에만     ▶(>) B 에만     ·(.) 확인 중
--- 다른 것은 빨강, 한쪽에만 있는 것은 파랑, 확인 중인 것은 흐리게.
+-- 색은 Neogit 상태 화면의 것 (g:vimide_dirdiff_colors): 다른 것은 파랑(NeogitChangeModified),
+-- A 에만은 빨강(NeogitChangeDeleted), B 에만은 초록(NeogitChangeNewFile), 확인 중은 흐리게.
+-- 'classic' 이면 예전 색 (다른 것 빨강, 한쪽에만 있는 것 파랑).
+--
+-- 파일 짝은 비교 탭에서 본다 (g:vimide_dirdiff_pair_tab = 1, 기본): 짝마다 탭 하나 - A | B 를
+-- diff 로, 창 머리에 경로와 보기. 같은 짝을 다시 고르면 그 탭으로 간다. 비교 탭의 q 는 그 탭을
+-- 닫고 트리의 그 줄로 (:tabclose 도 같다). 트리를 끝내면(q) 그 비교 탭들도 닫힌다.
+-- g:vimide_dirdiff_pair_tab = 0 이면 예전처럼 트리 탭 위쪽의 편집 창 둘에서 본다.
+-- 비교 창의 보기 (\d 로 고른다, Beyond Compare 의 글 비교 보기): 모두 보이기(기본 - 접지
+-- 않는다), 차이 보이기(바뀐 줄만, 나머지는 접는다), 문맥 보이기(바뀐 줄과 위아래 N 줄).
+-- 접기는 foldmethod=diff 그대로라 zR(모두) / zM(접기)도 된다.
 --
 -- 트리 창의 키
---   <CR>        파일: 위 두 창에 비교를 열고 커서를 편집 창(첫 차이)으로
+--   <CR>        파일: 비교 탭을 열고(있으면 그 탭으로) 커서를 첫 차이로
 --               디렉터리: 펼치기/접기
---   o           파일: 비교를 열되 커서는 트리에 그대로
+--   o           파일: 비교 탭을 뒤에서 열고(열려 있으면 다시 읽고) 커서는 트리에 그대로 -
+--               여러 짝을 열어 두고 gt 로 돌아본다. pair_tab = 0 이면 위 두 창에 열기만
 --   <C-n>/<C-p> 다음/앞 '차이' 파일로 (접힌 디렉터리는 펼치며). 모두·차이 밖의 보기에서는 그
 --               보기가 보이는 것으로 (좌측 최신이면 A 가 최신인 파일, 동일이면 같은 파일)
 --   l / h       펼치기 / 접기(접혀 있으면 부모로)
@@ -30,8 +41,10 @@
 --               항목마다 안전하게 한다 (같은 이름은 덮어쓰고 디렉터리는 합친다 - 지우지
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
---   R           다시 훑기        q  끝내기(탭을 닫는다)       ?  도움말
--- 편집 창(비교 중인 두 창)에서는 <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
+--   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
+-- 비교 창(비교 탭의 두 창, pair_tab = 0 이면 위의 편집 창 둘)에서는 \d 가 보기 고르기, 비교 탭의
+-- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
+-- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
 -- 커서가 있는 차이 덩어리째 오른쪽(B)/왼쪽(A)으로 (diffput/diffget - 저장은 :w).
 -- <C-S-r>/<C-S-l> 은 커서 줄만 (터미널이 Ctrl+Shift 를 알려 줄 때 - iTerm2 CSI u, tmux
 -- extended-keys), 어디서나 되는 것은 횟수(1<C-r> = 커서 줄, N<C-r> = N 줄)와 비주얼(고른 줄).
@@ -47,10 +60,14 @@
 --   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이 보이기
 --   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (아래 MODES 의 id, only_diff 보다 먼저)
 --   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
---   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (기본: 화면의 40%)
+--   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때만, 기본: 화면의 40%)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
 --   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
+--   let g:vimide_dirdiff_colors = 'classic' " 예전 색 (기본 'neogit': Neogit 상태 화면의 색)
+--   let g:vimide_dirdiff_pair_tab = 0      " 파일 짝을 비교 탭 대신 트리 위의 편집 창 둘에서
+--   let g:vimide_dirdiff_file_view = 'diff' " 비교 창의 처음 보기 (all / diff / context)
+--   let g:vimide_dirdiff_context = 3       " 문맥 보이기의 위아래 줄 수
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -67,6 +84,49 @@ local ns_pick = api.nvim_create_namespace('vimide_dirdiffview_pick')
 
 local M = {}
 local sessions = {} -- tabpage handle -> session
+
+-- 짝을 보이는 창 둘(view): { s = 세션, tab, win_a, win_b, rel = 보이는 짝, bin, empty_a, empty_b, fmode = 보기 }.
+-- pair_tab 이면 짝마다 비교 탭 하나(s.views[탭]), 아니면 트리 탭 위의 편집 창 둘 하나뿐(s.main)
+local function views_of(s)
+  local out = {}
+  if s.main then
+    out[#out + 1] = s.main
+  end
+  for _, v in pairs(s.views or {}) do
+    out[#out + 1] = v
+  end
+  return out
+end
+local views_of_fn = views_of
+
+local function all_views()
+  local out = {}
+  for _, s in pairs(sessions) do
+    vim.list_extend(out, views_of(s))
+  end
+  return out
+end
+
+-- 이 창이 비교 창(두 창 중 하나)인 view
+local function view_of_win(w)
+  for _, v in ipairs(all_views()) do
+    if w == v.win_a or w == v.win_b then
+      return v
+    end
+  end
+end
+
+-- 이 탭의 view: 비교 탭, 또는 편집 창 둘을 가진 트리 탭 (pair_tab = 0)
+local function view_of_tab(tab)
+  for _, s in pairs(sessions) do
+    if s.views[tab] then
+      return s.views[tab]
+    end
+    if s.main and s.tab == tab then
+      return s.main
+    end
+  end
+end
 
 local BAD = { diff = true, onlyA = true, onlyB = true }
 
@@ -118,29 +178,126 @@ local function say(msg, level)
   (_G.vimide_notify or vim.notify)('DirDiff: ' .. msg, level or vim.log.levels.INFO)
 end
 
+-- 색. g:vimide_dirdiff_colors = 'neogit'(기본)이면 Neogit 상태 화면의 무리에 잇는다 - 사용자가 Neogit
+-- 상태 화면이 더 잘 읽힌다고 했다. 그 무리가 없으면(Neogit 을 setup 하지 않았다) 그 줄만 예전 색.
+-- 'classic' 은 예전 색 그대로. 무리마다 { 이름, Neogit 무리(앞의 것부터 있는 것), 예전 정의 }.
+-- 비교 창(A·B 두 창)의 것은 그 창의 winhighlight 로만 단다 (diff_whl): A 쪽은 바뀐 줄·A 에만 있는 줄이
+-- Neogit 의 빨강(지운 줄), B 쪽은 초록(더한 줄). 줄 안의 바뀐 글자(DiffText)는 Neogit 의 줄 안 차이
+-- (NeogitDiff*Inline) - Highlight 는 그 줄과 바탕색이 같아 바뀐 글자가 보이지 않았다 (sourceinsight 색, 실측)
+local function neo()
+  return vim.g.vimide_dirdiff_colors ~= 'classic'
+end
+
+local HL = {
+  { 'VimIdeDirDiffChanged', { 'NeogitChangeModified' }, { fg = '#e06c75', ctermfg = 167 } },
+  { 'VimIdeDirDiffOrphan', nil, { fg = '#61afef', ctermfg = 75 } },   -- 예전 '한쪽에만' (A·B 가 같은 색)
+  { 'VimIdeDirDiffOnlyA', { 'NeogitChangeDeleted' }, { link = 'VimIdeDirDiffOrphan' } },
+  { 'VimIdeDirDiffOnlyB', { 'NeogitChangeNewFile', 'NeogitChangeAdded' }, { link = 'VimIdeDirDiffOrphan' } },
+  { 'VimIdeDirDiffPending', { 'NeogitSubtleText' }, { link = 'Comment' } },
+  { 'VimIdeDirDiffSame', nil, { link = 'Normal' } },
+  { 'VimIdeDirDiffDir', nil, { link = 'Directory' } },
+  { 'VimIdeDirDiffSize', { 'NeogitSubtleText' }, { link = 'Number' } },
+  { 'VimIdeDirDiffDate', { 'NeogitSubtleText' }, { link = 'Comment' } },
+  { 'VimIdeDirDiffOpened', nil, { link = 'Visual' } },
+  { 'VimIdeDirDiffMark', nil, { link = 'Search' } },        -- Space 로 고른 항목
+  { 'VimIdeDirDiffSide', nil, { underline = true, bold = true } },  -- 커서 줄의 지금 쪽(A/B)
+  { 'VimIdeDirDiffPickA', nil, { link = 'Search' } },      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
+  { 'VimIdeDirDiffMenuNow', { 'NeogitSectionHeader' }, { link = 'Title' } },  -- 보기 메뉴의 지금 보기
+  -- 창 머리·상태줄의 이름표 (Neogit 의 절 머리 - 'Unstaged changes'). neogit 색일 때만 단다
+  { 'VimIdeDirDiffHeader', { 'NeogitSectionHeader' }, { link = 'Title' } },
+  -- 비교 창 (winhighlight 의 대상 - neogit 색일 때만 단다). Neogit 이 없으면 원래 Diff* 그대로
+  { 'VimIdeDirDiffAddA', { 'NeogitDiffDelete' }, { link = 'DiffAdd' } },
+  { 'VimIdeDirDiffChangeA', { 'NeogitDiffDelete' }, { link = 'DiffChange' } },
+  { 'VimIdeDirDiffTextA', { 'NeogitDiffDeleteInline', 'NeogitDiffDeleteHighlight' }, { link = 'DiffText' } },
+  { 'VimIdeDirDiffAddB', { 'NeogitDiffAdd' }, { link = 'DiffAdd' } },
+  { 'VimIdeDirDiffChangeB', { 'NeogitDiffAdd' }, { link = 'DiffChange' } },
+  { 'VimIdeDirDiffTextB', { 'NeogitDiffAddInline', 'NeogitDiffAddHighlight' }, { link = 'DiffText' } },
+  { 'VimIdeDirDiffFiller', { 'NeogitSubtleText' }, { link = 'DiffDelete' } },  -- 끼인 줄은 흐리게
+}
+
+local function has_hl(name)
+  local ok, h = pcall(api.nvim_get_hl, 0, { name = name })
+  return ok and next(h) ~= nil
+end
+
+-- 마지막으로 단 정의 (nvim_get_hl 로 읽은 것, default 표시는 빼고). 지금 정의가 이것과 같거나 비었을
+-- 때만 다시 단다 - 사용자가 :hi 로 바꾼 것(또는 색 구성표가 정한 것)은 그대로 둔다. 다시 달 때는
+-- :hi clear 로 우리 것을 걷고 default 로: 그냥 default 로 덮으면 '있는 정의' 라 바뀌지 않는다.
+-- :hi clear(색 구성표 바꾸기)는 default 링크를 남겨 두므로(default 표시 없이) 견줄 때 그 표시를 뺀다
+local hl_mine = {}
+local function hl_now(name)
+  local h = api.nvim_get_hl(0, { name = name, link = true })
+  h.default = nil
+  return h
+end
+
 local function set_hl()
-  local function def(name, spec)
-    spec.default = true
-    api.nvim_set_hl(0, name, spec)
+  local n = neo()
+  for _, d in ipairs(HL) do
+    local name, spec = d[1], d[3]
+    if n and d[2] then
+      for _, g in ipairs(d[2]) do
+        if has_hl(g) then
+          spec = { link = g }
+          break
+        end
+      end
+    end
+    local cur = hl_now(name)
+    if next(cur) == nil or (hl_mine[name] and vim.deep_equal(cur, hl_mine[name])) then
+      if next(cur) ~= nil then
+        pcall(vim.cmd, 'hi clear ' .. name)
+      end
+      api.nvim_set_hl(0, name, vim.tbl_extend('force', spec, { default = true }))
+      hl_mine[name] = hl_now(name)
+    end
   end
-  def('VimIdeDirDiffChanged', { fg = '#e06c75', ctermfg = 167 })
-  def('VimIdeDirDiffOrphan', { fg = '#61afef', ctermfg = 75 })
-  def('VimIdeDirDiffPending', { link = 'Comment' })
-  def('VimIdeDirDiffSame', { link = 'Normal' })
-  def('VimIdeDirDiffDir', { link = 'Directory' })
-  def('VimIdeDirDiffSize', { link = 'Number' })
-  def('VimIdeDirDiffDate', { link = 'Comment' })
-  def('VimIdeDirDiffOpened', { link = 'Visual' })
-  def('VimIdeDirDiffMark', { link = 'Search' })        -- Space 로 고른 항목
-  def('VimIdeDirDiffSide', { underline = true, bold = true })  -- 커서 줄의 지금 쪽(A/B)
-  def('VimIdeDirDiffPickA', { link = 'Search' })      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
-  def('VimIdeDirDiffMenuNow', { link = 'Title' })     -- 보기 메뉴의 지금 보기
 end
 set_hl()
+-- Neogit 도 ColorScheme 에서 제 무리를 다시 정한다 - 그 뒤에 (먼저 보면 :hi clear 로 비어 있어 예전 색이 된다)
 api.nvim_create_autocmd('ColorScheme', {
   group = api.nvim_create_augroup('VimIdeDirDiffViewHl', { clear = true }),
-  callback = set_hl,
+  callback = function()
+    vim.schedule(set_hl)
+  end,
 })
+
+-- 비교 창의 winhighlight (side: 'a' / 'b', nil 이면 걷는다). neogit 색일 때만 단다. 창에만(local) - :set 처럼
+-- 그 창의 전역 값까지 바꾸면 그 창에서 갈라 만든 창과 setlocal winhighlight< 가 그것을 물려받는다.
+-- 무리 이름의 VimIdeDirDiff 는 표시이기도 하다: 비교 창이 아닌 창이 이것을 달고 있으면 물려받은 것이다
+-- (strip_inherited)
+local WHL = {
+  a = 'DiffAdd:VimIdeDirDiffAddA,DiffChange:VimIdeDirDiffChangeA,DiffText:VimIdeDirDiffTextA,DiffDelete:VimIdeDirDiffFiller',
+  b = 'DiffAdd:VimIdeDirDiffAddB,DiffChange:VimIdeDirDiffChangeB,DiffText:VimIdeDirDiffTextB,DiffDelete:VimIdeDirDiffFiller',
+}
+local function diff_whl(win, side)
+  if not api.nvim_win_is_valid(win) then
+    return
+  end
+  local want = (side and neo()) and WHL[side] or ''
+  if vim.wo[win].winhighlight ~= want then
+    pcall(api.nvim_set_option_value, 'winhighlight', want, { scope = 'local', win = win })
+  end
+end
+
+-- 창에만(local) 다는 창 옵션. vim.wo[w].x = 는 :set 처럼 그 창의 전역 값까지 바꾸어, 그 창에서 연
+-- 새 탭(:tabnew)·창이 그 값(트리의 상태줄·머리)을 전역 값으로 물려받았다 - pair_tab 에서 트리 창에서
+-- 비교 탭을 열면 plain_window(setlocal x<) 뒤에도 비교 창에 트리의 상태줄이 떴다
+local function set_wo(win, name, val)
+  pcall(api.nvim_set_option_value, name, val, { scope = 'local', win = win })
+end
+
+-- 상태줄·창 머리의 한 토막에 색 (neogit 색일 때만). %$무리$ 는 앞의 색(StatusLine·WinBar 의 바탕)을
+-- 물려받는다 - %#무리# 는 Neogit 무리에 바탕이 없어 그 토막만 Normal 바탕으로 떴다
+local function hl_part(group, text)
+  if not neo() then
+    return text
+  end
+  if vim.fn.has('nvim-0.11') == 0 then
+    return '%#' .. group .. '#' .. text .. '%*'   -- %$ $ (바탕 유지)는 0.11 부터
+  end
+  return '%$' .. group .. '$' .. text .. '%*'
+end
 
 local function script_path()
   local f = api.nvim_get_runtime_file('tools/dirdiffscan.py', false)[1]
@@ -322,8 +479,10 @@ on_event = function(s, ev)
   end
   if k == 'list' then
     store_list(s, ev.dir, ev.entries or {})
-    if s.reopen and ev.dir == s.reopen.parent then
-      s.reopen.ready = true   -- 복사한 뒤의 새 판정이 왔다 - 이제 그 짝을 다시 연다
+    for _, ro in pairs(s.reopen or {}) do
+      if ev.dir == ro.parent then
+        ro.ready = true       -- 복사한 뒤의 새 판정이 왔다 - 이제 그 짝을 다시 연다
+      end
     end
     if s.walk and s.walk.wait == ev.dir then
       s.walk.wait = nil
@@ -564,8 +723,9 @@ local function line_of(s, L, r)
   elseif st == 'same' then
     group = is_dir(e) and 'VimIdeDirDiffDir' or nil
   end
-  local ga = st == 'onlyA' and 'VimIdeDirDiffOrphan' or group
-  local gb = st == 'onlyB' and 'VimIdeDirDiffOrphan' or group
+  -- A 에만 / B 에만 은 따로 (Neogit 의 지운 파일·새 파일 - classic 은 둘 다 VimIdeDirDiffOrphan)
+  local ga = st == 'onlyA' and 'VimIdeDirDiffOnlyA' or group
+  local gb = st == 'onlyB' and 'VimIdeDirDiffOnlyB' or group
   local off_g = #lt
   local off_b = #lt + #g
   if lm and ga then
@@ -598,9 +758,14 @@ local function put_hls(s, lnum, hls)
   end
 end
 
+-- 트리 창의 상태줄 ('statusline' 에 그대로 쓰는 글 - % 는 이미 %% 로). neogit 색이면 이름표에 색:
+-- 'DirDiff'·보기 이름은 절 머리, 다름·A만·B만 은 트리의 그 색, 도움말은 흐리게
 local function status_text(s)
   local p = s.prog or {}
   local parts = {}
+  local function esc(t)
+    return (t:gsub('%%', '%%%%'))
+  end
   if p.done then
     parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
   elseif p.again then
@@ -609,11 +774,11 @@ local function status_text(s)
     parts[#parts + 1] = ('훑는 중 %d초 · 디렉터리 %s'):format(math.floor(p.sec or 0), commas(p.dirs or 0))
   end
   parts[#parts + 1] = ('파일 %s'):format(commas(p.files or 0))
-  parts[#parts + 1] = ('다름 %s'):format(commas(p.diff or 0))
-  parts[#parts + 1] = ('A만 %s'):format(commas(p.onlyA or 0))
-  parts[#parts + 1] = ('B만 %s'):format(commas(p.onlyB or 0))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffChanged', ('다름 %s'):format(commas(p.diff or 0)))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffOnlyA', ('A만 %s'):format(commas(p.onlyA or 0)))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffOnlyB', ('B만 %s'):format(commas(p.onlyB or 0)))
   if (p.pend or 0) > 0 then
-    parts[#parts + 1] = ('확인 중 %s'):format(commas(p.pend))
+    parts[#parts + 1] = hl_part('VimIdeDirDiffPending', ('확인 중 %s'):format(commas(p.pend)))
   end
   if (p.err or 0) > 0 then
     parts[#parts + 1] = ('읽기 실패 %s'):format(commas(p.err))
@@ -622,8 +787,9 @@ local function status_text(s)
   if na + nb > 0 then
     parts[#parts + 1] = ('고름 A %d / B %d'):format(na, nb)
   end
-  return ' DirDiff  ' .. table.concat(parts, ' · ') .. '   [' .. MODE[s.mode].label .. ']'
-    .. '   [' .. (s.side == 'b' and 'B' or 'A') .. ' 쪽]   (? 도움말)'
+  return ' ' .. hl_part('VimIdeDirDiffHeader', 'DirDiff') .. '  ' .. table.concat(parts, ' · ')
+    .. '   ' .. hl_part('VimIdeDirDiffHeader', '[' .. esc(MODE[s.mode].label) .. ']')
+    .. '   [' .. (s.side == 'b' and 'B' or 'A') .. ' 쪽]   ' .. hl_part('VimIdeDirDiffPending', '(? 도움말)')
 end
 
 -- 보이는 줄이 하나도 없을 때
@@ -641,7 +807,8 @@ local function winbar_text(s, L)
   local function side(tag, path)
     return fit(' ' .. tag .. ': ' .. vim.fn.fnamemodify(path, ':~'), L.half)
   end
-  return (side('A', s.a) .. '   ' .. side('B', s.b)):gsub('%%', '%%%%')
+  -- 트리의 머리(A 쪽 | B 쪽 뿌리)는 Neogit 의 절 머리 색으로 (classic 은 그대로)
+  return hl_part('VimIdeDirDiffHeader', (side('A', s.a) .. '   ' .. side('B', s.b)):gsub('%%', '%%%%'))
 end
 
 -- 줄 i 로, 지금 쪽(A/B)의 이름 자리에 커서를
@@ -674,11 +841,27 @@ mark_side = function(s)
   pcall(api.nvim_buf_set_extmark, s.buf_l, ns_side, i - 1, a, { end_col = b, hl_group = 'VimIdeDirDiffSide', priority = 50 })
 end
 
+-- 지금 열어 둔 짝의 줄에 바탕색: 위의 편집 창 둘에 보이는 것(pair_tab = 0), 비교 탭이 열려 있는
+-- 짝 모두 (pair_tab - 어느 짝에 탭이 있는지 트리에서 보인다)
 local function mark_open(s)
+  if not api.nvim_buf_is_valid(s.buf_l) then
+    return
+  end
   api.nvim_buf_clear_namespace(s.buf_l, ns_open, 0, -1)
-  local i = s.opened_rel and s.row_of[s.opened_rel]
-  if i then
-    pcall(api.nvim_buf_set_extmark, s.buf_l, ns_open, i - 1, 0, { line_hl_group = 'VimIdeDirDiffOpened' })
+  local rels = {}
+  if s.main and s.main.rel then
+    rels[s.main.rel] = true
+  end
+  for _, v in pairs(s.views) do
+    if v.rel then
+      rels[v.rel] = true
+    end
+  end
+  for rel in pairs(rels) do
+    local i = s.row_of[rel]
+    if i then
+      pcall(api.nvim_buf_set_extmark, s.buf_l, ns_open, i - 1, 0, { line_hl_group = 'VimIdeDirDiffOpened' })
+    end
   end
 end
 
@@ -711,10 +894,8 @@ render = function(s)
   end
   mark_open(s)
   s.dirty = {}
-  pcall(function()
-    vim.wo[s.win_l].winbar = winbar_text(s, L)
-    vim.wo[s.win_l].statusline = status_text(s):gsub('%%', '%%%%')
-  end)
+  set_wo(s.win_l, 'winbar', winbar_text(s, L))
+  set_wo(s.win_l, 'statusline', status_text(s))
   if s.want_rel and s.row_of[s.want_rel] then
     goto_row(s, s.row_of[s.want_rel])
     s.want_rel = nil
@@ -723,17 +904,19 @@ render = function(s)
   end
   mark_side(s)
   -- 복사로 바뀐 파일을 보고 있었으면 그 짝을 다시 연다 (없던 쪽이 생겼다). 부모의 새 목록이
-  -- 온 뒤에만 - 먼저 열었더니 옛 항목(없던 쪽 그대로)으로 열고 끝났다
-  if s.reopen and s.reopen.ready then
-    local rel = s.reopen.rel
-    s.reopen = nil
-    local e = entry_of_fn(s, rel)
-    if e and not is_dir(e) then
-      vim.schedule(function()
-        if not s.done then
-          open_pair_fn(s, { rel = rel, e = e, dir = rel:match('^(.*)/[^/]+$') or '' }, false)
-        end
-      end)
+  -- 온 뒤에만 - 먼저 열었더니 옛 항목(없던 쪽 그대로)으로 열고 끝났다. 짝마다 (비교 탭이 여럿일 수 있다):
+  -- 그 짝을 보이는 창(위의 편집 창, 그 짝의 비교 탭)에서만 다시 채운다 - 탭을 새로 열거나 옮기지 않는다
+  for rel, ro in pairs(s.reopen or {}) do
+    if ro.ready then
+      s.reopen[rel] = nil
+      local e = entry_of_fn(s, rel)
+      if e and not is_dir(e) then
+        vim.schedule(function()
+          if not s.done then
+            open_pair_fn(s, { rel = rel, e = e, dir = rel:match('^(.*)/[^/]+$') or '' }, 'refill')
+          end
+        end)
+      end
     end
   end
   if s.want_rel and s.prog and s.prog.done and next(s.loading) == nil then
@@ -829,9 +1012,7 @@ local function render_dirty(s)
   mark_open(s)
   if s.prog_dirty then
     s.prog_dirty = false
-    pcall(function()
-      vim.wo[s.win_l].statusline = status_text(s):gsub('%%', '%%%%')
-    end)
+    set_wo(s.win_l, 'statusline', status_text(s))
   end
 end
 
@@ -863,7 +1044,7 @@ schedule_render = function(s)
 end
 
 -- ---------------------------------------------------------------------------
--- 비교 열기 (위의 두 편집 창)
+-- 비교 열기 (비교 탭, 또는 위의 두 편집 창 - pair_tab = 0)
 -- ---------------------------------------------------------------------------
 
 -- 창 옵션을 전역 값으로 되돌린다 (곁창·트리 창에서 갈라 만든 창은 그 옵션을 물려받는다)
@@ -897,14 +1078,15 @@ end
 -- 이름은 처음 한 번만 붙이고 바꾸지 않는다. 무엇을 보이는지는 창 머리(winbar)와 버퍼 글에
 -- 쓴다 - 처음에는 볼 때마다 이름을 바꾸었더니, nvim 이 바꾸기 전 이름으로 버퍼를 하나씩
 -- 새로 만들어 두어(rename_buffer) 끝낸 뒤에도 'DirDiff A (A 에 없음) …' 버퍼가 쌓였다.
-local function scratch(s, side, text)
-  local b = s['empty_' .. side]
+-- 짝을 보이는 곳(view)마다 하나씩 (비교 탭마다 따로 - 한 버퍼를 두 탭이 같이 쓰면 한 탭의 알림이 다른 탭에도 떴다)
+local function scratch(v, side, text)
+  local b = v['empty_' .. side]
   if not (b and api.nvim_buf_is_valid(b)) then
     b = api.nvim_create_buf(false, true)
     vim.bo[b].bufhidden = 'hide'
     vim.bo[b].swapfile = false
     pcall(api.nvim_buf_set_name, b, ('DirDiff %s #%d'):format(side:upper(), b))
-    s['empty_' .. side] = b
+    v['empty_' .. side] = b
   end
   vim.bo[b].modifiable = true
   api.nvim_buf_set_lines(b, 0, -1, false, text)
@@ -925,9 +1107,10 @@ end
 
 -- 한쪽에만 있는 파일: 있는 쪽에 파일을, 없는 쪽에는 빈 버퍼를 diff 로 (Beyond Compare
 -- 처럼 - 있는 쪽 줄이 모두 '더해진 줄'로 보인다). 무엇인지는 창 머리(winbar)에 쓴다.
-local function show_file(s, win, path, side)
+local function show_file(v, win, path, side)
+  local s = v.s
   if not path then
-    api.nvim_win_set_buf(win, scratch(s, side, {}))
+    api.nvim_win_set_buf(win, scratch(v, side, {}))
     return
   end
   -- 이 창에 이미 그 파일이 떠 있고 고친 채면 다시 읽지 않는다. :edit 이 같은 버퍼를
@@ -992,12 +1175,6 @@ local function show_file(s, win, path, side)
   end
 end
 
-local function set_head(win, text)
-  pcall(function()
-    vim.wo[win].winbar = (' ' .. text):gsub('%%', '%%%%')
-  end)
-end
-
 -- 앞에서 열었던 파일 버퍼를 치운다 (이 비교에서 연 것, 고치지 않았고 어디에도 안 보이는 것)
 local function unused(b)
   -- getbufvar: :bd 로 닫은 버퍼를 vim.bo 로 읽으면 그 파일의 마크가 shada 에서 빠진다 (위 show_file)
@@ -1041,7 +1218,188 @@ end
 
 local NOTE = { d = '디렉터리', o = '특수 파일', ld = '디렉터리를 가리키는 링크', lx = '끊긴 링크' }
 
-local function open_pair(s, r, jump)
+local function pair_tab_on()
+  return (tonumber(vim.g.vimide_dirdiff_pair_tab) or 1) ~= 0
+end
+
+-- 비교 창의 보기 (Beyond Compare 의 글 비교 보기). 접기는 diff 의 것(foldmethod=diff)을 그대로 쓴다:
+--   all      모두 보이기 - 접기를 모두 연다 (foldlevel 99). 그 뒤 zM 이면 'diffopt' 의 문맥대로 접힌다
+--   diff     차이 보이기 - 바뀐 줄만 (context:0. vim 은 0 을 1 로 친다 - 접기 사이에는 줄 하나가 있어야 한다)
+--   context  문맥 보이기 - 바뀐 줄과 위아래 g:vimide_dirdiff_context 줄
+-- 'diffopt' 의 context 는 전역 하나라 비교 탭에 들어올 때 그 탭의 보기로 바꾸고, 다른 탭에 들어가면
+-- 되돌린다 (dip_sync - 그러지 않으면 사용자의 vimdiff 탭도 같이 접혔다). 두 창의 접기가 diff 의 한
+-- 덩어리 목록에서 나오므로 함께 내려간다 (scrollbind, zR·zM·zo·zc 도 두 창에 같이 - vim 이 맞춘다).
+-- 동일 보이기(같은 줄만)는 넣지 않았다: 바뀐 덩어리를 접으면 접힌 자리는 창마다 한 줄인데, 끼인
+-- 줄(filler)은 접을 수 없고(덩어리 다음 줄 위에 붙는다) 한쪽에만 있는 덩어리는 다른 쪽에 접을 줄이
+-- 없다 - 덩어리마다 두 창의 줄 수가 어긋나 내려갈수록 벌어졌다 (manual 접기로 실측). diff 의
+-- scrollbind 는 줄 번호로 맞추지 화면 줄로 맞추지 않는다
+local FMODES = {
+  { id = 'all', label = '모두 보이기' },
+  { id = 'diff', label = '차이 보이기' },
+  { id = 'context', label = '문맥 보이기' },
+}
+local FMODE = {}
+for i, md in ipairs(FMODES) do
+  md.i = i
+  FMODE[md.id] = md
+end
+
+local function ctx_lines()
+  return math.max(0, math.floor(tonumber(vim.g.vimide_dirdiff_context) or 3))
+end
+
+local function fmode_label(id)
+  if id == 'context' then
+    return ('문맥 보이기 (%d줄)'):format(ctx_lines())
+  end
+  return FMODE[id].label
+end
+
+-- 처음 보기: g:vimide_dirdiff_file_view (FMODES 의 id, 기본 all = 모두 보이기). 짝을 새로 열 때마다
+-- 이 보기로 시작한다 (요청: 기본은 모두 보이기) - \d 로 고른 보기는 그 짝에만 남는다
+local function start_fmode()
+  local v = vim.g.vimide_dirdiff_file_view
+  if type(v) == 'string' and FMODE[v] then
+    return v
+  end
+  if v ~= nil and v ~= '' then
+    say(('g:vimide_dirdiff_file_view 를 모릅니다: %s (all diff context)'):format(tostring(v)), vim.log.levels.WARN)
+  end
+  return 'all'
+end
+
+-- 'diffopt' 의 context: 지금 탭이 짝을 보이는 탭이고 그 보기가 차이·문맥이면 그 값, 아니면 사용자 것.
+-- dip.saved: 바꾸기 전 사용자 값, dip.ours: 우리가 넣은 값 - 그 사이 사용자가 :set diffopt 로 바꿨으면
+-- 그것을 둔다 (그 위에 다시 context 만 얹는다)
+local dip = {}
+local function with_context(opt, n)
+  local parts = {}
+  for p in opt:gmatch('[^,]+') do
+    if not p:match('^context:') then
+      parts[#parts + 1] = p
+    end
+  end
+  parts[#parts + 1] = 'context:' .. n
+  return table.concat(parts, ',')
+end
+
+local function dip_sync()
+  local v = view_of_tab(api.nvim_get_current_tabpage())
+  local n = nil
+  if v and v.rel and not v.bin then
+    if v.fmode == 'diff' then
+      n = 0
+    elseif v.fmode == 'context' then
+      n = ctx_lines()
+    end
+  end
+  if dip.ours and vim.o.diffopt ~= dip.ours then
+    -- 그 사이 사용자가 :set diffopt 로 바꿨다: 그 값을 두되 우리가 넣은 context 는 걷고, 원래 값에
+    -- context 가 있었으면 그것을 돌려놓는다 (안 그러면 context:0 이 남아 사용자의 vimdiff 가 1줄만 보였다)
+    local own = dip.saved and dip.saved:match('context:%d+')
+    local now = {}
+    for p in vim.o.diffopt:gmatch('[^,]+') do
+      if not p:match('^context:') then
+        now[#now + 1] = p
+      end
+    end
+    if own then
+      now[#now + 1] = own
+    end
+    dip.saved, dip.ours = table.concat(now, ','), nil
+  end
+  if n then
+    dip.saved = dip.saved or vim.o.diffopt
+    local want = with_context(dip.saved, n)
+    if vim.o.diffopt ~= want then
+      vim.o.diffopt = want
+    end
+    dip.ours = want
+  elseif dip.saved then
+    if vim.o.diffopt ~= dip.saved then
+      vim.o.diffopt = dip.saved
+    end
+    dip.saved, dip.ours = nil, nil
+  end
+  -- 접기는 계산한 그때의 context 로 남는다: 다른 탭에 있을 때 다시 채운 짝(트리 복사 뒤)은 그때의 'diffopt'
+  -- 로 접혔고, 같은 보기의 다른 비교 탭에서 넘어오면 'diffopt' 가 그대로라 nvim 이 다시 접지 않았다.
+  -- 이 짝을 마지막으로 접은 context(ctx_done)와 다르면 다시 접게 한다 (foldmethod 를 다시 넣으면 다시 접는다)
+  local key = n or -1
+  if v and v.rel and not v.bin and v.ctx_done ~= key then
+    v.ctx_done = key
+    for _, w in ipairs({ v.win_a, v.win_b }) do
+      if api.nvim_win_is_valid(w) and vim.wo[w].diff then
+        set_wo(w, 'foldmethod', 'diff')
+      end
+    end
+  end
+end
+
+-- 비교 창의 머리(winbar): ' A: 경로' / ' B: 경로', B 쪽 오른쪽 끝에 지금 보기와 키. neogit 색이면 A:·B: 는
+-- 트리의 A 에만·B 에만 색, 보기는 절 머리 색. 창에만(set_wo) - 그 창의 전역 값까지 바꾸면 setlocal
+-- winbar< 가 머리를 되돌려 놓는다 (strip_inherited)
+local function set_heads(v)
+  local function esc(t)
+    return (t:gsub('%%', '%%%%'))
+  end
+  for _, side in ipairs({ 'a', 'b' }) do
+    local w = v['win_' .. side]
+    local h = v.head and v.head[side]
+    if h and api.nvim_win_is_valid(w) then
+      local tag = hl_part(side == 'a' and 'VimIdeDirDiffOnlyA' or 'VimIdeDirDiffOnlyB', side:upper() .. ':')
+      local text = ' ' .. tag .. ' %<' .. esc(h)   -- 좁으면 경로 앞쪽을 자른다 (A:·B: 는 남긴다)
+      if side == 'b' then
+        local keys = v.inline and '' or 'q 닫기'
+        if not v.bin then
+          keys = '\\d 보기' .. (keys ~= '' and (' · ' .. keys) or '')
+          text = text .. '%=' .. hl_part('VimIdeDirDiffHeader', '[' .. esc(fmode_label(v.fmode)) .. ']')
+        else
+          text = text .. '%='
+        end
+        text = text .. ' ' .. hl_part('VimIdeDirDiffPending', esc(keys)) .. ' '
+      end
+      set_wo(w, 'winbar', text)
+    end
+  end
+end
+
+-- 보기를 두 창에: 'diffopt' 의 context(지금 탭이면)를 맞추고, 접기를 켜고 foldlevel 로 열거나 닫는다
+-- (모두 99, 나머지 0). 알림(바이너리·큰 파일)은 diff 가 아니라 건드리지 않는다
+local function apply_fmode(v)
+  if v.tab == api.nvim_get_current_tabpage() then
+    dip_sync()
+  end
+  for _, w in ipairs({ v.win_a, v.win_b }) do
+    if api.nvim_win_is_valid(w) and vim.wo[w].diff then
+      set_wo(w, 'foldenable', true)
+      set_wo(w, 'foldlevel', v.fmode == 'all' and 99 or 0)
+    end
+  end
+  set_heads(v)
+end
+
+-- 짝의 창에서 비교의 흔적(diff, 접기, 머리, winhighlight)을 걷는다 - 창을 닫거나 버퍼가 내려가기 앞에:
+-- nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을 적어 두었다가(wininfo) 그 버퍼를 다음에 여는 창에 입힌다
+local function unview_win(w)
+  if not api.nvim_win_is_valid(w) then
+    return
+  end
+  pcall(api.nvim_win_call, w, function()
+    local was = vim.wo.diff
+    vim.cmd('diffoff')
+    if was then
+      undiff_folds()
+      -- 보기의 foldlevel(모두 보이기 99)도: :diffoff 는 되돌리지 않아 고친 채 남긴 버퍼를 다시 열면 따라왔다
+      pcall(vim.cmd, 'setlocal foldlevel<')
+    end
+  end)
+  set_wo(w, 'winbar', '')
+  diff_whl(w, nil)
+end
+
+-- 짝을 view 의 두 창에 채운다. jump: 커서를 첫 차이로
+local function fill(v, r, jump)
+  local s = v.s
   local e = r.e
   local rel = shown(r.rel)
   local pa = e.ka and (s.a .. '/' .. r.rel) or nil
@@ -1056,43 +1414,19 @@ local function open_pair(s, r, jump)
     return ('  (%s 쪽은 %s: %s%s)'):format(side, NOTE[k], rel, to and (' -> ' .. shown(to)) or '')
   end
   local na, nb = note(ka, 'A', pa), note(kb, 'B', pb)
-  -- 다른 탭의 비교에서 짝을 다시 열 때(다른 탭에서 한 복사·저장 뒤) 그 탭의 지금 창을 지킨다: 아래
+  -- 다른 탭의 짝을 다시 채울 때(다른 탭에서 한 복사·저장 뒤) 그 탭의 지금 창을 지킨다: 아래
   -- BufEnter 훅(BufExplorer 등)이 nvim_win_call 안에서 그 탭의 지금 창을 B 창으로 옮겨 놓아, gT·q 로
   -- 돌아가면 커서가 트리가 아니라 B 창에 있었다 (f 는 f{char}, <C-r> 은 diffget 이 되었다)
-  local tab_win = s.tab ~= api.nvim_get_current_tabpage() and api.nvim_tabpage_get_win(s.tab) or nil
-  -- 비교 창을 닫아 버렸으면 트리 위에 다시 만든다. 트리 창에서 가르면 트리 옵션
-  -- (번호 끔 등)을 물려받으므로 plain_window 로 되돌리고, 트리 높이도 되돌린다
-  local made = {}
-  if not api.nvim_win_is_valid(s.win_a) and not api.nvim_win_is_valid(s.win_b) then
-    s.win_a = api.nvim_open_win(scratch(s, 'a', {}), false, { split = 'above', win = s.win_l })
-    made[#made + 1] = s.win_a
-  end
-  if not api.nvim_win_is_valid(s.win_a) then
-    s.win_a = api.nvim_open_win(scratch(s, 'a', {}), false, { split = 'left', win = s.win_b })
-    made[#made + 1] = s.win_a
-  elseif not api.nvim_win_is_valid(s.win_b) then
-    s.win_b = api.nvim_open_win(scratch(s, 'b', {}), false, { split = 'right', win = s.win_a })
-    made[#made + 1] = s.win_b
-  end
-  for _, w in ipairs(made) do
-    plain_window(w)
-  end
-  if #made > 0 and s.list_h then
-    pcall(api.nvim_win_set_height, s.win_l, s.list_h)
-  end
-  -- 창 머리(winbar)도 걷고 나서 버퍼를 바꾼다: nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을 적어
-  -- 두었다가(wininfo) 그 버퍼를 새 창에 띄울 때 입힌다 - 그대로 두었더니 앞에 본 파일을 다른 탭에서
-  -- 열면(Tab/Tab 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_head 가 단다
+  local tab_win = v.tab ~= api.nvim_get_current_tabpage() and api.nvim_tabpage_is_valid(v.tab)
+    and api.nvim_tabpage_get_win(v.tab) or nil
+  -- 다른 버퍼로 바꾸는 동안은 아래 BufWinEnter(짝이 아닌 버퍼면 색·머리를 걷는다)가 보지 않게
+  v.filling = true
+  -- 창 머리(winbar)·winhighlight 도 걷고 나서 버퍼를 바꾼다: nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을
+  -- 적어 두었다가(wininfo) 그 버퍼를 새 창에 띄울 때 입힌다 - 그대로 두었더니 앞에 본 파일을 다른 탭에서
+  -- 열면(Tab/Tab 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_heads 가 단다
   -- diff 접기도 같은 까닭으로 걷는다 (undiff_folds)
-  for _, w in ipairs({ s.win_a, s.win_b }) do
-    pcall(api.nvim_win_call, w, function()
-      local was = vim.wo.diff
-      vim.cmd('diffoff')
-      if was then
-        undiff_folds()
-      end
-      vim.wo.winbar = ''
-    end)
+  for _, w in ipairs({ v.win_a, v.win_b }) do
+    unview_win(w)
   end
   local max = (tonumber(vim.g.vimide_dirdiff_max_mb) or 20) * 1024 * 1024
   local function size_of(k, p, sz)
@@ -1117,23 +1451,22 @@ local function open_pair(s, r, jump)
       '',
       '  판정: ' .. ({ same = '같다', diff = '다르다', onlyA = 'A 에만', onlyB = 'B 에만', pend = '확인 중' })[e.st],
     }
-    api.nvim_win_set_buf(s.win_a, scratch(s, 'a', info))
-    api.nvim_win_set_buf(s.win_b, scratch(s, 'b', info))
+    api.nvim_win_set_buf(v.win_a, scratch(v, 'a', info))
+    api.nvim_win_set_buf(v.win_b, scratch(v, 'b', info))
   else
     if na then
-      api.nvim_win_set_buf(s.win_a, scratch(s, 'a', { '', na }))
+      api.nvim_win_set_buf(v.win_a, scratch(v, 'a', { '', na }))
     else
-      show_file(s, s.win_a, pa, 'a')
+      show_file(v, v.win_a, pa, 'a')
     end
     if nb then
-      api.nvim_win_set_buf(s.win_b, scratch(s, 'b', { '', nb }))
+      api.nvim_win_set_buf(v.win_b, scratch(v, 'b', { '', nb }))
     else
-      show_file(s, s.win_b, pb, 'b')
+      show_file(v, v.win_b, pb, 'b')
     end
-    for _, w in ipairs({ s.win_a, s.win_b }) do
+    for _, w in ipairs({ v.win_a, v.win_b }) do
       pcall(api.nvim_win_call, w, function()
         vim.cmd('diffthis')
-        vim.wo.foldlevel = 0
         -- 파일별 BufEnter 설정(.c 의 ts=8 등)을 양쪽 모두에 - noautocmd 로 열어서 커서가
         -- 들어가는 쪽만 받았고, 탭 들여쓰기가 A 와 B 에서 다르게 보였다. BufRead 는 여전히 없다
         if vim.bo.buftype == '' then
@@ -1142,24 +1475,33 @@ local function open_pair(s, r, jump)
       end)
     end
   end
-  local function head(side, k, root)
+  local function head(k, root)
     if k == nil then
-      return side .. ': (없음) ' .. rel
+      return '(없음) ' .. rel
     end
-    return side .. ': ' .. shown(vim.fn.fnamemodify(root .. '/' .. r.rel, ':~'))
+    return shown(vim.fn.fnamemodify(root .. '/' .. r.rel, ':~'))
   end
-  set_head(s.win_a, head('A', e.ka, s.a))
-  set_head(s.win_b, head('B', e.kb, s.b))
+  v.head = { a = head(e.ka, s.a), b = head(e.kb, s.b) }
+  if v.rel ~= r.rel then
+    v.fmode = s.fmode   -- 다른 짝을 실었다 (pair_tab = 0 의 편집 창) - 처음 보기로
+  end
+  v.rel = r.rel
+  v.ctx_done = nil   -- 지금 'diffopt' 로 새로 접혔다 - 이 탭에 들어올 때 그 탭의 context 로 (dip_sync)
+  v.bin = bin   -- 두 창이 알림이다 (편집 창의 <C-r>/<C-l> 이 알린다, 보기는 접을 것이 없다)
+  v.buf_a, v.buf_b = api.nvim_win_get_buf(v.win_a), api.nvim_win_get_buf(v.win_b)
+  -- 비교 색 (neogit): A 쪽은 빨강, B 쪽은 초록. 알림 창에는 달지 않는다
+  diff_whl(v.win_a, not bin and 'a' or nil)
+  diff_whl(v.win_b, not bin and 'b' or nil)
+  apply_fmode(v)
+  v.filling = false
   sweep(s)
-  s.opened_rel = r.rel
-  s.bin = bin   -- 두 창이 알림이다 (편집 창의 <C-r>/<C-l> 이 알린다)
   mark_open(s)
-  if tab_win and api.nvim_win_is_valid(tab_win) and api.nvim_tabpage_is_valid(s.tab)
-      and api.nvim_tabpage_get_win(s.tab) ~= tab_win then
-    pcall(api.nvim_tabpage_set_win, s.tab, tab_win)
+  if tab_win and api.nvim_win_is_valid(tab_win) and api.nvim_tabpage_is_valid(v.tab)
+      and api.nvim_tabpage_get_win(v.tab) ~= tab_win then
+    pcall(api.nvim_tabpage_set_win, v.tab, tab_win)
   end
   if jump then
-    local w = pa and s.win_a or s.win_b
+    local w = pa and v.win_a or v.win_b
     api.nvim_set_current_win(w)
     pcall(vim.cmd, 'normal! gg')
     if not bin then
@@ -1170,6 +1512,148 @@ local function open_pair(s, r, jump)
       elseif vim.fn.diff_hlID(1, 1) == 0 then
         pcall(vim.cmd, 'normal! ]c')
       end
+    end
+  end
+end
+
+-- 이 짝(rel)의 비교 탭
+local function view_of_rel(s, rel)
+  for _, v in pairs(s.views) do
+    if v.rel == rel then
+      return v
+    end
+  end
+end
+
+-- :tabnew 가 만든 빈 [No Name] 은 곧바로 치운다 (비교할 때마다 하나씩 남았다)
+local function drop_noname(nb)
+  if api.nvim_buf_is_valid(nb) and api.nvim_buf_get_name(nb) == '' and not vim.bo[nb].modified
+      and api.nvim_buf_line_count(nb) == 1 and api.nvim_buf_get_lines(nb, 0, 1, false)[1] == ''
+      and #vim.fn.win_findbuf(nb) == 0 then
+    pcall(api.nvim_buf_delete, nb, {})
+  end
+end
+
+-- 새 비교 탭: 이 세션의 탭들(트리 탭과 그 비교 탭) 중 맨 뒤의 것 바로 다음에 (열수록 오른쪽으로 -
+-- 그냥 :tabnew 는 트리 탭 바로 뒤라 연 차례가 거꾸로 섰다). 트리 창에서 열면 새 창이 트리의 창 옵션을
+-- 물려받으므로 plain_window 로 되돌린다. 트리 창의 상태줄·머리는 창에만(set_wo) 달아 두어 전역 값으로는
+-- 따라오지 않는다
+local function new_view(s)
+  local last = api.nvim_tabpage_get_number(s.tab)
+  for t in pairs(s.views) do
+    if api.nvim_tabpage_is_valid(t) then
+      last = math.max(last, api.nvim_tabpage_get_number(t))
+    end
+  end
+  vim.cmd(last .. 'tabnew')
+  local v = { s = s, tab = api.nvim_get_current_tabpage(), fmode = s.fmode }
+  -- vim-ide 의 곁창 지킴이(vimidewin.lua)가 이 탭을 남의 것으로 보게 (빈 버퍼 창을 곁창으로 알고 파일을
+  -- 다른 창으로 빼냈다)
+  vim.t[v.tab].vimide_dirdiff_pair = true
+  v.win_a = api.nvim_get_current_win()
+  local nb = api.nvim_get_current_buf()
+  plain_window(v.win_a)
+  api.nvim_win_set_buf(v.win_a, scratch(v, 'a', {}))
+  drop_noname(nb)
+  v.win_b = api.nvim_open_win(scratch(v, 'b', {}), false, { split = 'right', win = v.win_a })
+  plain_window(v.win_b)
+  s.views[v.tab] = v
+  return v
+end
+
+-- 비교 탭의 창 하나를 닫아 버렸으면 남은 창 옆에 다시 만든다. 둘 다 없으면(탭에 다른 창만 남았다) 그
+-- 탭은 놓아주고 nil - 새 탭을 연다
+-- 두 번째 값: 창을 다시 만들었다 (그 창은 빈 자리라 다시 채워야 한다)
+local function repair_view(v)
+  local s = v.s
+  local okA, okB = api.nvim_win_is_valid(v.win_a), api.nvim_win_is_valid(v.win_b)
+  if okA and okB then
+    return v, false
+  end
+  if not okA and not okB then
+    v.closed = true
+    s.views[v.tab] = nil
+    return nil
+  end
+  if okA then
+    v.win_b = api.nvim_open_win(scratch(v, 'b', {}), false, { split = 'right', win = v.win_a })
+    plain_window(v.win_b)
+  else
+    v.win_a = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'left', win = v.win_b })
+    plain_window(v.win_a)
+  end
+  return v, true
+end
+
+-- 짝을 연다. jump: true = 그 짝으로 가서 커서를 첫 차이로 (<CR>), false = 열되 트리에 그대로 (o),
+-- 'refill' = 그 짝을 보이고 있는 창만 다시 채운다 (복사·저장 뒤 - 새 탭을 열거나 옮기지 않는다)
+--
+-- pair_tab: 짝마다 비교 탭 하나. 이미 열린 짝이면 <CR> 은 그 탭으로 (다시 읽지 않는다 - 고친 것·커서
+-- 그대로), o 는 그 탭을 다시 채우고 트리에 그대로. 새 짝의 o 는 뒤에서 탭을 열고 트리로 돌아온다
+-- (여러 짝을 열어 두고 gt 로 돌아본다)
+local function open_pair(s, r, jump)
+  local v = s.main
+  if v then
+    -- pair_tab = 0: 위의 편집 창 둘. 닫아 버렸으면 트리 위에 다시 만든다. 트리 창에서 가르면 트리 옵션
+    -- (번호 끔 등)을 물려받으므로 plain_window 로 되돌리고, 트리 높이도 되돌린다
+    if jump == 'refill' and v.rel ~= r.rel then
+      return
+    end
+    local made = {}
+    if not api.nvim_win_is_valid(v.win_a) and not api.nvim_win_is_valid(v.win_b) then
+      v.win_a = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'above', win = s.win_l })
+      made[#made + 1] = v.win_a
+    end
+    if not api.nvim_win_is_valid(v.win_a) then
+      v.win_a = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'left', win = v.win_b })
+      made[#made + 1] = v.win_a
+    elseif not api.nvim_win_is_valid(v.win_b) then
+      v.win_b = api.nvim_open_win(scratch(v, 'b', {}), false, { split = 'right', win = v.win_a })
+      made[#made + 1] = v.win_b
+    end
+    for _, w in ipairs(made) do
+      plain_window(w)
+    end
+    if #made > 0 and s.list_h then
+      pcall(api.nvim_win_set_height, s.win_l, s.list_h)
+    end
+    return fill(v, r, jump == true)
+  end
+  v = view_of_rel(s, r.rel)
+  local repaired = false
+  if v then
+    v, repaired = repair_view(v)
+  end
+  if jump == 'refill' then
+    if v then
+      fill(v, r, false)
+    end
+    return
+  end
+  if v then
+    if jump then
+      api.nvim_set_current_tabpage(v.tab)
+      if repaired then
+        -- 닫아 버린 창을 빈 자리로 다시 세웠다 - 두 창을 다시 채우고 diff 를 다시 건다
+        -- (그냥 넘어가면 남은 창은 diff 가 꺼진 채, 새 창은 빈 채였다)
+        fill(v, r, true)
+      end
+    else
+      fill(v, r, false)
+      -- 한쪽이 디렉터리인 줄의 <CR> 은 펼치고 접기라 그 탭으로 가지 않는다 - 그 줄에서는 gt 로
+      say(('비교 탭을 다시 읽었습니다 (탭 %d) - %s 로 그 탭으로'):format(api.nvim_tabpage_get_number(v.tab),
+        is_dir(r.e) and 'gt' or '<CR>'))
+    end
+    return
+  end
+  v = new_view(s)
+  -- 새 탭은 o 로 열어도 커서를 첫 차이에 두고 연다 (지금 탭이 그 탭이다) - 나중에 gt 로 가면 거기서 시작
+  fill(v, r, true)
+  if not jump and api.nvim_tabpage_is_valid(s.tab) then
+    -- o: 트리로 돌아온다 (커서는 트리의 그 줄 그대로)
+    api.nvim_set_current_tabpage(s.tab)
+    if api.nvim_win_is_valid(s.win_l) then
+      api.nvim_set_current_win(s.win_l)
     end
   end
 end
@@ -1214,7 +1698,13 @@ local function act_enter(s, jump)
     -- 한쪽은 디렉터리, 한쪽은 파일(링크·특수 파일): 파일 쪽을 안내 옆에 보인다. 디렉터리면
     -- 늘 여기서 끝냈더니 o 는 아무것도 하지 않았고, 다른 쪽의 파일은 트리에서 열 수 없었다
     if r.e.ka and r.e.kb and not both_dirs(r.e) then
-      open_pair(s, r, false)
+      -- 비교 탭이 멀쩡히 있으면 <CR> 로 펼치고 접을 때마다 다시 읽지 않는다. o 는 다시 읽고(파일
+      -- 줄의 o 와 같게), 창 하나를 닫아 버린 탭이면 <CR> 도 다시 세운다
+      local v = not s.main and view_of_rel(s, r.rel)
+      local intact = v and api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b)
+      if jump == false or not intact then
+        open_pair(s, r, false)
+      end
     end
     return
   end
@@ -1823,11 +2313,14 @@ local function forget(s, rels)
       end
     end
   end
-  if s.opened_rel then
-    for _, rr in ipairs(rels) do
-      if s.opened_rel == rr or s.opened_rel:sub(1, #rr + 1) == rr .. '/' then
-        local parent = s.opened_rel:match('^(.*)/[^/]+$') or ''
-        s.reopen = { rel = s.opened_rel, parent = parent }
+  -- 열어 둔 짝마다 (위의 편집 창, 비교 탭들). rel -> { parent, ready }
+  for _, v in ipairs(views_of_fn(s)) do
+    local o = v.rel
+    for _, rr in ipairs(o and rels or {}) do
+      if o == rr or o:sub(1, #rr + 1) == rr .. '/' then
+        local parent = o:match('^(.*)/[^/]+$') or ''
+        s.reopen = s.reopen or {}
+        s.reopen[o] = { parent = parent }
         if parent ~= '' and not s.expanded[parent] then
           request_list(s, parent)   -- 접혀 있어도 새 판정을 받아 온다
         end
@@ -1937,13 +2430,13 @@ copied_fn = on_copied
 -- 있으면 받는다: 넘겼더니 <C-r> 은 되돌리기 취소(E21), <C-l> 은 창 옮기기가 되어 트리 복사를 알리지
 -- 못했다. 처음의 빈 창(아직 연 짝이 없다)과 사용자가 :e 로 띄운 파일은 넘긴다
 local function applies()
-  local s = sessions[api.nvim_get_current_tabpage()]
   local w = api.nvim_get_current_win()
-  if not (s and (w == s.win_a or w == s.win_b)) then
+  local v = view_of_win(w)
+  if not v then
     return nil
   end
-  if vim.wo[w].diff or (s.opened_rel and vim.bo[api.nvim_win_get_buf(w)].buftype ~= '') then
-    return s
+  if vim.wo[w].diff or (v.rel and vim.bo[api.nvim_win_get_buf(w)].buftype ~= '') then
+    return v
   end
 end
 
@@ -2216,8 +2709,8 @@ end
 
 -- one: <C-S-r>/<C-S-l> - 횟수가 없어도 커서 줄만
 function _G.vimide_dirdiff_copy_lines(dir, one)
-  local s = applies()
-  if not s then
+  local v = applies()
+  if not v then
     return
   end
   local w = api.nvim_get_current_win()
@@ -2236,9 +2729,9 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
     -- 비주얼을 끝낸다. feedkeys('<Esc>', 'x') 는 뒤에 쌓인 키까지 비주얼 안에서 먼저 돌렸다
     vim.cmd('normal! \27')
   end
-  local in_a = w == s.win_a
+  local in_a = w == v.win_a
   local put = (dir > 0) == in_a          -- 내 창에서 저쪽으로 보내기 / 저쪽에서 가져오기
-  local other = in_a and s.win_b or s.win_a
+  local other = in_a and v.win_b or v.win_a
   if not api.nvim_win_is_valid(other) then
     return
   end
@@ -2248,11 +2741,11 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
   -- 파일에 들어가거나 줄이 지워졌다
   for _, b in ipairs({ mine, theirs }) do
     if vim.bo[b].buftype ~= '' then
-      if s.bin then
+      if v.bin then
         return say('바이너리·큰 파일은 줄로 복사할 수 없습니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
           vim.log.levels.WARN)
       end
-      local side = (b == s.empty_a or api.nvim_win_get_buf(s.win_a) == b) and 'A' or 'B'
+      local side = (b == v.empty_a or api.nvim_win_get_buf(v.win_a) == b) and 'A' or 'B'
       return say(side .. ' 쪽은 파일이 아닙니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
         vim.log.levels.WARN)
     end
@@ -2260,7 +2753,7 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
   -- 덩어리째는 대상 버퍼를 직접 바꾸므로(copy_rows) 미리 본다 - 그대로 두면 API 오류가 파일·줄
   -- 번호를 단 채 나왔다 (:diffput 은 E21)
   if not vim.bo[tb].modifiable then
-    return say(((tb == api.nvim_win_get_buf(s.win_a)) and 'A' or 'B')
+    return say(((tb == api.nvim_win_get_buf(v.win_a)) and 'A' or 'B')
       .. " 쪽 버퍼는 고칠 수 없습니다 ('modifiable' 꺼짐)", vim.log.levels.WARN)
   end
   -- 저쪽 버퍼를 이름으로 준다: 이 탭에 diff 창이 셋 이상이면 이름 없는 :diffput 은 E101 이었다
@@ -2356,42 +2849,84 @@ function _G.vimide_dirdiff_prev_key(id)
   end
 end
 
+-- 전역 매핑 lhs(mode)를 감싼다: when() 이 돌릴 키를 주면 그것, 아니면 감싸기 전의 매핑(없으면 그 키
+-- 그대로). 감싸기 전의 것은 prev_maps[id] 에 - 단축키 도움말(keyhelp.lua 의 SCOPED)이 이 함수의
+-- upvalue prev_maps·id 로 '그 밖에서는 …' 을 찾는다 (이름을 바꾸면 거기도)
+local function wrap(mode, lhs, when, desc)
+  -- 전역 매핑만 본다. maparg() 는 지금 버퍼의 매핑을 먼저 돌려주어서, 그런 창(neo-tree 등)에서
+  -- .vimrc 를 다시 읽으면(:source - 이것을 다시 부른다) 그 버퍼의 q 를 어디서나 돌렸다
+  local prev
+  local want = api.nvim_replace_termcodes(
+    lhs:gsub('<[Ll]eader>', ((vim.g.mapleader or '\\'):gsub('%%', '%%%%'))), true, true, true)
+  for _, m in ipairs(api.nvim_get_keymap(mode)) do
+    if api.nvim_replace_termcodes(m.lhs, true, true, true) == want then
+      prev = m
+      break
+    end
+  end
+  if type(prev) == 'table' and prev.desc and prev.desc:match('^DirDiff 비교 창') then
+    prev = prev_maps[mode .. lhs]   -- 벌써 가로챈 것 - 처음 것을 그대로
+  end
+  if type(prev) ~= 'table' or vim.tbl_isempty(prev) then
+    prev = nil
+  end
+  prev_maps[mode .. lhs] = prev
+  local id = mode .. lhs
+  vim.keymap.set(mode, lhs, function()
+    local keys = when()
+    if keys then
+      return keys
+    end
+    local p = prev_maps[id]
+    if not p then
+      return lhs
+    end
+    if p.callback then
+      -- replace_keycodes 가 id 안의 <leader> 까지 바꾸므로 < 를 <lt> 로 (그대로면 "n\d" 로 Lua 오류)
+      return ('<Cmd>lua _G.vimide_dirdiff_prev_key(%q)<CR>'):format((id:gsub('<', '<lt>')))
+    end
+    return p.rhs
+  end, { expr = true, silent = true, replace_keycodes = true, desc = desc })
+end
+
 local function take_over()
   for lhs, t in pairs(TAKE) do
     local dir, one = t[1], t[2] == true
     for _, mode in ipairs({ 'n', 'x' }) do
-      local prev = vim.fn.maparg(lhs, mode, false, true)
-      if type(prev) == 'table' and prev.desc and prev.desc:match('^DirDiff 비교 창') then
-        prev = prev_maps[mode .. lhs]   -- 벌써 가로챈 것 - 처음 것을 그대로
-      end
-      if type(prev) ~= 'table' or vim.tbl_isempty(prev) then
-        prev = nil
-      end
-      prev_maps[mode .. lhs] = prev
-      local id = mode .. lhs
-      vim.keymap.set(mode, lhs, function()
+      wrap(mode, lhs, function()
         if applies() then
           return ('<Cmd>lua _G.vimide_dirdiff_copy_lines(%d, %s)<CR>'):format(dir, tostring(one))
         end
-        local p = prev_maps[id]
-        if not p then
-          return lhs
-        end
-        if p.callback then
-          return ('<Cmd>lua _G.vimide_dirdiff_prev_key(%q)<CR>'):format(id)
-        end
-        return p.rhs
-      end, { expr = true, silent = true, replace_keycodes = true,
-        desc = 'DirDiff 비교 창: ' .. (one and '커서 줄을 ' or '차이 덩어리를 ')
-          .. (dir > 0 and '오른쪽(B)' or '왼쪽(A)') .. '으로' })
+      end, 'DirDiff 비교 창: ' .. (one and '커서 줄을 ' or '차이 덩어리를 ')
+        .. (dir > 0 and '오른쪽(B)' or '왼쪽(A)') .. '으로')
     end
   end
 end
+
+-- 비교 창에서만 쓰는 다른 키 (copy_keys 와 상관없이 늘): \d 보기 고르기 - 리더 d 는 neo-tree 밖에서
+-- 비어 있다 (neo-tree 의 \d 는 그 버퍼의 매핑이라 이것보다 먼저다). q 는 비교 탭의 것만 - 그 탭을
+-- 닫는다 (diffview 의 diff 창에 vim-ide 가 건 q 와 같다). 매크로를 적는 중이면 q 그대로 (적기 끝).
+-- pair_tab = 0 의 편집 창에서 q 는 예전대로 매크로다
+local function take_over_view_keys()
+  wrap('n', '<leader>d', function()
+    if view_of_win(api.nvim_get_current_win()) then
+      return '<Cmd>lua _G.vimide_dirdiff_file_menu()<CR>'
+    end
+  end, 'DirDiff 비교 창: 보기 고르기 (모두 / 차이 / 문맥 보이기)')
+  wrap('n', 'q', function()
+    local v = view_of_win(api.nvim_get_current_win())
+    if v and not v.inline and vim.fn.reg_recording() == '' then
+      return '<Cmd>lua _G.vimide_dirdiff_pair_quit()<CR>'
+    end
+  end, 'DirDiff 비교 창: 비교 탭 닫기 (트리의 그 줄로)')
+end
+
 -- .vimrc 를 다시 읽으면(:source) 그 map <C-l> 이 이것을 덮는다 - .vimrc 가 이것을 다시 부른다
 function _G.vimide_dirdiff_take_over()
   if (tonumber(vim.g.vimide_dirdiff_copy_keys) or 1) ~= 0 then
     take_over()
   end
+  take_over_view_keys()
 end
 _G.vimide_dirdiff_take_over()
 
@@ -2562,27 +3097,221 @@ local function open_menu(s)
   })
 end
 
+local HELP_PAIR = {
+  '비교 창 (비교 탭의 두 창, pair_tab = 0 이면 트리 위의 편집 창 둘)',
+  '  \\d          보기 고르기: 모두 보이기(기본) / 차이 보이기 / 문맥 보이기 (Enter 고르기, 1 2 3)',
+  '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
+  '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
+  '  <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
+  '  <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w - 트리 판정도 다시)',
+  '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널에서는 1<C-r> 1<C-l>)',
+  '                - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
+  '  N<C-r> N<C-l> 커서 줄부터 N 줄, 비주얼은 고른 줄만',
+}
+
 local function help()
-  vim.notify(table.concat({
+  local lines = {
     'DirDiff 트리',
-    '  <CR>        파일: 비교를 열고 편집 창으로 / 디렉터리: 펼치기·접기',
-    '  o           비교를 열되 트리에 그대로',
+    '  <CR>        파일: 비교 탭을 열고(열려 있으면 그 탭으로) 첫 차이로 / 디렉터리: 펼치기·접기',
+    '  o           비교 탭을 뒤에서 열고(열려 있으면 다시 읽고) 트리에 그대로 - gt 로 돌아본다',
+    '              (pair_tab = 0 이면 둘 다 트리 위의 편집 창 둘에 - o 는 열기만)',
     '  <C-n> <C-p> 다음 / 앞 차이 파일 (모두·차이 밖의 보기: 그 보기가 보이는 것 - 동일이면 같은 파일)',
     '  l h         펼치기 / 접기(부모로)',
     '  O X         차이 있는 디렉터리 모두 펼치기 (다른 보기: 그 보기가 보이는 것이 있는 디렉터리) / 모두 접기',
     '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
     '  F           모두 보이기 <-> 차이 보이기',
-    '  R           다시 훑기      q  끝내기',
+    '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
     '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
     '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A])',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
-    '편집 창: <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
-    '         <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w)',
-    '         <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널에서는 1<C-r> 1<C-l>)',
-    '                   - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
-    '         N<C-r> N<C-l> 커서 줄부터 N 줄, 비주얼은 고른 줄만',
-  }, '\n'))
+  }
+  vim.list_extend(lines, HELP_PAIR)
+  vim.notify(table.concat(lines, '\n'))
+end
+
+-- 비교 탭 하나를 놓는다: 목록에서 빼고, 그 탭의 빈·알림 버퍼를 지우고, 이 비교가 연 버퍼 중 어디에도
+-- 안 보이는 것을 치운다 (고친 것은 남기고 알린다 - 끝낼 때의 finish 처럼). back: 트리의 그 줄로
+local function release_view(v, back)
+  local s = v.s
+  v.closed = true
+  s.views[v.tab] = nil
+  if api.nvim_tabpage_is_valid(v.tab) then
+    -- 탭이 남았으면(:tabonly 로 트리 탭이 닫혔다) 보통 탭으로 - 곁창 지킴이도 다시 본다
+    pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')
+  end
+  for _, b in ipairs({ v.empty_a or false, v.empty_b or false }) do
+    if b and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then
+      pcall(api.nvim_buf_delete, b, { force = true })
+    end
+  end
+  local kept = {}
+  for _, b in ipairs({ v.buf_a or false, v.buf_b or false }) do
+    if b and s.opened[b] and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0
+        and vim.fn.getbufvar(b, '&modified') == 1 then
+      kept[#kept + 1] = vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':~:.')
+    end
+  end
+  sweep(s)
+  if #kept > 0 then
+    say('고친 채 남겨 둔 버퍼: ' .. table.concat(kept, ', '), vim.log.levels.WARN)
+  end
+  if s.done then
+    return
+  end
+  mark_open(s)
+  if back and api.nvim_tabpage_is_valid(s.tab) then
+    api.nvim_set_current_tabpage(s.tab)
+    if api.nvim_win_is_valid(s.win_l) then
+      api.nvim_set_current_win(s.win_l)
+      local i = v.rel and s.row_of[v.rel]
+      if i then
+        goto_row(s, i)
+        mark_side(s)
+      end
+    end
+  end
+  dip_sync()
+end
+
+-- 비교 탭을 닫는다 (그 탭의 q, 트리를 끝낼 때). 먼저 목록에서 빼서 TabClosed·WinClosed 가 다시
+-- 치우지 않게 하고, 두 창의 흔적(diff·머리·winhighlight)을 걷은 뒤 닫는다. 탭이 하나뿐일 수는 없다
+-- (트리 탭이 있다) - 그래도 마지막이면 닫지 않는다
+local function close_view(v, back)
+  if v.closed then
+    return
+  end
+  v.closed = true
+  v.s.views[v.tab] = nil
+  for _, w in ipairs({ v.win_a, v.win_b }) do
+    unview_win(w)
+  end
+  if api.nvim_tabpage_is_valid(v.tab) and #api.nvim_list_tabpages() > 1 then
+    pcall(vim.cmd, 'tabclose ' .. api.nvim_tabpage_get_number(v.tab))
+  end
+  release_view(v, back)
+end
+
+function _G.vimide_dirdiff_pair_quit()
+  local v = view_of_win(api.nvim_get_current_win())
+  if v and not v.inline then
+    close_view(v, true)
+  end
+end
+
+-- 비교 창의 보기 메뉴 (\d): 트리의 f 메뉴처럼 작은 창 - 지금 보기에 ●, Enter·더블클릭·Space 로 고르기,
+-- 1 2 3 은 바로, q·Esc·\d 닫기, ? 도움말. 그 비교 창 가운데에 뜬다
+local function set_fmode(v, id)
+  v.fmode = id   -- 이 짝만. 다음에 여는 짝은 처음 보기(s.fmode)로 시작한다
+  apply_fmode(v)
+end
+
+local function open_fmenu(v)
+  if v.menu and api.nvim_win_is_valid(v.menu.win) then
+    return api.nvim_set_current_win(v.menu.win)
+  end
+  if not v.rel then
+    return say('트리에서 파일을 먼저 고르세요')
+  end
+  if v.bin then
+    return say('바이너리·큰 파일은 줄로 비교하지 않아 보기가 없습니다')
+  end
+  local from = api.nvim_get_current_win()
+  local buf = api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = 'wipe'
+  -- 이름·filetype: 단축키 도움말(F1)이 이 창을 이름으로 부른다 (keyhelp.lua 의 WIN_NAME)
+  vim.bo[buf].filetype = 'vimidedirdifffile'
+  pcall(api.nvim_buf_set_name, buf, 'DirDiff 비교 보기 #' .. buf)
+  local dot = ascii() and '*' or '●'
+  local lines, width = {}, 0
+  for i, md in ipairs(FMODES) do
+    lines[i] = (' %s %d  %s '):format(md.id == v.fmode and dot or ' ', i, fmode_label(md.id))
+    width = math.max(width, vim.fn.strdisplaywidth(lines[i]))
+  end
+  local footer = ' Enter 고르기 · q 닫기 · ? 도움말 '
+  width = math.max(width, vim.fn.strdisplaywidth(footer) + 2)
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  for i, md in ipairs(FMODES) do
+    if md.id == v.fmode then
+      pcall(api.nvim_buf_set_extmark, buf, ns, i - 1, 1, { end_col = #lines[i] - 1, hl_group = 'VimIdeDirDiffMenuNow' })
+    end
+  end
+  local h = #lines
+  local fw, fh = api.nvim_win_get_width(from), api.nvim_win_get_height(from)
+  local border = ascii() and { '+', '-', '+', '|', '+', '-', '+', '|' } or 'rounded'
+  local win = api.nvim_open_win(buf, true, {
+    relative = 'win', win = from, row = math.max(0, math.floor((fh - h) / 2) - 1),
+    col = math.max(0, math.floor((fw - width) / 2)), width = width, height = h, style = 'minimal',
+    border = border, title = ' 보기 ', title_pos = 'center', footer = footer, footer_pos = 'center', zindex = 60,
+  })
+  vim.wo[win].cursorline = true
+  v.menu = { buf = buf, win = win }
+  pcall(api.nvim_win_set_cursor, win, { FMODE[v.fmode].i, 1 })
+  local function close(back)
+    if not (v.menu and v.menu.buf == buf) then
+      return
+    end
+    v.menu = nil
+    if api.nvim_win_is_valid(win) then
+      pcall(api.nvim_win_close, win, true)
+    end
+    if back and api.nvim_win_is_valid(from) then
+      pcall(api.nvim_set_current_win, from)
+    end
+  end
+  local function choose(i)
+    local md = FMODES[i or api.nvim_win_get_cursor(win)[1]]
+    close(true)
+    if md and not v.closed then
+      set_fmode(v, md.id)
+    end
+  end
+  local function o(desc)
+    return { buffer = buf, nowait = true, silent = true, desc = desc }
+  end
+  for _, k in ipairs({ '<CR>', '<2-LeftMouse>', '<Space>' }) do
+    vim.keymap.set('n', k, function()
+      choose()
+    end, o('이 보기로 (비교 보기 메뉴)'))
+  end
+  for i in ipairs(FMODES) do
+    vim.keymap.set('n', tostring(i), function()
+      choose(i)
+    end, o(fmode_label(FMODES[i].id) .. ' (비교 보기 메뉴)'))
+  end
+  for _, k in ipairs({ 'q', '<Esc>', '<leader>d' }) do
+    vim.keymap.set('n', k, function()
+      close(true)
+    end, o('비교 보기 메뉴 닫기'))
+  end
+  vim.keymap.set('n', '?', function()
+    close(true)
+    vim.notify(table.concat(HELP_PAIR, '\n'))
+  end, o('비교 창의 키 (도움말)'))
+  -- F1: 메뉴를 닫고 비교 창에서 연다 (트리의 f 메뉴와 같은 까닭 - 떠난 창이 없어져 엉뚱한 창으로 갔다)
+  if vim.fn.exists('*VimIdeKeyHelp') == 1 then
+    vim.keymap.set('n', '<F1>', function()
+      close(true)
+      vim.fn.VimIdeKeyHelp()
+    end, o('단축키 도움말 (비교 보기 메뉴를 닫고 비교 창에서)'))
+  end
+  api.nvim_create_autocmd('WinLeave', {
+    buffer = buf,
+    once = true,
+    callback = function()
+      vim.schedule(function()
+        close(false)
+      end)
+    end,
+  })
+end
+
+function _G.vimide_dirdiff_file_menu()
+  local v = view_of_win(api.nvim_get_current_win())
+  if v then
+    open_fmenu(v)
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2606,24 +3335,46 @@ local function finish(s, stay)
     say(('%s → %s 복사를 멈췄습니다 - 다 쓴 것만 %s 쪽에 남았습니다'):format(c.from:upper(), c.to:upper(),
       c.to:upper()), vim.log.levels.WARN)
   end
-  sessions[s.tab] = nil
   local here = api.nvim_get_current_tabpage()
+  -- 비교 탭들도 닫는다 (트리를 끝내면 그 짝들도 끝난다). 고친 버퍼는 아래에서 한꺼번에 알린다
+  for _, v in ipairs(vim.tbl_values(s.views)) do
+    v.closed = true
+    s.views[v.tab] = nil
+    for _, w in ipairs({ v.win_a, v.win_b }) do
+      unview_win(w)
+    end
+    if api.nvim_tabpage_is_valid(v.tab) and #api.nvim_list_tabpages() > 1 then
+      pcall(vim.cmd, 'tabclose ' .. api.nvim_tabpage_get_number(v.tab))
+    end
+    if api.nvim_tabpage_is_valid(v.tab) then
+      pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')   -- 마지막 탭이라 남았다
+    end
+    for _, b in ipairs({ v.empty_a or false, v.empty_b or false }) do
+      if b and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then
+        pcall(api.nvim_buf_delete, b, { force = true })
+      end
+    end
+  end
+  sessions[s.tab] = nil
+  local m = s.main
   if api.nvim_tabpage_is_valid(s.tab) then
     api.nvim_set_current_tabpage(s.tab)
     local was = {}
-    for _, w in ipairs({ s.win_a, s.win_b }) do
+    for _, w in ipairs(m and { m.win_a, m.win_b } or {}) do
       was[w] = api.nvim_win_is_valid(w) and vim.wo[w].diff
     end
     pcall(vim.cmd, 'diffoff!')
-    -- 남는 버퍼(사용자 것, 고친 것)에 창 머리와 diff 접기가 적혀 남지 않게 (open_pair 의 winbar 와 같은
-    -- 까닭, undiff_folds)
-    for _, w in ipairs({ s.win_a, s.win_b }) do
+    -- 남는 버퍼(사용자 것, 고친 것)에 창 머리·비교 색·diff 접기가 적혀 남지 않게 (open_pair 의 winbar 와
+    -- 같은 까닭, undiff_folds)
+    for _, w in ipairs(m and { m.win_a, m.win_b } or {}) do
       if api.nvim_win_is_valid(w) then
-        pcall(function()
-          vim.wo[w].winbar = ''
-        end)
+        set_wo(w, 'winbar', '')
+        diff_whl(w, nil)
         if was[w] then
-          pcall(api.nvim_win_call, w, undiff_folds)
+          pcall(api.nvim_win_call, w, function()
+            undiff_folds()
+            pcall(vim.cmd, 'setlocal foldlevel<')
+          end)
         end
       end
     end
@@ -2655,7 +3406,7 @@ local function finish(s, stay)
       pcall(api.nvim_buf_delete, b, { unload = true })
     end
   end
-  for _, b in ipairs({ s.buf_l, s.empty_a, s.empty_b }) do
+  for _, b in ipairs({ s.buf_l, m and m.empty_a or false, m and m.empty_b or false }) do
     if b and api.nvim_buf_is_valid(b) then
       pcall(api.nvim_buf_delete, b, { force = true })
     end
@@ -2663,6 +3414,7 @@ local function finish(s, stay)
   if #kept > 0 then
     say('고친 채 남겨 둔 버퍼: ' .. table.concat(kept, ', '), vim.log.levels.WARN)
   end
+  dip_sync()
 end
 
 local function restart(s)
@@ -2694,9 +3446,9 @@ local function map_list(s)
   local function m(lhs, fn, desc)
     vim.keymap.set('n', lhs, fn, { buffer = b, nowait = true, silent = true, desc = desc })
   end
-  m('<CR>', function() act_enter(s, true) end, '비교 열고 편집 창으로 / 펼치기')
+  m('<CR>', function() act_enter(s, true) end, '비교 탭 열기(있으면 그 탭으로) / 펼치기')
   m('<2-LeftMouse>', function() act_enter(s, true) end, '비교 열기')
-  m('o', function() act_enter(s, false) end, '비교 열기 (트리에 그대로)')
+  m('o', function() act_enter(s, false) end, '비교 탭을 뒤에서 열기·다시 읽기 (트리에 그대로)')
   m('<C-n>', function() act_step(s, 1) end, '다음 차이 (보기에 따라)')
   m('<C-p>', function() act_step(s, -1) end, '앞 차이 (보기에 따라)')
   m('l', function()
@@ -2755,14 +3507,19 @@ local function full_dir(d)
   return (vim.fn.fnamemodify(d, ':p'):gsub('(.)/+$', '%1'))
 end
 
--- 트리 창 (탭 맨 아래, 전체 너비). 옵션은 창에만(local) - vim.wo 는 :set 처럼 그 창의
--- 전역 값까지 바꾸어, 그 창에서 갈라 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다
-local function open_tree_win(s)
-  s.win_l = api.nvim_open_win(s.buf_l, true, { split = 'below', win = -1, height = s.list_h })
+-- 트리 창의 옵션. 창에만(local) - vim.wo 는 :set 처럼 그 창의 전역 값까지 바꾸어, 그 창에서 갈라
+-- 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다
+local function tree_opts(s)
   for k, v in pairs({ number = false, relativenumber = false, wrap = false, cursorline = true,
-    winfixheight = true, signcolumn = 'no', foldcolumn = '0', list = false, spell = false }) do
+    winfixheight = not s.pair_tab, signcolumn = 'no', foldcolumn = '0', list = false, spell = false }) do
     pcall(api.nvim_set_option_value, k, v, { scope = 'local', win = s.win_l })
   end
+end
+
+-- 트리 창 (탭 맨 아래, 전체 너비 - pair_tab 이면 탭 전체)
+local function open_tree_win(s)
+  s.win_l = api.nvim_open_win(s.buf_l, true, { split = 'below', win = -1, height = not s.pair_tab and s.list_h or nil })
+  tree_opts(s)
 end
 
 function M.open(a, b)
@@ -2795,12 +3552,16 @@ function M.open(a, b)
   if vim.fn.executable('python3') ~= 1 then
     return say('python3 이 없습니다 - :DirDiffClassic 을 쓰세요', vim.log.levels.WARN)
   end
+  -- 색 다시 보기: g:vimide_dirdiff_colors 를 바꿨거나 Neogit 이 늦게 setup 되었으면 이 비교부터
+  set_hl()
   local s = {
     a = a, b = b, req = 0, dirs = {}, loading = {}, dirty = {},
     expanded = { [''] = true }, rows = {}, row_of = {}, opened = {}, unload = {},
     side = 'a', marks = { a = {}, b = {} }, offb = {}, offg = {},
     mode = start_mode(), reveal_step = 1,
     origin = api.nvim_get_current_tabpage(),
+    -- 짝을 보일 곳: 비교 탭들(views) 또는 위의 편집 창 둘(main). 비교 중에 옵션을 바꿔도 이 비교는 그대로
+    views = {}, pair_tab = pair_tab_on(), fmode = start_fmode(),
   }
   -- 곁창에서 :tabnew 하면 그 창 옵션을 물려받고 neo-tree 가 가져간다 - EDIT 창에서
   local back = api.nvim_get_current_win()
@@ -2816,27 +3577,33 @@ function M.open(a, b)
     pcall(api.nvim_tabpage_set_win, s.origin, back)
   end
   s.tab = api.nvim_get_current_tabpage()
-  s.win_a = api.nvim_get_current_win()
   local nb = api.nvim_get_current_buf()
-  plain_window(s.win_a)
-  api.nvim_win_set_buf(s.win_a, scratch(s, 'a', { '', '  아래 트리에서 파일을 고르고 Enter  (? 도움말)' }))
-  -- :tabnew 가 만든 빈 [No Name] 은 곧바로 치운다 (비교할 때마다 하나씩 남았다)
-  if api.nvim_buf_is_valid(nb) and api.nvim_buf_get_name(nb) == '' and not vim.bo[nb].modified
-      and api.nvim_buf_line_count(nb) == 1 and api.nvim_buf_get_lines(nb, 0, 1, false)[1] == ''
-      and #vim.fn.win_findbuf(nb) == 0 then
-    pcall(api.nvim_buf_delete, nb, {})
-  end
-  vim.cmd('rightbelow vsplit')
-  s.win_b = api.nvim_get_current_win()
-  api.nvim_win_set_buf(s.win_b, scratch(s, 'b', { '' }))
   s.buf_l = api.nvim_create_buf(false, true)
   vim.bo[s.buf_l].bufhidden = 'hide'
   -- airline 이 창을 옮길 때마다 상태줄을 제 것으로 바꿔 진행·합계가 사라졌다
   vim.b[s.buf_l].airline_disable_statusline = 1
   vim.bo[s.buf_l].filetype = 'vimidedirdiff'
   api.nvim_buf_set_name(s.buf_l, 'DirDiff ' .. vim.fn.fnamemodify(a, ':t') .. ' <> ' .. vim.fn.fnamemodify(b, ':t') .. ' #' .. s.buf_l)
-  s.list_h = tonumber(vim.g.vimide_dirdiff_list_height) or math.max(10, math.floor(vim.o.lines * 0.4))
-  open_tree_win(s)
+  if s.pair_tab then
+    -- 트리만 (탭 전체). 짝은 비교 탭에서 본다 (open_pair)
+    s.win_l = api.nvim_get_current_win()
+    plain_window(s.win_l)
+    api.nvim_win_set_buf(s.win_l, s.buf_l)
+    tree_opts(s)
+    drop_noname(nb)
+  else
+    local v = { s = s, tab = s.tab, inline = true, fmode = s.fmode }
+    s.main = v
+    v.win_a = api.nvim_get_current_win()
+    plain_window(v.win_a)
+    api.nvim_win_set_buf(v.win_a, scratch(v, 'a', { '', '  아래 트리에서 파일을 고르고 Enter  (? 도움말)' }))
+    drop_noname(nb)
+    vim.cmd('rightbelow vsplit')
+    v.win_b = api.nvim_get_current_win()
+    api.nvim_win_set_buf(v.win_b, scratch(v, 'b', { '' }))
+    s.list_h = tonumber(vim.g.vimide_dirdiff_list_height) or math.max(10, math.floor(vim.o.lines * 0.4))
+    open_tree_win(s)
+  end
   vim.t.vimide_dirdiff_view = true
   sessions[s.tab] = s
   map_list(s)
@@ -2850,12 +3617,8 @@ end
 
 -- 편집 창에서 <C-n>/<C-p> (.vimrc 의 ListStep 이 먼저 묻는다): ]c / [c
 function _G.vimide_dirdiff_step(dir)
-  local s = sessions[api.nvim_get_current_tabpage()]
-  if not s then
-    return false
-  end
   local w = api.nvim_get_current_win()
-  if (w == s.win_a or w == s.win_b) and vim.wo[w].diff then
+  if view_of_win(w) and vim.wo[w].diff then
     -- dir 의 크기가 횟수다 (.vimrc 가 v:count1 을 넘긴다): 2<C-n> = 2]c
     pcall(vim.cmd, 'normal! ' .. math.max(1, math.abs(dir)) .. (dir > 0 and ']c' or '[c'))
     return true
@@ -2909,6 +3672,24 @@ api.nvim_create_autocmd('TabClosed', {
         end)
       end
     end
+    -- 비교 탭을 :tabclose(:q, <C-w>c ...)로 닫았다: 그 짝을 놓고, 그 탭에 있었으면 트리의 그 줄로 (q 처럼)
+    for _, v in ipairs(all_views()) do
+      if not v.inline and not api.nvim_tabpage_is_valid(v.tab) then
+        local was_here = leaving == v.tab
+        v.closed = true
+        v.s.views[v.tab] = nil
+        vim.schedule(function()
+          release_view(v, was_here)
+        end)
+      end
+    end
+  end,
+})
+-- 'diffopt' 의 context 를 들어온 탭의 보기로 (비교 탭이 아니면 사용자 것으로 되돌린다 - dip_sync)
+api.nvim_create_autocmd('TabEnter', {
+  group = group,
+  callback = function()
+    dip_sync()
   end,
 })
 -- :tabclose (또는 <C-w>c) 로 편집 창이 닫힐 때도 남는 버퍼(고친 것, 사용자 것)에 머리와 diff 접기가 적혀
@@ -2919,14 +3700,14 @@ api.nvim_create_autocmd('WinClosed', {
   group = group,
   callback = function(ev)
     local w = tonumber(ev.match)
-    for _, s in pairs(sessions) do
-      if w and (w == s.win_a or w == s.win_b) and api.nvim_win_is_valid(w) then
-        pcall(api.nvim_win_call, w, function()
-          vim.cmd('diffoff')
-          undiff_folds()
-          vim.wo.winbar = ''
-        end)
-      end
+    if w and view_of_win(w) and api.nvim_win_is_valid(w) then
+      pcall(api.nvim_win_call, w, function()
+        vim.cmd('diffoff')
+        undiff_folds()
+        pcall(vim.cmd, 'setlocal foldlevel<')
+      end)
+      set_wo(w, 'winbar', '')
+      diff_whl(w, nil)
     end
   end,
 })
@@ -2937,33 +3718,44 @@ api.nvim_create_autocmd('WinClosed', {
 -- 편집 창과 같은 머리를 달고 있으면 거기서 받은 옵션이다 - 머리를 걷고 diff 였으면 :diffoff (그 창만,
 -- 묶기·접기도 diff 전으로). :diffoff 가 남긴 manual 접기와 'foldenable' 은 undiff_folds 가 되돌린다.
 -- 사용자가 :diffsplit·vimdiff 로 켜는 diff 는 그 명령이 버퍼를 띄운 뒤에 켜므로 남는다.
--- 머리가 다른(사용자가 켠) diff 창은 건드리지 않는다
+-- 머리가 다른(사용자가 켠) diff 창은 건드리지 않는다.
+-- 비교 색(winhighlight - VimIdeDirDiff* 로 잇는 것)도 같다: 비교 창이 아닌 창이 그것을 달고 있으면 물려받은
+-- 것이라 걷는다 (그 창에 같은 파일이 떠도 보통 색으로)
 local function strip_inherited()
   if next(sessions) == nil then
     return
   end
   local w = api.nvim_get_current_win()
   local wb = vim.wo[w].winbar
-  if wb == '' then
+  local hl = vim.wo[w].winhighlight:find('VimIdeDirDiff', 1, true) ~= nil
+  if wb == '' and not hl then
     return
   end
+  local views = all_views()
   local from = false
-  for _, s in pairs(sessions) do
-    if w == s.win_a or w == s.win_b then
+  for _, v in ipairs(views) do
+    if w == v.win_a or w == v.win_b then
       return
     end
-    for _, x in ipairs({ s.win_a, s.win_b }) do
-      if api.nvim_win_is_valid(x) and vim.wo[x].winbar == wb then
+    for _, x in ipairs({ v.win_a, v.win_b }) do
+      if wb ~= '' and api.nvim_win_is_valid(x) and vim.wo[x].winbar == wb then
         from = true
       end
     end
   end
   if from then
     pcall(vim.cmd, 'setlocal winbar<')
-    if vim.wo[w].diff then
-      pcall(vim.cmd, 'diffoff')
-      undiff_folds()
+  end
+  if hl then
+    pcall(vim.cmd, 'setlocal winhighlight<')
+    if vim.wo[w].winhighlight:find('VimIdeDirDiff', 1, true) then
+      set_wo(w, 'winhighlight', '')
     end
+  end
+  if (from or hl) and vim.wo[w].diff then
+    pcall(vim.cmd, 'diffoff')
+    undiff_folds()
+    pcall(vim.cmd, 'setlocal foldlevel<')   -- 보기의 foldlevel(모두 보이기 99)도 물려받았다
   end
 end
 api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
@@ -2974,13 +3766,35 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
 api.nvim_create_autocmd('BufWinEnter', {
   group = group,
   callback = function(ev)
-    if sessions[api.nvim_get_current_tabpage()] then
+    -- 트리 탭과 비교 탭 안은 비교의 것이다
+    local tab = api.nvim_get_current_tabpage()
+    if sessions[tab] or view_of_tab(tab) then
       return
     end
     vim.b[ev.buf].vimide_dirdiff = nil
     for _, s in pairs(sessions) do
       s.opened[ev.buf] = nil
       s.unload[ev.buf] = nil   -- 도로 내려 둘 버퍼도: 사용자가 쓰기 시작했다
+    end
+  end,
+})
+-- 비교 창에 짝이 아닌 버퍼를 띄우면(:e 다른 파일, :b, <C-^>) 그 창의 비교 색과 머리를 걷는다 - 그
+-- 파일은 짝이 아니다. 짝의 버퍼로 돌아오면 다시 단다. 채우는 동안(fill)은 보지 않는다
+api.nvim_create_autocmd('BufWinEnter', {
+  group = group,
+  callback = function(ev)
+    local w = api.nvim_get_current_win()
+    local v = view_of_win(w)
+    if not v or v.filling or not v.rel then
+      return
+    end
+    local side = w == v.win_a and 'a' or 'b'
+    if ev.buf == v['buf_' .. side] then
+      diff_whl(w, not v.bin and side or nil)
+      set_heads(v)
+    else
+      diff_whl(w, nil)
+      set_wo(w, 'winbar', '')
     end
   end,
 })

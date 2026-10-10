@@ -1968,19 +1968,24 @@ if !exists('g:DirDiffExcludes')
 endif
 let g:vimide_dirdiff_tab = 1
 " nvim 의 :DirDiff 는 Beyond Compare 식 나란한 트리다 (~/.vim/plugin/dirdiffview.lua).
-" 위(편집 창 둘)는 A | B 비교, 아래는 A 트리 | 판정 | B 트리. 큰 트리도 곧바로 보인다
+" 탭 하나에 A 트리 | 판정 | B 트리, 파일 짝은 짝마다 비교 탭(A | B diff)에서 본다
+" (g:vimide_dirdiff_pair_tab = 0 이면 예전처럼 트리 위의 편집 창 둘). 큰 트리도 곧바로 보인다
 " - 뒤에서 python3(~/.vim/tools/dirdiffscan.py)이 훑으며 보내고(펼쳐 둔 디렉터리 먼저,
 " 그다음 맨 위 폴더 순서대로), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음',
 " 나머지만 내용을 읽는다. 제외는 위의 g:DirDiffExcludes 를 같이 쓴다.
 " 한쪽에만 있는 파일은 없는 쪽을 빈 버퍼로 두고 diff (A만: 왼쪽에 파일, B만: 오른쪽에).
-"   트리: <CR> 비교 열고 편집 창으로(디렉터리는 펼치기), o 열기만, <C-n>/<C-p> 다음/앞
+" 색은 Neogit 상태 화면의 것 (다름 파랑, A만 빨강, B만 초록, 비교 창의 A 줄 빨강 / B 줄 초록).
+"   트리: <CR> 비교 탭 열고 그 탭으로(열려 있으면 그 탭으로, 디렉터리는 펼치기), o 비교 탭을
+"         뒤에서 열기(열려 있으면 다시 읽기, 트리에 그대로), <C-n>/<C-p> 다음/앞
 "         차이 파일(모두·차이 밖의 보기는 그 보기의 것), l/h 펼치기/접기, O/X 모두 펼치기/접기,
-"         R 다시, q 끝, ? 도움말
+"         R 다시, q 끝(비교 탭들도), ? 도움말
 "         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
 "         <Tab> 비교할 곳 고르기 ([A] 에서 Tab, [B] 에서 Tab -> 새 탭에서 비교. neo-tree 와 같은 [A])
 "         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
-"   편집 창: <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
+"   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
+"            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도),
+"            <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
 "            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term 처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
 "            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
 "            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
@@ -1990,7 +1995,7 @@ let g:vimide_dirdiff_tab = 1
 "                                          "  left-newer right-newer left-newer-orphans right-newer-orphans
 "                                          "  left-orphans right-orphans same, only_diff 보다 먼저)
 "   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
-"   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (기본: 화면의 40%)
+"   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때, 기본: 화면의 40%)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
@@ -2000,6 +2005,14 @@ let g:vimide_dirdiff_filter = ''
 let g:vimide_dirdiff_trust_mtime = 1
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
+" DirDiff 색: 'neogit' = Neogit 상태 화면의 색 (Neogit 이 없으면 예전 색), 'classic' = 예전 색
+let g:vimide_dirdiff_colors = 'neogit'
+" 파일 짝을 볼 곳: 1 = 짝마다 비교 탭, 0 = 트리 위의 편집 창 둘 (예전)
+let g:vimide_dirdiff_pair_tab = 1
+" 비교 창의 처음 보기: 'all' 모두 보이기, 'diff' 차이 보이기, 'context' 문맥 보이기 (\d 로 바꾼다)
+let g:vimide_dirdiff_file_view = 'all'
+" 문맥 보이기에서 바뀐 줄 위아래로 보일 줄 수
+let g:vimide_dirdiff_context = 3
 
 " Ease my eyes
 "colorscheme solarized

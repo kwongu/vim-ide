@@ -867,8 +867,8 @@ list is matched against the global mappings; a table elsewhere is usually
 about the keys of one window (neo-tree's `K`, the DirDiff tree's `<C-n>`), so
 it is matched only for leader keys, F keys, `Ctrl-W`, `,` keys and
 commands - and for the keys DirDiff takes over in its edit windows
-(`<C-r>`, `<C-l>`, `<C-S-r>`, `<C-S-l>`), which are global mappings that act
-only inside a DirDiff tab: their rows in "in the edit windows" show the
+(`<C-r>`, `<C-l>`, `<C-S-r>`, `<C-S-l>`, `\d`, `q`), which are global mappings
+that act only in a DirDiff comparison's two windows: their rows in "in the edit windows" show the
 mapping (and only that one - not the same key's mapping in other modes), and
 every preview of those mappings says what the key does outside a DirDiff
 comparison: the mapping DirDiff wrapped, with the file and line that set it
@@ -911,10 +911,10 @@ stays the previous window (`Ctrl-W p`), so cancelling one of those forms
 afterwards still lands in the edit window it was opened from. Those forms
 float above everything else, so while the list is open they are hidden (nvim
 0.10 and later; before that the list is raised above them), and they come back
-when it closes. DirDiff's view menu
-(`f`) does not come back: F1 there closes it and opens the list from the tree
-the menu was opened from, so closing the list, or opening a row from it, goes
-to that tree.
+when it closes. DirDiff's view menus
+(`f` in the tree, `\d` in a compare window) do not come back: F1 there closes
+the menu and opens the list from the window the menu was opened from, so
+closing the list, or opening a row from it, goes to that window.
 `q` in a read-only README or definition tab goes back to the tab and window F1
 was pressed in. Terminal mode leaves F1 to the program running there.
 The fugitive windows and, in nvim, tagbar no longer take F1 for their own
@@ -2398,10 +2398,12 @@ pick `[A]` in neo-tree and `[B]` in a comparison tree, or the other way round.
 
 ### The side-by-side tree (nvim)
 
-In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare: the two
-edit windows on top show the chosen pair in diff mode (A on the left, B on
-the right), and the window below holds A's tree, a verdict column, and B's
-tree next to each other.
+In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare: one window
+holds A's tree, a verdict column, and B's tree next to each other, and each
+file pair you pick opens in a *compare tab* of its own (A on the left, B on
+the right, in diff mode; see *Compare tabs* below).
+`let g:vimide_dirdiff_pair_tab = 0` keeps the earlier layout instead: two edit
+windows on top of the tree, showing one pair at a time.
 
 ```
 ▾ sub                 2026-09-29 ≠ ▾ sub                 2026-09-29
@@ -2413,15 +2415,36 @@ tree next to each other.
 ```
 
 `=` same, `≠` different, `◀` only in A, `▶` only in B, `·` not checked
-yet (`= x < > .` with `g:vimide_ascii_icons`). Differences are red, one-side
-entries blue. A folder is `≠` as soon as anything inside it differs, and `=`
-only once everything below it has been checked. The status line shows the
-progress and the totals.
+yet (`= x < > .` with `g:vimide_ascii_icons`). A folder is `≠` as soon as
+anything inside it differs, and `=` only once everything below it has been
+checked. The status line shows the progress and the totals.
+
+The colors are Neogit's status screen colors (`g:vimide_dirdiff_colors =
+'neogit'`, the default), which read better than DirDiff's own: a difference is
+`NeogitChangeModified` (blue, bold italic), only in A is `NeogitChangeDeleted`
+(red), only in B is `NeogitChangeNewFile` (green), entries not checked yet and
+the sizes and dates of identical entries are `NeogitSubtleText`, and the tree's
+header, the `DirDiff` and view labels in the status line and the current item
+of a view menu are `NeogitSectionHeader`; identical entries stay plain. In the
+two compare windows the A side's changed lines and lines only in A are
+Neogit's removed-line colors (`NeogitDiffDelete`), the B side's are its
+added-line colors (`NeogitDiffAdd`), the changed characters inside a line are
+Neogit's in-line diff colors (`NeogitDiffDeleteInline` / `NeogitDiffAddInline`
+- its `…Highlight` groups have the same background as the line, so the changed
+characters did not stand out), and the filler lines are dimmed. The DirDiff
+groups only link to Neogit's (`VimIdeDirDiffChanged`, `VimIdeDirDiffOnlyA`,
+`VimIdeDirDiffOnlyB`, `VimIdeDirDiffAddA` ... - `:hi` one of them to change it;
+that is kept over a color scheme change), they follow a color scheme change,
+and a group falls back to the earlier color when Neogit is not set up. The
+compare colors are window-local (`'winhighlight'`) to DirDiff's own two windows
+only. `let g:vimide_dirdiff_colors = 'classic'` brings back the earlier colors:
+differences red, one-side entries blue, the compare windows in the plain
+`DiffAdd` / `DiffChange` / `DiffText` colors.
 
 | in the tree | |
 |---|---|
-| `<CR>` | file: show the pair in the edit windows and move the cursor there, on the first change. Folder: open / close |
-| `o` | show the pair, stay in the tree |
+| `<CR>` | file: open the pair in a compare tab and move the cursor there, on the first change; a pair that already has a compare tab goes to that tab (as it was left - edits and cursor kept). Folder: open / close |
+| `o` | open the pair's compare tab in the background and stay in the tree, so several pairs can be opened and then visited with `gt`; on a pair that already has one, read it again (unsaved edits are kept). With `g:vimide_dirdiff_pair_tab = 0`: show the pair in the edit windows, stay in the tree |
 | `<C-n>` / `<C-p>` | next / previous file that differs (or exists on one side only), opening folders on the way. In a view other than *all* and *differences*: the next entry that view is about |
 | `l` / `h` | open a folder / close it (or go to the parent) |
 | `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree) |
@@ -2432,19 +2455,78 @@ progress and the totals.
 | `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
 | `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
 | `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
-| `q` | finish: closes the tab, goes back, removes the buffers it opened (an edited one is kept, and named) |
+| `q` | finish: closes the tab and its compare tabs, goes back, removes the buffers it opened (an edited one is kept, and named) |
 | `?` | these keys |
 
-In the two edit windows:
+In the two windows of a compare tab (or the two edit windows above the tree
+with `g:vimide_dirdiff_pair_tab = 0`):
 
 | in the edit windows | |
 |---|---|
+| `\d` | choose the view: *all*, *differences*, *context* - a small menu (`Enter`, a double click or `1` `2` `3` picks, `q` / `Esc` closes, `?` lists these keys); see *View modes* below. The window bar shows the current one |
+| `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same). While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c` |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
 | `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when the terminal reports Ctrl+Shift (iTerm2 with CSI u, tmux with `extended-keys`); Tera Term usually sends a plain `<C-r>` / `<C-l>` |
 | `1<C-r>` / `1<C-l>`, `N<C-r>`, visual | work in every terminal: a count copies that many lines from the cursor (`1<C-r>` is the cursor line, with the same rule on an unchanged line as `<C-S-r>`), a visual selection exactly its lines. Lines of the other side just above the first of those lines are not part of them (as with nvim's `:1,1diffget`); when nothing in the lines differs it says so |
 
 The copy goes into the other buffer and `:w` saves it. Unsaved edits on either side are what is compared and copied, and each copy is one undo step in the buffer it changed. When one side is not a file (the empty side of a one-sided file, a note - a binary or too large file too) the keys refuse and point to the tree copy. Block copies count the rows of both windows (filler lines included) and replace exactly the block's lines, instead of handing nvim a line range: with linematch, a range one line wider than the block also took the next piece and deleted lines on the other side, and nvim's own `:diffput` loses a line when the target is a file with a single empty line (or empties one partway through) and leaves a line behind on `u` after copying into an empty file. On a very large diff (counting takes over 0.25 s), or when `'diffopt'` has `iblank` or lacks `filler` (the rows of the two windows no longer line up), it falls back to `:diffput` / `:diffget` with a range around the block - except into an empty file, which is always filled directly (one `u` empties it again), and into a file holding a single empty line, where the few rows can still be told apart. `do` / `dp` still work. Outside the DirDiff tab `<C-r>` is redo and `<C-l>` moves to the right window, exactly as before, and `<C-S-r>` / `<C-S-l>` do what nvim does without a mapping (`let g:vimide_dirdiff_copy_keys = 0` leaves all four alone everywhere).
+
+#### Compare tabs
+
+`<CR>` on a file opens the pair in a tab of its own, right after the DirDiff
+tab and the compare tabs it already has: A on the left, B on the right, in
+diff mode, the window bars saying `A: <path>` / `B: <path>`, and B's bar the
+current view and its keys (`[모두 보이기] \d 보기 · q 닫기`). The rows of the
+pairs that have a compare tab are highlighted in the tree. The DirDiff tab
+itself shows only the tree, at full height.
+
+- `<CR>` on a pair that already has a compare tab goes to it; `o` opens one in
+  the background (the cursor waits on the first change) or reads an open one
+  again.
+- `q` in a compare tab, `:tabclose`, or closing its last window: back to the
+  tree, on that pair's row. The buffers the compare opened are removed, an
+  edited one is kept and named. `q` in the tree closes every compare tab of
+  that comparison.
+- One-sided files, binary and too large files, and a name that is a folder on
+  one side work as before (an empty side, a note).
+- Everything the edit windows did still works there: `<C-n>` / `<C-p>`, the
+  `<C-r>` / `<C-l>` copies with counts and visual selections, `:w` updating
+  the tree's verdict, a tree copy reloading an open pair (in whichever compare
+  tab shows it, without moving you there), nested `Tab` / `Tab` comparisons
+  and several comparisons at once (each has its own compare tabs).
+- vim-ide's sidebar guard leaves a compare tab alone (`t:vimide_dirdiff_pair`),
+  as it does the DirDiff tab.
+
+#### View modes
+
+`\d` in a compare window chooses how the pair is shown, like Beyond
+Compare's text compare views. The window bar shows the current one. Every
+pair you open starts in 모두 보이기 (the default view); a view chosen with `\d`
+stays with that pair only.
+
+| view | id | shows |
+|---|---|---|
+| 모두 보이기 | `all` | every line, nothing folded (the default) |
+| 차이 보이기 | `diff` | only the changed lines - the unchanged ones are folded, leaving one line next to each change (vim's minimum, `context:0` counts as 1) |
+| 문맥 보이기 | `context` | the changed lines with `g:vimide_dirdiff_context` lines (3) above and below |
+
+- The folds are vim's own diff folds (`foldmethod=diff`), so `zR` opens them
+  all (*all*) and `zM` closes them (*differences* or *context*); `zo` / `zc`
+  work too, and both windows always fold the same way and stay aligned while
+  scrolling. The bar keeps showing the view chosen with `\d`.
+- The fold context is the global `'diffopt'` `context:` item. It is set when
+  you enter a compare tab in *differences* or *context*, and your own
+  `'diffopt'` is back as soon as you enter any other tab, so your own vimdiff
+  tabs keep folding as before.
+- `let g:vimide_dirdiff_file_view = 'diff'` starts in another view (an id from
+  the table).
+- There is no *same* view (only the identical lines): vim can fold changed
+  blocks, but not the filler lines that stand in for the other side's lines,
+  and a block that exists on one side only has nothing to fold on the other -
+  each folded block would take a different number of rows in the two windows,
+  and since diff scrolling binds the windows by line, not by screen row, they
+  drift apart further down.
 
 #### Views
 
@@ -2521,12 +2603,15 @@ Copying in the tree:
   mode, so the whole file shows as added: an A-only file on the left with an
   empty right side, a B-only file on the right with an empty left side. The
   window bar says `(없음)` on the empty side.
-- The window bars (`A: …` / `B: …`) and diff mode belong to the two edit
-  windows only. Opening a file shown there in another window or tab
-  (`:tabnew file`, `:e`, `:vsplit file`, `Enter` in neo-tree, a `Tab` / `Tab`
-  vimdiff) gives a plain window: nvim copies the options of the window that
-  shows the buffer, and the bar, `diff`, `scrollbind`, `cursorbind` and the
-  diff folds are taken off again there. A file the edit windows showed earlier
+- The window bars (`A: …` / `B: …`), the compare colors and diff mode belong
+  to the two compare windows only. Opening a file shown there in another
+  window or tab (`:tabnew file`, `:e`, `:vsplit file`, `:split` in a compare
+  window, `Enter` in neo-tree, a `Tab` / `Tab` vimdiff) gives a plain window:
+  nvim copies the options of the window that shows the buffer, and the bar,
+  the `'winhighlight'`, `diff`, `scrollbind`, `cursorbind`, the diff folds and
+  the view's fold level are taken off again there. Another file opened in a
+  compare window (`:e other`) loses the bar and the colors too, and gets them
+  back when the pair's file comes back (`<C-^>`). A file the edit windows showed earlier
   and that is still loaded - your own buffer after another pair replaced it,
   an edited one kept after `q` or `:tabclose` - opens the same way, with
   folding as usual and none of the comparison's folds. A `:diffsplit` or
@@ -2556,8 +2641,14 @@ Copying in the tree:
   `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
   starts with only the differences, `let g:vimide_dirdiff_filter = '<id>'`
   with any view from *Views* (it wins over `only_diff`), and
-  `g:vimide_dirdiff_list_height` sets the tree height (default 40% of the
-  screen).
+  `g:vimide_dirdiff_list_height` sets the tree height with
+  `g:vimide_dirdiff_pair_tab = 0` (default 40% of the screen).
+- Options of the compare side: `g:vimide_dirdiff_colors` (`'neogit'` /
+  `'classic'`), `g:vimide_dirdiff_pair_tab` (1: compare tabs, 0: edit windows
+  above the tree), `g:vimide_dirdiff_file_view` (`'all'` / `'diff'` /
+  `'context'`), `g:vimide_dirdiff_context` (3). A comparison keeps the layout
+  it was opened with; the colors change at the next `:DirDiff` or color
+  scheme change.
 
 ### The plugin's list (vim, `:DirDiffClassic`)
 
