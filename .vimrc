@@ -936,17 +936,17 @@ augroup END
 " neo-tree: 사이드바 파일 트리 (NERDTree 상위 호환)
 "   F9 또는 <leader>t 로 토글. a 생성 / d 삭제 / r 이름변경 / ? 도움말
 "   (F11 은 그대로 NERDTree 오른쪽 창)
-"   트리는 기본이 고정 모드다: EDIT 창에서 파일을 옮겨 다녀도 F9 사이드바와 F11 부동
-"   트리가 따라가지 않는다 (요청). <leader>P 로 실시간 경로 모드(편집 파일을 따라가기)와
+"   트리는 기본이 실시간 경로 모드다: F9 사이드바, F11 부동 트리, F12 RelationView 열의
+"   트리가 모두 편집 파일을 따라간다. <leader>P 로 셋 모두 고정 모드(따라가지 않기)와
 "   오간다 - ~/.vim/plugin/treepin.lua, :VimIdeTreePin [on|off]. 기본과 다른 모드일 때만
-"   트리 창 맨 위에 표시한다. RelationView 열의 트리는 늘 따라간다.
-"     let g:vimide_tree_pinned = 0   " 예전처럼 처음부터 실시간 경로 모드로
+"   트리 창 맨 위에 표시한다.
+"     let g:vimide_tree_pinned = 1   " 처음부터 고정 모드로
 "   netrw 는 nvim-tree 가 이미 가로채므로 neo-tree 는 건드리지 않는다.
 "   대용량 트리에서 발열/지연이 없도록 git status 는 비동기, 파일
 "   watcher 는 끈다.
 "
 if !exists('g:vimide_tree_pinned')
-    let g:vimide_tree_pinned = 1
+    let g:vimide_tree_pinned = 0
 endif
 "
 " git 표시(색깔 마크)의 비용 - 실측 (56,220 파일 커널 repo, 공유 서버):

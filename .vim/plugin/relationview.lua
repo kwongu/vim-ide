@@ -3110,8 +3110,8 @@ end
 -- 지금 편집 중인 파일. 트리가 펼쳐 보여줄 대상이다.
 -- 우리 창(패널/미리보기/트리)에 있거나 진짜 파일이 아니면 nil.
 follow_file = function()
-  -- \P 의 트리 고정(treepin.lua)은 여기에 걸지 않는다 - 이 열의 트리는 늘 따라간다
-  if cfg('tree_follow', 1) == 0 then
+  -- \P 의 트리 고정(treepin.lua)도 이 열의 트리에 건다 (요청: F9 F11 F12 모두 같은 \P)
+  if cfg('tree_follow', 1) == 0 or vim.g.vimide_tree_pinned == 1 then
     return nil
   end
   local win = api.nvim_get_current_win()
@@ -3282,6 +3282,13 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
   end,
   desc = 'RelationView: the column tree follows the edited file',
 })
+
+-- \P 로 고정을 풀었을 때 지금 파일로 곧바로 한 번 따라간다 (treepin.lua 가 부른다).
+-- 고정 중에 본 파일이 마지막으로 드러낸 파일과 같아도 다시 드러낸다
+function _G.relationview_tree_catch_up()
+  s.tree_last = nil
+  tree_follow_soon()
+end
 
 -- 오른쪽 열의 트리는 RelationView 가 따로 관리한다.
 --

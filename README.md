@@ -1937,20 +1937,19 @@ also on `?`, so nothing was lost. neo-tree's two-key sort maps (`oc` `od` `og`
 `om` `on` `os` `ot`) are dropped - they start with `o`, so `o` used to wait
 `timeoutlen` before it opened anything.
 
-The tree is **fixed by default**: the F9 sidebar and the F11 floating tree stay
-where they are while you move between files in the edit window. `\P` switches
-to the *live path* mode, where every file you move to gets expanded and the
-cursor jumps to it, and `\P` again goes back to fixed (from any window;
-`:VimIdeTreePin [on|off]` does the same). Only the mode that differs from the
-one you started with is marked at the top of the tree window
-(` [실시간 경로] \P 로 고정 `), so the default costs no line. Switching to live
-from an edit window jumps the tree to the current file at once. Fixed stops only
-the following: opening and expanding by hand in the tree, and an explicit
-`:Neotree reveal`, still work, and a fixed tree you open comes up at its root
-instead of expanded to the current file. The tree in the RelationView column
-always follows - it shows the current file. It is the file tree that is fixed -
-neo-tree's buffers view (`<` / `>`) keeps following. `let g:vimide_tree_pinned = 0`
-starts in the live path mode, as before.
+The trees **follow the edit window by default** (*live path* mode): the F9
+sidebar, the F11 floating tree and the tree in the F12 RelationView column all
+expand to every file you move to, with the cursor on it. `\P` switches all three
+to the *fixed* mode, where they stay where they are while you move between
+files, and `\P` again goes back (from any window; `:VimIdeTreePin [on|off]`
+does the same). Only the mode that differs from the one you started with is
+marked at the top of the tree windows (` [고정] \P 로 실시간 경로 `), so the
+default costs no line. Going back to live from an edit window jumps the trees
+to the current file at once. Fixed stops only the following: opening and
+expanding by hand in the tree, and an explicit `:Neotree reveal`, still work,
+and a fixed tree you open comes up at its root instead of expanded to the
+current file. It is the file tree that is fixed - neo-tree's buffers view
+(`<` / `>`) keeps following. `let g:vimide_tree_pinned = 1` starts fixed.
 
 `y` was not free either. neo-tree has it on its file clipboard, in normal and
 visual mode, so `yy` or a `<C-v>` block `y` in the tree put nothing into a

@@ -1,13 +1,13 @@
--- treepin.lua - \P: neo-tree 트리의 고정 모드 / 실시간 경로 모드 (토글)
+-- treepin.lua - \P: neo-tree 트리의 실시간 경로 모드 / 고정 모드 (토글)
 --
--- 기본은 고정 모드다 (g:vimide_tree_pinned = 1, 요청): F9 사이드바와 F11 부동 트리가 편집
--- 파일을 따라가지 않는다. \P 로 실시간 경로 모드(따라가기)로 바꾸고, 다시 \P 로 돌아온다.
+-- 기본은 실시간 경로 모드다 (g:vimide_tree_pinned = 0, 요청): F9 사이드바, F11 부동 트리,
+-- F12 RelationView 열의 트리가 모두 편집 파일을 따라간다. \P 로 셋 모두 고정 모드로 바꾸고,
+-- 다시 \P 로 돌아온다. (RelationView 열의 트리는 relationview.lua 가 따로 따라가는데,
+-- 그것도 이 고정을 본다.) 아래 '고정' 설명은 고정 모드에서 무엇이 멈추는지다.
 --
 -- EDIT 창에서 파일을 옮겨 다니면 neo-tree 가 그 파일까지 펼치고 커서를 옮긴다
 -- (filesystem.follow_current_file). 다른 곳을 보면서 트리는 그대로 두고 싶을 때 \P 로
--- 고정한다. F9 사이드바 같은 neo-tree 창만이다 - RelationView 열의 트리는 늘 따라간다
--- (요청: 그 트리는 언제나 지금 파일을 보여 줄 것. 그 따라가기는 relationview.lua 가
--- 따로 하고 이 고정을 보지 않는다. 표시도 그 창에는 달지 않는다).
+-- 고정한다. F9 사이드바, F11 부동 트리, F12 RelationView 열의 트리 모두다.
 --
 --   \P               고정 / 풀기 (어느 창에서나)
 --   :VimIdeTreePin   같은 것.  :VimIdeTreePin on / off 로 정해서도
@@ -33,7 +33,7 @@
 -- neo-tree 의 모듈을 미리 부르지 않는다 (시작이 15ms 느려졌다). 감싸기는 트리가 처음
 -- 생길 때(FileType neo-tree) 한다 - 그 전에는 따라갈 트리도 없다.
 --
---   let g:vimide_tree_pinned = 0   " 처음부터 실시간 경로 모드로 (기본 1 = 고정)
+--   let g:vimide_tree_pinned = 1   " 처음부터 고정 모드로 (기본 0 = 실시간 경로)
 
 if vim.g.loaded_vimide_treepin then
   return
@@ -53,7 +53,7 @@ local function pinned()
 end
 -- 시작할 때의 모드 (.vimrc 의 g:vimide_tree_pinned). 표시는 이것과 다른 모드일 때만 단다 -
 -- 고정이 기본이 되자 모든 트리에 늘 '[고정]' 한 줄이 서 있었다
-local start_pinned = vim.g.vimide_tree_pinned == nil or vim.g.vimide_tree_pinned == 1
+local start_pinned = vim.g.vimide_tree_pinned == 1
 
 -- 새 트리 상태가 복사해 가는 소스 기본 설정. neo-tree 가 아직 합치지 않았으면 nil
 local function fs_follow_config()
@@ -141,11 +141,10 @@ end
 local BAR_PIN = '%#VimIdeTreePinned# [고정] \\P 로 실시간 경로 %*'
 local BAR_LIVE = '%#VimIdeTreePinned# [실시간 경로] \\P 로 고정 %*'
 
--- 고정되는 트리 창: neo-tree 파일 트리이고 RelationView 열의 트리(w:rv_tree)가 아닌 것
+-- 고정되는 트리 창: neo-tree 파일 트리 (F9 사이드바, F11 부동 창, F12 RelationView 열)
 local function pinnable(win)
   local buf = api.nvim_win_get_buf(win)
   return vim.bo[buf].filetype == 'neo-tree' and vim.b[buf].neo_tree_source == 'filesystem'
-      and not vim.w[win].rv_tree
 end
 
 local function mark_win(win)
@@ -189,6 +188,10 @@ local function catch_up()
   local fs = wrap_follow()   -- 트리를 한 번도 안 열었으면 nil - 따라갈 트리가 없다
   if fs and fs.follow then
     pcall(fs.follow)
+  end
+  -- RelationView 열의 트리도 (F12 - 그 따라가기는 relationview.lua 가 한다)
+  if _G.relationview_tree_catch_up then
+    pcall(_G.relationview_tree_catch_up)
   end
 end
 
