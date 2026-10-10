@@ -2540,6 +2540,15 @@ compare: A on the left, B on the right, in diff mode. The rows of the pairs
 that have a compare tab are highlighted in the tree. The DirDiff tab itself
 shows only the tree (with its path line), at full height.
 
+`,r` / `,e` move to the next / previous tab of the comparison - the DirDiff tab
+and its compare tabs, in tab order, wrapping around - from the tree and from
+the compare windows alike. With several tabs the tab line shows tabs instead of
+buffers, so the keys that walk the buffers elsewhere walk these tabs here
+(`:bn!` did nothing in the tree, and in a compare window it put another buffer
+in place of the compared file). Other tabs (the one you were editing in,
+another comparison) are reached with `gt` / `gT`; outside DirDiff `,r` / `,e`
+still cycle the buffers.
+
 - **Window bars** (Beyond Compare's path field and the info row under it, in
   one line): `A: <path>  2026-10-10 오후 11:09:40  1,286 바이트  utf-8  unix`,
   and on B's bar the current view and its keys (`[모두 보이기] \d 보기 · q

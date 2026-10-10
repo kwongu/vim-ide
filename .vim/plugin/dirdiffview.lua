@@ -62,6 +62,7 @@
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
+--   ,r / ,e     이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이 - 비교 창에서도. 아래 tab_cycle)
 -- 비교 창(비교 탭의 두 창, pair_tab = 0 이면 위의 편집 창 둘)에서는 \d 가 보기 고르기, 비교 탭의
 -- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
 -- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
@@ -3739,6 +3740,53 @@ local function take_over_view_keys()
 end
 
 -- .vimrc 를 다시 읽으면(:source) 그 map <C-l> 이 이것을 덮는다 - .vimrc 가 이것을 다시 부른다
+-- ,r / ,e (.vimrc 의 BufCycle 이 먼저 묻는다): DirDiff 탭(트리 탭과 그 비교 탭들) 안에서는 버퍼가 아니라
+-- 그 비교의 탭 사이를 오간다 (요청). 탭이 여럿이면 airline 의 탭 줄이 버퍼 대신 탭을 보이므로 같은 키가
+-- 그 탭들을 따라가는 것이 맞다 - 버퍼 이동(:bn!)은 트리(buftype nofile)에서는 아무 일도 하지 않았고,
+-- 비교 창에서는 그 창의 파일을 다른 버퍼로 바꿔 비교를 깼다. 차례는 탭 번호 차례, 끝에서 처음으로 돈다.
+-- 그 비교의 탭만 돈다 - 다른 탭(편집하던 탭, 다른 비교)으로는 gt / gT. 다룬 것이면 true (BufCycle 은
+-- 그때 :bn! 을 하지 않는다), DirDiff 탭이 아니면 false
+function _G.vimide_dirdiff_tab_cycle(dir)
+  local cur = api.nvim_get_current_tabpage()
+  local s
+  for _, x in pairs(sessions) do
+    if x.tab == cur or (x.views and x.views[cur]) then
+      s = x
+      break
+    end
+  end
+  if not s then
+    return false
+  end
+  local tabs = {}
+  if api.nvim_tabpage_is_valid(s.tab) then
+    tabs[#tabs + 1] = s.tab
+  end
+  for t in pairs(s.views or {}) do
+    if t ~= s.tab and api.nvim_tabpage_is_valid(t) then
+      tabs[#tabs + 1] = t
+    end
+  end
+  if #tabs < 2 then
+    -- pair_tab = 0 이거나 아직 짝을 열지 않았다. :bn! 으로 넘기면 편집 창(비교 창)의 파일이 바뀌므로 막는다
+    say('이 비교의 탭은 하나뿐입니다 (<CR> 로 짝을 열면 비교 탭이 생긴다, 다른 탭은 gt)')
+    return true
+  end
+  table.sort(tabs, function(a, b)
+    return api.nvim_tabpage_get_number(a) < api.nvim_tabpage_get_number(b)
+  end)
+  local idx = 1
+  for i, t in ipairs(tabs) do
+    if t == cur then
+      idx = i
+      break
+    end
+  end
+  idx = (idx - 1 + (dir < 0 and -1 or 1)) % #tabs + 1
+  api.nvim_set_current_tabpage(tabs[idx])
+  return true
+end
+
 function _G.vimide_dirdiff_take_over()
   if (tonumber(vim.g.vimide_dirdiff_copy_keys) or 1) ~= 0 then
     take_over()
@@ -3952,6 +4000,7 @@ local function help()
     '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
     '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
+    '  ,r ,e       이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이를 돈다 - 비교 창에서도)',
     '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
     '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A])',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',

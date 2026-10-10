@@ -3541,6 +3541,14 @@ endif
 " 예전에는 `map ,r :bn!<CR>   " Switch to ...` 라서 <CR> 뒤의 글자들이 노멀
 " 모드 키로 딸려 들어갔다.
 func! s:BufCycle(cmd) abort
+	" DirDiff 탭(트리 탭과 그 비교 탭들)에서는 ,r / ,e 가 그 비교의 탭 사이를 오간다 - 탭이 여럿이면
+	" 탭 줄이 탭을 보이므로 (dirdiffview.lua 의 tab_cycle). 트리는 buftype 이 있어 아래에서 막혔고,
+	" 비교 창에서는 :bn! 이 비교하던 파일을 다른 버퍼로 바꿨다. 먼저 묻는다
+	if has('nvim') && (a:cmd ==# 'bn!' || a:cmd ==# 'bp!')
+				\ && luaeval('_G.vimide_dirdiff_tab_cycle ~= nil and _G.vimide_dirdiff_tab_cycle(_A) or false',
+				\            a:cmd ==# 'bn!' ? 1 : -1)
+		return
+	endif
 	if &buftype !=# ''
 		return
 	endif
