@@ -4,15 +4,35 @@
 --   neo-tree 에서 \d 두 번  같은 것 (dirdiffpick.lua)
 --   :DirDiffClassic <A> <B> 예전 DirDiff.vim 목록 (dirdifftab.vim)
 --
--- 트리 창은 왼쪽이 A, 오른쪽이 B 의 트리다. 같은 줄에 같은 이름이
--- 오고, 한쪽에만 있으면 다른 쪽은 비어 있다. 가운데 칸이 판정이다:
---   =  같다      ≠(x) 다르다      ◀(<) A 에만     ▶(>) B 에만     ·(.) 확인 중
--- 색은 Neogit 상태 화면의 것 (g:vimide_dirdiff_colors): 다른 것은 파랑(NeogitChangeModified),
--- A 에만은 빨강(NeogitChangeDeleted), B 에만은 초록(NeogitChangeNewFile), 확인 중은 흐리게.
--- 'classic' 이면 예전 색 (다른 것 빨강, 한쪽에만 있는 것 파랑).
+-- 트리 창은 왼쪽이 A, 오른쪽이 B 의 트리다 (Beyond Compare 의 폴더 비교처럼). 같은 줄에 같은
+-- 이름이 오고, 한쪽에만 있으면(고아) 다른 쪽은 비어 있다. 반쪽마다 칸이 셋: 이름(안내선 + 폴더
+-- 아이콘 또는 파일 표시 + 이름), 크기(천 단위 쉼표), 수정일('2026-10-10 오후 11:09:40' -
+-- g:vimide_dirdiff_date_format). 반쪽이 좁으면 시각, 날짜, 크기 순으로 뺀다. 맨 위 한 줄(경로 줄
+-- 창)에 A·B 의 뿌리, 그 아래 한 줄에 칸 제목(이름 크기 수정일) - 트리를 내려도 그대로다.
+-- 가운데 칸이 판정이다 (Beyond Compare 처럼 다른 파일과 같은 파일에만):
+--   ≠(x) 다르다      =  같다      ·(.) 확인 중      (고아와 폴더는 비운다)
+-- 색 (g:vimide_dirdiff_colors = 'bc', 기본 - Beyond Compare 의 색. background 가 dark 면 어두운 짝):
+--   같은 파일 보통 글자, 다른 파일은 수정 시각이 늦은 쪽 빨강·이른 쪽 회색 (시각이 같거나 모르면
+--   둘 다 빨강), 고아 파일(한쪽에만 있는 파일)은 파랑. 폴더는 (한쪽에만 있는 것도) 이름은 보통 글자,
+--   크기·날짜는 옅은 회색이고 아이콘이 그 아래를 말한다 (그쪽에서 보아): 늦은 쪽인 차이가 있으면
+--   빨강, 아니고 이른 쪽인 차이가 있으면 회색, 그 밖(같음·고아만)은 보통 폴더색 (Beyond Compare 의
+--   첫 사진). 뒤쪽이 주는 폴더의 표시(mask - 그 아래 모두를 합한 것)로 가린다 (folder_g). 지금 줄은
+--   연두 (Beyond Compare 의 고른 줄).
+-- 'neogit' 이면 Neogit 상태 화면의 무리에 잇고(다른 것 NeogitChangeModified, A 에만
+-- NeogitChangeDeleted, B 에만 NeogitChangeNewFile), 'classic' 이면 예전 색 (다른 것 빨강, 한쪽에만
+-- 파랑) - 이 둘은 판정 칸도 예전 것(◀ ▶ 까지)이다.
 --
 -- 파일 짝은 비교 탭에서 본다 (g:vimide_dirdiff_pair_tab = 1, 기본): 짝마다 탭 하나 - A | B 를
--- diff 로, 창 머리에 경로와 보기. 같은 짝을 다시 고르면 그 탭으로 간다. 비교 탭의 q 는 그 탭을
+-- diff 로 (Beyond Compare 의 글 비교처럼). 창 머리(winbar)에 쪽·경로(좁으면 가운데를 줄인다)·수정
+-- 일시·크기(바이트)·인코딩·줄 끝, B 쪽 끝에 보기와 키. 바뀐 줄은 연분홍 바탕, 줄 안의 다른
+-- 글자와 한쪽에만 있는 줄은 빨강, 다른 쪽의 빈자리(끼인 줄)는 회색 빗금(╱). 지금 차이 덩어리의
+-- 첫 줄에 노란 화살표(A ⇨, B ⇦)와 덩어리 끝까지 가는 괄호선, 탭 맨 왼쪽에 개요 막대(파일 전체를
+-- 줄여서 - 빨강 차이, 회색 빗금 빈자리, 파랑 빈 줄, 오른쪽 칸이 보이는 곳. 누르면 그리로,
+-- g:vimide_dirdiff_overview), 맨 아래에 줄 자세히 두 줄(커서 줄과 맞은편 줄, 빈칸 · 탭 → 줄 끝 ¶,
+-- g:vimide_dirdiff_line_details). 바뀐 덩어리 안의 빈 줄은 연보라 (Beyond Compare 의 '중요하지
+-- 않은' 줄 - bc 색에서만). 한쪽에만 있는 파일은 있는 쪽이 모두 분홍에 빨강, 없는 쪽은 빗금뿐이다.
+-- 개요 막대·줄 자세히는 그 비교 탭에만 있고 들어가지 않는다 (cmp - 아래 '비교 탭의 곁').
+-- 같은 짝을 다시 고르면 그 탭으로 간다. 비교 탭의 q 는 그 탭을
 -- 닫고 트리의 그 줄로 (:tabclose 도 같다). 트리를 끝내면(q) 그 비교 탭들도 닫힌다.
 -- g:vimide_dirdiff_pair_tab = 0 이면 예전처럼 트리 탭 위쪽의 편집 창 둘에서 본다.
 -- 비교 창의 보기 (\d 로 고른다, Beyond Compare 의 글 비교 보기): 모두 보이기(기본 - 접지
@@ -52,6 +72,7 @@
 -- 커서 줄만(<C-S-r>, 1<C-r>)인데 그 줄이 바뀐 줄이 아니면, 바로 위(먼저)·아래에 끼인 줄(저쪽에만
 -- 있는 줄) 덩어리째다 - 여러 줄일 수 있다.
 -- 비교 탭 밖의 <C-r>(되돌리기 취소)·<C-l>(창 옮기기)은 그대로다.
+-- 비교 창의 <C-w>w/<C-w>W 는 곁 창(개요 막대·줄 자세히)을 건너뛴 다음/앞 창이다 (A·B 를 오간다).
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
 -- 먼저), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음', 나머지만 뒤에서
@@ -65,10 +86,13 @@
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
 --   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
---   let g:vimide_dirdiff_colors = 'classic' " 예전 색 (기본 'neogit': Neogit 상태 화면의 색)
+--   let g:vimide_dirdiff_colors = 'neogit' " Neogit 상태 화면의 색 ('classic' 예전 색, 기본 'bc': Beyond Compare)
 --   let g:vimide_dirdiff_pair_tab = 0      " 파일 짝을 비교 탭 대신 트리 위의 편집 창 둘에서
 --   let g:vimide_dirdiff_file_view = 'diff' " 비교 창의 처음 보기 (all / diff / context)
 --   let g:vimide_dirdiff_context = 3       " 문맥 보이기의 위아래 줄 수
+--   let g:vimide_dirdiff_date_format = '%Y-%m-%d %H:%M'  " 수정일 꼴 (strftime + %p 오전/오후, %l 12시간제 시)
+--   let g:vimide_dirdiff_overview = 0      " 비교 탭 맨 왼쪽의 개요 막대 없이
+--   let g:vimide_dirdiff_line_details = 0  " 비교 탭 맨 아래의 줄 자세히(두 줄) 없이
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -82,6 +106,16 @@ local ns = api.nvim_create_namespace('vimide_dirdiffview')
 local ns_open = api.nvim_create_namespace('vimide_dirdiffview_open')
 local ns_side = api.nvim_create_namespace('vimide_dirdiffview_side')
 local ns_pick = api.nvim_create_namespace('vimide_dirdiffview_pick')
+-- 새 것은 한 표에 (이 파일은 맨 위 지역 이름이 LuaJIT 의 한도 200 가까이 있다)
+--   head 경로 줄, arrow 비교 창의 화살표·괄호선, blank 연보라 빈 줄·한쪽에만 있는 줄의 빨강,
+--   over 개요 막대, line 줄 자세히
+local NS = {}
+for _, k in ipairs({ 'head', 'arrow', 'blank', 'over', 'line' }) do
+  NS[k] = api.nvim_create_namespace('vimide_dirdiffview_' .. k)
+end
+-- tr: 트리 창의 Beyond Compare 꼴 (칸·안내선·색·경로 줄), cmp: 비교 탭의 곁 (개요 막대, 줄 자세히,
+-- 화살표, 연보라 빈 줄). 함수와 상태는 이 두 표의 필드로 - 지역 이름을 늘리지 않으려고
+local tr, cmp = {}, {}
 
 local M = {}
 local sessions = {} -- tabpage handle -> session
@@ -161,6 +195,7 @@ local function ascii()
   return (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
 end
 
+-- 예전 판정 칸 (neogit·classic 색). bc 는 tr.verdict
 local function sym(st)
   if ascii() then
     return ({ same = '=', diff = 'x', onlyA = '<', onlyB = '>', pend = '.' })[st] or ' '
@@ -168,52 +203,137 @@ local function sym(st)
   return ({ same = '=', diff = '≠', onlyA = '◀', onlyB = '▶', pend = '·' })[st] or ' '
 end
 
-local function fold_icon(open)
-  if ascii() then
-    return open and '- ' or '+ '
-  end
-  return open and '▾ ' or '▸ '
+-- 옵션이 켜져 있는가 (없으면 기본값 d)
+local function on(v, d)
+  return (tonumber(v) or d) ~= 0
 end
 
 local function say(msg, level)
   (_G.vimide_notify or vim.notify)('DirDiff: ' .. msg, level or vim.log.levels.INFO)
 end
 
--- 색. g:vimide_dirdiff_colors = 'neogit'(기본)이면 Neogit 상태 화면의 무리에 잇는다 - 사용자가 Neogit
--- 상태 화면이 더 잘 읽힌다고 했다. 그 무리가 없으면(Neogit 을 setup 하지 않았다) 그 줄만 예전 색.
--- 'classic' 은 예전 색 그대로. 무리마다 { 이름, Neogit 무리(앞의 것부터 있는 것), 예전 정의 }.
--- 비교 창(A·B 두 창)의 것은 그 창의 winhighlight 로만 단다 (diff_whl): A 쪽은 바뀐 줄·A 에만 있는 줄이
--- Neogit 의 빨강(지운 줄), B 쪽은 초록(더한 줄). 줄 안의 바뀐 글자(DiffText)는 Neogit 의 줄 안 차이
--- (NeogitDiff*Inline) - Highlight 는 그 줄과 바탕색이 같아 바뀐 글자가 보이지 않았다 (sourceinsight 색, 실측)
-local function neo()
-  return vim.g.vimide_dirdiff_colors ~= 'classic'
+-- 색 무리 (g:vimide_dirdiff_colors):
+--   'bc'      (기본) Beyond Compare 의 색 - 사용자가 Beyond Compare 처럼 보이기를 바랐다. 'background' 가
+--             dark 면 어두운 짝 (jellybeans 같은 어두운 화면), cterm 은 256 색 근사
+--   'neogit'  Neogit 상태 화면의 무리에 잇는다. 그 무리가 없으면(Neogit 을 setup 하지 않았다) 그 줄만 예전 색
+--   'classic' 예전 색 그대로
+-- 모르는 값은 'bc'. 무리마다 { 이름, Neogit 무리(앞의 것부터 있는 것), 예전 정의, bc 밝은, bc 어두운 }
+-- (bc 정의가 없으면 예전 정의). 비교 창(A·B 두 창)의 것은 그 창의 winhighlight 로만 단다 (diff_whl):
+-- bc 는 두 쪽 모두 바뀐 줄이 연분홍 바탕, 줄 안의 다른 글자·한쪽에만 있는 줄이 빨강 (Beyond Compare 의
+-- 글 비교). neogit 은 A 쪽이 Neogit 의 빨강(지운 줄), B 쪽이 초록(더한 줄), 줄 안의 바뀐 글자(DiffText)는
+-- Neogit 의 줄 안 차이 (NeogitDiff*Inline) - Highlight 는 그 줄과 바탕색이 같아 바뀐 글자가 보이지 않았다
+-- (sourceinsight 색, 실측)
+local function pal()
+  local p = vim.g.vimide_dirdiff_colors
+  if p == 'neogit' or p == 'classic' then
+    return p
+  end
+  return 'bc'
 end
 
+-- classic 이 아닌가 (bc, neogit): 비교 창의 winhighlight 와 상태줄·창 머리의 토막 색을 단다
+local function neo()
+  return pal() ~= 'classic'
+end
+
+-- bc 정의를 짧게: fg, ctermfg, bg, ctermbg, 덧붙일 것 (bold 등)
+local function C(fg, cf, bg, cb, more)
+  local t = { fg = fg, ctermfg = cf, bg = bg, ctermbg = cb }
+  for k, v in pairs(more or {}) do
+    t[k] = v
+  end
+  return t
+end
+local BOLD = { bold = true, cterm = { bold = true } }
+
 local HL = {
-  { 'VimIdeDirDiffChanged', { 'NeogitChangeModified' }, { fg = '#e06c75', ctermfg = 167 } },
-  { 'VimIdeDirDiffOrphan', nil, { fg = '#61afef', ctermfg = 75 } },   -- 예전 '한쪽에만' (A·B 가 같은 색)
+  -- 트리. 다름 (상태줄의 다름 수, 시각이 같거나 모르는 다른 파일)
+  { 'VimIdeDirDiffChanged', { 'NeogitChangeModified' }, { fg = '#e06c75', ctermfg = 167 },
+    C('#f00000', 196), C('#ff6b6b', 203) },
+  -- 다른 파일의 수정 시각이 늦은 쪽 / 이른 쪽 (neogit·classic 은 둘 다 다름 색 - 예전처럼)
+  { 'VimIdeDirDiffNewer', { 'NeogitChangeModified' }, { link = 'VimIdeDirDiffChanged' },
+    C('#f00000', 196), C('#ff6b6b', 203) },
+  { 'VimIdeDirDiffOlder', { 'NeogitChangeModified' }, { link = 'VimIdeDirDiffChanged' },
+    C('#8b8b8b', 245), C('#7c7c7c', 243) },
+  { 'VimIdeDirDiffOrphan', nil, { fg = '#61afef', ctermfg = 75 },   -- 고아 (A·B 가 같은 색)
+    C('#1a1aff', 21), C('#7aa6ff', 75) },
   { 'VimIdeDirDiffOnlyA', { 'NeogitChangeDeleted' }, { link = 'VimIdeDirDiffOrphan' } },
   { 'VimIdeDirDiffOnlyB', { 'NeogitChangeNewFile', 'NeogitChangeAdded' }, { link = 'VimIdeDirDiffOrphan' } },
-  { 'VimIdeDirDiffPending', { 'NeogitSubtleText' }, { link = 'Comment' } },
+  { 'VimIdeDirDiffPending', { 'NeogitSubtleText' }, { link = 'Comment' },
+    C('#a8a8a8', 248), C('#666666', 241) },
   { 'VimIdeDirDiffSame', nil, { link = 'Normal' } },
   { 'VimIdeDirDiffDir', nil, { link = 'Directory' } },
   { 'VimIdeDirDiffSize', { 'NeogitSubtleText' }, { link = 'Number' } },
   { 'VimIdeDirDiffDate', { 'NeogitSubtleText' }, { link = 'Comment' } },
-  { 'VimIdeDirDiffOpened', nil, { link = 'Visual' } },
+  -- bc: 양쪽에 있는 폴더의 크기·날짜 (옅은 회색), 안내선, 보통 폴더 아이콘(Beyond Compare 의 연보라 폴더)
+  { 'VimIdeDirDiffDim', { 'NeogitSubtleText' }, { link = 'VimIdeDirDiffSize' },
+    C('#c7c7c7', 251), C('#707070', 242) },
+  { 'VimIdeDirDiffGuide', nil, { link = 'NonText' }, C('#c4c4c4', 250), C('#444444', 238) },
+  { 'VimIdeDirDiffFolder', nil, { link = 'Directory' }, C('#8f8fff', 105), C('#8f9fe0', 104) },
+  -- 판정 칸 (bc): ≠ 빨강 굵게, = 보통 글자 굵게
+  { 'VimIdeDirDiffNeq', nil, { link = 'VimIdeDirDiffChanged' },
+    C('#f00000', 196, nil, nil, BOLD), C('#ff6b6b', 203, nil, nil, BOLD) },
+  { 'VimIdeDirDiffEq', nil, { link = 'VimIdeDirDiffPending' }, BOLD, BOLD },
+  -- 트리의 지금 줄 (창에만 CursorLine 을 이것으로 - tree_opts)
+  { 'VimIdeDirDiffSelect', nil, { link = 'CursorLine' }, C(nil, nil, '#d7ffd0', 194), C(nil, nil, '#24402a', 22) },
+  { 'VimIdeDirDiffOpened', nil, { link = 'Visual' }, C(nil, nil, '#e8eefc', 189), C(nil, nil, '#2a3346', 237) },
   { 'VimIdeDirDiffMark', nil, { link = 'Search' } },        -- Space 로 고른 항목
   { 'VimIdeDirDiffSide', nil, { underline = true, bold = true } },  -- 커서 줄의 지금 쪽(A/B)
   { 'VimIdeDirDiffPickA', nil, { link = 'Search' } },      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
   { 'VimIdeDirDiffMenuNow', { 'NeogitSectionHeader' }, { link = 'Title' } },  -- 보기 메뉴의 지금 보기
-  -- 창 머리·상태줄의 이름표 (Neogit 의 절 머리 - 'Unstaged changes'). neogit 색일 때만 단다
-  { 'VimIdeDirDiffHeader', { 'NeogitSectionHeader' }, { link = 'Title' } },
-  -- 비교 창 (winhighlight 의 대상 - neogit 색일 때만 단다). Neogit 이 없으면 원래 Diff* 그대로
-  { 'VimIdeDirDiffAddA', { 'NeogitDiffDelete' }, { link = 'DiffAdd' } },
-  { 'VimIdeDirDiffChangeA', { 'NeogitDiffDelete' }, { link = 'DiffChange' } },
-  { 'VimIdeDirDiffTextA', { 'NeogitDiffDeleteInline', 'NeogitDiffDeleteHighlight' }, { link = 'DiffText' } },
-  { 'VimIdeDirDiffAddB', { 'NeogitDiffAdd' }, { link = 'DiffAdd' } },
-  { 'VimIdeDirDiffChangeB', { 'NeogitDiffAdd' }, { link = 'DiffChange' } },
-  { 'VimIdeDirDiffTextB', { 'NeogitDiffAddInline', 'NeogitDiffAddHighlight' }, { link = 'DiffText' } },
-  { 'VimIdeDirDiffFiller', { 'NeogitSubtleText' }, { link = 'DiffDelete' } },  -- 끼인 줄은 흐리게
+  -- 창 머리·상태줄의 이름표 (Neogit 의 절 머리 - 'Unstaged changes'). neogit·bc 색일 때만 단다
+  { 'VimIdeDirDiffHeader', { 'NeogitSectionHeader' }, { link = 'Title' }, BOLD, BOLD },
+  -- 트리 위 경로 줄: 다른 쪽 / 지금 쪽 (Beyond Compare 의 경로 칸 - 지금 쪽이 연두), 그 아래 칸 제목
+  { 'VimIdeDirDiffPath', nil, { link = 'StatusLineNC' },
+    C('#000000', 16, '#f0f0f0', 255), C('#d0d0d0', 252, '#262626', 235) },
+  { 'VimIdeDirDiffPathOn', nil, { link = 'StatusLine' },
+    C('#000000', 16, '#ddffdd', 194), C('#e0e0e0', 254, '#1f3a22', 22) },
+  -- 칸 제목은 nocombine: 상태줄의 토막 색은 StatusLine 과 섞여서 jellybeans 의 기울임이 따라왔다
+  { 'VimIdeDirDiffColHead', nil, { link = 'StatusLineNC' },
+    C('#303030', 236, '#f6f6f6', 255, { nocombine = true }), C('#b0b0b0', 249, '#202020', 234, { nocombine = true }) },
+  -- 트리 상태줄의 수 (다름·A만·B만). 여섯째 true: 'background' 가 아니라 상태줄 바탕으로 밝은·어두운 짝을
+  -- 고른다 - jellybeans 는 어두운 화면에 밝은 상태줄이라 어두운 짝(옅은 빨강·파랑)이 바탕에 묻혔다
+  { 'VimIdeDirDiffStChanged', nil, { link = 'VimIdeDirDiffChanged' }, C('#e00000', 160), C('#ff6b6b', 203), true },
+  { 'VimIdeDirDiffStOnlyA', nil, { link = 'VimIdeDirDiffOnlyA' }, C('#1a1aff', 21), C('#7aa6ff', 75), true },
+  { 'VimIdeDirDiffStOnlyB', nil, { link = 'VimIdeDirDiffOnlyB' }, C('#1a1aff', 21), C('#7aa6ff', 75), true },
+  -- 비교 창 (winhighlight 의 대상 - classic 이 아닐 때만 단다). Neogit 이 없으면 원래 Diff* 그대로
+  { 'VimIdeDirDiffAddA', { 'NeogitDiffDelete' }, { link = 'DiffAdd' },
+    C('#ff0000', 196, '#ffe3e3', 224), C('#ff8a8a', 210, '#3a1d20', 52) },
+  { 'VimIdeDirDiffChangeA', { 'NeogitDiffDelete' }, { link = 'DiffChange' },
+    C(nil, nil, '#ffe3e3', 224), C(nil, nil, '#3a1d20', 52) },
+  { 'VimIdeDirDiffTextA', { 'NeogitDiffDeleteInline', 'NeogitDiffDeleteHighlight' }, { link = 'DiffText' },
+    C('#ff0000', 196, '#ffe3e3', 224), C('#ff8a8a', 210, '#3a1d20', 52) },
+  { 'VimIdeDirDiffAddB', { 'NeogitDiffAdd' }, { link = 'DiffAdd' }, { link = 'VimIdeDirDiffAddA' },
+    { link = 'VimIdeDirDiffAddA' } },
+  { 'VimIdeDirDiffChangeB', { 'NeogitDiffAdd' }, { link = 'DiffChange' }, { link = 'VimIdeDirDiffChangeA' },
+    { link = 'VimIdeDirDiffChangeA' } },
+  { 'VimIdeDirDiffTextB', { 'NeogitDiffAddInline', 'NeogitDiffAddHighlight' }, { link = 'DiffText' },
+    { link = 'VimIdeDirDiffTextA' }, { link = 'VimIdeDirDiffTextA' } },
+  -- 끼인 줄 (neogit 은 흐리게, bc 는 Beyond Compare 의 회색 빗금 - fillchars diff:╱ 의 글자색)
+  { 'VimIdeDirDiffFiller', { 'NeogitSubtleText' }, { link = 'DiffDelete' },
+    C('#c4c4c4', 250, '#fcfcfc'), C('#3a3a3a', 237, '#181818') },
+  -- bc: 파일 끝 아래 (fillchars eob 는 비운다), 바뀐 덩어리 안의 빈 줄 (연보라 - Beyond Compare 의 '중요하지 않은' 줄)
+  { 'VimIdeDirDiffEob', nil, { link = 'EndOfBuffer' }, C('#e6e6e6', 254), C('#2a2a2a', 235) },
+  { 'VimIdeDirDiffBlank', nil, { link = 'DiffChange' }, C(nil, nil, '#efefff', 189), C(nil, nil, '#24243a', 17) },
+  -- bc: 한쪽에만 있는 줄의 글자 (구문 색 위에 - DiffAdd 의 글자색은 키워드 등의 구문 색에 진다)
+  { 'VimIdeDirDiffAddText', nil, { link = 'DiffAdd' }, C('#ff0000', 196), C('#ff8a8a', 210) },
+  -- 비교 창의 창 머리: 지금 창 (WinBar) / 다른 창 (WinBarNC) - bc 만
+  { 'VimIdeDirDiffBarOn', nil, { link = 'WinBar' }, C('#000000', 16, '#ddffdd', 194), C('#e0e0e0', 254, '#1f3a22', 22) },
+  { 'VimIdeDirDiffBar', nil, { link = 'WinBarNC' }, C('#000000', 16, '#f0f0f0', 255), C('#d0d0d0', 252, '#262626', 235) },
+  -- 창 머리의 정보(일시·크기·인코딩): Beyond Compare 의 정보 줄은 검은 글자다 - 키 안내의 흐린 색으로는
+  -- 연두·회색 바탕에서 읽기 어려웠다 (대비 2:1 남짓)
+  { 'VimIdeDirDiffBarInfo', nil, { link = 'VimIdeDirDiffPending' }, C('#505050', 239), C('#a8a8a8', 248) },
+  -- 지금 차이의 노란 화살표 (A ⇨ / B ⇦ - 줄 자세히의 앞에도), 그 덩어리 끝까지의 괄호선
+  { 'VimIdeDirDiffArrow', nil, { fg = '#d7a000', ctermfg = 178, bold = true },
+    C('#3c4a34', 58, '#fbdc74', 221, BOLD), C('#151515', 233, '#e5c062', 179, BOLD) },
+  { 'VimIdeDirDiffBracket', nil, { link = 'NonText' }, C('#a0a0a0', 247), C('#606060', 241) },
+  -- 줄 자세히의 빈칸·탭·줄 끝 표시
+  { 'VimIdeDirDiffWs', nil, { link = 'NonText' }, C('#a0a0a0', 247), C('#5a5a5a', 240) },
+  -- 개요 막대: 차이, 빈자리(한쪽에 줄이 없다), 빈 줄(연보라 줄), 보이는 곳
+  { 'VimIdeDirDiffOvChange', nil, { link = 'DiffText' }, C(nil, nil, '#ff0000', 196), C(nil, nil, '#d04545', 167) },
+  { 'VimIdeDirDiffOvFill', nil, { link = 'DiffDelete' }, C('#b8b8b8', 249, '#f0f0f0', 255), C('#4a4a4a', 239, '#202020', 234) },
+  { 'VimIdeDirDiffOvBlank', nil, { link = 'DiffAdd' }, C(nil, nil, '#5050ff', 63), C(nil, nil, '#4a6cff', 63) },
+  { 'VimIdeDirDiffOvView', nil, { link = 'Visual' }, C(nil, nil, '#a0a0a0', 247), C(nil, nil, '#5a5a5a', 240) },
 }
 
 local function has_hl(name)
@@ -232,17 +352,36 @@ local function hl_now(name)
   return h
 end
 
+-- 상태줄(StatusLine) 바탕이 어두운가. 바탕이 없으면 'background' 로 (reverse 면 글자색이 바탕이다)
+function tr.st_dark()
+  local ok, h = pcall(api.nvim_get_hl, 0, { name = 'StatusLine', link = false })
+  local bg = ok and (h.reverse and h.fg or h.bg) or nil
+  if type(bg) ~= 'number' then
+    return vim.o.background == 'dark'
+  end
+  local r, g, b = math.floor(bg / 65536) % 256, math.floor(bg / 256) % 256, bg % 256
+  return 0.299 * r + 0.587 * g + 0.114 * b < 128
+end
+
 local function set_hl()
-  local n = neo()
+  local p = pal()
+  local dark = vim.o.background == 'dark'
+  local st_dark = tr.st_dark()
   for _, d in ipairs(HL) do
     local name, spec = d[1], d[3]
-    if n and d[2] then
+    if p == 'neogit' and d[2] then
       for _, g in ipairs(d[2]) do
         if has_hl(g) then
           spec = { link = g }
           break
         end
       end
+    elseif p == 'bc' then
+      local dk = dark
+      if d[6] then
+        dk = st_dark
+      end
+      spec = (dk and d[5]) or d[4] or spec
     end
     local cur = hl_now(name)
     if next(cur) == nil or (hl_mine[name] and vim.deep_equal(cur, hl_mine[name])) then
@@ -255,31 +394,21 @@ local function set_hl()
   end
 end
 set_hl()
--- Neogit 도 ColorScheme 에서 제 무리를 다시 정한다 - 그 뒤에 (먼저 보면 :hi clear 로 비어 있어 예전 색이 된다)
+-- Neogit 도 ColorScheme 에서 제 무리를 다시 정한다 - 그 뒤에 (먼저 보면 :hi clear 로 비어 있어 예전 색이 된다).
+-- bc 는 'background' 로 밝은·어두운 짝을 고르므로 그것이 바뀔 때도 (색 구성표 없이 :set bg= 만 해도)
 api.nvim_create_autocmd('ColorScheme', {
   group = api.nvim_create_augroup('VimIdeDirDiffViewHl', { clear = true }),
   callback = function()
     vim.schedule(set_hl)
   end,
 })
-
--- 비교 창의 winhighlight (side: 'a' / 'b', nil 이면 걷는다). neogit 색일 때만 단다. 창에만(local) - :set 처럼
--- 그 창의 전역 값까지 바꾸면 그 창에서 갈라 만든 창과 setlocal winhighlight< 가 그것을 물려받는다.
--- 무리 이름의 VimIdeDirDiff 는 표시이기도 하다: 비교 창이 아닌 창이 이것을 달고 있으면 물려받은 것이다
--- (strip_inherited)
-local WHL = {
-  a = 'DiffAdd:VimIdeDirDiffAddA,DiffChange:VimIdeDirDiffChangeA,DiffText:VimIdeDirDiffTextA,DiffDelete:VimIdeDirDiffFiller',
-  b = 'DiffAdd:VimIdeDirDiffAddB,DiffChange:VimIdeDirDiffChangeB,DiffText:VimIdeDirDiffTextB,DiffDelete:VimIdeDirDiffFiller',
-}
-local function diff_whl(win, side)
-  if not api.nvim_win_is_valid(win) then
-    return
-  end
-  local want = (side and neo()) and WHL[side] or ''
-  if vim.wo[win].winhighlight ~= want then
-    pcall(api.nvim_set_option_value, 'winhighlight', want, { scope = 'local', win = win })
-  end
-end
+api.nvim_create_autocmd('OptionSet', {
+  group = 'VimIdeDirDiffViewHl',
+  pattern = 'background',
+  callback = function()
+    vim.schedule(set_hl)
+  end,
+})
 
 -- 창에만(local) 다는 창 옵션. vim.wo[w].x = 는 :set 처럼 그 창의 전역 값까지 바꾸어, 그 창에서 연
 -- 새 탭(:tabnew)·창이 그 값(트리의 상태줄·머리)을 전역 값으로 물려받았다 - pair_tab 에서 트리 창에서
@@ -288,7 +417,43 @@ local function set_wo(win, name, val)
   pcall(api.nvim_set_option_value, name, val, { scope = 'local', win = win })
 end
 
--- 상태줄·창 머리의 한 토막에 색 (neogit 색일 때만). %$무리$ 는 앞의 색(StatusLine·WinBar 의 바탕)을
+-- 비교 창의 winhighlight (side: 'a' / 'b', nil 이면 걷는다). classic 이 아닐 때만 단다. 창에만(local) - :set 처럼
+-- 그 창의 전역 값까지 바꾸면 그 창에서 갈라 만든 창과 setlocal winhighlight< 가 그것을 물려받는다.
+-- 무리 이름의 VimIdeDirDiff 는 표시이기도 하다: 비교 창이 아닌 창이 이것을 달고 있으면 물려받은 것이다
+-- (strip_inherited). bc 는 창 머리(지금 창 연두)와 파일 끝 아래도, 그리고 창에만 fillchars 의 diff(끼인 줄의
+-- 빗금)·eob 를 바꾼다. 화살표 자리로 signcolumn 을 늘 한 칸은 둔다 (모든 색 - 있다 없다 하면 글자가 밀린다.
+-- cmp.signcol)
+local WHL = {
+  a = 'DiffAdd:VimIdeDirDiffAddA,DiffChange:VimIdeDirDiffChangeA,DiffText:VimIdeDirDiffTextA,DiffDelete:VimIdeDirDiffFiller',
+  b = 'DiffAdd:VimIdeDirDiffAddB,DiffChange:VimIdeDirDiffChangeB,DiffText:VimIdeDirDiffTextB,DiffDelete:VimIdeDirDiffFiller',
+  bc = ',WinBar:VimIdeDirDiffBarOn,WinBarNC:VimIdeDirDiffBar,EndOfBuffer:VimIdeDirDiffEob',
+}
+local function diff_whl(win, side)
+  if not api.nvim_win_is_valid(win) then
+    return
+  end
+  local p = pal()
+  local want = (side and p ~= 'classic') and WHL[side] or ''
+  if side and p == 'bc' then
+    want = want .. WHL.bc
+  end
+  if vim.wo[win].winhighlight ~= want then
+    pcall(api.nvim_set_option_value, 'winhighlight', want, { scope = 'local', win = win })
+  end
+  if side then
+    if p == 'bc' then
+      set_wo(win, 'fillchars', cmp.fillchars())
+    end
+    set_wo(win, 'signcolumn', cmp.signcol())
+  else
+    -- 걷을 때는 그 창의 전역 값으로 (plain_window 와 같은 길)
+    pcall(api.nvim_win_call, win, function()
+      vim.cmd('setlocal fillchars< signcolumn<')
+    end)
+  end
+end
+
+-- 상태줄·창 머리의 한 토막에 색 (classic 이 아닐 때만). %$무리$ 는 앞의 색(StatusLine·WinBar 의 바탕)을
 -- 물려받는다 - %#무리# 는 Neogit 무리에 바탕이 없어 그 토막만 Normal 바탕으로 떴다
 local function hl_part(group, text)
   if not neo() then
@@ -347,6 +512,128 @@ local function rjust(s, w)
     return s
   end
   return string.rep(' ', w - d) .. s
+end
+
+-- 경로를 폭 w 안에, 넘치면 앞쪽을 자른다 (…뒤쪽 - Beyond Compare 의 경로 칸처럼 끝이 남는다)
+function tr.fit_left(s, w)
+  if w <= 0 then
+    return ''
+  end
+  local d = vim.fn.strdisplaywidth(s)
+  if d <= w then
+    return s .. string.rep(' ', w - d)
+  end
+  local n = vim.fn.strchars(s)
+  local k = 0
+  while k < n and vim.fn.strdisplaywidth(vim.fn.strcharpart(s, k)) > w - 1 do
+    k = k + 1
+  end
+  local t = '…' .. vim.fn.strcharpart(s, k)
+  return t .. string.rep(' ', w - vim.fn.strdisplaywidth(t))
+end
+
+-- 경로를 폭 w 안에, 넘치면 가운데 디렉터리를 … 로 (Beyond Compare 의 'Y:\...\subcore\...\파일'): 맨 앞
+-- (~ 또는 /)과 파일 이름은 남기고, 그 앞 디렉터리를 뒤에서부터 들어가는 만큼. 파일 이름만으로도 넘치면
+-- 그것의 앞쪽을 자른다. 비교 창의 머리 - 앞쪽부터 잘랐더니(%<) 정보(일시·크기)는 보이는데 파일 이름이
+-- 잘렸다 ('<egroup-subcore-tsound.bb'). 채우는 빈칸은 붙이지 않는다
+function tr.mid_path(p, w)
+  local sw = vim.fn.strdisplaywidth
+  if sw(p) <= w then
+    return p
+  end
+  local parts = vim.split(p, '/', { plain = true })
+  local base = parts[#parts]
+  if #parts > 2 then
+    local function cand(t)
+      return parts[1] .. '/…/' .. t
+    end
+    if sw(cand(base)) <= w then
+      local tail = base
+      for i = #parts - 1, 2, -1 do
+        if sw(cand(parts[i] .. '/' .. tail)) > w then
+          break
+        end
+        tail = parts[i] .. '/' .. tail
+      end
+      return cand(tail)
+    end
+  end
+  if #parts > 1 and sw('…/' .. base) <= w then
+    return '…/' .. base
+  end
+  return (tr.fit_left(base, w):gsub(' +$', ''))
+end
+
+-- 수정일 꼴 (g:vimide_dirdiff_date_format, 기본 '%Y-%m-%d %p %l:%M:%S' = '2026-10-10 오후 11:09:40').
+-- strftime 꼴에 둘을 더했다: %p 오전/오후 (C 의 %p 는 지역 설정을 따라 AM/PM 이거나, 맥 ko_KR 에서는
+-- 6 바이트라 칸이 어긋났다 - neo-tree 의 날짜 칸에서 겪은 것), %l 12시간제 시 (앞 0 없이 - %l 은
+-- strftime 마다 있거나 없다). 좁을 때 빼는 '시각' 은 처음 나오는 시각 꼴(%p %H %I %l %M %S %T %R %r %X)부터
+-- 끝까지, 그 앞이 '날짜' 다. 칸 너비는 가장 넓을 때로 (10~12시, 12월 28일 - 줄마다 너비가 달라 칸이 흔들리지 않게)
+tr.DATE_FMT = '%Y-%m-%d %p %l:%M:%S'
+function tr.strf(fmt, t)
+  local tm = os.date('*t', t)
+  local out = fmt:gsub('%%(.)', function(c)
+    if c == 'p' then
+      return tm.hour < 12 and '오전' or '오후'
+    elseif c == 'l' then
+      local h = tm.hour % 12
+      return tostring(h == 0 and 12 or h)
+    end
+    return '%' .. c
+  end)
+  local ok, r = pcall(os.date, out, t)
+  return ok and r or out
+end
+
+function tr.datefmt()
+  local f = vim.g.vimide_dirdiff_date_format
+  if type(f) ~= 'string' or f == '' then
+    f = tr.DATE_FMT
+  end
+  local c = tr.dfc
+  if c and c.src == f then
+    return c
+  end
+  -- 앞에서부터 % 꼴을 하나씩 (%% 는 글자 % 라 건너뛴다 - '%%p' 는 시각이 아니다)
+  local cut
+  local i = 1
+  while i <= #f do
+    if f:sub(i, i) == '%' then
+      if ('pHIlMSTRrX'):find(f:sub(i + 1, i + 1), 1, true) and f:sub(i + 1, i + 1) ~= '' then
+        cut = i
+        break
+      end
+      i = i + 2
+    else
+      i = i + 1
+    end
+  end
+  local dpart = cut and vim.trim(f:sub(1, cut - 1)) or f
+  local tpart = cut and vim.trim(f:sub(cut)) or ''
+  local wide = os.time({ year = 2000, month = 12, day = 28, hour = 22, min = 58, sec = 58 })
+  c = { src = f, date = dpart, time = tpart, cache = {}, n = 0 }
+  c.dw = dpart ~= '' and vim.fn.strdisplaywidth(tr.strf(dpart, wide)) or 0
+  c.tw = tpart ~= '' and vim.fn.strdisplaywidth(tr.strf(tpart, wide)) or 0
+  tr.dfc = c
+  return c
+end
+
+-- 수정일 칸 한 토막 (날짜 또는 시각, 폭 w 에 왼쪽 맞춤). 같은 시각이 많아 꼴낸 것을 담아 둔다
+function tr.cell(f, part, mt, w)
+  if not mt then
+    return string.rep(' ', w)
+  end
+  local key = part .. '\1' .. mt
+  local t = f.cache[key]
+  if not t then
+    if f.n > 20000 then
+      f.cache, f.n = {}, 0
+    end
+    t = fit(tr.strf(part == 'd' and f.date or f.time, mt), w)
+    f.cache[key] = t
+    f.n = f.n + 1
+  end
+  return t
 end
 
 -- ---------------------------------------------------------------------------
@@ -613,28 +900,47 @@ local function visible(s, e)
     or (band(bits, NB) ~= 0 and (not known or e.mb > e.ma)) or false
 end
 
--- 펼친 디렉터리만 따라 내려가며 줄을 만든다
+-- 펼친 디렉터리만 따라 내려가며 줄을 만든다. 줄마다 안내선 거리도 쪽마다 적는다 (Beyond Compare 는 반쪽마다
+-- 제 트리의 가지를 긋는다 - 다른 쪽에만 있는 형제는 세지 않는다): pa/pb = 조상(깊이 1 부터)마다 그쪽에서
+-- 그 아래로 형제가 더 있는지('1'/'0'), la/lb = 그쪽에서 이 줄 뒤로 형제가 없는지 (tr.guide)
 render_rows = function(s)
   local rows = {}
-  local function walk(rel, depth)
+  local function walk(rel, depth, pa, pb)
     local d = s.dirs[rel]
     if not d then
       if s.loading[rel] then
-        rows[#rows + 1] = { rel = rel .. '/', depth = depth, loading = true }
+        rows[#rows + 1] = { rel = rel .. '/', depth = depth, loading = true, pa = pa, pb = pb, la = true, lb = true }
       end
       return
     end
+    local vis = {}
+    local lasta, lastb = 0, 0
     for _, e in ipairs(d.entries) do
       if visible(s, e) then
-        local r = join(rel, e.name)
-        rows[#rows + 1] = { rel = r, dir = rel, depth = depth, e = e }
-        if is_dir(e) and s.expanded[r] then
-          walk(r, depth + 1)
+        vis[#vis + 1] = e
+        if e.ka ~= nil then
+          lasta = #vis
+        end
+        if e.kb ~= nil then
+          lastb = #vis
+        end
+      end
+    end
+    for i, e in ipairs(vis) do
+      local r = join(rel, e.name)
+      local row = { rel = r, dir = rel, depth = depth, e = e, pa = pa, pb = pb, la = i >= lasta, lb = i >= lastb }
+      rows[#rows + 1] = row
+      if is_dir(e) and s.expanded[r] then
+        -- 맨 위 줄의 아이들은 맨 왼쪽에서 가지를 친다 (그 위로는 선이 없다)
+        if depth == 0 then
+          walk(r, 1, '', '')
+        else
+          walk(r, depth + 1, pa .. (row.la and '0' or '1'), pb .. (row.lb and '0' or '1'))
         end
       end
     end
   end
-  walk('', 0)
+  walk('', 0, '', '')
   s.rows = rows
   s.row_of = {}
   for i, r in ipairs(rows) do
@@ -644,19 +950,111 @@ render_rows = function(s)
   end
 end
 
+-- 줄이 빠진 뒤(render_dirty - 보기가 거르는 중에 '같음' 이 된 줄) 안내선 거리를 지금 줄들로 다시 센다.
+-- render_rows 의 walk 와 같은 셈을 부모마다: 그쪽에 있는 마지막 형제(la/lb), 조상의 이음(pa/pb - 부모가
+-- 앞 줄이라 먼저 고쳐져 있다). 돌려주는 것: 바뀐 줄 번호들
+function tr.reguide(s)
+  local rows = s.rows
+  local kids = {}
+  for i, r in ipairs(rows) do
+    if r.e then
+      kids[r.dir] = kids[r.dir] or {}
+      table.insert(kids[r.dir], i)
+    end
+  end
+  local la, lb = {}, {}
+  for _, list in pairs(kids) do
+    local lasta, lastb = 0, 0
+    for k, i in ipairs(list) do
+      if rows[i].e.ka ~= nil then
+        lasta = k
+      end
+      if rows[i].e.kb ~= nil then
+        lastb = k
+      end
+    end
+    for k, i in ipairs(list) do
+      la[i], lb[i] = k >= lasta, k >= lastb
+    end
+  end
+  local changed = {}
+  for i, r in ipairs(rows) do
+    if r.e then
+      local pa, pb = '', ''
+      local p = r.depth > 1 and rows[s.row_of[r.dir] or 0]
+      if p then
+        pa, pb = p.pa .. (p.la and '0' or '1'), p.pb .. (p.lb and '0' or '1')
+      end
+      if pa ~= r.pa or pb ~= r.pb or la[i] ~= r.la or lb[i] ~= r.lb then
+        r.pa, r.pb, r.la, r.lb = pa, pb, la[i], lb[i]
+        changed[#changed + 1] = i
+      end
+    end
+  end
+  return changed
+end
+
+-- 반쪽의 칸 (Beyond Compare 의 폴더 비교): 이름(안내선 + 아이콘 + 이름) | 크기 | 날짜 | 시각. 좁으면
+-- 시각, 날짜, 크기 순으로 뺀다 (이름 칸이 크기 18, 날짜 22, 시각 24 칸은 남게)
 local function layout(s)
   local W = api.nvim_win_get_width(s.win_l)
   local half = math.floor((W - 3) / 2)
-  local date = half >= 60
-  local size = half >= 34
-  return { W = W, half = half, date = date, size = size }
+  local f = tr.datefmt()
+  local SZ = 12   -- ' ' + 11 칸 (9,999,999,999)
+  local dw = f.dw > 0 and (1 + f.dw) or 0
+  local tw = f.tw > 0 and (1 + f.tw) or 0
+  local size = half - SZ >= 18
+  local date = size and dw > 0 and half - SZ - dw >= 22
+  local time = size and tw > 0 and (date or dw == 0) and half - SZ - dw - tw >= 24
+  return { W = W, half = half, size = size, date = date, time = time, f = f,
+    sz = SZ, dw = date and dw or 0, tw = time and tw or 0 }
 end
 
--- 한쪽(A 또는 B) 반 칸: 들여쓰기 + 접기 표시 + 이름 + 크기 + 날짜
+-- 한쪽(A 또는 B) 반 칸
 -- 화면에 쓸 이름: 줄바꿈 같은 제어 문자는 ^J 로 (줄에 \n 이 들어가면 nvim_buf_set_lines 가
 -- 트리 전체를 못 그렸다). 경로·주고받기에는 원래 이름을 쓴다
 local function shown(name)
   return vim.fn.strtrans(name)
+end
+
+-- 안내선 (Beyond Compare 의 옅은 점선 가지): 조상마다 '│ ' / '  ', 제 가지 '├─' / '└─'. 깊이 0 은 없다.
+-- 그쪽에 없는 줄(고아의 빈 반쪽)은 가지 없이 지나가는 선만 ('│ ' - 그쪽에 뒤 형제가 있을 때).
+-- ASCII 는 '| ' '|-' '`-' (│ ├ └ 는 East Asian Ambiguous 라 CJK 글꼴 터미널이 두 칸으로 그려 줄이 밀린다 -
+-- neo-tree 의 안내선과 같은 까닭)
+function tr.guide(r, side, absent)
+  if r.depth == 0 then
+    return ''
+  end
+  local a = ascii()
+  local pre = side == 'b' and r.pb or r.pa
+  local last
+  if side == 'b' then
+    last = r.lb
+  else
+    last = r.la
+  end
+  local t = {}
+  for k = 1, #pre do
+    t[k] = pre:sub(k, k) == '1' and (a and '| ' or '│ ') or '  '
+  end
+  if absent then
+    t[#t + 1] = last and '  ' or (a and '| ' or '│ ')
+  else
+    t[#t + 1] = last and (a and '`-' or '└─') or (a and '|-' or '├─')
+  end
+  return table.concat(t)
+end
+
+-- 아이콘: 폴더는 열림/닫힘 (Nerd Font , ASCII v >), 파일은 작은 네모 (Beyond Compare 의 색 네모 -
+-- 이름과 같은 색, ASCII -). 모두 두 칸 (Nerd Font 글자는 한 칸을 넘쳐 그려지므로 뒤에 빈칸)
+function tr.icon(k, open)
+  if k == 'd' then
+    if ascii() then
+      return open and 'v ' or '> '
+    end
+    return open and '\u{f07c} ' or '\u{f07b} '
+  end
+  return ascii() and '- ' or '▪ '
 end
 
 local function side_text(s, L, r, side)
@@ -670,82 +1068,214 @@ local function side_text(s, L, r, side)
     k, sz, mt = e.kb, e.sb, e.mb
   end
   if k == nil then
+    -- 그쪽에 없다: 지나가는 안내선만 (absent - 이름·고르기는 없다)
+    local g = vim.fn.strcharpart(tr.guide(r, side, true), 0, L.half)
+    if g:find('%S') then
+      return g .. string.rep(' ', L.half - vim.fn.strchars(g)), { absent = true, g_end = #g }
+    end
     return string.rep(' ', L.half), nil
   end
   local tail = ''
   if L.size then
-    tail = tail .. ' ' .. rjust(k == 'd' and '' or commas(sz), 11)
+    -- 폴더의 크기는 비운다: 뒤쪽은 폴더 아래 크기의 합을 세지 않는다 (펼친 것만 더하면 거짓 수다)
+    tail = ' ' .. rjust(k == 'd' and '' or commas(sz), L.sz - 1)
   end
   if L.date then
-    tail = tail .. ' ' .. (mt and os.date('%Y-%m-%d', mt) or '          ')
+    tail = tail .. ' ' .. tr.cell(L.f, 'd', mt, L.dw - 1)
   end
-  local indw = 2 * r.depth
-  local icon = k == 'd' and fold_icon(s.expanded[r.rel]) or '  '
-  local iconw = vim.fn.strdisplaywidth(icon)
-  local namew = L.half - indw - iconw - vim.fn.strdisplaywidth(tail)
-  -- 깊은 줄이 반 칸을 넘으면 판정 칸과 B 쪽이 밀린다: 들여쓰기부터, 그다음 크기·날짜를 줄인다
+  if L.time then
+    tail = tail .. ' ' .. tr.cell(L.f, 't', mt, L.tw - 1)
+  end
+  local guide = tr.guide(r, side)
+  local icon = tr.icon(k, s.expanded[r.rel])
+  local gw = 2 * r.depth
+  local iconw = 2
+  local tailw = (L.size and L.sz or 0) + L.dw + L.tw
+  local namew = L.half - gw - iconw - tailw
+  -- 깊은 줄이 반 칸을 넘으면 판정 칸과 B 쪽이 밀린다: 안내선을 뿌리 쪽부터 덜고, 그다음 크기·날짜를 줄인다
   if namew < 8 then
-    indw = math.max(0, indw - (8 - namew))
-    namew = L.half - indw - iconw - vim.fn.strdisplaywidth(tail)
+    local cut = math.min(gw, 8 - namew)
+    guide = vim.fn.strcharpart(guide, cut)
+    gw = gw - cut
+    namew = L.half - gw - iconw - tailw
   end
   if namew < 1 then
     tail = ''
-    namew = L.half - indw - iconw
+    namew = L.half - gw - iconw
   end
   if namew < 1 then
-    indw = 0
+    guide, gw = '', 0
     namew = L.half - iconw
   end
-  local ind = string.rep(' ', indw)
   local bad = e.rerr and e.rerr:find(side, 1, true) and ' (못 읽음)' or ''
   local name = fit(shown(e.name) .. (k == 'l' and ' @' or '') .. bad, namew)
-  -- name_vis: 채운 빈칸을 뺀 이름 끝 (Tab 으로 고른 [A] 를 그 뒤에 단다)
-  return ind .. icon .. name .. tail, { name_start = #ind + #icon, name_end = #ind + #icon + #name, tail = #tail,
-    name_vis = #ind + #icon + #(name:gsub(' +$', '')) }
+  local ie = #guide + #icon
+  -- name_vis: 채운 빈칸을 뺀 이름 끝 (Tab 으로 고른 [A] 를 그 뒤에 단다). g_end/i_end: 안내선·아이콘 끝
+  return guide .. icon .. name .. tail, { g_end = #guide, i_end = ie, name_start = ie, name_end = ie + #name,
+    tail = #tail, name_vis = ie + #(name:gsub(' +$', '')) }
+end
+
+-- 다른 파일의 그쪽 색: 수정 시각이 늦으면 빨강, 이르면 회색, 같거나 모르면 빨강
+function tr.newer_g(mine, other)
+  if mine and other and mine < other then
+    return 'VimIdeDirDiffOlder'
+  end
+  return 'VimIdeDirDiffNewer'
+end
+
+-- 양쪽에 있는 폴더의 아이콘 색 (그쪽에서 본 그 아래): 뒤쪽이 주는 폴더의 표시(mask - 아래 모두를 합한
+-- 것, dirdiffscan.py 의 dir_mask)로 가린다. Beyond Compare 처럼 늦은 쪽인 차이(그쪽 최신, 또는 시각이 같은·
+-- 모르는·종류가 다른 다름 DX)가 있으면 빨강 > 이른 쪽인 차이가 있으면 회색 > 그 밖(같음, 고아만, 아직
+-- 훑는 중)은 보통 폴더색. 고아만 든 폴더를 파랑으로 했더니 Beyond Compare 의 첫 사진과 달랐다 (거기서는
+-- 고아만 든 폴더도 보통 연보라 폴더다 - 파랑은 고아 파일의 이름뿐). 예전 뒤쪽(표시 없음)은 폴더의 판정과
+-- 폴더 자신의 수정 시각으로 어림한다 - 다르면 늦은 쪽 빨강·이른 쪽 회색
+function tr.folder_g(e, side)
+  local m = e.m
+  local mine_t, other_t
+  if side == 'a' then
+    mine_t, other_t = e.ma, e.mb
+  else
+    mine_t, other_t = e.mb, e.ma
+  end
+  if not m then
+    return e.st == 'diff' and tr.newer_g(mine_t, other_t) or 'VimIdeDirDiffFolder'
+  end
+  local mine_new, other_new = NA, NB
+  if side == 'b' then
+    mine_new, other_new = NB, NA
+  end
+  if band(m, mine_new + DX) ~= 0 then
+    return 'VimIdeDirDiffNewer'
+  elseif band(m, other_new) ~= 0 then
+    return 'VimIdeDirDiffOlder'
+  end
+  return 'VimIdeDirDiffFolder'
+end
+
+-- 반쪽의 색: 이름, 크기·날짜, 아이콘 (nil 은 보통 글자)
+function tr.classes(e, side)
+  local k, other, mine_t, other_t
+  if side == 'a' then
+    k, other, mine_t, other_t = e.ka, e.kb, e.ma, e.mb
+  else
+    k, other, mine_t, other_t = e.kb, e.ka, e.mb, e.ma
+  end
+  local st = e.st
+  if pal() ~= 'bc' then
+    -- neogit·classic: 예전 색 (다른 것은 양쪽이 같은 다름 색, 한쪽에만은 그쪽 색)
+    local group
+    if st == 'diff' then
+      group = 'VimIdeDirDiffChanged'
+    elseif st == 'pend' then
+      group = 'VimIdeDirDiffPending'
+    elseif st == 'same' then
+      group = is_dir(e) and 'VimIdeDirDiffDir' or nil
+    end
+    local mine = (side == 'a' and st == 'onlyA' and 'VimIdeDirDiffOnlyA')
+      or (side == 'b' and st == 'onlyB' and 'VimIdeDirDiffOnlyB') or nil
+    local g = mine or group
+    local data = (st == 'diff' or mine) and g or 'VimIdeDirDiffSize'
+    return g, data, k == 'd' and (g or 'VimIdeDirDiffFolder') or g
+  end
+  if both_dirs(e) then
+    local bad = e.rerr and e.rerr:find(side, 1, true) and 'VimIdeDirDiffChanged' or nil
+    return bad, 'VimIdeDirDiffDim', tr.folder_g(e, side)
+  end
+  if e.rerr and e.rerr:find(side, 1, true) then
+    return 'VimIdeDirDiffChanged', 'VimIdeDirDiffChanged', 'VimIdeDirDiffChanged'
+  end
+  if k == 'd' then
+    -- 고아 폴더 (한쪽은 폴더, 한쪽은 파일인 줄의 폴더 쪽도): Beyond Compare 처럼 양쪽에 있는 폴더와 같은
+    -- 꼴 - 이름 보통 글자, 날짜 옅은 회색, 보통 폴더 아이콘 (첫 사진의 chime_16bit·tcc805x)
+    return nil, 'VimIdeDirDiffDim', 'VimIdeDirDiffFolder'
+  end
+  if st == 'onlyA' or st == 'onlyB' then
+    -- 고아 파일
+    return 'VimIdeDirDiffOrphan', 'VimIdeDirDiffOrphan', 'VimIdeDirDiffOrphan'
+  end
+  if st == 'diff' then
+    -- 폴더와 견주는 파일 쪽은 시각을 견줄 것이 아니다 - 다름 그대로
+    local g = other == 'd' and 'VimIdeDirDiffChanged' or tr.newer_g(mine_t, other_t)
+    return g, g, g
+  end
+  -- 같음, 확인 중(판정 칸의 흐린 · 가 알린다): 보통 글자
+  return nil, nil, nil
+end
+
+-- 가운데 판정 칸 (글자, 색). bc: 다른 파일 ≠, 같은 파일 =, 확인 중 ·, 고아와 양쪽에 있는 폴더는 비운다
+-- (Beyond Compare 처럼). neogit·classic 은 예전 것 (◀ ▶ 까지)
+function tr.verdict(e)
+  local st = e.st
+  if pal() ~= 'bc' then
+    local g
+    if st == 'same' then
+      g = 'VimIdeDirDiffPending'
+    else
+      g = (st == 'diff' and 'VimIdeDirDiffChanged') or (st == 'onlyA' and 'VimIdeDirDiffOnlyA')
+        or (st == 'onlyB' and 'VimIdeDirDiffOnlyB') or 'VimIdeDirDiffPending'
+    end
+    return sym(st), g
+  end
+  if both_dirs(e) then
+    return ' ', nil
+  end
+  if st == 'diff' then
+    return ascii() and 'x' or '≠', 'VimIdeDirDiffNeq'
+  elseif st == 'same' then
+    return '=', 'VimIdeDirDiffEq'
+  elseif st == 'pend' then
+    return ascii() and '.' or '·', 'VimIdeDirDiffPending'
+  end
+  return ' ', nil
+end
+
+-- 반쪽의 색을 hls 에 (off: 그 반쪽이 줄에서 시작하는 바이트)
+function tr.side_hls(hls, e, side, m, off)
+  if not m then
+    return
+  end
+  if m.absent then
+    hls[#hls + 1] = { 'VimIdeDirDiffGuide', off, off + m.g_end }
+    return
+  end
+  local name_g, data_g, icon_g = tr.classes(e, side)
+  if m.g_end > 0 then
+    hls[#hls + 1] = { 'VimIdeDirDiffGuide', off, off + m.g_end }
+  end
+  if icon_g then
+    hls[#hls + 1] = { icon_g, off + m.g_end, off + m.i_end }
+  end
+  if name_g then
+    hls[#hls + 1] = { name_g, off + m.name_start, off + m.name_end }
+  end
+  if data_g and m.tail > 0 then
+    hls[#hls + 1] = { data_g, off + m.name_end, off + m.name_end + m.tail }
+  end
 end
 
 local function line_of(s, L, r)
   if r.loading then
-    local t = string.rep('  ', r.depth) .. '  (읽는 중…)'
-    return t, {}, nil
+    local g = tr.guide(r, 'a')
+    return g .. '  (읽는 중…)', { { 'VimIdeDirDiffGuide', 0, #g } }, nil
   end
   local e = r.e
   local lt, lm = side_text(s, L, r, 'a')
-  local g = ' ' .. sym(e.st) .. ' '
+  local vt, vg = tr.verdict(e)
+  local g = ' ' .. vt .. ' '
   local rt, rm = side_text(s, L, r, 'b')
   local text = lt .. g .. rt
   local hls = {}
-  local st = e.st
-  local group
-  if st == 'diff' then
-    group = 'VimIdeDirDiffChanged'
-  elseif st == 'pend' then
-    group = 'VimIdeDirDiffPending'
-  elseif st == 'same' then
-    group = is_dir(e) and 'VimIdeDirDiffDir' or nil
-  end
-  -- A 에만 / B 에만 은 따로 (Neogit 의 지운 파일·새 파일 - classic 은 둘 다 VimIdeDirDiffOrphan)
-  local ga = st == 'onlyA' and 'VimIdeDirDiffOnlyA' or group
-  local gb = st == 'onlyB' and 'VimIdeDirDiffOnlyB' or group
   local off_g = #lt
   local off_b = #lt + #g
-  if lm and ga then
-    hls[#hls + 1] = { ga, lm.name_start, lm.name_end }
+  tr.side_hls(hls, e, 'a', lm, 0)
+  tr.side_hls(hls, e, 'b', rm, off_b)
+  if vg then
+    hls[#hls + 1] = { vg, off_g, off_b }
   end
-  if lm and lm.tail > 0 then
-    hls[#hls + 1] = { (st == 'diff' or st == 'onlyA') and ga or 'VimIdeDirDiffSize', off_g - lm.tail, off_g }
-  end
-  hls[#hls + 1] = { (st == 'same') and 'VimIdeDirDiffPending' or (ga or gb or 'VimIdeDirDiffPending'), off_g, off_b }
-  if rm and gb then
-    hls[#hls + 1] = { gb, off_b + rm.name_start, off_b + rm.name_end }
-  end
-  if rm and rm.tail > 0 then
-    hls[#hls + 1] = { (st == 'diff' or st == 'onlyB') and gb or 'VimIdeDirDiffSize', #text - rm.tail, #text }
-  end
-  if lm and s.marks.a[r.rel] then
+  if lm and not lm.absent and s.marks.a[r.rel] then
     hls[#hls + 1] = { 'VimIdeDirDiffMark', lm.name_start, lm.name_end }
   end
-  if rm and s.marks.b[r.rel] then
+  if rm and not rm.absent and s.marks.b[r.rel] then
     hls[#hls + 1] = { 'VimIdeDirDiffMark', off_b + rm.name_start, off_b + rm.name_end }
   end
   return text, hls, off_b, off_g
@@ -759,8 +1289,9 @@ local function put_hls(s, lnum, hls)
   end
 end
 
--- 트리 창의 상태줄 ('statusline' 에 그대로 쓰는 글 - % 는 이미 %% 로). neogit 색이면 이름표에 색:
--- 'DirDiff'·보기 이름은 절 머리, 다름·A만·B만 은 트리의 그 색, 도움말은 흐리게
+-- 트리 창의 상태줄 ('statusline' 에 그대로 쓰는 글 - % 는 이미 %% 로). classic 이 아니면 이름표에 색:
+-- 'DirDiff'·보기 이름은 절 머리, 다름·A만·B만 은 트리의 그 색(bc 는 상태줄 바탕에 맞춘 짝 - VimIdeDirDiffSt*),
+-- 도움말은 흐리게
 local function status_text(s)
   local p = s.prog or {}
   local parts = {}
@@ -775,9 +1306,9 @@ local function status_text(s)
     parts[#parts + 1] = ('훑는 중 %d초 · 디렉터리 %s'):format(math.floor(p.sec or 0), commas(p.dirs or 0))
   end
   parts[#parts + 1] = ('파일 %s'):format(commas(p.files or 0))
-  parts[#parts + 1] = hl_part('VimIdeDirDiffChanged', ('다름 %s'):format(commas(p.diff or 0)))
-  parts[#parts + 1] = hl_part('VimIdeDirDiffOnlyA', ('A만 %s'):format(commas(p.onlyA or 0)))
-  parts[#parts + 1] = hl_part('VimIdeDirDiffOnlyB', ('B만 %s'):format(commas(p.onlyB or 0)))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffStChanged', ('다름 %s'):format(commas(p.diff or 0)))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyA', ('A만 %s'):format(commas(p.onlyA or 0)))
+  parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyB', ('B만 %s'):format(commas(p.onlyB or 0)))
   if (p.pend or 0) > 0 then
     parts[#parts + 1] = hl_part('VimIdeDirDiffPending', ('확인 중 %s'):format(commas(p.pend)))
   end
@@ -804,12 +1335,123 @@ local function empty_text(s)
   return ('  (%s: 보일 것이 없습니다 - f 로 보기를 바꿉니다)'):format(MODE[s.mode].label)
 end
 
-local function winbar_text(s, L)
-  local function side(tag, path)
-    return fit(' ' .. tag .. ': ' .. vim.fn.fnamemodify(path, ':~'), L.half)
+-- 트리 위의 두 줄 (Beyond Compare 의 경로 칸 둘과 칸 제목): 경로 줄 창(트리 바로 위의 한 줄짜리 창,
+-- filetype vimidedirdiffhead)에 A·B 의 뿌리를 반쪽마다 - 지금 쪽(A/B)이 연두 칸 -, 그 창의 상태줄에 칸
+-- 제목(이름 크기 수정일). 'laststatus' 가 0·3 이면 창마다 상태줄이 없어서 칸 제목은 트리 창의 winbar 에.
+-- 둘 다 트리를 내려도 그대로고, 트리를 그릴 때마다(창 너비가 바뀌면 WinResized) 트리와 같은 칸에 다시
+-- 맞춘다. winbar 하나로는 두 줄을 둘 수 없고, 버퍼 첫 줄에 두면 내려가며 사라진다. 경로 줄 창에는 들어가지
+-- 않는다 (들어가면 트리로 - 누른 쪽으로 A/B 쪽을 바꾼다, cmp.bounce). :only 등으로 닫히면 그 탭에서 다음에
+-- 그릴 때 다시 만든다
+function tr.titles_in_head()
+  local ls = vim.o.laststatus
+  return ls ~= 0 and ls ~= 3
+end
+
+-- 칸 제목 반쪽 (트리 줄과 같은 칸: 이름 | 오른쪽 맞춘 크기 | 수정일)
+function tr.title_half(L)
+  local tailw = (L.size and L.sz or 0) + L.dw + L.tw
+  local t = fit(' 이름', L.half - tailw)
+  if L.size then
+    t = t .. rjust('크기', L.sz)
   end
-  -- 트리의 머리(A 쪽 | B 쪽 뿌리)는 Neogit 의 절 머리 색으로 (classic 은 그대로)
-  return hl_part('VimIdeDirDiffHeader', (side('A', s.a) .. '   ' .. side('B', s.b)):gsub('%%', '%%%%'))
+  if L.dw + L.tw > 0 then
+    t = t .. ' ' .. fit('수정일', L.dw + L.tw - 1)
+  end
+  return t
+end
+
+function tr.titles(L)
+  local h = tr.title_half(L)
+  local t = h .. '   ' .. h
+  t = t .. string.rep(' ', math.max(0, L.W - vim.fn.strdisplaywidth(t)))
+  return '%#VimIdeDirDiffColHead#' .. (t:gsub('%%', '%%%%'))
+end
+
+-- 곁 창(경로 줄·개요 막대·줄 자세히)의 창 옵션: 갈라 만든 창의 옵션(트리의 상태줄, 비교 창의 diff·
+-- 묶기·접기·winbar ...)을 물려받으므로 모두 걷는다. 파일이 이 창에 열리지 않게 winfixbuf (0.10 부터)
+function tr.plain_extra(w)
+  for k, v in pairs({ number = false, relativenumber = false, signcolumn = 'no', foldcolumn = '0',
+    statuscolumn = '', cursorline = false, cursorcolumn = false, colorcolumn = '', wrap = false,
+    list = false, spell = false, winbar = '', winhighlight = '', scrolloff = 0, sidescrolloff = 0,
+    diff = false, scrollbind = false, cursorbind = false, foldenable = false, foldmethod = 'manual',
+    fillchars = 'eob: ', statusline = ' ', winfixbuf = true }) do
+    set_wo(w, k, v)
+  end
+end
+
+function tr.head_ensure(s)
+  if not (api.nvim_win_is_valid(s.win_l) and api.nvim_buf_is_valid(s.buf_l)) then
+    return false
+  end
+  if s.hwin and api.nvim_win_is_valid(s.hwin) then
+    return true
+  end
+  -- 다른 탭의 창 옆에는 만들지 않는다 (그 탭에 들어가 다시 그릴 때)
+  if api.nvim_win_get_tabpage(s.win_l) ~= api.nvim_get_current_tabpage() then
+    return false
+  end
+  if not (s.hbuf and api.nvim_buf_is_valid(s.hbuf)) then
+    local b = api.nvim_create_buf(false, true)
+    vim.bo[b].bufhidden = 'wipe'
+    vim.b[b].airline_disable_statusline = 1   -- airline 이 칸 제목(상태줄)을 제 것으로 바꾸지 않게
+    vim.bo[b].filetype = 'vimidedirdiffhead'
+    pcall(api.nvim_buf_set_name, b, 'DirDiff 경로 #' .. b)
+    s.hbuf = b
+  end
+  local w = cmp.open_extra(s.hbuf, { split = 'above', win = s.win_l, height = 1 })
+  if not w then
+    return false
+  end
+  s.hwin = w
+  tr.plain_extra(w)
+  set_wo(w, 'winfixheight', true)
+  -- 편집 창 둘 아래의 트리(pair_tab = 0)는 높이를 지킨다 (한 줄을 편집 창에서 가져온다)
+  if not s.pair_tab and s.list_h then
+    pcall(api.nvim_win_set_height, s.win_l, s.list_h)
+  end
+  return true
+end
+
+-- 경로 줄: 반쪽마다 ' A  경로' (넘치면 앞쪽을 자른다), 지금 쪽 칸은 연두
+function tr.head_line(s, L)
+  local function half(tag, path)
+    return ' ' .. tag .. '  ' .. tr.fit_left(shown(vim.fn.fnamemodify(path, ':~')), L.half - 4)
+  end
+  local a, b = half('A', s.a), half('B', s.b)
+  local line = a .. '   ' .. b
+  line = line .. string.rep(' ', math.max(0, L.W - vim.fn.strdisplaywidth(line)))
+  local ob = #a + 3
+  local hls = {
+    { s.side == 'a' and 'VimIdeDirDiffPathOn' or 'VimIdeDirDiffPath', 0, #a },
+    { 'VimIdeDirDiffColHead', #a, ob },
+    { s.side == 'b' and 'VimIdeDirDiffPathOn' or 'VimIdeDirDiffPath', ob, ob + #b },
+    { 'VimIdeDirDiffColHead', ob + #b, #line },
+    { 'VimIdeDirDiffHeader', 1, 2 },
+    { 'VimIdeDirDiffHeader', ob + 1, ob + 2 },
+  }
+  return line, hls
+end
+
+function tr.head_render(s, L)
+  local in_head = tr.titles_in_head()
+  if tr.head_ensure(s) then
+    local line, hls = tr.head_line(s, L)
+    local b = api.nvim_win_get_buf(s.hwin)
+    vim.bo[b].modifiable = true
+    api.nvim_buf_set_lines(b, 0, -1, false, { line })
+    vim.bo[b].modifiable = false
+    api.nvim_buf_clear_namespace(b, NS.head, 0, -1)
+    for i, h in ipairs(hls) do
+      pcall(api.nvim_buf_set_extmark, b, NS.head, 0, h[2], { end_col = h[3], hl_group = h[1], priority = 100 + i })
+    end
+    set_wo(s.hwin, 'statusline', in_head and tr.titles(L) or ' ')
+    if api.nvim_win_get_height(s.hwin) ~= 1 then
+      pcall(api.nvim_win_set_height, s.hwin, 1)
+    end
+  else
+    in_head = false   -- 경로 줄 창이 없다 (다른 탭에서 그렸다): 칸 제목은 트리의 winbar 에
+  end
+  set_wo(s.win_l, 'winbar', in_head and '' or tr.titles(L))
 end
 
 -- 줄 i 로, 지금 쪽(A/B)의 이름 자리에 커서를
@@ -858,9 +1500,12 @@ local function mark_open(s)
       rels[v.rel] = true
     end
   end
+  -- 커서 줄은 빼고: 줄 색(line_hl_group)이 지금 줄의 CursorLine(연두) 위에 와서 고른 줄이 보이지 않았다
+  -- (커서가 움직이면 다시 단다 - map_list 의 CursorMoved)
+  local cur = api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_cursor(s.win_l)[1]
   for rel in pairs(rels) do
     local i = s.row_of[rel]
-    if i then
+    if i and i ~= cur then
       pcall(api.nvim_buf_set_extmark, s.buf_l, ns_open, i - 1, 0, { line_hl_group = 'VimIdeDirDiffOpened' })
     end
   end
@@ -895,7 +1540,7 @@ render = function(s)
   end
   mark_open(s)
   s.dirty = {}
-  set_wo(s.win_l, 'winbar', winbar_text(s, L))
+  tr.head_render(s, L)
   set_wo(s.win_l, 'statusline', status_text(s))
   if s.want_rel and s.row_of[s.want_rel] then
     goto_row(s, s.row_of[s.want_rel])
@@ -1001,6 +1646,15 @@ local function render_dirty(s)
         s.row_of[r.rel] = i
       end
     end
+    -- 빠진 줄의 형제·그 아래 줄의 안내선이 바뀌었을 수 있다 (마지막 형제가 빠지면 앞 형제가 └─ 로,
+    -- 그 아래의 │ 는 끊긴다) - 바뀐 줄만 다시 쓴다
+    for _, i in ipairs(tr.reguide(s)) do
+      local t, h, ob, og = line_of(s, L, s.rows[i])
+      s.offb[i], s.offg[i] = ob, og
+      api.nvim_buf_set_lines(s.buf_l, i - 1, i, false, { t })
+      api.nvim_buf_clear_namespace(s.buf_l, ns, i - 1, i)
+      put_hls(s, i, h)
+    end
   end
   vim.bo[s.buf_l].modifiable = false
   s.dirty = {}
@@ -1014,6 +1668,7 @@ local function render_dirty(s)
   if s.prog_dirty then
     s.prog_dirty = false
     set_wo(s.win_l, 'statusline', status_text(s))
+    tr.head_render(s, L)   -- 지금 쪽(A/B)이 바뀌었을 수 있다 (경로 칸의 연두)
   end
 end
 
@@ -1048,11 +1703,14 @@ end
 -- 비교 열기 (비교 탭, 또는 위의 두 편집 창 - pair_tab = 0)
 -- ---------------------------------------------------------------------------
 
--- 창 옵션을 전역 값으로 되돌린다 (곁창·트리 창에서 갈라 만든 창은 그 옵션을 물려받는다)
+-- 창 옵션을 전역 값으로 되돌린다 (곁창·트리 창에서 갈라 만든 창은 그 옵션을 물려받는다). 곁 창(경로 줄·
+-- 개요 막대·줄 자세히 - tr.plain_extra)이 다는 것도 모두: 마지막 탭에서 트리를 닫으면 남는 창이 경로 줄
+-- 창일 수 있다 - winfixbuf 가 남아 그 창에서 :edit 이 E1513 으로 거절되었다
 local function plain_window(win)
   for _, o in ipairs({ 'winhighlight', 'winfixwidth', 'winfixheight', 'number', 'relativenumber',
     'signcolumn', 'foldcolumn', 'cursorline', 'list', 'wrap', 'spell', 'statuscolumn', 'winbar',
-    'statusline' }) do
+    'statusline', 'winfixbuf', 'scrolloff', 'sidescrolloff', 'fillchars', 'foldenable', 'foldmethod',
+    'colorcolumn', 'cursorcolumn', 'cursorlineopt' }) do
     pcall(api.nvim_win_call, win, function()
       vim.cmd('setlocal ' .. o .. '<')
     end)
@@ -1336,28 +1994,69 @@ local function dip_sync()
   end
 end
 
--- 비교 창의 머리(winbar): ' A: 경로' / ' B: 경로', B 쪽 오른쪽 끝에 지금 보기와 키. neogit 색이면 A:·B: 는
--- 트리의 A 에만·B 에만 색, 보기는 절 머리 색. 창에만(set_wo) - 그 창의 전역 값까지 바꾸면 setlocal
--- winbar< 가 머리를 되돌려 놓는다 (strip_inherited)
+-- 비교 창의 머리(winbar) - Beyond Compare 의 경로 칸과 그 아래 정보 줄을 한 줄에: ' A: 경로  수정 일시  크기
+-- 바이트  인코딩  줄 끝' / ' B: …', B 쪽 오른쪽 끝에 지금 보기와 키. 좁으면 정보를 빼고 경로의 가운데
+-- 디렉터리를 … 로 줄인다 (파일 이름은 남는다 - tr.mid_path). 없는 쪽은 '(없음) 경로' (Beyond Compare 의 빈
+-- 경로 칸). bc 색이면 A:·B: 는 굵게, 정보는 진한 회색(VimIdeDirDiffBarInfo), 머리는 지금
+-- 창이 연두 (winhighlight 의 WinBar - diff_whl), neogit 색이면 A:·B: 는 트리의 A 에만·B 에만 색, 보기는 절
+-- 머리 색. 창에만(set_wo) - 그 창의 전역 값까지 바꾸면 setlocal winbar< 가 머리를 되돌려 놓는다 (strip_inherited)
 local function set_heads(v)
   local function esc(t)
     return (t:gsub('%%', '%%%%'))
   end
+  local sw = vim.fn.strdisplaywidth
   for _, side in ipairs({ 'a', 'b' }) do
     local w = v['win_' .. side]
     local h = v.head and v.head[side]
     if h and api.nvim_win_is_valid(w) then
-      local tag = hl_part(side == 'a' and 'VimIdeDirDiffOnlyA' or 'VimIdeDirDiffOnlyB', side:upper() .. ':')
-      local text = ' ' .. tag .. ' %<' .. esc(h)   -- 좁으면 경로 앞쪽을 자른다 (A:·B: 는 남긴다)
+      local tg = pal() == 'bc' and 'VimIdeDirDiffHeader' or (side == 'a' and 'VimIdeDirDiffOnlyA' or 'VimIdeDirDiffOnlyB')
+      local gone = (v.gone and v.gone[side]) and ' (없음)' or ''
+      local left = ' ' .. hl_part(tg, side:upper() .. ':') .. gone .. ' %<'
+      local used = 1 + 2 + sw(gone) + 1
+      local W = api.nvim_win_get_width(w)
+      -- 경로는 파일 이름과 맨 앞(~/…/)만큼은 남게 - 정보·보기·키는 그것이 안 들어가면 뺀다
+      local need = math.min(sw(h), sw(vim.fn.fnamemodify(h, ':t')) + 4)
+      local right, rw = '', 0
       if side == 'b' then
+        -- B 쪽 끝의 보기와 키: 좁으면 키 안내, 그다음 보기 이름을 뺀다 (파일 이름이 먼저다)
         local keys = v.inline and '' or 'q 닫기'
+        local label = ''
         if not v.bin then
           keys = '\\d 보기' .. (keys ~= '' and (' · ' .. keys) or '')
-          text = text .. '%=' .. hl_part('VimIdeDirDiffHeader', '[' .. esc(fmode_label(v.fmode)) .. ']')
-        else
-          text = text .. '%='
+          label = '[' .. fmode_label(v.fmode) .. ']'
         end
-        text = text .. ' ' .. hl_part('VimIdeDirDiffPending', esc(keys)) .. ' '
+        local function width_of(lb, ks)
+          return (lb ~= '' and 1 + sw(lb) or 0) + (ks ~= '' and 2 + sw(ks) or 1)
+        end
+        if W - used - need - width_of(label, keys) < 0 then
+          keys = ''
+        end
+        if W - used - need - width_of(label, keys) < 0 then
+          label = ''
+        end
+        if label ~= '' then
+          right = ' ' .. hl_part('VimIdeDirDiffHeader', esc(label))
+        end
+        right = right .. (keys ~= '' and (' ' .. hl_part('VimIdeDirDiffPending', esc(keys)) .. ' ') or ' ')
+        rw = width_of(label, keys)
+      end
+      -- 정보는 좁으면 뒤에서부터 뺀다 (인코딩·줄 끝, 크기, 일시) - 경로가 파일 이름과 맨 앞만큼은 남게
+      -- (20 칸만 남겼더니 긴 파일 이름이 잘린 채 일시가 보였다). 남은 칸에 경로를 가운데부터 줄여 넣는다
+      -- (tr.mid_path - 파일 이름은 끝까지 남는다). %< 는 그래도 넘칠 때(창이 더 좁다)의 마지막 자르기
+      local parts = cmp.info(v, side)
+      local room = W - used - need - rw
+      local info = table.concat(parts, '  ')
+      while #parts > 0 and 2 + sw(info) > room do
+        parts[#parts] = nil
+        info = table.concat(parts, '  ')
+      end
+      local pw = W - used - rw - (info ~= '' and 2 + sw(info) or 0)
+      local text = left .. esc(tr.mid_path(h, math.max(1, pw)))
+      if info ~= '' then
+        text = text .. '  ' .. hl_part('VimIdeDirDiffBarInfo', esc(info))
+      end
+      if side == 'b' then
+        text = text .. '%=' .. right
       end
       set_wo(w, 'winbar', text)
     end
@@ -1396,6 +2095,12 @@ local function unview_win(w)
   end)
   set_wo(w, 'winbar', '')
   diff_whl(w, nil)
+  cmp.ungone(w)
+  vim.w[w].overview_off = nil
+  -- 화살표·연보라 빈 줄은 버퍼에 단 것이라 (창에만 보이게 한 것은 nvim__ns_set 이 있을 때뿐) 걷는다
+  local b = api.nvim_win_get_buf(w)
+  api.nvim_buf_clear_namespace(b, NS.arrow, 0, -1)
+  api.nvim_buf_clear_namespace(b, NS.blank, 0, -1)
 end
 
 -- 짝을 view 의 두 창에 채운다. jump: 커서를 첫 차이로
@@ -1476,13 +2181,15 @@ local function fill(v, r, jump)
       end)
     end
   end
+  -- 없는 쪽은 경로를 보이되 (없음) 을 붙인다 - (없음) 은 자르지 않는 자리에 (set_heads)
   local function head(k, root)
     if k == nil then
-      return '(없음) ' .. rel
+      return rel
     end
     return shown(vim.fn.fnamemodify(root .. '/' .. r.rel, ':~'))
   end
   v.head = { a = head(e.ka, s.a), b = head(e.kb, s.b) }
+  v.gone = { a = e.ka == nil, b = e.kb == nil }
   if v.rel ~= r.rel then
     v.fmode = s.fmode   -- 다른 짝을 실었다 (pair_tab = 0 의 편집 창) - 처음 보기로
   end
@@ -1490,10 +2197,35 @@ local function fill(v, r, jump)
   v.ctx_done = nil   -- 지금 'diffopt' 로 새로 접혔다 - 이 탭에 들어올 때 그 탭의 context 로 (dip_sync)
   v.bin = bin   -- 두 창이 알림이다 (편집 창의 <C-r>/<C-l> 이 알린다, 보기는 접을 것이 없다)
   v.buf_a, v.buf_b = api.nvim_win_get_buf(v.win_a), api.nvim_win_get_buf(v.win_b)
-  -- 비교 색 (neogit): A 쪽은 빨강, B 쪽은 초록. 알림 창에는 달지 않는다
+  -- 창 머리의 수정 일시·크기 (디스크의 것 - :w 하면 다시, BufWritePost)
+  v.path = { a = pa, b = pb }
+  v.info = { a = pa and uv.fs_stat(pa) or nil, b = pb and uv.fs_stat(pb) or nil }
+  -- 비교 색 (bc: 두 쪽 분홍·빨강, neogit: A 쪽 빨강, B 쪽 초록). 알림 창에는 달지 않는다
   diff_whl(v.win_a, not bin and 'a' or nil)
   diff_whl(v.win_b, not bin and 'b' or nil)
+  cmp.gone_side(v)
+  -- 알림(바이너리·큰 파일)에는 곁 창이 쓸모없다 (빈 개요 막대, 'A – B –' 뿐인 줄 자세히) - 닫고 두 창을 반반으로
+  if bin and (v.ov or v.ld) then
+    cmp.detach(v)
+    if api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
+      local tw = api.nvim_win_get_width(v.win_a) + api.nvim_win_get_width(v.win_b)
+      pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
+    end
+  end
+  cmp.own_overview(v)
+  -- 탭 이름: airline 의 탭 줄은 탭에 목록 버퍼가 없으면 첫 창의 버퍼 이름을 쓴다 - 두 창이 다 알림이면 그
+  -- 첫 창이 개요 막대라 'DirDiff 개요 #20' 이 떴다. 그때만 짝의 파일 이름을 t:title 로 (보통 짝은 airline
+  -- 이 파일 이름을 그대로 쓴다)
+  if not v.inline and api.nvim_tabpage_is_valid(v.tab) then
+    if vim.fn.buflisted(v.buf_a) == 0 and vim.fn.buflisted(v.buf_b) == 0 then
+      vim.t[v.tab].title = vim.fn.fnamemodify(rel, ':t')
+    else
+      pcall(api.nvim_tabpage_del_var, v.tab, 'title')
+    end
+  end
   apply_fmode(v)
+  -- 개요 막대·화살표·줄 자세히·연보라 빈 줄을 새 짝으로
+  cmp.kick(v, true)
   v.filling = false
   sweep(s)
   mark_open(s)
@@ -1559,6 +2291,8 @@ local function new_view(s)
   v.win_b = api.nvim_open_win(scratch(v, 'b', {}), false, { split = 'right', win = v.win_a })
   plain_window(v.win_b)
   s.views[v.tab] = v
+  -- 맨 왼쪽 개요 막대, 맨 아래 줄 자세히 (이 탭에만 - 짝을 채우면 cmp.kick 이 그린다)
+  cmp.attach(v)
   return v
 end
 
@@ -1574,6 +2308,13 @@ local function repair_view(v)
   if not okA and not okB then
     v.closed = true
     s.views[v.tab] = nil
+    -- 놓는 다른 길(release_view, finish)처럼: 다시 그리기 시계를 멈추고 버퍼의 표시를 걷는다
+    cmp.clear(v)
+    if api.nvim_tabpage_is_valid(v.tab) then
+      cmp.detach(v)
+      pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')
+      pcall(api.nvim_tabpage_del_var, v.tab, 'title')
+    end
     return nil
   end
   if okA then
@@ -1602,7 +2343,12 @@ local function open_pair(s, r, jump)
     end
     local made = {}
     if not api.nvim_win_is_valid(v.win_a) and not api.nvim_win_is_valid(v.win_b) then
-      v.win_a = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'above', win = s.win_l })
+      -- 트리 위의 경로 줄 창보다 위에 (그 사이에 끼면 경로 줄이 트리와 떨어진다). 높이를 주고 연다: 한 줄짜리
+      -- 경로 줄 창(winfixheight)을 그냥 가르면 새 창이 두 줄이 되고, 그 뒤 트리 높이를 되돌려도 줄이 모자라
+      -- 화면 맨 아래에 옛 상태줄이 한 줄 남았다. 트리가 list_h 로 돌아가고 남는 만큼 (상태줄 한 줄을 빼고)
+      local above = (s.hwin and api.nvim_win_is_valid(s.hwin)) and s.hwin or s.win_l
+      local h = math.max(2, api.nvim_win_get_height(s.win_l) - (s.list_h or 0) - 1)
+      v.win_a = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'above', win = above, height = h })
       made[#made + 1] = v.win_a
     end
     if not api.nvim_win_is_valid(v.win_a) then
@@ -2937,11 +3683,43 @@ local function take_over()
   end
 end
 
+-- <C-w>w / <C-w><C-w> / <C-w>W 를 비교 창(비교 탭의 두 창, pair_tab = 0 의 편집 창 둘)에서만: 곁 창(경로 줄·
+-- 개요 막대·줄 자세히)을 건너뛰고 다음/앞 창으로. 감싸지 않았더니 비교 창 B 에서 <C-w>w 가 줄 자세히로 갔다가
+-- 돌려보내져 늘 B 에 머물렀다 (A·B 를 <C-w>w 로 오가는 vimdiff 버릇). 횟수가 있으면(3<C-w>w) 원래대로.
+-- 다른 창(트리 등)에서는 원래대로 - 곁 창에 들어가면 cmp.bounce 가 알맞은 창으로 보낸다
+function _G.vimide_dirdiff_cycle(dir)
+  local wins = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local c = api.nvim_win_get_config(w)
+    if (c.relative == '' or c.focusable) and not cmp.FT[vim.bo[api.nvim_win_get_buf(w)].filetype] then
+      wins[#wins + 1] = w
+    end
+  end
+  local cur = api.nvim_get_current_win()
+  local i = 0
+  for k, w in ipairs(wins) do
+    if w == cur then
+      i = k
+    end
+  end
+  if #wins > 0 then
+    api.nvim_set_current_win(wins[((i - 1 + dir) % #wins) + 1])
+  end
+end
+
 -- 비교 창에서만 쓰는 다른 키 (copy_keys 와 상관없이 늘): \d 보기 고르기 - 리더 d 는 neo-tree 밖에서
 -- 비어 있다 (neo-tree 의 \d 는 그 버퍼의 매핑이라 이것보다 먼저다). q 는 비교 탭의 것만 - 그 탭을
 -- 닫는다 (diffview 의 diff 창에 vim-ide 가 건 q 와 같다). 매크로를 적는 중이면 q 그대로 (적기 끝).
--- pair_tab = 0 의 편집 창에서 q 는 예전대로 매크로다
+-- pair_tab = 0 의 편집 창에서 q 는 예전대로 매크로다. <C-w>w <C-w><C-w> <C-w>W 는 곁 창을 건너뛴다
+-- (위 _G.vimide_dirdiff_cycle)
 local function take_over_view_keys()
+  for _, spec in ipairs({ { '<C-w>w', 1 }, { '<C-w><C-w>', 1 }, { '<C-w>W', -1 } }) do
+    wrap('n', spec[1], function()
+      if vim.v.count == 0 and view_of_win(api.nvim_get_current_win()) then
+        return ('<Cmd>lua _G.vimide_dirdiff_cycle(%d)<CR>'):format(spec[2])
+      end
+    end, 'DirDiff 비교 창: ' .. (spec[2] > 0 and '다음' or '앞') .. ' 창으로 (경로 줄·개요 막대·줄 자세히는 건너뛴다)')
+  end
   wrap('n', '<leader>d', function()
     if view_of_win(api.nvim_get_current_win()) then
       return '<Cmd>lua _G.vimide_dirdiff_file_menu()<CR>'
@@ -3133,6 +3911,8 @@ end
 
 local HELP_PAIR = {
   '비교 창 (비교 탭의 두 창, pair_tab = 0 이면 트리 위의 편집 창 둘)',
+  '  개요 막대(맨 왼쪽)를 누르면 그 자리로. 맨 아래 두 줄은 커서 줄과 맞은편 줄 (빈칸 · 탭 → 줄 끝 ¶)',
+  '  <C-w>w <C-w>W 다음 / 앞 창 (개요 막대·줄 자세히는 건너뛴다 - A·B 를 오간다)',
   '  \\d          보기 고르기: 모두 보이기(기본) / 차이 보이기 / 문맥 보이기 (Enter 고르기, 1 2 3)',
   '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
@@ -3182,9 +3962,12 @@ local function release_view(v, back)
   local s = v.s
   v.closed = true
   s.views[v.tab] = nil
+  cmp.clear(v)   -- 버퍼에 남은 화살표·연보라 빈 줄 (탭째 닫혀 창이 없을 때)
   if api.nvim_tabpage_is_valid(v.tab) then
-    -- 탭이 남았으면(:tabonly 로 트리 탭이 닫혔다) 보통 탭으로 - 곁창 지킴이도 다시 본다
+    -- 탭이 남았으면(:tabonly 로 트리 탭이 닫혔다) 보통 탭으로 - 곁창 지킴이도 다시 본다. 곁 창은 닫는다
+    cmp.detach(v)
     pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')
+    pcall(api.nvim_tabpage_del_var, v.tab, 'title')
   end
   for _, b in ipairs({ v.empty_a or false, v.empty_b or false }) do
     if b and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then
@@ -3389,11 +4172,15 @@ local function finish(s, stay)
     for _, w in ipairs({ v.win_a, v.win_b }) do
       unview_win(w)
     end
+    cmp.clear(v)
     if api.nvim_tabpage_is_valid(v.tab) and #api.nvim_list_tabpages() > 1 then
       pcall(vim.cmd, 'tabclose ' .. api.nvim_tabpage_get_number(v.tab))
     end
     if api.nvim_tabpage_is_valid(v.tab) then
-      pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')   -- 마지막 탭이라 남았다
+      -- 마지막 탭이라 남았다 (:tabonly, 트리 탭을 먼저 닫았다): 보통 탭으로 - 곁 창도 닫는다
+      cmp.detach(v)
+      pcall(api.nvim_tabpage_del_var, v.tab, 'vimide_dirdiff_pair')
+      pcall(api.nvim_tabpage_del_var, v.tab, 'title')
     end
     for _, b in ipairs({ v.empty_a or false, v.empty_b or false }) do
       if b and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0 then
@@ -3424,12 +4211,18 @@ local function finish(s, stay)
         end
       end
     end
+    if m then
+      cmp.clear(m)
+    end
     if #api.nvim_list_tabpages() > 1 then
       pcall(vim.cmd, 'tabclose')
     else
-      -- 마지막 탭: 창 하나를 새 빈 버퍼로. 트리 창을 물려 쓰게 되므로 그 옵션을 걷는다
+      -- 마지막 탭: 창 하나를 새 빈 버퍼로. 트리 창(트리를 :q 로 닫았으면 경로 줄 창)을 물려 쓰게 되므로 그
+      -- 옵션을 걷는다 - winfixbuf 는 먼저 (그대로면 enew 가 E1513 으로 거절되어 경로 줄 버퍼가 남았다)
+      set_wo(api.nvim_get_current_win(), 'winfixbuf', false)
       pcall(vim.cmd, 'silent! only | enew')
       plain_window(api.nvim_get_current_win())
+      pcall(api.nvim_tabpage_del_var, s.tab, 'title')
     end
   end
   if stay and api.nvim_tabpage_is_valid(here) then
@@ -3452,7 +4245,7 @@ local function finish(s, stay)
       pcall(api.nvim_buf_delete, b, { unload = true })
     end
   end
-  for _, b in ipairs({ s.buf_l, m and m.empty_a or false, m and m.empty_b or false }) do
+  for _, b in ipairs({ s.buf_l, s.hbuf or false, m and m.empty_a or false, m and m.empty_b or false }) do
     if b and api.nvim_buf_is_valid(b) then
       pcall(api.nvim_buf_delete, b, { force = true })
     end
@@ -3530,6 +4323,7 @@ local function map_list(s)
       local old = s.side
       cursor_side(s)
       mark_side(s)
+      mark_open(s)
       if old ~= s.side then
         s.prog_dirty = true
         schedule_render(s)
@@ -3554,10 +4348,15 @@ local function full_dir(d)
 end
 
 -- 트리 창의 옵션. 창에만(local) - vim.wo 는 :set 처럼 그 창의 전역 값까지 바꾸어, 그 창에서 갈라
--- 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다
+-- 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다. 지금 줄은 Beyond Compare 의 고른 줄처럼 연두
+-- (CursorLine 을 이 창에서만 VimIdeDirDiffSelect 로 - neogit·classic 은 그것이 CursorLine 이다).
+-- colorcolumn(vim-ide 는 80)·statuscolumn 은 끈다 - 칸 제목(winbar·경로 줄 창의 상태줄)이 0 칸부터라
+-- 줄 앞에 무엇이 붙으면 칸이 어긋난다
 local function tree_opts(s)
   for k, v in pairs({ number = false, relativenumber = false, wrap = false, cursorline = true,
-    winfixheight = not s.pair_tab, signcolumn = 'no', foldcolumn = '0', list = false, spell = false }) do
+    winfixheight = not s.pair_tab, signcolumn = 'no', foldcolumn = '0', list = false, spell = false,
+    colorcolumn = '', statuscolumn = '', cursorlineopt = 'both',
+    winhighlight = 'CursorLine:VimIdeDirDiffSelect' }) do
     pcall(api.nvim_set_option_value, k, v, { scope = 'local', win = s.win_l })
   end
 end
@@ -3651,6 +4450,9 @@ function M.open(a, b)
     open_tree_win(s)
   end
   vim.t.vimide_dirdiff_view = true
+  -- 탭 이름: airline 의 탭 줄은 탭에 목록 버퍼가 없으면 첫 창의 버퍼 이름을 쓰는데, 첫 창이 이제 경로 줄
+  -- 창이다 ('DirDiff 경로' 가 떴다). 그 탭 줄이 먼저 보는 t:title 에 트리의 이름을 둔다
+  vim.t.title = 'DirDiff ' .. vim.fn.fnamemodify(a, ':t') .. ' <> ' .. vim.fn.fnamemodify(b, ':t')
   sessions[s.tab] = s
   map_list(s)
   if not start_job(s) then
@@ -3659,6 +4461,991 @@ function M.open(a, b)
   end
   request_list(s, '')
   render(s)
+end
+
+-- ---------------------------------------------------------------------------
+-- 비교 탭의 곁 (Beyond Compare 의 글 비교): 개요 막대, 줄 자세히, 노란 화살표, 연보라 빈 줄
+-- ---------------------------------------------------------------------------
+-- 곁 창은 그 비교 탭에만 있는 nofile 창이다 (filetype 이 cmp.FT). 들어가지 않는다: <C-w>w·<C-w>W 는 건너뛰고
+-- (_G.vimide_dirdiff_cycle), 그래도 들어가면(<C-w>h <C-w>j, 마우스) 비교 창으로 돌려보낸다 (cmp.bounce -
+-- 개요 막대를 눌렀으면 그 자리로, 키보드로 개요 막대에 왔으면 A 로). 파일이 열리지 않게 winfixbuf, 곁창
+-- 지킴이는 이 탭을 남의 것으로 본다 (t:vimide_dirdiff_pair). 크기는 지킨다 (cmp.keep_size). 비교 창 둘이 다
+-- 닫히면 곁 창도 닫는다 (cmp.orphans) - 탭이 닫혀 TabClosed 가 짝을 놓는다. 짝을 놓았는데 탭이 남으면
+-- (:tabonly) 곁 창도 닫는다 (cmp.detach), 알림(바이너리·큰 파일)에는 곁 창이 없다. vim-ide 의 overview 막대는
+-- 개요 막대가 있는 비교 창에 띄우지 않는다 (w:overview_off). pair_tab = 0 의 편집 창 둘에는 곁 창 없이
+-- 화살표·연보라만 단다.
+-- 그리는 것은 모두 v.dd (cmp.compute) 에서: 버퍼 글을 vim.diff 로 한 번 견준 덩어리 목록이다 - vim 의
+-- diff 를 줄마다 묻는 diff_hlID·diff_filler 는 부를 때마다 조각 목록을 처음부터 찾아서 줄 수 x 조각 수가
+-- 걸린다. 'diffopt' 의 알고리즘·무시·linematch 를 그대로 넘겨 화면과 같은 덩어리가 나온다. 다시 세는 것은
+-- 짝을 채울 때, 글이 바뀔 때(TextChanged), DiffUpdated, 창 크기가 바뀔 때만 (마지막 부름에서 120ms 쉰 뒤),
+-- 커서·화면이 움직이면 화살표·줄 자세히·보이는 곳만 (20ms 뒤) - cmp.kick
+
+cmp.FT = { vimidedirdiffhead = true, vimidedirdiffover = true, vimidedirdiffline = true }
+
+-- 끼인 줄의 빗금 (bc): 그 창의 전역 fillchars 에서 diff·eob 만 바꿔 창에만 단다 - 창에만 단 fillchars 는
+-- 전역 값을 통째로 덮으므로 (다른 항목이 기본값으로 돌아가지 않게 전역 값에서 시작한다). 파일 끝 아래는
+-- ~ 없이 비운다 (Beyond Compare 처럼 - 그 자리 줄 맨 앞 한 칸의 표시는 빗금처럼 보이지 않았다).
+-- ASCII 는 '/' (╱ 는 East Asian Ambiguous)
+function cmp.fillchars()
+  local parts = {}
+  for item in (vim.go.fillchars or ''):gmatch('[^,]+') do
+    if not item:match('^diff:') and not item:match('^eob:') then
+      parts[#parts + 1] = item
+    end
+  end
+  parts[#parts + 1] = 'diff:' .. (ascii() and '/' or '╱')
+  parts[#parts + 1] = 'eob: '
+  return table.concat(parts, ',')
+end
+
+-- 그쪽 창이 짝의 버퍼를 보이고 있으면 그 버퍼 (아니면 nil): 비교 창에서 :e 로 다른 파일을 열었으면 화살표·
+-- 연보라·줄 자세히는 그쪽을 짝으로 보지 않는다 - 그 파일에 노란 화살표가 달리고 줄 자세히가 그 파일의 줄을
+-- 짝의 줄과 나란히 보였다. 짝의 버퍼로 돌아오면(<C-^>) 다시 (BufWinEnter 가 cmp.kick)
+function cmp.pbuf(v, side)
+  local w = v['win_' .. side]
+  if not api.nvim_win_is_valid(w) then
+    return nil
+  end
+  local b = api.nvim_win_get_buf(w)
+  if b ~= v['buf_' .. side] then
+    return nil
+  end
+  return b
+end
+
+-- 없는 쪽(한쪽에만 있는 파일의 빈 쪽)은 빗금뿐이게 (bc): 그 창의 줄 번호·지금 줄 색·colorcolumn 을 끈다 - 빗금 아래 홀로
+-- 남은 빈 버퍼의 '1' 줄이 번호와 지금 줄 색을 달고 떴다 (Beyond Compare 의 빈 쪽에는 아무것도 없다). 창
+-- 변수(w:vimide_dirdiff_gone)로 적어 두고 unview_win 이 되돌린다 (cmp.ungone)
+function cmp.gone_side(v)
+  for _, side in ipairs({ 'a', 'b' }) do
+    local w = v['win_' .. side]
+    if api.nvim_win_is_valid(w) and v.gone and v.gone[side] and not v.bin and pal() == 'bc' then
+      for _, o in ipairs({ 'number', 'relativenumber', 'cursorline' }) do
+        set_wo(w, o, false)
+      end
+      set_wo(w, 'colorcolumn', '')
+      vim.w[w].vimide_dirdiff_gone = 1
+    end
+  end
+end
+
+function cmp.ungone(w)
+  if vim.w[w].vimide_dirdiff_gone then
+    vim.w[w].vimide_dirdiff_gone = nil
+    pcall(api.nvim_win_call, w, function()
+      vim.cmd('setlocal number< relativenumber< cursorline< colorcolumn<')
+    end)
+  end
+end
+
+-- 비교 창의 signcolumn: 화살표 자리로 늘 한 칸(있다 없다 하면 글자가 밀린다), 사용자의 것이 여러 칸(auto:2,
+-- yes:2)이면 그만큼까지 - yes:1 로 못박았더니 gitsigns·진단의 sign 이 화살표(우선순위 200)에 가렸다
+function cmp.signcol()
+  local g = vim.go.signcolumn or ''
+  local n = tonumber(g:match('^yes:(%d)$'))
+  if n then
+    return 'yes:' .. n
+  end
+  local hi = tonumber(g:match('^auto:%d%-(%d)$') or g:match('^auto:(%d)$'))
+  if hi and hi > 1 then
+    return 'auto:1-' .. hi
+  end
+  return 'yes:1'
+end
+
+-- 지금 비교 창 (A 또는 B): 지금 창이 그것이면 그것, 아니면 마지막으로 있던 것, 없으면 A
+function cmp.cur(v)
+  local w = api.nvim_get_current_win()
+  if w == v.win_a or w == v.win_b then
+    return w
+  end
+  if v.cur_win and (v.cur_win == v.win_a or v.cur_win == v.win_b) and api.nvim_win_is_valid(v.cur_win) then
+    return v.cur_win
+  end
+  return api.nvim_win_is_valid(v.win_a) and v.win_a or v.win_b
+end
+
+-- 곁 창(경로 줄·개요 막대·줄 자세히)을 연다. focusable = false 는 쓰지 않는다: 0.12 에서도 나눈 창은 <C-w>w
+-- 가 그대로 들어가고(창 번호만 없어진다), airline 의 탭 이름이 엉뚱한 창을 보았다 (실측). <C-w>w 는 그 탭에서
+-- 곁 창을 건너뛰게 감싸고 (_G.vimide_dirdiff_cycle), 그래도 들어오면(<C-w>h <C-w>j, 마우스) 돌려보낸다 (cmp.bounce)
+function cmp.open_extra(b, cfg)
+  local ok, w = pcall(api.nvim_open_win, b, false, cfg)
+  return ok and w or nil
+end
+
+-- 곁 창 하나 (kind: 이름, ft, 창 설정)
+function cmp.extra(kind, ft, cfg)
+  local b = api.nvim_create_buf(false, true)
+  vim.bo[b].bufhidden = 'wipe'
+  vim.b[b].airline_disable_statusline = 1
+  vim.bo[b].filetype = ft
+  pcall(api.nvim_buf_set_name, b, ('DirDiff %s #%d'):format(kind, b))
+  local w = cmp.open_extra(b, cfg)
+  if not w then
+    pcall(api.nvim_buf_delete, b, { force = true })
+    return nil
+  end
+  tr.plain_extra(w)
+  return { win = w, buf = b }
+end
+
+function cmp.attach(v)
+  if v.inline then
+    return
+  end
+  if on(vim.g.vimide_dirdiff_overview, 1) then
+    v.ov = cmp.extra('개요', 'vimidedirdiffover', { split = 'left', win = v.win_a, width = 3 })
+    if v.ov then
+      set_wo(v.ov.win, 'winfixwidth', true)
+      -- 빈 winbar 한 줄: 막대의 칸이 비교 창의 글 줄과 같은 높이에 서게 (비교 창에는 창 머리가 있다)
+      set_wo(v.ov.win, 'winbar', '%#VimIdeDirDiffBar# ')
+      -- A 가 막대만큼 좁아졌다 - 두 창을 같은 너비로
+      local tw = api.nvim_win_get_width(v.win_a) + api.nvim_win_get_width(v.win_b)
+      pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
+    end
+  end
+  if on(vim.g.vimide_dirdiff_line_details, 1) then
+    v.ld = cmp.extra('줄', 'vimidedirdiffline', { split = 'below', win = -1, height = 2 })
+    if v.ld then
+      set_wo(v.ld.win, 'winfixheight', true)
+    end
+  end
+  cmp.own_overview(v)
+end
+
+-- 곁 창의 크기를 지킨다 (개요 막대 3 칸, 줄 자세히 2 줄): winfixwidth 가 있어도 왼쪽 곁창(neo-tree·Tagbar)을
+-- 열었다 닫으면 nvim 이 비워진 칸을 맨 왼쪽 창인 개요 막대에 주어 36 칸이 되었고, <C-w>| 뒤에는 1 칸으로
+-- 남았다. 넓어진 막대를 되돌렸으면(곁창이 내준 칸이 A 로 간다) A·B 를 다시 반반으로 (WinResized). 좁아진
+-- 것(<C-w>|)은 되돌리기만 - 반반으로 하면 사용자가 넓힌 창이 도로 줄었다
+function cmp.keep_size(v)
+  local fixed = false
+  if v.ov and api.nvim_win_is_valid(v.ov.win) and api.nvim_win_get_width(v.ov.win) ~= 3 then
+    fixed = api.nvim_win_get_width(v.ov.win) > 3
+    pcall(api.nvim_win_set_width, v.ov.win, 3)
+  end
+  if v.ld and api.nvim_win_is_valid(v.ld.win) and api.nvim_win_get_height(v.ld.win) ~= 2 then
+    pcall(api.nvim_win_set_height, v.ld.win, 2)
+  end
+  if fixed and api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
+    local tw = api.nvim_win_get_width(v.win_a) + api.nvim_win_get_width(v.win_b)
+    pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
+  end
+end
+
+-- 비교 창 둘이 다 닫혔으면 곁 창도 닫는다 (WinClosed 뒤)
+function cmp.orphans(v)
+  if v.closed or api.nvim_win_is_valid(v.win_a) or api.nvim_win_is_valid(v.win_b) then
+    return
+  end
+  cmp.detach(v)
+end
+
+-- 곁 창을 닫는다: 짝을 놓았는데 탭이 남을 때(:tabonly·트리 탭을 닫아 비교 탭이 마지막 탭, 비교 창 둘이 다
+-- 닫혔다), 알림(바이너리·큰 파일)이 된 짝. 그대로 두었더니 다시 그리지 않는 개요 막대·줄 자세히가 옛 글을
+-- 단 채 남았고, 짝이 없어 돌려보내지도 않아 <C-w>h 로 들어가 머물렀다. vim-ide 의 overview 막대도 돌려준다
+function cmp.detach(v)
+  for _, x in ipairs({ v.ov or false, v.ld or false }) do
+    if x and api.nvim_win_is_valid(x.win) then
+      pcall(api.nvim_win_close, x.win, true)
+    end
+  end
+  v.ov, v.ld = nil, nil
+  cmp.own_overview(v)
+end
+
+-- vim-ide 의 overview 막대(overview.lua - 편집 창 오른쪽 끝의 부동 막대)를 비교 창에서 끈다 (w:overview_off):
+-- 개요 막대가 있으면 막대가 둘이었다 (A 와 B 사이에 검은 막대). 개요 막대가 없으면(꺼 두었거나 pair_tab = 0)
+-- 그대로 둔다. 창 변수라 갈라 만든 창은 물려받지 않는다
+function cmp.own_overview(v)
+  local off = (v.ov and api.nvim_win_is_valid(v.ov.win)) and 1 or nil
+  for _, w in ipairs({ v.win_a, v.win_b }) do
+    if api.nvim_win_is_valid(w) then
+      vim.w[w].overview_off = off
+    end
+  end
+end
+
+-- 버퍼에 단 화살표·연보라를 걷는다 (짝을 놓을 때). 다시 그리기 시계도 멈춘다
+function cmp.clear(v)
+  if v.cx and v.cx.timer then
+    v.cx.timer:stop()
+    if not v.cx.timer:is_closing() then
+      v.cx.timer:close()
+    end
+    v.cx.timer = nil
+  end
+  for _, t in ipairs({ v.ab or {}, v.mb or {} }) do
+    for _, b in pairs(t) do
+      if api.nvim_buf_is_valid(b) then
+        api.nvim_buf_clear_namespace(b, NS.arrow, 0, -1)
+        api.nvim_buf_clear_namespace(b, NS.blank, 0, -1)
+      end
+    end
+  end
+  v.ab, v.mb = nil, nil
+  v.dd = nil
+end
+
+-- 화살표·연보라는 버퍼에 단다 - 같은 파일을 다른 창에도 띄우면 거기도 보인다. nvim__ns_set(있으면)으로 그
+-- 이름 공간을 비교 창들에만 보이게 한다 (0.10~ 의 실험 API 라 없거나 바뀌면 그냥 버퍼 전체)
+function cmp.scope()
+  if not api.nvim__ns_set then
+    return
+  end
+  local wins = {}
+  for _, v in ipairs(all_views()) do
+    for _, w in ipairs({ v.win_a, v.win_b }) do
+      if api.nvim_win_is_valid(w) then
+        wins[#wins + 1] = w
+      end
+    end
+  end
+  if #wins > 0 then
+    pcall(api.nvim__ns_set, NS.arrow, { wins = wins })
+    pcall(api.nvim__ns_set, NS.blank, { wins = wins })
+  end
+end
+
+-- 'diffopt' 을 vim.diff 의 것으로 (화면의 diff 와 같은 덩어리가 나오게): 알고리즘, 빈칸·빈 줄 무시,
+-- linematch (덩어리 안의 줄 맞춤 - 화면도 그렇게 맞춘다), indent-heuristic. icase 는 vim.diff 에 없어서
+-- 소문자로 바꿔 견준다
+function cmp.diffopts()
+  local o = { result_type = 'indices' }
+  local icase = false
+  for p in vim.o.diffopt:gmatch('[^,]+') do
+    local k, val = p:match('^([^:]+):?(.*)$')
+    if k == 'algorithm' and val ~= '' then
+      o.algorithm = val
+    elseif k == 'iwhite' then
+      o.ignore_whitespace_change = true
+    elseif k == 'iwhiteall' then
+      o.ignore_whitespace = true
+    elseif k == 'iwhiteeol' then
+      o.ignore_whitespace_change_at_eol = true
+    elseif k == 'iblank' then
+      o.ignore_blank_lines = true
+    elseif k == 'indent-heuristic' then
+      o.indent_heuristic = true
+    elseif k == 'linematch' then
+      o.linematch = tonumber(val)
+    elseif k == 'icase' then
+      icase = true
+    end
+  end
+  return o, icase
+end
+
+-- 두 창의 차이를 센다 (v.dd): hunks (a0 a1 b0 b1 - 반열린 구간, 1 부터. 빈 쪽은 a0 == a1 이고 그 줄 바로
+-- 위가 끼인 줄 자리, r0 = 가지런한 행 - 끼인 줄 포함, 0 부터), N 가지런한 행 수, blocks (사이에 같은 줄
+-- 없이 붙은 덩어리를 묶은 것 - linematch 가 조각낸 한 덩어리, 화살표), blank (연보라 빈 줄: 짝 없는 빈
+-- 줄, 짝이 있으면 둘 다 빈 줄 - 빈칸만 다르다). 덩어리 안에서 앞의 min(ca, cb) 줄이 짝을 이루고 남은 줄의
+-- 맞은편이 끼인 줄이다 (vim 의 diff 가 그린다). 아주 큰 것(두 쪽 합 40만 줄 넘음)은 세지 않는다
+function cmp.compute(v)
+  v.dd = nil
+  if v.bin or not v.rel then
+    return
+  end
+  local wa, wb = v.win_a, v.win_b
+  local ba, bb = cmp.pbuf(v, 'a'), cmp.pbuf(v, 'b')
+  if not (ba and bb and vim.wo[wa].diff and vim.wo[wb].diff) then
+    return
+  end
+  if api.nvim_buf_line_count(ba) + api.nvim_buf_line_count(bb) > 400000 then
+    return
+  end
+  local la = empty_buf(ba) and {} or api.nvim_buf_get_lines(ba, 0, -1, false)
+  local lb = empty_buf(bb) and {} or api.nvim_buf_get_lines(bb, 0, -1, false)
+  local opts, icase = cmp.diffopts()
+  local ta = #la > 0 and (table.concat(la, '\n') .. '\n') or ''
+  local tb = #lb > 0 and (table.concat(lb, '\n') .. '\n') or ''
+  if icase then
+    ta, tb = ta:lower(), tb:lower()
+  end
+  local df = (vim.text and vim.text.diff) or vim.diff
+  -- linematch 는 덩어리마다 따로: 파일 전체에 linematch 를 주면 vim.diff 가 덩어리마다 글 전체를 다시 훑어
+  -- (15만 줄, 덩어리 400 개에 0.36 초 - linematch 없이는 0.016 초, 실측) 고칠 때마다 멈췄다. 먼저 줄 맞춤
+  -- 없이 덩어리를 찾고, 화면처럼(diffopt linematch:N - 두 쪽 합이 N 줄 이하인 덩어리) 그 덩어리의 글만
+  -- 다시 견주어 조각낸다
+  local lm = opts.linematch
+  opts.linematch = nil
+  local ok, hk = pcall(df, ta, tb, opts)
+  if not ok or type(hk) ~= 'table' then
+    return
+  end
+  if lm and lm > 0 then
+    local out = {}
+    local sub_opts = vim.tbl_extend('force', opts, { linematch = lm })
+    for _, h in ipairs(hk) do
+      local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
+      local done = false
+      if ca > 0 and cb > 0 and ca + cb <= lm then
+        local xa = table.concat(la, '\n', sa, sa + ca - 1) .. '\n'
+        local xb = table.concat(lb, '\n', sb, sb + cb - 1) .. '\n'
+        if icase then
+          xa, xb = xa:lower(), xb:lower()
+        end
+        local ok2, sub = pcall(df, xa, xb, sub_opts)
+        if ok2 and type(sub) == 'table' and #sub > 0 then
+          for _, x in ipairs(sub) do
+            out[#out + 1] = { sa - 1 + x[1], x[2], sb - 1 + x[3], x[4] }
+          end
+          done = true
+        end
+      end
+      if not done then
+        out[#out + 1] = h
+      end
+    end
+    hk = out
+  end
+  local d = { na = #la, nb = #lb, hunks = {}, blocks = {}, blank = { a = {}, b = {} }, added = { a = {}, b = {} } }
+  local row, pa = 0, 1
+  local want_blank = pal() == 'bc'
+  local nblank = 0
+  for _, h in ipairs(hk) do
+    local sa, ca, sb, cb = h[1], h[2], h[3], h[4]
+    local a0 = ca == 0 and sa + 1 or sa
+    local b0 = cb == 0 and sb + 1 or sb
+    row = row + (a0 - pa)
+    local x = { a0 = a0, a1 = a0 + ca, b0 = b0, b1 = b0 + cb, r0 = row }
+    d.hunks[#d.hunks + 1] = x
+    local last = d.blocks[#d.blocks]
+    if last and last.a1 == a0 and last.b1 == b0 then
+      last.a1, last.b1 = x.a1, x.b1
+    else
+      d.blocks[#d.blocks + 1] = { a0 = a0, a1 = x.a1, b0 = b0, b1 = x.b1 }
+    end
+    -- 짝 없는 줄 (맞은편이 끼인 줄): 그 줄들의 글자를 빨강으로 (bc - cmp.marks)
+    if ca > cb then
+      d.added.a[#d.added.a + 1] = { a0 + cb, x.a1 }
+    elseif cb > ca then
+      d.added.b[#d.added.b + 1] = { b0 + ca, x.b1 }
+    end
+    if want_blank and nblank < 20000 then
+      for k = 0, math.max(ca, cb) - 1 do
+        local xa = k < ca and la[a0 + k] or nil
+        local xb = k < cb and lb[b0 + k] or nil
+        local ea = xa ~= nil and not xa:find('%S')
+        local eb = xb ~= nil and not xb:find('%S')
+        if ea and (xb == nil or eb) then
+          d.blank.a[#d.blank.a + 1] = a0 + k
+          nblank = nblank + 1
+        end
+        if eb and (xa == nil or ea) then
+          d.blank.b[#d.blank.b + 1] = b0 + k
+          nblank = nblank + 1
+        end
+      end
+    end
+    row = row + math.max(ca, cb)
+    pa = x.a1
+  end
+  d.N = row + (#la + 1 - pa)
+  v.dd = d
+end
+
+-- 한쪽 줄 l 의 가지런한 행(0 부터), 맞은편 줄(없으면 nil - 그 행은 맞은편이 끼인 줄), 바뀐 줄인가
+function cmp.locate(d, side, l)
+  local s0, s1, o0, o1 = 'a0', 'a1', 'b0', 'b1'
+  if side == 'b' then
+    s0, s1, o0, o1 = 'b0', 'b1', 'a0', 'a1'
+  end
+  local hs = d.hunks
+  local lo, hi, k = 1, #hs, 0
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    if hs[mid][s0] <= l then
+      k, lo = mid, mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  if k == 0 then
+    return l - 1, l, false
+  end
+  local h = hs[k]
+  if l < h[s1] then
+    local kk = l - h[s0]
+    local other = h[o0] + kk
+    return h.r0 + kk, (other < h[o1]) and other or nil, true
+  end
+  local off = l - h[s1]
+  return h.r0 + math.max(h.a1 - h.a0, h.b1 - h.b0) + off, h[o1] + off, false
+end
+
+-- 가지런한 행 row 의 그쪽 줄 (끼인 줄 자리면 그 아래 첫 줄)
+function cmp.line_at(d, side, row)
+  local s0, s1 = side == 'b' and 'b0' or 'a0', side == 'b' and 'b1' or 'a1'
+  local prow, pl = 0, 1
+  for _, h in ipairs(d.hunks) do
+    if row < h.r0 then
+      return pl + (row - prow)
+    end
+    local rows = math.max(h.a1 - h.a0, h.b1 - h.b0)
+    if row < h.r0 + rows then
+      local kk = row - h.r0
+      return kk < h[s1] - h[s0] and h[s0] + kk or h[s1]
+    end
+    prow, pl = h.r0 + rows, h[s1]
+  end
+  return pl + (row - prow)
+end
+
+-- 커서 줄 l 이 든 블록, 없으면 가장 가까운 것 (같으면 앞의 것)
+function cmp.block_at(d, side, l)
+  local s0, s1 = side == 'b' and 'b0' or 'a0', side == 'b' and 'b1' or 'a1'
+  local bs = d.blocks
+  local lo, hi, k = 1, #bs, 0
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    if bs[mid][s0] <= l then
+      k, lo = mid, mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  local function dist(b)
+    if b[s0] == b[s1] then
+      return math.abs(l - b[s0])
+    end
+    if l < b[s0] then
+      return b[s0] - l
+    end
+    return l >= b[s1] and (l - b[s1] + 1) or 0
+  end
+  local best, bd
+  for _, i in ipairs({ k, k + 1 }) do
+    local b = bs[i]
+    if b and (not bd or dist(b) < bd) then
+      best, bd = b, dist(b)
+    end
+  end
+  return best
+end
+
+-- 노란 화살표 (Beyond Compare 의 지금 차이): 커서가 있는(없으면 가까운) 덩어리의 첫 줄에 A ⇨, B ⇦,
+-- 그 덩어리 끝까지 옅은 괄호선 (│ … └ - 500 줄 넘으면 끝만). 줄이 없는 쪽(빈자리 - 끼인 줄은 sign 을 달
+-- 수 없다)은 빗금 바로 위 줄에 (첫 줄 위면 그 아래 줄에)
+function cmp.arrows(v)
+  v.ab = v.ab or {}
+  for _, side in ipairs({ 'a', 'b' }) do
+    local old = v.ab[side]
+    if old and api.nvim_buf_is_valid(old) then
+      api.nvim_buf_clear_namespace(old, NS.arrow, 0, -1)
+    end
+    v.ab[side] = nil
+  end
+  local d = v.dd
+  if not (d and #d.blocks > 0) then
+    return
+  end
+  local cw = cmp.cur(v)
+  if not api.nvim_win_is_valid(cw) then
+    return
+  end
+  local blk = cmp.block_at(d, cw == v.win_b and 'b' or 'a', api.nvim_win_get_cursor(cw)[1])
+  if not blk then
+    return
+  end
+  local a = ascii()
+  for _, side in ipairs({ 'a', 'b' }) do
+    local b = cmp.pbuf(v, side)
+    -- 줄이 하나도 없는 쪽(한쪽에만 있는 파일의 빈 쪽)에는 달지 않는다: 빗금을 모두 지나 맨 아래의 빈 줄에
+    -- 홀로 섰다 (끼인 줄에는 sign 을 달 수 없다)
+    if b and d['n' .. side] > 0 then
+      local n = api.nvim_buf_line_count(b)
+      local x0, x1 = blk[side .. '0'], blk[side .. '1']
+      local at = x0
+      if x1 == x0 then
+        at = x0 > 1 and x0 - 1 or 1
+      end
+      at = math.max(1, math.min(at, n))
+      local arrow = side == 'a' and (a and '>' or '⇨') or (a and '<' or '⇦')
+      pcall(api.nvim_buf_set_extmark, b, NS.arrow, at - 1, 0,
+        { sign_text = arrow, sign_hl_group = 'VimIdeDirDiffArrow', priority = 200 })
+      if x1 - x0 > 1 then
+        local last = math.min(x1 - 1, n)
+        if x1 - x0 <= 500 then
+          for l = x0 + 1, last - 1 do
+            pcall(api.nvim_buf_set_extmark, b, NS.arrow, l - 1, 0,
+              { sign_text = a and '|' or '│', sign_hl_group = 'VimIdeDirDiffBracket', priority = 200 })
+          end
+        end
+        pcall(api.nvim_buf_set_extmark, b, NS.arrow, last - 1, 0,
+          { sign_text = a and '`' or '└', sign_hl_group = 'VimIdeDirDiffBracket', priority = 200 })
+      end
+      v.ab[side] = b
+    end
+  end
+end
+
+-- 연보라 빈 줄 (bc 만): 바뀐 덩어리 안의 빈 줄 (Beyond Compare 의 '중요하지 않은' 차이). 줄 바탕을 덮는다.
+-- 한쪽에만 있는 줄의 글자 빨강도 여기서 (같은 이름 공간 - 같이 걷는다)
+function cmp.marks(v)
+  v.mb = v.mb or {}
+  for _, side in ipairs({ 'a', 'b' }) do
+    local old = v.mb[side]
+    if old and api.nvim_buf_is_valid(old) then
+      api.nvim_buf_clear_namespace(old, NS.blank, 0, -1)
+    end
+    v.mb[side] = nil
+    local b = cmp.pbuf(v, side)
+    if v.dd and pal() == 'bc' and b then
+      -- line_hl_group 은 diff 의 줄 색(DiffAdd·DiffChange)에 진다 (실측) - 줄 끝까지 가는 범위 색은 이긴다
+      local n = api.nvim_buf_line_count(b)
+      -- 줄 l0 ~ l1-1 (1 부터): 끝은 다음 줄 첫머리. 마지막 줄이면 버퍼 끝 너머(줄 수, 0 - strict = false)로:
+      -- 그 줄 끝까지로 했더니 마지막 줄이 빈 줄이면 폭 0 이라 연보라가 그려지지 않았다
+      local function lines(l0, l1, opt)
+        opt.end_row, opt.end_col = math.min(l1, n + 1) - 1, 0
+        opt.strict = false
+        pcall(api.nvim_buf_set_extmark, b, NS.blank, l0 - 1, 0, opt)
+      end
+      for _, l in ipairs(v.dd.blank[side]) do
+        lines(l, l + 1, { hl_group = 'VimIdeDirDiffBlank', hl_eol = true, priority = 50 })
+      end
+      -- 한쪽에만 있는 줄은 글자를 모두 빨강으로 (Beyond Compare - 구문 색보다 위, 덩어리마다 하나)
+      for _, x in ipairs(v.dd.added[side]) do
+        lines(x[1], x[2], { hl_group = 'VimIdeDirDiffAddText', priority = 150 })
+      end
+      v.mb[side] = b
+    end
+  end
+end
+
+-- 개요 막대 (Beyond Compare 의 맨 왼쪽 막대): 파일 전체(가지런한 행)를 창 높이로 줄여 칸마다 A | B |
+-- 보이는 곳. 칸의 색은 그 행들 중 가장 센 것 - 차이(빨강) > 연보라 빈 줄(파랑) > 빈자리(그쪽에 줄이
+-- 없다 - 회색 빗금). 셋째 칸이 지금 보이는 곳 (회색). 누르면 그 자리로 (cmp.over_click)
+function cmp.over_fill(v)
+  local ov = v.ov
+  if not (ov and api.nvim_win_is_valid(ov.win) and api.nvim_buf_is_valid(ov.buf)) then
+    return
+  end
+  -- 글 줄의 높이 (winheight - 창 머리 한 줄을 뺀 것): nvim_win_get_height 는 창 머리까지 세어 칸이 한 줄
+  -- 많았고, 마지막 칸(파일 끝의 차이, G 의 보이는 곳)은 창 밖이라 보이지 않았다
+  local H = math.max(1, vim.fn.winheight(ov.win))
+  local W = math.max(3, api.nvim_win_get_width(ov.win))
+  local lines = {}
+  for i = 1, H do
+    lines[i] = string.rep(' ', W)
+  end
+  vim.bo[ov.buf].modifiable = true
+  api.nvim_buf_set_lines(ov.buf, 0, -1, false, lines)
+  vim.bo[ov.buf].modifiable = false
+  ov.cells = nil
+  local d = v.dd
+  if d and d.N > 0 then
+    -- 창보다 짧은 파일은 행 하나가 칸 하나 (막대가 글과 같은 줄에 선다 - 늘이면 짧은 파일의 차이가 엉뚱한
+    -- 높이에 찍혔다). 긴 파일은 창 높이로 줄인다
+    local N = math.max(d.N, H)
+    local cells = { a = {}, b = {} }
+    local function mark(t, r0, r1, val)
+      if r1 <= r0 then
+        return
+      end
+      local c1 = math.min(H - 1, math.floor((r1 - 1) * H / N))
+      for c = math.floor(r0 * H / N), c1 do
+        if (t[c] or 0) < val then
+          t[c] = val
+        end
+      end
+    end
+    local blank = { a = {}, b = {} }
+    for _, side in ipairs({ 'a', 'b' }) do
+      for _, l in ipairs(d.blank[side]) do
+        blank[side][l] = true
+      end
+    end
+    for _, h in ipairs(d.hunks) do
+      local rows = math.max(h.a1 - h.a0, h.b1 - h.b0)
+      for _, side in ipairs({ 'a', 'b' }) do
+        local x0, x1 = h[side .. '0'], h[side .. '1']
+        local t, bl = cells[side], blank[side]
+        if x1 - x0 > 2000 or next(bl) == nil then
+          mark(t, h.r0, h.r0 + (x1 - x0), 3)
+        else
+          for k = 0, x1 - x0 - 1 do
+            mark(t, h.r0 + k, h.r0 + k + 1, bl[x0 + k] and 2 or 3)
+          end
+        end
+        mark(t, h.r0 + (x1 - x0), h.r0 + rows, 1)
+      end
+    end
+    ov.cells = cells
+  end
+  cmp.over_paint(v)
+end
+
+-- 지금 보이는 곳의 칸 (c0, c1 - 0 부터)
+function cmp.view_cells(v, H)
+  local d = v.dd
+  local w = cmp.cur(v)
+  if not (d and d.N > 0 and api.nvim_win_is_valid(w)) then
+    return nil
+  end
+  local side = w == v.win_b and 'b' or 'a'
+  local top, bot = vim.fn.line('w0', w), vim.fn.line('w$', w)
+  local r0 = cmp.locate(d, side, top)
+  local r1 = cmp.locate(d, side, bot)
+  local N = math.max(d.N, H)
+  return math.floor(r0 * H / N), math.min(H - 1, math.floor(r1 * H / N))
+end
+
+function cmp.over_paint(v)
+  local ov = v.ov
+  if not (ov and api.nvim_win_is_valid(ov.win) and api.nvim_buf_is_valid(ov.buf)) then
+    return
+  end
+  api.nvim_buf_clear_namespace(ov.buf, NS.over, 0, -1)
+  local H = api.nvim_buf_line_count(ov.buf)
+  local G = { 'VimIdeDirDiffOvFill', 'VimIdeDirDiffOvBlank', 'VimIdeDirDiffOvChange' }
+  local hatch = ascii() and '/' or '╱'
+  local cells = ov.cells
+  local v0, v1 = cmp.view_cells(v, H)
+  for c = 0, H - 1 do
+    for i, side in ipairs({ 'a', 'b' }) do
+      local st = cells and cells[side][c]
+      if st then
+        local opt = { end_col = i, hl_group = G[st] }
+        if st == 1 then
+          opt.virt_text, opt.virt_text_pos = { { hatch, G[1] } }, 'overlay'
+        end
+        pcall(api.nvim_buf_set_extmark, ov.buf, NS.over, c, i - 1, opt)
+      end
+    end
+    if v0 and c >= v0 and c <= v1 then
+      pcall(api.nvim_buf_set_extmark, ov.buf, NS.over, c, 2, { end_col = 3, hl_group = 'VimIdeDirDiffOvView' })
+    end
+  end
+end
+
+-- 개요 막대를 눌렀다: 그 칸의 행으로 (지금 비교 창에서, 가운데로). cell: 누른 칸 (1 부터 - getmousepos() 의
+-- line, 막대 버퍼의 줄. winrow 는 창 머리까지 세어 한 칸 아래로 갔다)
+function cmp.over_click(v, cell)
+  local d = v.dd
+  local w = cmp.cur(v)
+  if not api.nvim_win_is_valid(w) then
+    return
+  end
+  api.nvim_set_current_win(w)
+  if not (d and d.N > 0 and v.ov and api.nvim_win_is_valid(v.ov.win)) then
+    return
+  end
+  local H = math.max(1, api.nvim_buf_line_count(v.ov.buf))
+  cell = math.max(1, math.min(cell, H))
+  local row = math.max(0, math.min(d.N - 1, math.floor((cell - 0.5) * math.max(d.N, H) / H)))
+  local l = cmp.line_at(d, w == v.win_b and 'b' or 'a', row)
+  l = math.max(1, math.min(l, api.nvim_buf_line_count(api.nvim_win_get_buf(w))))
+  pcall(api.nvim_win_set_cursor, w, { l, 0 })
+  pcall(vim.cmd, 'normal! zz')
+  cmp.kick(v)
+end
+
+-- 줄 하나를 빈칸이 보이게 (빈칸 ·, 탭 → 와 다음 탭 자리까지, 줄 끝 ¶ - ASCII 는 . > $). 돌려주는 것:
+-- 글, 원래 바이트(1 부터) -> 새 바이트(0 부터), 표시들의 [시작, 끝) 바이트
+function cmp.show_ws(text, ts)
+  local a = ascii()
+  local SP, TAB, EOL = a and '.' or '·', a and '>' or '→', a and '$' or '¶'
+  if #text > 1000 then
+    text = vim.fn.strcharpart(text:sub(1, 1000), 0, vim.fn.strchars(text:sub(1, 1000)) - 1)
+  end
+  local out, map, ws = {}, {}, {}
+  local ob, col, i, n = 0, 0, 1, #text
+  while i <= n do
+    local c = text:byte(i)
+    local clen = c < 0x80 and 1 or c < 0xE0 and 2 or c < 0xF0 and 3 or 4
+    local ch = text:sub(i, i + clen - 1)
+    map[i] = ob
+    local piece
+    if ch == ' ' then
+      piece = SP
+      ws[#ws + 1] = { ob, ob + #piece }
+      col = col + 1
+    elseif ch == '\t' then
+      local w = ts - (col % ts)
+      piece = TAB .. string.rep(a and '-' or ' ', w - 1)
+      ws[#ws + 1] = { ob, ob + #piece }
+      col = col + w
+    else
+      piece = ch
+      col = col + (clen == 1 and 1 or vim.fn.strdisplaywidth(ch))
+    end
+    out[#out + 1] = piece
+    ob = ob + #piece
+    i = i + clen
+  end
+  map[n + 1] = ob
+  ws[#ws + 1] = { ob, ob + #EOL }
+  out[#out + 1] = EOL
+  return table.concat(out), map, ws
+end
+
+-- 줄 자세히 (Beyond Compare 의 맨 아래 두 줄): ⇨ A 의 줄, ⇦ B 의 줄 - 커서 줄과 맞은편 줄 (맞은편이 끼인
+-- 줄이면 비운다). 빈칸이 보이게, 비교 창과 같은 색 (바뀐 줄은 분홍 바탕에 다른 글자 빨강 - vim 의
+-- diff_hlID 로, 한쪽에만 있는 줄은 빨강). 커서가 창 밖으로 나가면 가로로 따라간다. 상태줄에 두 줄의 번호
+function cmp.details(v)
+  local ld = v.ld
+  if not (ld and api.nvim_win_is_valid(ld.win) and api.nvim_buf_is_valid(ld.buf)) then
+    return
+  end
+  local d = v.dd
+  local cw = cmp.cur(v)
+  local cur = {}
+  local on_side = cw == v.win_b and 'b' or 'a'
+  if not v.bin and v.rel and api.nvim_win_is_valid(cw) then
+    local l = api.nvim_win_get_cursor(cw)[1]
+    cur[on_side] = l
+    local other = on_side == 'a' and 'b' or 'a'
+    if d then
+      local _, o = cmp.locate(d, on_side, l)
+      cur[other] = o
+      if (on_side == 'a' and d.na == 0) or (on_side == 'b' and d.nb == 0) then
+        cur[on_side] = nil
+      end
+    elseif api.nvim_win_is_valid(v['win_' .. other]) then
+      cur[other] = api.nvim_win_get_cursor(v['win_' .. other])[1]
+    end
+  end
+  local lines, marks = {}, {}
+  -- 다른 글자: DiffText, 그리고 0.12 의 diffopt inline:char 가 줄 안에 더한 글자에 쓰는 DiffTextAdd (그 무리가
+  -- 있으면 - 비교 창에서는 그것이 DiffText 에 이어져 빨강인데 줄 자세히는 DiffText 만 보아 검게 남았다)
+  local text_id = vim.fn.hlID('DiffText')
+  local add_id = vim.fn.hlexists('DiffTextAdd') == 1 and vim.fn.hlID('DiffTextAdd') or -1
+  local pcol
+  for i, side in ipairs({ 'a', 'b' }) do
+    local pre = side == 'a' and (ascii() and '>' or '⇨') or (ascii() and '<' or '⇦')
+    local l = cur[side]
+    local w = v['win_' .. side]
+    local line = ''
+    local mk = { { 'VimIdeDirDiffArrow', 0, #pre, 130 } }
+    -- 짝이 아닌 버퍼를 띄운 쪽은 비운다 (cmp.pbuf)
+    local b = cmp.pbuf(v, side)
+    if l and b then
+      local src = api.nvim_buf_get_lines(b, l - 1, l, false)[1] or ''
+      local body, map, ws = cmp.show_ws(src, vim.bo[b].tabstop)
+      line = body
+      local o = #pre
+      local S = side:upper()
+      local other, inh
+      if d then
+        other, inh = select(2, cmp.locate(d, side, l))
+      end
+      if inh then
+        if other then
+          mk[#mk + 1] = { 'VimIdeDirDiffChange' .. S, o, o + #body, 100 }
+          -- 다른 글자: vim 의 diff 가 그 창에서 DiffText 로 그리는 바이트 (앞 400 바이트까지)
+          local runs = api.nvim_win_call(w, function()
+            local r, st = {}, nil
+            for c = 1, math.min(#src, 400) do
+              local id = vim.fn.diff_hlID(l, c)
+              local hit = id == text_id or id == add_id
+              if hit and not st then
+                st = c
+              elseif not hit and st then
+                r[#r + 1] = { st, c }
+                st = nil
+              end
+            end
+            if st then
+              r[#r + 1] = { st, math.min(#src, 400) + 1 }
+            end
+            return r
+          end)
+          for _, x in ipairs(runs) do
+            if map[x[1]] and map[x[2]] then
+              mk[#mk + 1] = { 'VimIdeDirDiffText' .. S, o + map[x[1]], o + map[x[2]], 110 }
+            end
+          end
+        else
+          mk[#mk + 1] = { 'VimIdeDirDiffAdd' .. S, o, o + #body, 100 }
+        end
+      end
+      for _, x in ipairs(ws) do
+        mk[#mk + 1] = { 'VimIdeDirDiffWs', o + x[1], o + x[2], 120 }
+      end
+      if side == on_side then
+        local cc = api.nvim_win_get_cursor(cw)[2] + 1
+        local ob = map[cc] or map[#src + 1] or 0
+        pcol = vim.fn.strdisplaywidth(pre .. body:sub(1, ob))
+      end
+    end
+    lines[i] = pre .. line
+    marks[i] = mk
+  end
+  vim.bo[ld.buf].modifiable = true
+  api.nvim_buf_set_lines(ld.buf, 0, -1, false, lines)
+  vim.bo[ld.buf].modifiable = false
+  api.nvim_buf_clear_namespace(ld.buf, NS.line, 0, -1)
+  for i, mk in ipairs(marks) do
+    for _, m in ipairs(mk) do
+      pcall(api.nvim_buf_set_extmark, ld.buf, NS.line, i - 1, m[2], { end_col = m[3], hl_group = m[1], priority = m[4] })
+    end
+  end
+  local width = api.nvim_win_get_width(ld.win)
+  local left = (pcol and pcol > width - 4) and math.max(0, pcol - math.floor(width / 2)) or 0
+  pcall(api.nvim_win_call, ld.win, function()
+    vim.fn.winrestview({ leftcol = left, topline = 1 })
+  end)
+  set_wo(ld.win, 'statusline', ('%%#VimIdeDirDiffPending# 줄 자세히   A %s   B %s'):format(
+    cur.a and tostring(cur.a) or '-', cur.b and tostring(cur.b) or '-'))
+end
+
+-- 창 머리의 정보 (cmp: 비교 탭의 일부라 여기에): { 수정 일시, 크기, 인코딩·줄 끝 } - 좁으면 뒤에서부터 뺀다
+-- (set_heads). 알림 창(바이너리·큰 파일)은 일시·크기만, 파일이 아닌 쪽(없음, 디렉터리)은 없다
+function cmp.info(v, side)
+  local st = v.info and v.info[side]
+  if not (st and st.type == 'file') then
+    return {}
+  end
+  local f = tr.datefmt()
+  local parts = { tr.strf(f.src, st.mtime.sec), commas(st.size) .. ' 바이트' }
+  local w = v['win_' .. side]
+  if not v.bin and api.nvim_win_is_valid(w) then
+    local b = api.nvim_win_get_buf(w)
+    if vim.bo[b].buftype == '' then
+      local fenc = vim.bo[b].fileencoding
+      parts[#parts + 1] = (fenc ~= '' and fenc or vim.o.encoding) .. '  ' .. vim.bo[b].fileformat
+    end
+  end
+  return parts
+end
+
+-- 다시 그리기를 모은다: all 이면 차이를 다시 세고 개요 막대·연보라까지, 아니면 화살표·줄 자세히·보이는
+-- 곳만. 마지막 부름에서 잠깐 뒤에 한 번 (글을 치는 동안 큰 파일을 줄곧 다시 세지 않게 all 은 120ms 쉰 뒤)
+function cmp.kick(v, all)
+  if not v or v.closed then
+    return
+  end
+  local cx = v.cx or {}
+  v.cx = cx
+  if all then
+    cx.all = true
+  end
+  if not cx.timer then
+    cx.timer = uv.new_timer()
+  end
+  cx.timer:stop()
+  cx.timer:start(cx.all and 120 or 20, 0, vim.schedule_wrap(function()
+    if v.closed then
+      return
+    end
+    local ok, err = pcall(cmp.update, v)
+    if not ok and on(vim.g.vimide_dirdiff_debug, 0) then
+      say('곁 창: ' .. tostring(err), vim.log.levels.WARN)
+    end
+  end))
+end
+
+function cmp.update(v)
+  if v.cx.all then
+    v.cx.all = false
+    cmp.scope()
+    cmp.compute(v)
+    cmp.marks(v)
+    cmp.over_fill(v)
+  else
+    cmp.over_paint(v)
+  end
+  cmp.arrows(v)
+  cmp.details(v)
+end
+
+-- 마우스로 들어왔는가: 마지막으로 받은 키가 마우스 키였나 (vim.on_key - 키를 받을 때마다, 그 키로 창을
+-- 옮기기 앞에 불린다). getmousepos() 만 보았더니 그것은 마지막 마우스 자리라, 한 번 누른 뒤에는(또는 한 번도
+-- 안 눌러 (1,1) - 개요 막대가 왼쪽 위다) 키보드로 들어와도(<C-w>h <C-w>t) 누른 것으로 알고 옛 자리로 뛰었다
+cmp.MOUSE = {}
+for _, k in ipairs({ '<LeftMouse>', '<LeftRelease>', '<LeftDrag>', '<RightMouse>', '<MiddleMouse>' }) do
+  cmp.MOUSE[#cmp.MOUSE + 1] = api.nvim_replace_termcodes(k, true, true, true)
+end
+cmp.mouse = false
+-- key 는 매핑을 푼 뒤, typed 는 친 그대로 (overview.lua 처럼 마우스 키를 매핑으로 감싼 것이 있어 둘 다 본다)
+vim.on_key(function(key, typed)
+  local k = (key or '') .. (typed or '')
+  if k == '' then
+    return
+  end
+  local m = false
+  if k:find('\128', 1, true) then
+    for _, x in ipairs(cmp.MOUSE) do
+      if k:find(x, 1, true) then
+        m = true
+        break
+      end
+    end
+  end
+  cmp.mouse = m
+end, api.nvim_create_namespace('vimide_dirdiffview_key'))
+
+-- 곁 창에 들어왔다 (WinEnter 뒤, click: 마우스로 들어왔다 - WinEnter 때의 cmp.mouse): 경로 줄이면 트리로
+-- (누른 쪽으로 A/B. pair_tab = 0 에서 트리에서 <C-w>k 로 왔으면 그 위의 편집 창으로 지나간다 - 트리로
+-- 돌려보냈더니 편집 창에 갈 수 없었다), 개요 막대를 눌렀으면 그 자리로, 키보드로 개요 막대에 왔으면 A 로
+-- (<C-w>h <C-w>t 1<C-w>w - 왼쪽·첫 창으로 가려던 것), 그 밖에는 마지막 비교 창으로. 돌아간 비교 창의
+-- '앞 창'(<C-w>p)은 다른 비교 창으로 둔다 - 곁 창이 앞 창으로 남아 <C-w>p 가 그리 갔다가 돌아오기만 했다
+function cmp.bounce(w, click)
+  if api.nvim_get_current_win() ~= w or not api.nvim_win_is_valid(w) then
+    return
+  end
+  local mp = vim.fn.getmousepos()
+  click = click and mp.winid == w
+  local from = vim.fn.win_getid(vim.fn.winnr('#'))
+  for _, s in pairs(sessions) do
+    if s.hwin == w then
+      if api.nvim_win_is_valid(s.win_l) then
+        if not click and from == s.win_l then
+          local up = vim.fn.win_getid(vim.fn.winnr('k'))
+          if up ~= 0 and up ~= w then
+            api.nvim_set_current_win(up)
+            return
+          end
+        end
+        if click then
+          s.side = mp.wincol > layout(s).half + 2 and 'b' or 'a'
+        end
+        api.nvim_set_current_win(s.win_l)
+        goto_row(s, api.nvim_win_get_cursor(s.win_l)[1])
+        mark_side(s)
+        s.prog_dirty = true
+        schedule_render(s)
+      else
+        pcall(vim.cmd, 'wincmd p')
+      end
+      return
+    end
+  end
+  for _, v in ipairs(all_views()) do
+    local is_ov = v.ov and v.ov.win == w
+    if is_ov or (v.ld and v.ld.win == w) then
+      local back = cmp.cur(v)
+      if is_ov and not click and api.nvim_win_is_valid(v.win_a) then
+        back = v.win_a
+      end
+      if api.nvim_win_is_valid(back) then
+        local alt = back == v.win_a and v.win_b or v.win_a
+        if api.nvim_win_is_valid(alt) then
+          pcall(vim.cmd, 'noautocmd call win_gotoid(' .. alt .. ')')
+        end
+        api.nvim_set_current_win(back)
+      end
+      if click and is_ov then
+        cmp.over_click(v, mp.line)
+      end
+      return
+    end
+  end
+  pcall(vim.cmd, 'wincmd p')
+end
+
+-- 트리 창이 닫혔는데 경로 줄 창이 남았다: 닫는다 (그 탭에 그것뿐이면 탭이 닫혀 TabClosed 가 끝낸다).
+-- 마지막 탭의 마지막 창이라 닫을 수 없으면 끝낸다 (finish 가 빈 버퍼 하나로 남긴다)
+function tr.head_orphan(s)
+  local hw = s.hwin
+  if not (hw and api.nvim_win_is_valid(hw)) or api.nvim_win_is_valid(s.win_l) then
+    return
+  end
+  if #api.nvim_tabpage_list_wins(api.nvim_win_get_tabpage(hw)) > 1 or #api.nvim_list_tabpages() > 1 then
+    pcall(api.nvim_win_close, hw, true)
+  elseif not s.done then
+    finish(s)
+  end
 end
 
 -- 편집 창에서 <C-n>/<C-p> (.vimrc 의 ListStep 이 먼저 묻는다): ]c / [c
@@ -3731,11 +5518,21 @@ api.nvim_create_autocmd('TabClosed', {
     end
   end,
 })
--- 'diffopt' 의 context 를 들어온 탭의 보기로 (비교 탭이 아니면 사용자 것으로 되돌린다 - dip_sync)
+-- 'diffopt' 의 context 를 들어온 탭의 보기로 (비교 탭이 아니면 사용자 것으로 되돌린다 - dip_sync).
+-- 비교 탭이면 곁(화살표·연보라·빨강·개요 막대)을 다시 센다: 이것들은 버퍼에 단 것이라 같은 파일을 보이는
+-- 다른 비교 탭(겹친 Tab/Tab, 뿌리를 같이 쓰는 비교 둘)이 제 짝으로 덮어 놓았을 수 있다. 터미널 크기가
+-- 바뀐 뒤 처음이면 두 창을 반반으로 (cmp.rebalance)
 api.nvim_create_autocmd('TabEnter', {
   group = group,
   callback = function()
     dip_sync()
+    local v = view_of_tab(api.nvim_get_current_tabpage())
+    if v then
+      if v.rebal then
+        cmp.rebalance(v)
+      end
+      cmp.kick(v, true)
+    end
   end,
 })
 -- :tabclose (또는 <C-w>c) 로 편집 창이 닫힐 때도 남는 버퍼(고친 것, 사용자 것)에 머리와 diff 접기가 적혀
@@ -3746,7 +5543,8 @@ api.nvim_create_autocmd('WinClosed', {
   group = group,
   callback = function(ev)
     local w = tonumber(ev.match)
-    if w and view_of_win(w) and api.nvim_win_is_valid(w) then
+    local v = w and view_of_win(w)
+    if v and api.nvim_win_is_valid(w) then
       pcall(api.nvim_win_call, w, function()
         vim.cmd('diffoff')
         undiff_folds()
@@ -3754,6 +5552,21 @@ api.nvim_create_autocmd('WinClosed', {
       end)
       set_wo(w, 'winbar', '')
       diff_whl(w, nil)
+      -- 비교 창 둘이 다 닫히면 곁 창(개요 막대·줄 자세히)도 - 그것만 남은 탭이 닫혀야 예전처럼
+      -- TabClosed 가 짝을 놓고 트리로 돌아간다
+      if not v.inline then
+        vim.schedule(function()
+          cmp.orphans(v)
+        end)
+      end
+    end
+    -- 트리 창이 닫히면 그 위의 경로 줄 창도 (경로 줄만 남은 탭이 되지 않게)
+    for _, s in pairs(sessions) do
+      if w and w == s.win_l and s.hwin and api.nvim_win_is_valid(s.hwin) then
+        vim.schedule(function()
+          tr.head_orphan(s)
+        end)
+      end
     end
   end,
 })
@@ -3769,6 +5582,11 @@ api.nvim_create_autocmd('WinClosed', {
 -- 것이라 걷는다 (그 창에 같은 파일이 떠도 보통 색으로)
 local function strip_inherited()
   if next(sessions) == nil then
+    return
+  end
+  -- 트리와 곁 창(경로 줄·개요 막대·줄 자세히)은 제 winhighlight(지금 줄의 연두 등)를 단 우리 창이다
+  local ft = vim.bo.filetype
+  if ft == 'vimidedirdiff' or cmp.FT[ft] then
     return
   end
   local w = api.nvim_get_current_win()
@@ -3796,6 +5614,14 @@ local function strip_inherited()
     pcall(vim.cmd, 'setlocal winhighlight<')
     if vim.wo[w].winhighlight:find('VimIdeDirDiff', 1, true) then
       set_wo(w, 'winhighlight', '')
+    end
+  end
+  if from or hl then
+    -- 비교 창에만 단 화살표 자리(signcolumn)와 빗금(fillchars)도 물려받았다 (diff_whl). 없는 쪽 창에서
+    -- 갈랐으면 꺼 둔 줄 번호·지금 줄 색·colorcolumn 도 (cmp.gone_side)
+    pcall(vim.cmd, 'setlocal signcolumn< fillchars<')
+    if vim.wo[w].number ~= vim.go.number or vim.wo[w].cursorline ~= vim.go.cursorline then
+      pcall(vim.cmd, 'setlocal number< relativenumber< cursorline< colorcolumn<')
     end
   end
   if (from or hl) and vim.wo[w].diff then
@@ -3837,11 +5663,15 @@ api.nvim_create_autocmd('BufWinEnter', {
     local side = w == v.win_a and 'a' or 'b'
     if ev.buf == v['buf_' .. side] then
       diff_whl(w, not v.bin and side or nil)
+      cmp.gone_side(v)
       set_heads(v)
     else
       diff_whl(w, nil)
       set_wo(w, 'winbar', '')
+      cmp.ungone(w)
     end
+    -- 화살표·연보라·개요 막대·줄 자세히도 (짝이 아닌 쪽은 비운다 - cmp.pbuf)
+    cmp.kick(v, true)
   end,
 })
 -- 비교 중인 두 디렉터리 안의 파일을 :w 로 저장하면 그 항목만 다시 본다 (트리 복사처럼).
@@ -3868,11 +5698,146 @@ api.nvim_create_autocmd('BufWritePost', {
 api.nvim_create_autocmd('WinResized', {
   group = group,
   callback = function()
+    local wins = vim.v.event.windows or {}
     for _, s in pairs(sessions) do
-      if api.nvim_win_is_valid(s.win_l) and vim.tbl_contains(vim.v.event.windows or {}, s.win_l) then
+      if api.nvim_win_is_valid(s.win_l) and vim.tbl_contains(wins, s.win_l) then
         render(s)
       end
     end
+    -- 개요 막대의 높이가 바뀌면 칸을 다시 나눈다. 비교 창의 너비가 바뀌면 창 머리에 넣을 정보도. 곁 창의
+    -- 크기가 바뀌었으면 되돌린다 (cmp.keep_size)
+    for _, v in ipairs(all_views()) do
+      if (v.ov and vim.tbl_contains(wins, v.ov.win)) or (v.ld and vim.tbl_contains(wins, v.ld.win)) then
+        cmp.keep_size(v)
+      end
+      if v.ov and vim.tbl_contains(wins, v.ov.win) then
+        cmp.kick(v, true)
+      end
+      if vim.tbl_contains(wins, v.win_a) or vim.tbl_contains(wins, v.win_b) then
+        set_heads(v)
+      end
+    end
+  end,
+})
+-- 터미널 크기가 바뀌면 비교 탭의 두 창을 다시 같은 너비로 (nvim 은 늘어난 칸을 오른쪽 창에 모두 준다 -
+-- Beyond Compare 처럼 반반. 그 사이 손으로 바꾼 너비도 반반으로 돌아간다). 다른 탭의 것은 그 탭에 들어갈
+-- 때 (v.rebal - 아래 TabEnter): 다른 탭의 창 너비를 지금 바꾸면 그 탭에 들어갈 때 nvim 이 늘어난 칸을 다시
+-- 오른쪽 창에 주어 A=77, B=118 이 되었다
+function cmp.rebalance(v)
+  v.rebal = nil
+  if not v.inline and api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
+    local tw = api.nvim_win_get_width(v.win_a) + api.nvim_win_get_width(v.win_b)
+    pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
+  end
+end
+api.nvim_create_autocmd('VimResized', {
+  group = group,
+  callback = function()
+    local here = api.nvim_get_current_tabpage()
+    for _, v in ipairs(all_views()) do
+      if v.tab == here then
+        cmp.rebalance(v)
+      elseif not v.inline then
+        v.rebal = true
+      end
+    end
+  end,
+})
+-- 비교 탭의 곁 (cmp): 커서·화면이 움직이면 화살표·줄 자세히·개요 막대의 보이는 곳을, 글이 바뀌거나
+-- diff 가 다시 계산되면 차이를 다시 센다. 모두 모아서 (cmp.kick)
+api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+  group = group,
+  callback = function()
+    if next(sessions) == nil then
+      return
+    end
+    local w = api.nvim_get_current_win()
+    local v = view_of_win(w)
+    if v then
+      v.cur_win = w
+      cmp.kick(v)
+    end
+  end,
+})
+api.nvim_create_autocmd('WinScrolled', {
+  group = group,
+  callback = function()
+    if next(sessions) == nil then
+      return
+    end
+    local v = view_of_tab(api.nvim_get_current_tabpage())
+    if v then
+      cmp.kick(v)
+    end
+  end,
+})
+api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'DiffUpdated' }, {
+  group = group,
+  callback = function(ev)
+    if next(sessions) == nil then
+      return
+    end
+    local v = view_of_tab(api.nvim_get_current_tabpage())
+    -- 글이 바뀐 것은 짝의 버퍼일 때만: 그 탭의 다른 버퍼(pair_tab = 0 에서 훑는 동안 다시 그리는 트리 등)가
+    -- 바뀔 때마다 두 버퍼를 다시 견주었다
+    if v and (ev.event == 'DiffUpdated' or ev.buf == cmp.pbuf(v, 'a') or ev.buf == cmp.pbuf(v, 'b')) then
+      cmp.kick(v, true)
+    end
+  end,
+})
+-- 곁 창(경로 줄·개요 막대·줄 자세히)에 들어오면 돌려보낸다. 비교 창에 들어오면 그 창이 '지금 쪽' (줄 자세히)
+api.nvim_create_autocmd('WinEnter', {
+  group = group,
+  callback = function()
+    if next(sessions) == nil then
+      return
+    end
+    local w = api.nvim_get_current_win()
+    if cmp.FT[vim.bo[api.nvim_win_get_buf(w)].filetype] then
+      local click = cmp.mouse
+      vim.schedule(function()
+        cmp.bounce(w, click)
+      end)
+      return
+    end
+    local v = view_of_win(w)
+    if v then
+      v.cur_win = w
+      cmp.kick(v)
+    end
+  end,
+})
+-- :w 하면 창 머리의 수정 일시·크기를 다시 (디스크의 것)
+api.nvim_create_autocmd('BufWritePost', {
+  group = group,
+  callback = function(ev)
+    for _, v in ipairs(all_views()) do
+      local hit = false
+      for _, side in ipairs({ 'a', 'b' }) do
+        local w = v['win_' .. side]
+        local p = v.path and v.path[side]
+        if p and api.nvim_win_is_valid(w) and api.nvim_win_get_buf(w) == ev.buf then
+          v.info = v.info or {}
+          v.info[side] = uv.fs_stat(p)
+          hit = true
+        end
+      end
+      if hit then
+        set_heads(v)
+      end
+    end
+  end,
+})
+-- 'laststatus' 가 바뀌면 칸 제목의 자리(경로 줄 창의 상태줄 / 트리의 winbar)도 바뀐다
+api.nvim_create_autocmd('OptionSet', {
+  group = group,
+  pattern = 'laststatus',
+  callback = function()
+    vim.schedule(function()
+      for _, s in pairs(sessions) do
+        render(s)
+      end
+    end)
   end,
 })
 -- 끝낼 때 비교 탭을 모두 닫는다. 이 VimLeavePre 가 vimidesession 의 것보다 먼저 돈다

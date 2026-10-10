@@ -13,6 +13,7 @@
 --   g:overview          0 이면 아무 것도 하지 않는다 (기본 1)
 --   g:overview_width    막대 너비, 칸 수 (기본 2)
 --   g:overview_min      이 줄 수 아래인 파일에는 띄우지 않는다 (기본 40)
+--   w:overview_off      이 창에는 띄우지 않는다 (DirDiff 비교 창 - 제 개요 막대가 있다)
 --
 -- 색은 지금 쓰는 colorscheme 에서 가져온다(CursorLine / Visual / Cursor /
 -- Diff* / Diagnostic*), 그래서 si / light / dark 어디서나 어울린다.
@@ -126,6 +127,10 @@ local function is_edit_win(win)
   local c = api.nvim_win_get_config(win)
   if c and c.relative and c.relative ~= '' then
     return false -- 부동 창
+  end
+  -- 제 개요 막대를 가진 창 (DirDiff 비교 탭의 두 창 - dirdiffview.lua 가 단다): 막대가 둘이 된다
+  if vim.w[win].overview_off then
+    return false
   end
   local buf = api.nvim_win_get_buf(win)
   if vim.bo[buf].buftype ~= '' then

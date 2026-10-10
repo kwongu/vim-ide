@@ -1974,7 +1974,14 @@ let g:vimide_dirdiff_tab = 1
 " 그다음 맨 위 폴더 순서대로), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음',
 " 나머지만 내용을 읽는다. 제외는 위의 g:DirDiffExcludes 를 같이 쓴다.
 " 한쪽에만 있는 파일은 없는 쪽을 빈 버퍼로 두고 diff (A만: 왼쪽에 파일, B만: 오른쪽에).
-" 색은 Neogit 상태 화면의 것 (다름 파랑, A만 빨강, B만 초록, 비교 창의 A 줄 빨강 / B 줄 초록).
+" 꼴과 색은 Beyond Compare 를 따른다 (g:vimide_dirdiff_colors = 'bc'):
+"   트리  반쪽마다 이름(안내선·폴더 아이콘) | 크기 | 수정일(오전/오후), 맨 위에 A·B 경로 줄과 칸 제목.
+"         같은 파일 보통 글자 =, 다른 파일은 늦은 쪽 빨강·이른 쪽 회색 ≠, 고아 파일(한쪽에만) 파랑,
+"         폴더(한쪽에만 있는 것도)는 보통 글자에 아이콘이 그 아래(늦은 차이 빨강 / 이른 차이 회색), 지금 줄 연두
+"   비교 탭  바뀐 줄 분홍 바탕·다른 글자 빨강, 빈자리 회색 빗금, 지금 차이에 노란 화살표,
+"         맨 왼쪽 개요 막대(누르면 그리로), 맨 아래 줄 자세히(빈칸 · 탭 → 줄 끝 ¶), 창 머리에
+"         경로·수정 일시·크기·인코딩. 덩어리 안의 빈 줄은 연보라. 개요 막대·줄 자세히에는 들어가지
+"         않는다 (비교 창의 <C-w>w/<C-w>W 는 그 둘을 건너뛰고 A·B 를 오간다)
 "   트리: <CR> 비교 탭 열고 그 탭으로(열려 있으면 그 탭으로, 디렉터리는 펼치기), o 비교 탭을
 "         뒤에서 열기(열려 있으면 다시 읽기, 트리에 그대로), <C-n>/<C-p> 다음/앞
 "         차이 파일(모두·차이 밖의 보기는 그 보기의 것), l/h 펼치기/접기, O/X 모두 펼치기/접기,
@@ -2005,14 +2012,22 @@ let g:vimide_dirdiff_filter = ''
 let g:vimide_dirdiff_trust_mtime = 1
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
-" DirDiff 색: 'neogit' = Neogit 상태 화면의 색 (Neogit 이 없으면 예전 색), 'classic' = 예전 색
-let g:vimide_dirdiff_colors = 'neogit'
+" DirDiff 색: 'bc' = Beyond Compare 의 색 (background 가 dark 면 어두운 짝),
+" 'neogit' = Neogit 상태 화면의 색 (Neogit 이 없으면 예전 색), 'classic' = 예전 색
+let g:vimide_dirdiff_colors = 'bc'
 " 파일 짝을 볼 곳: 1 = 짝마다 비교 탭, 0 = 트리 위의 편집 창 둘 (예전)
 let g:vimide_dirdiff_pair_tab = 1
 " 비교 창의 처음 보기: 'all' 모두 보이기, 'diff' 차이 보이기, 'context' 문맥 보이기 (\d 로 바꾼다)
 let g:vimide_dirdiff_file_view = 'all'
 " 문맥 보이기에서 바뀐 줄 위아래로 보일 줄 수
 let g:vimide_dirdiff_context = 3
+" 트리의 수정일 꼴: strftime 꼴에 %p = 오전/오후, %l = 12시간제 시(앞 0 없이). 좁으면 시각(%p %H %M ...
+" 부터 끝)을 먼저, 그다음 날짜를 뺀다. 예: '%Y-%m-%d %H:%M' (24시간제, 초 없이)
+let g:vimide_dirdiff_date_format = '%Y-%m-%d %p %l:%M:%S'
+" 비교 탭 맨 왼쪽의 개요 막대 (파일 전체를 줄여 차이를 빨강으로, 누르면 그리로): 1 켬, 0 끔
+let g:vimide_dirdiff_overview = 1
+" 비교 탭 맨 아래의 줄 자세히 (커서 줄과 맞은편 줄을 빈칸이 보이게 두 줄로): 1 켬, 0 끔
+let g:vimide_dirdiff_line_details = 1
 
 " Ease my eyes
 "colorscheme solarized

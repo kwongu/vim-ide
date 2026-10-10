@@ -2398,48 +2398,87 @@ pick `[A]` in neo-tree and `[B]` in a comparison tree, or the other way round.
 
 ### The side-by-side tree (nvim)
 
-In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare: one window
-holds A's tree, a verdict column, and B's tree next to each other, and each
-file pair you pick opens in a *compare tab* of its own (A on the left, B on
-the right, in diff mode; see *Compare tabs* below).
+In nvim, `:DirDiff` opens a new tab laid out like Beyond Compare's folder
+compare: one window holds A's tree, a verdict column, and B's tree next to
+each other, and each file pair you pick opens in a *compare tab* of its own (A
+on the left, B on the right, in diff mode; see *Compare tabs* below).
 `let g:vimide_dirdiff_pair_tab = 0` keeps the earlier layout instead: two edit
 windows on top of the tree, showing one pair at a time.
 
 ```
-▾ sub                 2026-09-29 ≠ ▾ sub                 2026-09-29
-    d1.c            2 2020-01-01 ≠     d1.c            2 2026-09-29
-  hunks.c         111 2020-01-01 ≠   hunks.c         118 2026-09-29
-  onlyA.c           2 2026-09-29 ◀
-  onlyB.c                        ▶   onlyB.c           2 2026-09-29
-  same.c            5 2026-09-29 =   same.c            5 2026-09-29
+ A  ~/work/a                                        B  ~/work/b
+ 이름              크기 수정일                      이름              크기 수정일
+ sub                   2026-10-10 오후 11:09:40    sub                   2026-09-20 오전 2:15:49
+├─▪ d1.c              2 2026-10-10 오후 11:09:40 ≠ ├─▪ d1.c              2 2026-09-20 오전 2:15:49
+├─▪ hunks.c         111 2026-10-10 오후 11:09:40 ≠ ├─▪ hunks.c         118 2026-09-20 오전 2:15:49
+├─▪ onlyA.c           2 2026-10-10 오후 11:09:40   │
+│                                                  ├─▪ onlyB.c           2 2026-09-20 오전 2:15:49
+└─▪ same.c            5 2026-10-10 오후 11:09:40 = └─▪ same.c            5 2026-10-10 오후 11:09:40
 ```
 
-`=` same, `≠` different, `◀` only in A, `▶` only in B, `·` not checked
-yet (`= x < > .` with `g:vimide_ascii_icons`). A folder is `≠` as soon as
-anything inside it differs, and `=` only once everything below it has been
-checked. The status line shows the progress and the totals.
+Each half has three columns: the name (tree guide lines, an open or closed
+folder icon - a Nerd Font glyph, `v` / `>` with `g:vimide_ascii_icons` - or a
+small square before a file name, `-` in ASCII), the size (right-aligned, with
+thousands separators; a folder's size is left empty, as the helper does not
+add up what is below it) and the modification time as `2026-10-10 오후
+11:09:40` (`g:vimide_dirdiff_date_format`, below). When a half gets too
+narrow, the time goes first, then the date, then the size. The guide lines
+are drawn per side, as Beyond Compare does: a half only branches to the
+entries that exist on that side, and the line runs on through the rows that
+are empty there. Above the tree, a one-line window shows A's root over the
+left half and B's over the right one (the current side's path is green), and
+the column titles `이름 크기 수정일` sit right under it, aligned with the
+columns of each half (in that window's status line, or in the tree's window
+bar with `'laststatus'` 0 or 3); neither scrolls away, and both follow the
+window width. The path line cannot be entered - the cursor goes back to the
+tree, and a click on a half switches to that side (with
+`g:vimide_dirdiff_pair_tab = 0`, `<C-w>k` from the tree passes it and goes on
+to the edit windows above).
 
-The colors are Neogit's status screen colors (`g:vimide_dirdiff_colors =
-'neogit'`, the default), which read better than DirDiff's own: a difference is
-`NeogitChangeModified` (blue, bold italic), only in A is `NeogitChangeDeleted`
-(red), only in B is `NeogitChangeNewFile` (green), entries not checked yet and
-the sizes and dates of identical entries are `NeogitSubtleText`, and the tree's
-header, the `DirDiff` and view labels in the status line and the current item
-of a view menu are `NeogitSectionHeader`; identical entries stay plain. In the
-two compare windows the A side's changed lines and lines only in A are
-Neogit's removed-line colors (`NeogitDiffDelete`), the B side's are its
-added-line colors (`NeogitDiffAdd`), the changed characters inside a line are
-Neogit's in-line diff colors (`NeogitDiffDeleteInline` / `NeogitDiffAddInline`
-- its `…Highlight` groups have the same background as the line, so the changed
-characters did not stand out), and the filler lines are dimmed. The DirDiff
-groups only link to Neogit's (`VimIdeDirDiffChanged`, `VimIdeDirDiffOnlyA`,
-`VimIdeDirDiffOnlyB`, `VimIdeDirDiffAddA` ... - `:hi` one of them to change it;
-that is kept over a color scheme change), they follow a color scheme change,
-and a group falls back to the earlier color when Neogit is not set up. The
-compare colors are window-local (`'winhighlight'`) to DirDiff's own two windows
-only. `let g:vimide_dirdiff_colors = 'classic'` brings back the earlier colors:
+The verdict column says `≠` for files that differ and `=` for identical ones,
+and stays empty for one-sided entries (orphans) and folders, as in Beyond
+Compare; `·` marks a file not checked yet (`x = .` with
+`g:vimide_ascii_icons`). The status line shows the progress and the totals.
+
+The colors are Beyond Compare's (`g:vimide_dirdiff_colors = 'bc'`, the
+default; with `'background'` dark a matching dark set is used, and 256-color
+terminals get the nearest colors):
+
+- An identical file is plain text. A file that differs is red on the side
+  whose modification time is later and grey on the earlier side (red on both
+  when the times are equal or unknown). An orphan file - one that exists on
+  one side only - is blue. A name that is a folder on one side and a file on
+  the other is red on the file side.
+- A folder - on both sides or on one side only, as in Beyond Compare - has its
+  name in plain text and its date in light grey; its icon tells what is below
+  it, seen from that side: red if something there differs and is newer on this
+  side (or differs with equal times), otherwise grey if something there
+  differs and is older on this side, and the plain folder color otherwise
+  (nothing differs, or only orphans). This comes from the summary the helper
+  keeps per folder (the same one the views use), so it is right for folders
+  that were never opened too.
+- The row under the cursor is light green across the whole width (the tree
+  window's own `CursorLine`), and the current side's half is underlined.
+- The totals in the status line (`다름`, `A만`, `B만`) pick the light or the
+  dark red and blue by the status line's own background, so they stay readable
+  on a light status line in a dark theme (jellybeans).
+
+`let g:vimide_dirdiff_colors = 'neogit'` uses Neogit's status screen colors
+instead: a difference is `NeogitChangeModified` (blue, bold italic) on both
+sides, only in A is `NeogitChangeDeleted` (red), only in B is
+`NeogitChangeNewFile` (green), and in the compare windows A's changed lines
+are Neogit's removed-line colors (`NeogitDiffDelete`), B's its added-line
+colors (`NeogitDiffAdd`), with the changed characters in its in-line colors;
+a group falls back to the earlier color when Neogit is not set up.
+`let g:vimide_dirdiff_colors = 'classic'` brings back the earlier colors:
 differences red, one-side entries blue, the compare windows in the plain
-`DiffAdd` / `DiffChange` / `DiffText` colors.
+`DiffAdd` / `DiffChange` / `DiffText` colors. Both keep the earlier verdict
+column (`◀` only in A, `▶` only in B, folders too). All DirDiff groups are
+named `VimIdeDirDiff…` (`VimIdeDirDiffNewer`, `VimIdeDirDiffOlder`,
+`VimIdeDirDiffOrphan`, `VimIdeDirDiffSelect`, `VimIdeDirDiffAddA`,
+`VimIdeDirDiffFiller`, `VimIdeDirDiffArrow` ... - `:hi` one of them to change
+it; that is kept over a color scheme or `'background'` change). The compare
+colors are window-local (`'winhighlight'`) to DirDiff's own two windows only.
 
 | in the tree | |
 |---|---|
@@ -2466,6 +2505,7 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | `\d` | choose the view: *all*, *differences*, *context* - a small menu (`Enter`, a double click or `1` `2` `3` picks, `q` / `Esc` closes, `?` lists these keys); see *View modes* below. The window bar shows the current one |
 | `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same). While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c` |
+| `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
 | `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when Ctrl+Shift reaches it as its own key - see *Ctrl+Shift in tmux* below; Tera Term usually sends a plain `<C-r>` / `<C-l>` |
 | `1<C-r>` / `1<C-l>`, `N<C-r>`, visual | work in every terminal: a count copies that many lines from the cursor (`1<C-r>` is the cursor line, with the same rule on an unchanged line as `<C-S-r>`), a visual selection exactly its lines. Lines of the other side just above the first of those lines are not part of them (as with nvim's `:1,1diffget`); when nothing in the lines differs it says so |
@@ -2494,26 +2534,84 @@ whole-block copy of a session says so once, and the `?` help adds a line about i
 #### Compare tabs
 
 `<CR>` on a file opens the pair in a tab of its own, right after the DirDiff
-tab and the compare tabs it already has: A on the left, B on the right, in
-diff mode, the window bars saying `A: <path>` / `B: <path>`, and B's bar the
-current view and its keys (`[모두 보이기] \d 보기 · q 닫기`). The rows of the
-pairs that have a compare tab are highlighted in the tree. The DirDiff tab
-itself shows only the tree, at full height.
+tab and the compare tabs it already has, laid out like Beyond Compare's text
+compare: A on the left, B on the right, in diff mode. The rows of the pairs
+that have a compare tab are highlighted in the tree. The DirDiff tab itself
+shows only the tree (with its path line), at full height.
 
+- **Window bars** (Beyond Compare's path field and the info row under it, in
+  one line): `A: <path>  2026-10-10 오후 11:09:40  1,286 바이트  utf-8  unix`,
+  and on B's bar the current view and its keys (`[모두 보이기] \d 보기 · q
+  닫기`). When the bar is narrow, the encoding goes first, then the size, then
+  the time (on B's bar the key hints and then the view name too), so that the
+  file name always fits; the path is shortened in the middle
+  (`~/…/packagegroups/packagegroup-subcore-tsound.bb`) and only a file name
+  wider than the whole bar is cut. The side that has no file says `(없음)`
+  before the path. With the `'bc'` colors the current window's bar is green
+  and the time, size and encoding are dark grey.
+- **Colors** (`'bc'`): a changed line has a light pink background, with the
+  characters that differ in red (the identical parts stay as they are); a line
+  that exists on one side only is pink with all its text red; where one side
+  has no lines (vim's filler lines) there is a grey hatched area
+  (`'fillchars'` `diff:╱`, `/` with `g:vimide_ascii_icons`, set on those two
+  windows only), and nothing is drawn below the end of the file. Blank lines
+  inside a change are lavender - Beyond Compare's *unimportant* lines: a blank
+  line with no counterpart, or with a blank counterpart (only whitespace
+  differs).
+- **Arrows**: the change the cursor is in (or the nearest one) has a yellow
+  `⇨` in A's sign column and `⇦` in B's on its first line, with a thin bracket
+  down to its last line (`>` `<` `|` with `g:vimide_ascii_icons`). On a side
+  that has no lines there (only the hatched area), the arrow is on the line
+  just above it; the empty side of a one-sided file gets none, and shows only
+  the hatched area (no line number, no cursor line). They follow the cursor.
+  The sign column always keeps one column for them, and grows up to your
+  `'signcolumn'` width (`auto:2` ...) for other signs.
+- **Overview bar** at the far left of the tab (`g:vimide_dirdiff_overview`):
+  the whole file squeezed into the window height, A's column and B's column -
+  red where they differ, blue for those lavender blank lines, hatched where
+  that side has no lines - and a grey third column for the part on screen. A
+  file shorter than the window is drawn one row per line, level with the text.
+  Clicking a row jumps there (in the window the cursor was in, centered).
+  vim-ide's own overview bar (`overview.lua`) is not shown on the two compare
+  windows while this one is there.
+- **Line details** at the bottom (`g:vimide_dirdiff_line_details`): two lines
+  showing the cursor line and the line facing it on the other side (empty when
+  that side only has the hatched area), `⇨` for A and `⇦` for B, with spaces
+  shown as `·`, tabs as `→` and the line end as `¶` (`.` `>` `$` in ASCII), in
+  the compare colors. It follows the cursor, scrolling sideways when the cursor
+  is far right, and its status line gives the two line numbers.
+- The overview bar and the line details belong to that compare tab only. They
+  cannot be entered: the cursor goes back to the compare window it came from
+  (to A when the overview bar is reached from the keyboard - `<C-w>h`,
+  `<C-w>t`), `<C-w>w` skips them, and `<C-w>p` keeps going back and forth
+  between A and B. Files never open in them, they keep their size (3 columns,
+  2 lines) when a sidebar comes and goes, and they go away with the tab - `q`,
+  `:tabclose`, closing both compare windows - or on their own when the tab
+  outlives the comparison (`:tabonly`). A binary or too large pair gets
+  neither. All of it is drawn from one
+  comparison of the two buffers (`vim.diff` with the `'diffopt'` algorithm,
+  ignore options and linematch), done again only when the pair is loaded, the
+  text changes (after a short pause), the diff is updated or the window is
+  resized; moving the cursor only moves the arrows and the line details. Two
+  files of 150,000 lines take about 50 ms; past 400,000 lines in all, the bar,
+  the arrows and the lavender lines are left out.
 - `<CR>` on a pair that already has a compare tab goes to it; `o` opens one in
   the background (the cursor waits on the first change) or reads an open one
   again.
-- `q` in a compare tab, `:tabclose`, or closing its last window: back to the
-  tree, on that pair's row. The buffers the compare opened are removed, an
-  edited one is kept and named. `q` in the tree closes every compare tab of
+- `q` in a compare tab, `:tabclose`, or closing its last compare window: back
+  to the tree, on that pair's row. The buffers the compare opened are removed,
+  an edited one is kept and named. `q` in the tree closes every compare tab of
   that comparison.
 - One-sided files, binary and too large files, and a name that is a folder on
   one side work as before (an empty side, a note).
 - Everything the edit windows did still works there: `<C-n>` / `<C-p>`, the
   `<C-r>` / `<C-l>` copies with counts and visual selections, `:w` updating
-  the tree's verdict, a tree copy reloading an open pair (in whichever compare
-  tab shows it, without moving you there), nested `Tab` / `Tab` comparisons
-  and several comparisons at once (each has its own compare tabs).
+  the tree's verdict (and the bar's time and size), a tree copy reloading an
+  open pair (in whichever compare tab shows it, without moving you there),
+  nested `Tab` / `Tab` comparisons and several comparisons at once (each has
+  its own compare tabs). With `g:vimide_dirdiff_pair_tab = 0` the two edit
+  windows get the bars, colors, arrows and lavender lines, but no overview bar
+  or line details.
 - vim-ide's sidebar guard leaves a compare tab alone (`t:vimide_dirdiff_pair`),
   as it does the DirDiff tab.
 
@@ -2620,7 +2718,9 @@ Copying in the tree:
 
 - **Only in A / only in B.** The missing side is an empty buffer in diff
   mode, so the whole file shows as added: an A-only file on the left with an
-  empty right side, a B-only file on the right with an empty left side. The
+  empty right side, a B-only file on the right with an empty left side - with
+  the `'bc'` colors, as in Beyond Compare, every line of the file pink with red
+  text (its blank lines lavender) and the empty side only the hatched area. The
   window bar says `(없음)` on the empty side.
 - The window bars (`A: …` / `B: …`), the compare colors and diff mode belong
   to the two compare windows only. Opening a file shown there in another
@@ -2662,12 +2762,21 @@ Copying in the tree:
   with any view from *Views* (it wins over `only_diff`), and
   `g:vimide_dirdiff_list_height` sets the tree height with
   `g:vimide_dirdiff_pair_tab = 0` (default 40% of the screen).
-- Options of the compare side: `g:vimide_dirdiff_colors` (`'neogit'` /
-  `'classic'`), `g:vimide_dirdiff_pair_tab` (1: compare tabs, 0: edit windows
-  above the tree), `g:vimide_dirdiff_file_view` (`'all'` / `'diff'` /
-  `'context'`), `g:vimide_dirdiff_context` (3). A comparison keeps the layout
-  it was opened with; the colors change at the next `:DirDiff` or color
-  scheme change.
+- Options of the compare side: `g:vimide_dirdiff_colors` (`'bc'` /
+  `'neogit'` / `'classic'`), `g:vimide_dirdiff_pair_tab` (1: compare tabs, 0:
+  edit windows above the tree), `g:vimide_dirdiff_file_view` (`'all'` /
+  `'diff'` / `'context'`), `g:vimide_dirdiff_context` (3),
+  `g:vimide_dirdiff_overview` (1: the overview bar, 0: none),
+  `g:vimide_dirdiff_line_details` (1: the line details, 0: none). A comparison
+  keeps the layout it was opened with; the colors change at the next
+  `:DirDiff`, color scheme or `'background'` change.
+- `g:vimide_dirdiff_date_format` (`'%Y-%m-%d %p %l:%M:%S'`) is the tree's
+  modification time: `strftime()` items plus `%p` for 오전 / 오후 and `%l` for
+  the 12-hour hour without a leading zero (both done by DirDiff, not by the C
+  library - its `%p` follows the locale). The time part, dropped first when a
+  half is narrow, runs from the first time item (`%p` `%H` `%I` `%l` `%M` `%S`
+  `%T` `%R` `%r` `%X`) to the end. `'%Y-%m-%d %H:%M'` gives a 24-hour time
+  without seconds.
 
 ### The plugin's list (vim, `:DirDiffClassic`)
 
@@ -3031,8 +3140,9 @@ wheel            scroll the edit window
 
 `.vim/plugin/overview.lua`. Two cells wide by default
 (`g:overview_width`), hidden for files under `g:overview_min` (40) lines
-and for windows too narrow to spare the room, and off entirely with
-`let g:overview = 0`. Colours are taken from whatever colourscheme is
+and for windows too narrow to spare the room (and for a window with
+`w:overview_off` set - DirDiff's compare windows, which have their own),
+and off entirely with `let g:overview = 0`. Colours are taken from whatever colourscheme is
 loaded - `CursorLine` for the bar, `Visual` for the viewport, `Cursor`
 for the cursor, `Diff*` and `Diagnostic*` for the ticks - so it suits
 `si`, `light` and `dark` without three sets of hex codes. Override
