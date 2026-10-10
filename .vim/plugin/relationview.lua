@@ -90,8 +90,8 @@
 --   g:relationview_auto       1: update as the cursor moves (default 1)
 --   g:relationview_debounce   idle debounce in ms         (default 250)
 --   g:relationview_max_refs   max references per level    (default 1000)
---   g:relationview_max_depth  depth limit of '*'          (default 6)
---   g:relationview_max_nodes  node limit of '*'           (default 300)
+--   g:relationview_max_depth  depth limit of '*' and O/zO (default 6; O counts from its node)
+--   g:relationview_max_nodes  node limit of '*' and O/zO  (default 300)
 --   g:relationview_max_sites  call sites listed per caller (default 8)
 --   g:relationview_path_truncate  1: cut the path column to the window
 --                             width, eliding the front ('…'); default 0
@@ -1888,6 +1888,12 @@ local function ensure_buf()
   bmap('+', function() A.toggle('expand') end, 'RelationView: expand')
   bmap('-', function() A.toggle('collapse') end, 'RelationView: collapse')
   bmap('*', function() A.expand_all() end, 'RelationView: expand whole tree')
+  -- 커서의 심볼 아래만: 호출하는 심볼들을 끝까지 펼치기 / 모두 접기 (vim 의 zO / zC,
+  -- DirDiff 트리의 O / X 와 같은 손)
+  bmap('O', function() A.expand_subtree() end, 'RelationView: expand everything under this symbol')
+  bmap('zO', function() A.expand_subtree() end, 'RelationView: expand everything under this symbol')
+  bmap('X', function() A.collapse_subtree() end, 'RelationView: collapse everything under this symbol')
+  bmap('zC', function() A.collapse_subtree() end, 'RelationView: collapse everything under this symbol')
   -- 'g' would swallow the first key of 'gg', so the graph lives on 'x'
   bmap('x', function() A.graph() end, 'RelationView: export HTML graph')
   bmap('c', function() A.toggle_ctx() end, 'RelationView: toggle context window')
@@ -2289,7 +2295,7 @@ local function header(sym, note)
   local dir = mode == 'both' and 'both' or (mode == 'callees' and 'calls' or 'callers')
   return {
     '◆ ' .. (sym or '(none)') .. tail .. (note and ('  — ' .. note) or ''),
-    '  [⏎/^⏎]jump [o]peek [␣]open/close [*]all [^n/^p]next/prev [x]graph ' ..
+    '  [⏎/^⏎]jump [o]peek [␣]open/close [*]all [O/X]sub [^n/^p]next/prev [x]graph ' ..
       '[d]dir:' .. dir .. ' [c]ctx [p]pin [r]refresh [q]close',
   }
 end
@@ -6551,7 +6557,8 @@ api.nvim_create_autocmd({ 'WinEnter', 'WinClosed', 'WinNew', 'BufWinEnter' }, {
 
 -- expand the whole visible tree, breadth-first, bounded by
 -- g:relationview_max_depth / g:relationview_max_nodes
-function A.expand_all()
+-- from: 그 노드 아래만 펼친다 (zO / O). 깊이는 그 노드부터 센다
+function A.expand_all(from)
   local t = s.tree
   if not t or t.expanding or not t.nodes then
     return
@@ -6572,7 +6579,13 @@ function A.expand_all()
       end
     end
   end
-  absorb(t.nodes, 1)
+  absorb(from and { from } or t.nodes, 1)
+  -- 다 펼친 뒤 커서를 그 노드에 (펼치는 동안 줄이 밀린다)
+  local function settle()
+    if from and from.line and s.win and api.nvim_win_is_valid(s.win) then
+      pcall(api.nvim_win_set_cursor, s.win, { from.line, 0 })
+    end
+  end
 
   local function step()
     while true do
@@ -6583,6 +6596,7 @@ function A.expand_all()
       if total >= maxnodes then
         t.expanding = nil
         render_tree()
+        settle()
         vim.notify(string.format('RelationView: %d nodes — stopped '
           .. '(g:relationview_max_nodes)', total))
         return
@@ -6591,6 +6605,7 @@ function A.expand_all()
       if not entry then
         t.expanding = nil
         render_tree()
+        settle()
         return
       end
       local nd, depth = entry[1], entry[2]
@@ -6620,6 +6635,49 @@ function A.expand_all()
   end
   update_header()
   step()
+end
+
+-- 커서의 노드를 호출하는 심볼들을 끝까지 펼친다 (O, zO). '*' 와 같은 한도
+-- (g:relationview_max_depth 는 그 노드부터, g:relationview_max_nodes), 순환은 건너뛴다.
+-- 이미 펼친 [-] 노드에서 눌러도 덜 펼친 아래를 마저 펼친다
+function A.expand_subtree()
+  if s.tree and not s.tree.nodes then
+    return
+  end
+  local item = s.items[api.nvim_win_get_cursor(0)[1]]
+  local nd = item and item.node
+  if not nd or nd.loading then
+    return
+  end
+  if not nd.expandable or nd.cycle then
+    vim.notify('RelationView: 더 펼칠 것이 없습니다')
+    return
+  end
+  A.expand_all(nd)
+end
+
+-- 커서의 노드 아래를 모두 접는다 (X, zC). 아래 노드들도 접힌 채로 기억해서, 다시 + 하면
+-- 한 단계만 열린다 (읽어 둔 것은 그대로 - 다시 조회하지 않는다)
+function A.collapse_subtree()
+  if s.tree and not s.tree.nodes then
+    return
+  end
+  local item = s.items[api.nvim_win_get_cursor(0)[1]]
+  local nd = item and item.node
+  if not nd then
+    return
+  end
+  local function close(n)
+    n.expanded = false
+    for _, c in ipairs(n.children or {}) do
+      close(c)
+    end
+  end
+  close(nd)
+  render_tree()
+  if nd.line then
+    pcall(api.nvim_win_set_cursor, 0, { nd.line, 0 })
+  end
 end
 
 -- export the currently expanded tree as a self-contained HTML graph

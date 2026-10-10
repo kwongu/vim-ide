@@ -4015,6 +4015,12 @@ mouse button 4 / 5: back / forward, exactly like Ctrl+o / Ctrl+i (the
 o:     jump but keep focus in the panel (peek)
 Space: expand/collapse the caller under the cursor (+ and - work too)
 *:     expand the whole tree (bounded by max_depth/max_nodes options)
+O (zO): expand everything under the symbol at the cursor - all its callers,
+       their callers and so on (same limits, counted from that symbol;
+       cycles are skipped); on an already open [-] row it opens what is
+       still closed below
+X (zC): collapse everything under the symbol at the cursor; the rows below
+       stay closed too, so the next + opens one level again
 x:     export the current tree as an HTML call graph (Source Insight
        style boxes) and open it in the browser - not 'g', which would
        swallow the first key of 'gg'
