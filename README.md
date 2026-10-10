@@ -2457,8 +2457,9 @@ terminals get the nearest colors):
   (nothing differs, or only orphans). This comes from the summary the helper
   keeps per folder (the same one the views use), so it is right for folders
   that were never opened too.
-- The row under the cursor is light green across the whole width (the tree
-  window's own `CursorLine`), and the current side's half is underlined.
+- On the row under the cursor only the half of the side the cursor is on (A or
+  B) is light green, as Beyond Compare selects only that side; `<S-Tab>` or a
+  click on the other half moves the selection there.
 - The totals in the status line (`다름`, `A만`, `B만`) pick the light or the
   dark red and blue by the status line's own background, so they stay readable
   on a light status line in a dark theme (jellybeans).

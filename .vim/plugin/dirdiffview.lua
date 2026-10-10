@@ -17,7 +17,7 @@
 --   크기·날짜는 옅은 회색이고 아이콘이 그 아래를 말한다 (그쪽에서 보아): 늦은 쪽인 차이가 있으면
 --   빨강, 아니고 이른 쪽인 차이가 있으면 회색, 그 밖(같음·고아만)은 보통 폴더색 (Beyond Compare 의
 --   첫 사진). 뒤쪽이 주는 폴더의 표시(mask - 그 아래 모두를 합한 것)로 가린다 (folder_g). 지금 줄은
---   연두 (Beyond Compare 의 고른 줄).
+--   커서가 있는 쪽(A 또는 B)의 반 칸만 연두 (Beyond Compare 의 고른 줄 - 그쪽만 골라진다).
 -- 'neogit' 이면 Neogit 상태 화면의 무리에 잇고(다른 것 NeogitChangeModified, A 에만
 -- NeogitChangeDeleted, B 에만 NeogitChangeNewFile), 'classic' 이면 예전 색 (다른 것 빨강, 한쪽에만
 -- 파랑) - 이 둘은 판정 칸도 예전 것(◀ ▶ 까지)이다.
@@ -278,7 +278,9 @@ local HL = {
   { 'VimIdeDirDiffSelect', nil, { link = 'CursorLine' }, C(nil, nil, '#d7ffd0', 194), C(nil, nil, '#24402a', 22) },
   { 'VimIdeDirDiffOpened', nil, { link = 'Visual' }, C(nil, nil, '#e8eefc', 189), C(nil, nil, '#2a3346', 237) },
   { 'VimIdeDirDiffMark', nil, { link = 'Search' } },        -- Space 로 고른 항목
-  { 'VimIdeDirDiffSide', nil, { underline = true, bold = true } },  -- 커서 줄의 지금 쪽(A/B)
+  -- 커서 줄의 지금 쪽(A/B) 반 칸: 고른 줄의 연두 (Beyond Compare 처럼 그쪽만 - mark_side).
+  -- neogit·classic 은 VimIdeDirDiffSelect 가 CursorLine 이라 그 색 그대로
+  { 'VimIdeDirDiffSide', nil, { link = 'VimIdeDirDiffSelect' } },
   { 'VimIdeDirDiffPickA', nil, { link = 'Search' } },      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
   { 'VimIdeDirDiffMenuNow', { 'NeogitSectionHeader' }, { link = 'Title' } },  -- 보기 메뉴의 지금 보기
   -- 창 머리·상태줄의 이름표 (Neogit 의 절 머리 - 'Unstaged changes'). neogit·bc 색일 때만 단다
@@ -1463,7 +1465,10 @@ goto_row = function(s, i)
   pcall(api.nvim_win_set_cursor, s.win_l, { i, col or 0 })
 end
 
--- 커서 줄의 지금 쪽 반 칸에 밑줄
+-- 커서 줄의 지금 쪽 반 칸을 고른 줄 색(연두)으로. 줄 전체는 칠하지 않는다 (트리 창은 cursorline
+-- 을 끈다 - tree_opts): Beyond Compare 처럼 커서가 있는 쪽만 골라진 것으로 보인다. B 쪽은 창 오른쪽
+-- 끝까지 (hl_eol). 우선순위는 열어 둔 짝의 줄 색(mark_open 의 line_hl_group)보다 위 - 그 줄에서도
+-- 고른 반 칸이 보이고, 나머지 반 칸에는 열어 둔 표시가 남는다
 mark_side = function(s)
   if not (api.nvim_buf_is_valid(s.buf_l) and api.nvim_win_is_valid(s.win_l)) then
     return
@@ -1474,14 +1479,13 @@ mark_side = function(s)
   if not ob then
     return
   end
-  local line = api.nvim_buf_get_lines(s.buf_l, i - 1, i, false)[1] or ''
-  local a, b
   if s.side == 'b' then
-    a, b = ob, #line
+    pcall(api.nvim_buf_set_extmark, s.buf_l, ns_side, i - 1, ob,
+      { end_row = i, end_col = 0, hl_eol = true, hl_group = 'VimIdeDirDiffSide', priority = 4200 })
   else
-    a, b = 0, (s.offg and s.offg[i]) or ob
+    pcall(api.nvim_buf_set_extmark, s.buf_l, ns_side, i - 1, 0,
+      { end_col = (s.offg and s.offg[i]) or ob, hl_group = 'VimIdeDirDiffSide', priority = 4200 })
   end
-  pcall(api.nvim_buf_set_extmark, s.buf_l, ns_side, i - 1, a, { end_col = b, hl_group = 'VimIdeDirDiffSide', priority = 50 })
 end
 
 -- 지금 열어 둔 짝의 줄에 바탕색: 위의 편집 창 둘에 보이는 것(pair_tab = 0), 비교 탭이 열려 있는
@@ -1500,13 +1504,14 @@ local function mark_open(s)
       rels[v.rel] = true
     end
   end
-  -- 커서 줄은 빼고: 줄 색(line_hl_group)이 지금 줄의 CursorLine(연두) 위에 와서 고른 줄이 보이지 않았다
-  -- (커서가 움직이면 다시 단다 - map_list 의 CursorMoved)
-  local cur = api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_cursor(s.win_l)[1]
+  -- 커서 줄에도 단다. line_hl_group 이 아니라 줄 끝까지(hl_eol) 덮는 글자 색으로, 고른 반 칸(mark_side,
+  -- 우선순위 4200)보다 낮게: line_hl_group 은 우선순위와 상관없이 글자 색의 바탕을 덮어 고른 반 칸이
+  -- 사라졌다. 이러면 커서 줄에서 고른 반 칸은 연두, 다른 반 칸은 이 색이다
   for rel in pairs(rels) do
     local i = s.row_of[rel]
-    if i and i ~= cur then
-      pcall(api.nvim_buf_set_extmark, s.buf_l, ns_open, i - 1, 0, { line_hl_group = 'VimIdeDirDiffOpened' })
+    if i then
+      pcall(api.nvim_buf_set_extmark, s.buf_l, ns_open, i - 1, 0,
+        { end_row = i, end_col = 0, hl_eol = true, hl_group = 'VimIdeDirDiffOpened', priority = 100 })
     end
   end
 end
@@ -4348,15 +4353,15 @@ local function full_dir(d)
 end
 
 -- 트리 창의 옵션. 창에만(local) - vim.wo 는 :set 처럼 그 창의 전역 값까지 바꾸어, 그 창에서 갈라
--- 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다. 지금 줄은 Beyond Compare 의 고른 줄처럼 연두
--- (CursorLine 을 이 창에서만 VimIdeDirDiffSelect 로 - neogit·classic 은 그것이 CursorLine 이다).
+-- 만든 창과 끝낸 뒤 남은 창이 번호 없이 남았다. 지금 줄은 cursorline 을 끄고 커서가 있는 쪽 반 칸만
+-- 연두로 칠한다 (mark_side - Beyond Compare 처럼 그쪽만 골라진다. 줄 전체를 칠했더니 어느 쪽을 고른
+-- 것인지 밑줄로만 보였다).
 -- colorcolumn(vim-ide 는 80)·statuscolumn 은 끈다 - 칸 제목(winbar·경로 줄 창의 상태줄)이 0 칸부터라
 -- 줄 앞에 무엇이 붙으면 칸이 어긋난다
 local function tree_opts(s)
-  for k, v in pairs({ number = false, relativenumber = false, wrap = false, cursorline = true,
+  for k, v in pairs({ number = false, relativenumber = false, wrap = false, cursorline = false,
     winfixheight = not s.pair_tab, signcolumn = 'no', foldcolumn = '0', list = false, spell = false,
-    colorcolumn = '', statuscolumn = '', cursorlineopt = 'both',
-    winhighlight = 'CursorLine:VimIdeDirDiffSelect' }) do
+    colorcolumn = '', statuscolumn = '', winhighlight = '' }) do
     pcall(api.nvim_set_option_value, k, v, { scope = 'local', win = s.win_l })
   end
 end
@@ -5584,7 +5589,7 @@ local function strip_inherited()
   if next(sessions) == nil then
     return
   end
-  -- 트리와 곁 창(경로 줄·개요 막대·줄 자세히)은 제 winhighlight(지금 줄의 연두 등)를 단 우리 창이다
+  -- 트리와 곁 창(경로 줄·개요 막대·줄 자세히)은 제 창 옵션(winhighlight·cursorline 등)을 단 우리 창이다
   local ft = vim.bo.filetype
   if ft == 'vimidedirdiff' or cmp.FT[ft] then
     return
