@@ -141,7 +141,8 @@ local function symbol_range()
   local total = api.nvim_buf_line_count(buf)
   top = math.max(1, math.min(top, total))
   last = math.max(top, math.min(last, total))
-  return { win = src_win, buf = buf, top = top, last = last, name = item.name or '?' }
+  return { win = src_win, buf = buf, top = top, last = last, first = math.max(top, math.min(first, last)),
+    name = item.name or '?' }
 end
 
 -- aerial 창의 커서 줄이 가리키는 심볼을 편집 창에서 블록으로 잡는다
@@ -174,6 +175,7 @@ end
 -- 둔다 - 끝 '}' 바로 밑에 다음 함수의 주석이 붙으면 읽기 어렵다. 다른 데서 복사한
 -- 것은 줄 단위로 그대로 붙인다. 숫자를 주면(3p) 그만큼 붙인다. 되돌리기는 u 한 번.
 local last_yank -- aerial yy 로 담은 줄 (붙일 때 함수 사이 빈 줄을 둘지 가린다)
+local last_yank_head = 0 -- 그 블록에서 함수 정의 줄까지 (위 주석 줄 수)
 local yank_ns = api.nvim_create_namespace('aerial_yank')
 
 local function default_reg(reg)
@@ -197,6 +199,7 @@ function _G.aerial_yank_range(reg)
     vim.fn.setreg('"', lines, 'V')
   end
   last_yank = table.concat(lines, '\n')
+  last_yank_head = r.first - r.top
   -- 복사한 범위를 편집 창에서 잠깐 칠한다 (yank 했다는 표시)
   pcall(function()
     vim.hl.range(r.buf, yank_ns, 'IncSearch', { r.top - 1, 0 }, { r.last - 1, -1 },
@@ -207,6 +210,34 @@ function _G.aerial_yank_range(reg)
   end)
   vim.notify(('함수 복사: %s (%d줄)'):format(r.name, #lines))
   return true
+end
+
+-- 붙인 뒤 아웃라인을 바로 고친다. API 로 고친 버퍼는 TextChanged 가 나지 않아
+-- (지금 버퍼가 아니다) 편집 창에 들어가야 aerial 이 다시 읽었다 (요청). 백엔드에
+-- 다시 읽게 하고, aerial 커서를 편집 창 커서의 심볼(붙인 함수)로 맞춘다
+local function refresh_outline(r, def_line)
+  local ok, backends = pcall(require, 'aerial.backends')
+  local be = ok and backends.get(r.buf) or nil
+  if be and be.fetch_symbols_sync then
+    pcall(be.fetch_symbols_sync, r.buf)
+  else
+    pcall(function() require('aerial').refetch_symbols(r.buf) end)
+  end
+  -- 편집 창 커서를 붙인 함수의 이름 칸에 둔다: aerial 은 커서가 심볼 이름(selection
+  -- range) 앞이면 그 앞 심볼로 친다 - 줄 맨 앞(0칸)에 두었더니 aerial 커서가 원래
+  -- 함수에 남았다 (실측)
+  if def_line then
+    pcall(function()
+      for _, item in require('aerial.data').get_or_create(r.buf):iter({ skip_hidden = true }) do
+        if item.lnum == def_line then
+          local sel = item.selection_range or item
+          api.nvim_win_set_cursor(r.win, { sel.lnum, sel.col or 0 })
+          break
+        end
+      end
+    end)
+  end
+  pcall(function() require('aerial.window').update_position(r.win, r.win) end)
 end
 
 function _G.aerial_put_range(before, reg, count)
@@ -268,7 +299,12 @@ function _G.aerial_put_range(before, reg, count)
   end
   pcall(api.nvim_buf_set_mark, r.buf, '[', at + 1, 0, {})
   pcall(api.nvim_buf_set_mark, r.buf, ']', at + #out, 0, {})
-  pcall(api.nvim_win_set_cursor, r.win, { math.min(first, api.nvim_buf_line_count(r.buf)), 0 })
+  if block then
+    first = first + last_yank_head -- 붙인 함수의 정의 줄 (주석 다음)
+  end
+  first = math.min(first, api.nvim_buf_line_count(r.buf))
+  pcall(api.nvim_win_set_cursor, r.win, { first, 0 })
+  refresh_outline(r, block and first or nil)
   vim.notify(('붙임: %d줄 (%s %s)'):format(#out, r.name, before and '위' or '아래'))
   return true
 end
