@@ -935,12 +935,15 @@ augroup END
 " ------------------------------------
 " neo-tree: 사이드바 파일 트리 (NERDTree 상위 호환)
 "   F9 또는 <leader>t 로 토글. a 생성 / d 삭제 / r 이름변경 / ? 도움말
-"   (F11 은 그대로 NERDTree 오른쪽 창)
-"   트리는 기본이 실시간 경로 모드다: F9 사이드바, F11 부동 트리, F12 RelationView 열의
-"   트리가 모두 편집 파일을 따라간다. <leader>P 로 셋 모두 고정 모드(따라가지 않기)와
-"   오간다 - ~/.vim/plugin/treepin.lua, :VimIdeTreePin [on|off]. 기본과 다른 모드일 때만
-"   트리 창 맨 위에 표시한다.
-"     let g:vimide_tree_pinned = 1   " 처음부터 고정 모드로
+"   (F11 은 같은 neo-tree 를 부동 창으로 - NeoTreeFloat)
+"   트리는 기본이 실시간 경로 모드다: F9 사이드바와 F11 부동 트리가 편집 파일을
+"   따라간다. <leader>P 로 고정 모드(따라가지 않기)와 오간다 - ~/.vim/plugin/treepin.lua,
+"   :VimIdeTreePin [on|off]. 기본과 다른 모드일 때만 트리 창 맨 위에 표시한다.
+"   F12 RelationView 열의 트리는 따로 간다 (g:relationview_tree_pinned, RelationView
+"   설정 쪽). 그 열 안에서 누른 <leader>P 는 그 트리만 바꾼다. 편집 창에서 누르면 이 탭에
+"   보이는 트리를 바꾼다: F9 사이드바가 파일 트리로 떠 있으면 그것, 아니고 RelationView
+"   트리가 있으면 그것.
+"     let g:vimide_tree_pinned = 1   " F9/F11 을 처음부터 고정 모드로
 "   netrw 는 nvim-tree 가 이미 가로채므로 neo-tree 는 건드리지 않는다.
 "   대용량 트리에서 발열/지연이 없도록 git status 는 비동기, 파일
 "   watcher 는 끈다.
@@ -4149,6 +4152,13 @@ let g:relationview_tree_dir = 'root'
 let g:relationview_tree_follow = 1
 " 파일 사이를 빠르게 옮겨 다닐 때 트리를 매번 다시 그리지 않는다 (ms)
 let g:relationview_tree_follow_delay = 200
+" 이 열의 트리의 고정 모드 (1 = 따라가지 않는다). 기본 0 = 실시간 경로.
+" F9/F11 트리(g:vimide_tree_pinned)와 따로 간다. 이 열 안에서 <leader>P 로 오간다 -
+" F9 사이드바가 없으면 편집 창에서도 (:RelationViewTreePin [on|off]). 위 tree_follow = 0
+" 은 아예 끄는 것이다.
+if !exists('g:relationview_tree_pinned')
+    let g:relationview_tree_pinned = 0
+endif
 " 뿌리 밖의 파일을 잡았을 때 트리 뿌리까지 그 파일 쪽으로 옮길지.
 " 기본 0 = 가만둔다. neo-tree 는 1 일 때 뿌리를 그 파일의 상위로 바꾼다.
 let g:relationview_tree_follow_cwd = 0

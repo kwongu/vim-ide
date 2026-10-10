@@ -138,6 +138,13 @@
 --                             is left alone (neo-tree would otherwise ask
 --                             'File not in cwd. Change cwd to ...?').
 --   g:relationview_tree_follow_delay  debounce for that, in ms (default 200)
+--   g:relationview_tree_pinned  0 (default): that following is on (live path
+--                             mode). 1: the tree stays where it is (fixed
+--                             mode). \P inside the column (or in an edit
+--                             window when only this tree is shown) and
+--                             :RelationViewTreePin [on|off] switch it - a mode
+--                             of its own, separate from the F9/F11 trees'
+--                             g:vimide_tree_pinned (treepin.lua)
 --   g:relationview_tree_follow_cwd  1: move the tree root to a file found
 --                             outside it instead of ignoring it (default 0)
 --   g:relationview_list_min_height  in the three-way column, rows the relation
@@ -2800,6 +2807,9 @@ end
 local function close_tree()
   local keep_panel = panel_visible() and api.nvim_win_get_height(s.win) or nil
   if tree_visible() then
+    -- 보던 자리를 적어 둔다. 고정 중에 다시 세울 때(F12 껐다 켜기, 배치 바꾸기) ensure_tree 가 그
+    -- 자리로 연다 - 이 트리는 창마다 새 상태라, 안 그러면 뿌리만 덩그러니 나왔다
+    A.tree_pin_remember(s.tree_win)
     -- :split/:vsplit 으로 생긴 트리 사본도 같이 닫는다. 그냥 두면 F12 로 꺼도
     -- 사본이 열에 남았다 (QA). 사본은 neo-tree 가 그 창에 'current' 트리를
     -- 새로 그린 것이라 w:rv_tree 표가 없다(창 변수는 갈라도 따라오지 않는다).
@@ -2953,8 +2963,12 @@ local function install_open_hook()
       -- 쪼개지는 자리를 곁창이 아니라 편집 영역으로 옮겨서 한다.
       -- 예전에는 여기서 손을 떼어, 트리 열 안쪽에 10줄짜리 쪽창이 생겼다.
       pcall(vim.cmd, cmd .. ' ' .. vim.fn.fnameescape(args.path))
-      -- 우리가 열었으니 트리가 그 파일을 다시 펼치려 들 필요가 없다
-      s.tree_last = args.path
+      -- 이 열의 트리에서 열었으면 그 트리가 그 파일을 다시 펼치려 들 필요가 없다. 왼쪽(F9)이나
+      -- 부동(F11) 트리에서 열었으면 적지 않는다 - 적었더니 그 파일로 따라가야 할 이 열의
+      -- 트리가 '이미 했다' 로 건너뛰었다 (F9 를 \P 로 고정하고 F12 는 따라가게 둘 때 늘 그랬다)
+      if from == s.tree_win then
+        s.tree_last = args.path
+      end
       return { handled = true }
     end,
   })
@@ -3023,6 +3037,9 @@ ensure_tree = function()
   end
   s.tree_win = win
   pcall(function() vim.w[win].rv_tree = true end) -- 탭을 오갈 때 다시 집는 표
+  -- 미리보기에서 갈랐으면 그 창의 머리(' 경로:줄 ◆ 심볼')를 물려받는다 - neo-tree 는 winbar 를
+  -- 지우지 않아 트리 위에 낡은 머리가 남았고, \P 의 고정 표시(treepin.lua)도 남의 것으로 보고 비켜 갔다
+  pcall(function() vim.wo[win].winbar = '' end)
   -- 갈라 만든 창은 처음에 원래 창(패널)의 버퍼를 보여 준다. 아래 청소
   -- autocmd 는 '트리 자리가 아직 그 버퍼인' 동안만 건너뛴다.
   s.tree_seed = api.nvim_win_get_buf(win)
@@ -3049,6 +3066,14 @@ ensure_tree = function()
   -- 하면 파일을 열어 둔 채 t 를 눌렀을 때 뿌리 목록만 덩그러니 나온다.
   local dir = tree_dir()
   local reveal = follow_file()
+  if not reveal and vim.g.relationview_tree_pinned == 1 then
+    -- 고정 중에 다시 세우는 트리는 이 탭에서 보던 자리로 (A.tree_pin_remember). 그 사이 지워졌으면
+    -- (브랜치를 바꾸는 등) 뿌리로 - 없는 경로를 주면 neo-tree 가 ENOENT 를 내고 트리가 비었다
+    local at = s.tree_pin_at and s.tree_pin_at[api.nvim_get_current_tabpage()]
+    if at and vim.uv.fs_stat(at) then
+      reveal = at
+    end
+  end
   if reveal and not reveal_ok(dir, reveal) then
     reveal = nil
   end
@@ -3110,8 +3135,9 @@ end
 -- 지금 편집 중인 파일. 트리가 펼쳐 보여줄 대상이다.
 -- 우리 창(패널/미리보기/트리)에 있거나 진짜 파일이 아니면 nil.
 follow_file = function()
-  -- \P 의 트리 고정(treepin.lua)도 이 열의 트리에 건다 (요청: F9 F11 F12 모두 같은 \P)
-  if cfg('tree_follow', 1) == 0 or vim.g.vimide_tree_pinned == 1 then
+  -- \P 의 트리 고정(treepin.lua). 이 열의 트리는 F9/F11 과 따로 간다 (요청):
+  -- g:vimide_tree_pinned 가 아니라 g:relationview_tree_pinned 를 본다
+  if cfg('tree_follow', 1) == 0 or vim.g.relationview_tree_pinned == 1 then
     return nil
   end
   local win = api.nvim_get_current_win()
@@ -3200,6 +3226,19 @@ local function tree_follow_now()
   if not tree_visible() then
     return
   end
+  -- 트리 안에서 \P 로 고정을 풀었으면(relationview_tree_catch_up) 편집 창으로 돌아갈 때까지 보던
+  -- 자리를 지킨다. 트리·부동 창(도움말, F 찾기, 입력 칸)·곁창에 있는 동안은 따라가지 않는다 - 거기서는
+  -- follow_file 이 편집 창의 파일을 대신 집어, 팝업을 열었다 닫기만 해도 트리가 그 파일로 튀었다
+  -- 지키는 것은 고정을 푼 그 트리(창)만이다 - 다른 탭의 트리는 그대로 따라가고, 그 탭의 편집 창이
+  -- 이 표를 풀지도 않는다 (전역 하나였더니 다른 탭에 다녀오면 풀려 트리 안에서 튀었다)
+  if s.tree_hold and s.tree_hold == s.tree_win then
+    local cur = api.nvim_get_current_win()
+    if cur == s.tree_win or api.nvim_win_get_config(cur).relative ~= ''
+        or vim.bo[api.nvim_win_get_buf(cur)].buftype ~= '' then
+      return
+    end
+    s.tree_hold = nil
+  end
   local file = follow_file()
   if not file or s.tree_last == file then
     return
@@ -3218,6 +3257,10 @@ local function tree_follow_now()
     return
   end
   s.tree_last = file
+  -- 따라간 자리도 '보던 자리' 다 (A.tree_pin_remember). 안 적으면 트리를 닫는 길이 close_tree 를
+  -- 거치지 않을 때(:Neotree close 뒤 다시 세우기) 고정해 다시 연 트리가 따라가기 전의 자리로 열렸다
+  s.tree_pin_at = s.tree_pin_at or {}
+  s.tree_pin_at[api.nvim_get_current_tabpage()] = file
   -- 이 따라가기가 몇 번째인지. neo-tree 의 스캔은 비동기이고 앞선 것을
   -- 취소하지 않아서 여러 개가 겹쳐 돈다. 낡은 콜백은 손을 떼야 한다.
   s.tree_gen = (s.tree_gen or 0) + 1
@@ -3283,11 +3326,53 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'WinEnter' }, {
   desc = 'RelationView: the column tree follows the edited file',
 })
 
+-- 이 열의 트리가 보던 자리를 탭마다 적는다. 트리를 닫을 때(close_tree)와 트리 창을 떠날 때
+-- (WinLeave - :q 로 닫을 때도 그 앞에 온다) 부른다. 고정(g:relationview_tree_pinned) 중에 트리를
+-- 다시 세우면 ensure_tree 가 이 자리로 연다. 실시간 경로 중에도 적는다 - 고정 중에만 적었더니
+-- 고정을 풀고 다닌 뒤 다시 고정해 열면 예전 고정 때의 자리로 열렸다
+function A.tree_pin_remember(win)
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  pcall(function()
+    local st = require('neo-tree.sources.manager').get_state('filesystem', nil, win)
+    local node = st.tree and st.tree:get_node()
+    if node then
+      s.tree_pin_at = s.tree_pin_at or {}
+      s.tree_pin_at[api.nvim_win_get_tabpage(win)] = node:get_id()
+    end
+  end)
+end
+
+api.nvim_create_autocmd('WinLeave', {
+  group = group,
+  callback = function()
+    if s.tree_win and api.nvim_get_current_win() == s.tree_win then
+      A.tree_pin_remember(s.tree_win)
+    end
+  end,
+  desc = 'RelationView: remember where the fixed column tree is',
+})
+
 -- \P 로 고정을 풀었을 때 지금 파일로 곧바로 한 번 따라간다 (treepin.lua 가 부른다).
--- 고정 중에 본 파일이 마지막으로 드러낸 파일과 같아도 다시 드러낸다
+-- 고정 중에 본 파일이 마지막으로 드러낸 파일과 같아도 다시 드러낸다. 트리 안에서
+-- 풀었으면 보던 자리를 그대로 두고, 편집 창으로 돌아가는 순간(WinEnter) 따라간다
 function _G.relationview_tree_catch_up()
   s.tree_last = nil
-  tree_follow_soon()
+  local cur = api.nvim_get_current_win()
+  -- 트리를 :split 한 사본도 트리로 친다 (거기서 풀고 본 트리로 넘어가면 그 안에서 튀었다)
+  local in_tree = cur == s.tree_win
+      or (vim.bo[api.nvim_win_get_buf(cur)].filetype == 'neo-tree' and _G.relationview_owns_win(cur))
+  if not in_tree then
+    s.tree_hold = nil
+    tree_follow_soon()
+  else
+    -- 트리에 들어온 WinEnter 가 건 따라가기가 아직 기다리고 있으면(200ms 안에 \P) 그것도 멈춘다
+    s.tree_hold = s.tree_win
+    if s.tree_timer then
+      s.tree_timer:stop()
+    end
+  end
 end
 
 -- 오른쪽 열의 트리는 RelationView 가 따로 관리한다.
@@ -7030,6 +7115,39 @@ local function is_column_win(w)
   return w == s.win or w == s.ctx_win or w == s.tree_win or w == s.big_win
 end
 
+-- treepin.lua 의 \P 가 묻는다: 이 창이 RelationView 의 창인가 (그러면 F9/F11 트리가
+-- 아니라 이 열의 트리 모드를 바꾼다). 다른 탭의 열은 표(rv_tree/rv_big)와 패널의
+-- filetype 으로 알아본다
+function _G.relationview_owns_win(w)
+  w = w or api.nvim_get_current_win()
+  if not api.nvim_win_is_valid(w) then
+    return false
+  end
+  if is_column_win(w) then
+    return true
+  end
+  local ok, v = pcall(function() return vim.w[w].rv_tree or vim.w[w].rv_big end)
+  if ok and v then
+    return true
+  end
+  local b = api.nvim_win_get_buf(w)
+  if (s.buf and b == s.buf) or (s.ctx_ph and b == s.ctx_ph) then
+    return true -- 다른 탭(아직 집지 않은)의 목록·미리보기
+  end
+  -- 트리를 :split 한 사본은 표가 없다 - close_tree 처럼 '목록이나 미리보기와 같은 열' 로 가린다.
+  -- 목록은 열에 쌓을 때(right_stack)만 잣대가 된다: position = 'bottom' 에서 미리보기를 닫으면 트리가
+  -- 편집 창 옆에 서서, 그 '열' 이 편집 창과 아래의 목록까지 품었다 - 편집 창의 \P 가 F12 를 바꿨다.
+  -- 미리보기는 어느 배치에서나 트리와 같은 열이다
+  if tree_visible() then
+    local inside = A.vmax_inside(s.tree_win)
+    if inside[w] and ((right_stack() and s.win and inside[s.win])
+        or (s.ctx_win and inside[s.ctx_win])) then
+      return true
+    end
+  end
+  return vim.bo[b].filetype == 'relationview'
+end
+
 -- 'w' 를 누를 때마다 도는 단계. 화면의 몇 %까지 넓힐지.
 --
 --   let g:relationview_wide_steps = [50, 75]       " 기본 (.vimrc 가 이걸 준다)
@@ -7679,6 +7797,15 @@ function A.adopt_here(late)
       local okv, mark = pcall(function() return vim.w[w].rv_tree end)
       if okv and mark then
         s.tree_win = w
+        -- s.tree_last 는 다른 탭의 트리가 드러낸 것이다. 그대로 두면 이 탭의 트리가 같은 파일로
+        -- 따라가지 않았다 (다른 탭에서 \P 로 고정을 풀었을 때 등). 이 탭의 트리가 지금 커서를 둔
+        -- 것으로 바꾼다 - 이미 그 파일에 있으면 다시 훑지 않는다 (훑기는 큰 트리에서 1-3초)
+        s.tree_last = nil
+        pcall(function()
+          local st = require('neo-tree.sources.manager').get_state('filesystem', nil, w)
+          local node = st.tree and st.tree:get_node()
+          s.tree_last = node and node:get_id() or nil
+        end)
         break
       end
     end
@@ -7690,7 +7817,12 @@ end
 
 api.nvim_create_autocmd({ 'TabEnter', 'TabClosed' }, {
   group = group,
-  callback = function() pcall(A.adopt_here) end,
+  callback = function()
+    pcall(A.adopt_here)
+    -- 탭을 옮길 때의 WinEnter 는 이보다 먼저 돌아 s.tree_win 이 아직 앞 탭의 트리였다 - 그 따라가기는
+    -- '트리가 안 보인다' 로 건너뛰었다. 이 탭의 트리를 집은 지금 한 번 건다 (실시간 경로일 때만 움직인다)
+    tree_follow_soon()
+  end,
 })
 
 function A.pin()

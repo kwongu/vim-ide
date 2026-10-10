@@ -1937,19 +1937,30 @@ also on `?`, so nothing was lost. neo-tree's two-key sort maps (`oc` `od` `og`
 `om` `on` `os` `ot`) are dropped - they start with `o`, so `o` used to wait
 `timeoutlen` before it opened anything.
 
-The trees **follow the edit window by default** (*live path* mode): the F9
-sidebar, the F11 floating tree and the tree in the F12 RelationView column all
-expand to every file you move to, with the cursor on it. `\P` switches all three
-to the *fixed* mode, where they stay where they are while you move between
-files, and `\P` again goes back (from any window; `:VimIdeTreePin [on|off]`
-does the same). Only the mode that differs from the one you started with is
-marked at the top of the tree windows (` [고정] \P 로 실시간 경로 `), so the
-default costs no line. Going back to live from an edit window jumps the trees
-to the current file at once. Fixed stops only the following: opening and
+The trees **follow the edit window by default** (*live path* mode): they
+expand to every file you move to, with the cursor on it. `\P` switches a tree
+to the *fixed* mode, where it stays where it is while you move between files,
+and `\P` again goes back. There are two separate modes: one for the F9
+sidebar and the F11 floating tree together, and one for the tree in the F12
+RelationView column - fixing one leaves the other following. Which one `\P`
+switches depends on where you press it: anywhere in the RelationView column
+(its tree, the relation list or a preview) it is the F12 tree; in the F9 or
+F11 tree it is those; in an edit window it is the tree you can see in the tab -
+the F9 sidebar when it shows the file tree, else the RelationView tree when
+that is open, else F9/F11. The message says which. `:VimIdeTreePin [on|off]`
+(F9/F11) and `:RelationViewTreePin [on|off]` (F12) set one directly. Only a
+mode that differs from the one you started with is marked at the top of its
+tree windows (` [고정] \P 로 실시간 경로 `), so the default costs no line.
+Going back to live jumps the tree to the current file at once (F9/F11 when you
+are in an edit window, F12 unless you are in its tree - then it follows when
+you go back to the edit window). Fixed stops only the following: opening and
 expanding by hand in the tree, and an explicit `:Neotree reveal`, still work,
-and a fixed tree you open comes up at its root instead of expanded to the
-current file. It is the file tree that is fixed - neo-tree's buffers view
-(`<` / `>`) keeps following. `let g:vimide_tree_pinned = 1` starts fixed.
+and a fixed tree you open does not expand to the current file - it shows the
+place it was left at (its root the first time; the F12 tree keeps its place
+when RelationView is closed and opened again or switches layouts). It is the
+file tree that is fixed - neo-tree's buffers view (`<` / `>`) keeps
+following. `let g:vimide_tree_pinned = 1` starts F9/F11 fixed,
+`let g:relationview_tree_pinned = 1` the F12 tree.
 
 `y` was not free either. neo-tree has it on its file clipboard, in normal and
 visual mode, so `yy` or a `<C-v>` block `y` in the tree put nothing into a
