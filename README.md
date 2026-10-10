@@ -1937,17 +1937,20 @@ also on `?`, so nothing was lost. neo-tree's two-key sort maps (`oc` `od` `og`
 `om` `on` `os` `ot`) are dropped - they start with `o`, so `o` used to wait
 `timeoutlen` before it opened anything.
 
-`\P` pins the tree, and `\P` again lets it go (from any window;
-`:VimIdeTreePin [on|off]` does the same). Normally the tree follows the edit
-window - every file you move to gets expanded and the cursor jumps to it.
-Pinned, the F9 sidebar stays where it is while you move between files; a
-` [고정] \P 로 풀기 ` line at the top of the tree window says so. The tree in the
-RelationView column is not pinned - it always shows the current file. Letting go from an edit window jumps the tree to the
-current file at once. Only the following stops: opening and expanding by hand
-in the tree, and an explicit `:Neotree reveal`, still work. It is the file
-tree that is pinned - neo-tree's buffers view (`<` / `>`) keeps following and
-carries no marker. `let g:vimide_tree_pinned = 1` starts pinned (the first tree
-you open then comes up at its root instead of expanded to the current file).
+The tree is **fixed by default**: the F9 sidebar and the F11 floating tree stay
+where they are while you move between files in the edit window. `\P` switches
+to the *live path* mode, where every file you move to gets expanded and the
+cursor jumps to it, and `\P` again goes back to fixed (from any window;
+`:VimIdeTreePin [on|off]` does the same). Only the mode that differs from the
+one you started with is marked at the top of the tree window
+(` [실시간 경로] \P 로 고정 `), so the default costs no line. Switching to live
+from an edit window jumps the tree to the current file at once. Fixed stops only
+the following: opening and expanding by hand in the tree, and an explicit
+`:Neotree reveal`, still work, and a fixed tree you open comes up at its root
+instead of expanded to the current file. The tree in the RelationView column
+always follows - it shows the current file. It is the file tree that is fixed -
+neo-tree's buffers view (`<` / `>`) keeps following. `let g:vimide_tree_pinned = 0`
+starts in the live path mode, as before.
 
 `y` was not free either. neo-tree has it on its file clipboard, in normal and
 visual mode, so `yy` or a `<C-v>` block `y` in the tree put nothing into a

@@ -1,4 +1,7 @@
--- treepin.lua - \P: neo-tree 트리를 고정한다 (편집 파일을 따라가지 않게, 토글)
+-- treepin.lua - \P: neo-tree 트리의 고정 모드 / 실시간 경로 모드 (토글)
+--
+-- 기본은 고정 모드다 (g:vimide_tree_pinned = 1, 요청): F9 사이드바와 F11 부동 트리가 편집
+-- 파일을 따라가지 않는다. \P 로 실시간 경로 모드(따라가기)로 바꾸고, 다시 \P 로 돌아온다.
 --
 -- EDIT 창에서 파일을 옮겨 다니면 neo-tree 가 그 파일까지 펼치고 커서를 옮긴다
 -- (filesystem.follow_current_file). 다른 곳을 보면서 트리는 그대로 두고 싶을 때 \P 로
@@ -30,7 +33,7 @@
 -- neo-tree 의 모듈을 미리 부르지 않는다 (시작이 15ms 느려졌다). 감싸기는 트리가 처음
 -- 생길 때(FileType neo-tree) 한다 - 그 전에는 따라갈 트리도 없다.
 --
---   let g:vimide_tree_pinned = 1   " 처음부터 고정해 두기 (기본 0)
+--   let g:vimide_tree_pinned = 0   " 처음부터 실시간 경로 모드로 (기본 1 = 고정)
 
 if vim.g.loaded_vimide_treepin then
   return
@@ -48,6 +51,9 @@ hl()
 local function pinned()
   return vim.g.vimide_tree_pinned == 1
 end
+-- 시작할 때의 모드 (.vimrc 의 g:vimide_tree_pinned). 표시는 이것과 다른 모드일 때만 단다 -
+-- 고정이 기본이 되자 모든 트리에 늘 '[고정]' 한 줄이 서 있었다
+local start_pinned = vim.g.vimide_tree_pinned == nil or vim.g.vimide_tree_pinned == 1
 
 -- 새 트리 상태가 복사해 가는 소스 기본 설정. neo-tree 가 아직 합치지 않았으면 nil
 local function fs_follow_config()
@@ -132,7 +138,8 @@ end
 -- 고정 표시. 우리 것은 값으로 알아본다 - 창 변수로 '우리가 달았다' 를 적었더니, 트리에서
 -- < > 로 보기를 바꾸었다 돌아오거나 :split 하면 그 값이 버퍼·새 창을 따라가 풀린 뒤에도
 -- 남았다. 다른 것이 winbar 를 쓰고 있으면 손대지 않는다
-local BAR = '%#VimIdeTreePinned# [고정] \\P 로 풀기 %*'
+local BAR_PIN = '%#VimIdeTreePinned# [고정] \\P 로 실시간 경로 %*'
+local BAR_LIVE = '%#VimIdeTreePinned# [실시간 경로] \\P 로 고정 %*'
 
 -- 고정되는 트리 창: neo-tree 파일 트리이고 RelationView 열의 트리(w:rv_tree)가 아닌 것
 local function pinnable(win)
@@ -146,10 +153,11 @@ local function mark_win(win)
     return
   end
   local cur = vim.wo[win].winbar
-  local want = pinned() and pinnable(win)
-  if want and cur == '' then
-    vim.wo[win].winbar = BAR
-  elseif not want and cur == BAR then
+  local bar = pinned() and BAR_PIN or BAR_LIVE
+  local want = pinned() ~= start_pinned and pinnable(win)
+  if want and (cur == '' or cur == BAR_PIN or cur == BAR_LIVE) then
+    vim.wo[win].winbar = bar
+  elseif not want and (cur == BAR_PIN or cur == BAR_LIVE) then
     vim.wo[win].winbar = ''
   end
 end
@@ -193,8 +201,8 @@ function _G.vimide_tree_pin(on)
   if not on then
     catch_up()
   end
-  api.nvim_echo({ { on and '트리 고정: 편집 파일을 따라가지 않습니다 (\\P 로 풀기)'
-    or '트리 고정 풀림: 편집 파일을 따라갑니다', on and 'WarningMsg' or 'None' } }, false, {})
+  api.nvim_echo({ { on and '트리 고정 모드: 편집 파일을 따라가지 않습니다 (\\P 로 실시간 경로)'
+    or '트리 실시간 경로 모드: 편집 파일을 따라갑니다 (\\P 로 고정)', on and 'WarningMsg' or 'None' } }, false, {})
 end
 
 api.nvim_create_user_command('VimIdeTreePin', function(o)
@@ -216,7 +224,7 @@ end, {
 
 vim.keymap.set('n', '<Leader>P', function()
   _G.vimide_tree_pin()
-end, { silent = true, desc = '트리 고정 / 풀기 (neo-tree 가 편집 파일을 따라가지 않게)' })
+end, { silent = true, desc = '트리 고정 모드 <-> 실시간 경로 모드 (neo-tree 가 편집 파일을 따라갈지)' })
 
 local group = api.nvim_create_augroup('VimIdeTreePin', { clear = true })
 -- 트리가 생기면 감싸고(처음 한 번), 고정 중이면 새 상태의 따라가기도 끈다
