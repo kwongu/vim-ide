@@ -18,6 +18,9 @@
 --   g:aerial_range_comments = 0   " 주석은 빼고 함수만 잡는다
 --   g:aerial_range_blank_gap = 1  " 주석과 함수 사이에 허용할 빈 줄 수
 --   :AerialSelectRange            " 더블클릭과 같은 일을 커맨드로
+--
+-- yy / Y 는 같은 범위를 레지스터에 복사하고, p / P 는 aerial 커서의 함수 아래 / 위에
+-- 편집 창에서 붙인다 (aerial 의 p = 미리보기 스크롤은 autojump 가 있어 쓰지 않는다)
 
 if vim.g.loaded_aerialrange then
   return
@@ -111,25 +114,25 @@ local function end_of_symbol(buf, item)
   return item.lnum
 end
 
--- aerial 창의 커서 줄이 가리키는 심볼을 편집 창에서 블록으로 잡는다
-function _G.aerial_select_range()
+-- aerial 창의 커서 줄이 가리키는 심볼의 범위: 위 주석부터 끝까지 (더블클릭·v·yy 가 같이 쓴다)
+local function symbol_range()
   local ok_util, util = pcall(require, 'aerial.util')
   local ok_data, data = pcall(require, 'aerial.data')
   if not (ok_util and ok_data) then
-    return false
+    return nil
   end
   if not util.is_aerial_buffer(0) then
-    return false
+    return nil
   end
   local lnum = api.nvim_win_get_cursor(0)[1]
   local bufdata = data.get_or_create(0)
   local item = bufdata and bufdata:item(lnum)
   if not item or not item.lnum then
-    return false
+    return nil
   end
   local src_win = util.get_source_win(api.nvim_get_current_win())
   if not (src_win and api.nvim_win_is_valid(src_win)) then
-    return false
+    return nil
   end
   local buf = api.nvim_win_get_buf(src_win)
   local first = item.lnum
@@ -138,7 +141,16 @@ function _G.aerial_select_range()
   local total = api.nvim_buf_line_count(buf)
   top = math.max(1, math.min(top, total))
   last = math.max(top, math.min(last, total))
+  return { win = src_win, buf = buf, top = top, last = last, name = item.name or '?' }
+end
 
+-- aerial 창의 커서 줄이 가리키는 심볼을 편집 창에서 블록으로 잡는다
+function _G.aerial_select_range()
+  local r = symbol_range()
+  if not r then
+    return false
+  end
+  local src_win, top, last = r.win, r.top, r.last
   api.nvim_set_current_win(src_win)
   -- 점프 전 자리를 jumplist 에 남긴다 - C-o 로 돌아올 수 있게
   pcall(vim.cmd, "normal! m'")
@@ -150,6 +162,114 @@ function _G.aerial_select_range()
   vim.cmd('normal! V')
   api.nvim_win_set_cursor(src_win, { top, 0 })
   vim.cmd('normal! zt')
+  return true
+end
+
+-- yy / p : aerial 창에서 함수를 통째로 복사하고 붙인다 (요청).
+--
+-- yy 는 더블클릭으로 잡히는 범위(위 주석부터 함수 끝까지)를 줄 단위로 레지스터에
+-- 담는다 - "ayy 처럼 레지스터를 고를 수 있고, 편집 창에서 p 해도 같은 것이 붙는다.
+-- p / P 는 aerial 커서가 가리키는 함수의 아래 / 위에 편집 창에서 붙인다 (커서는
+-- aerial 에 그대로). aerial 에서 yy 한 함수를 붙일 때는 함수 사이에 빈 줄 하나를
+-- 둔다 - 끝 '}' 바로 밑에 다음 함수의 주석이 붙으면 읽기 어렵다. 다른 데서 복사한
+-- 것은 줄 단위로 그대로 붙인다. 숫자를 주면(3p) 그만큼 붙인다. 되돌리기는 u 한 번.
+local last_yank -- aerial yy 로 담은 줄 (붙일 때 함수 사이 빈 줄을 둘지 가린다)
+local yank_ns = api.nvim_create_namespace('aerial_yank')
+
+local function default_reg(reg)
+  return reg == nil or reg == '' or reg == '"' or reg == '+' or reg == '*'
+end
+
+function _G.aerial_yank_range(reg)
+  local r = symbol_range()
+  if not r then
+    return false
+  end
+  local lines = api.nvim_buf_get_lines(r.buf, r.top - 1, r.last, false)
+  reg = reg or vim.v.register
+  if reg == '' then
+    reg = '"'
+  end
+  vim.fn.setreg(reg, lines, 'V')
+  if default_reg(reg) then
+    -- 보통 yank 처럼 "0 과 이름 없는 레지스터에도 (편집 창의 p 가 그것을 쓴다)
+    vim.fn.setreg('0', lines, 'V')
+    vim.fn.setreg('"', lines, 'V')
+  end
+  last_yank = table.concat(lines, '\n')
+  -- 복사한 범위를 편집 창에서 잠깐 칠한다 (yank 했다는 표시)
+  pcall(function()
+    vim.hl.range(r.buf, yank_ns, 'IncSearch', { r.top - 1, 0 }, { r.last - 1, -1 },
+      { regtype = 'V' })
+    vim.defer_fn(function()
+      pcall(api.nvim_buf_clear_namespace, r.buf, yank_ns, 0, -1)
+    end, 250)
+  end)
+  vim.notify(('함수 복사: %s (%d줄)'):format(r.name, #lines))
+  return true
+end
+
+function _G.aerial_put_range(before, reg, count)
+  local r = symbol_range()
+  if not r then
+    return false
+  end
+  if not vim.bo[r.buf].modifiable then
+    vim.notify('편집 창 버퍼를 고칠 수 없습니다 (modifiable 꺼짐)', vim.log.levels.WARN)
+    return false
+  end
+  reg = reg or vim.v.register
+  if reg == '' then
+    reg = '"'
+  end
+  local lines = vim.fn.getreg(reg, 1, true)
+  if type(lines) ~= 'table' or #lines == 0 then
+    vim.notify(('레지스터 %s 가 비어 있습니다'):format(reg), vim.log.levels.WARN)
+    return false
+  end
+  local block = last_yank ~= nil and table.concat(lines, '\n') == last_yank
+  local function blank(l)
+    return l == nil or l:match('^%s*$') ~= nil
+  end
+  local out = {}
+  for _ = 1, math.max(1, count or 1) do
+    if block and before then
+      vim.list_extend(out, lines)
+      out[#out + 1] = ''
+    else
+      if block then
+        out[#out + 1] = ''
+      end
+      vim.list_extend(out, lines)
+    end
+  end
+  local at -- 이 줄 앞(0 기준)에 넣는다
+  if before then
+    at = r.top - 1
+    -- 위 함수와 붙지 않게: 넣을 자리 바로 위가 빈 줄이 아니면 앞에도 빈 줄
+    if block and at > 0 and not blank(api.nvim_buf_get_lines(r.buf, at - 1, at, false)[1]) then
+      table.insert(out, 1, '')
+    end
+  else
+    at = r.last
+    -- 함수 끝 바로 밑이 이미 빈 줄이면 그 빈 줄 뒤에 넣는다 (빈 줄이 두 겹이 되지 않게)
+    if block and blank(api.nvim_buf_get_lines(r.buf, at, at + 1, false)[1])
+        and at < api.nvim_buf_line_count(r.buf) then
+      table.remove(out, 1)
+      at = at + 1
+      out[#out + 1] = ''
+    end
+  end
+  api.nvim_buf_set_lines(r.buf, at, at, false, out)
+  -- 붙인 함수의 첫 줄로 편집 창 커서를 (포커스는 aerial 에 그대로)
+  local first = at + 1
+  while first <= at + #out and blank(api.nvim_buf_get_lines(r.buf, first - 1, first, false)[1]) do
+    first = first + 1
+  end
+  pcall(api.nvim_buf_set_mark, r.buf, '[', at + 1, 0, {})
+  pcall(api.nvim_buf_set_mark, r.buf, ']', at + #out, 0, {})
+  pcall(api.nvim_win_set_cursor, r.win, { math.min(first, api.nvim_buf_line_count(r.buf)), 0 })
+  vim.notify(('붙임: %d줄 (%s %s)'):format(#out, r.name, before and '위' or '아래'))
   return true
 end
 
@@ -171,5 +291,17 @@ api.nvim_create_autocmd('FileType', {
     vim.keymap.set('n', 'v', function()
       _G.aerial_select_range()
     end, { buffer = a.buf, desc = 'aerial: 함수를 주석까지 블록으로 잡기' })
+    vim.keymap.set('n', 'yy', function()
+      _G.aerial_yank_range(vim.v.register)
+    end, { buffer = a.buf, desc = 'aerial: 함수를 주석까지 통째로 복사' })
+    vim.keymap.set('n', 'Y', function()
+      _G.aerial_yank_range(vim.v.register)
+    end, { buffer = a.buf, desc = 'aerial: 함수를 주석까지 통째로 복사' })
+    vim.keymap.set('n', 'p', function()
+      _G.aerial_put_range(false, vim.v.register, vim.v.count1)
+    end, { buffer = a.buf, desc = 'aerial: 복사한 것을 이 함수 아래에 붙이기 (편집 창)' })
+    vim.keymap.set('n', 'P', function()
+      _G.aerial_put_range(true, vim.v.register, vim.v.count1)
+    end, { buffer = a.buf, desc = 'aerial: 복사한 것을 이 함수 위에 붙이기 (편집 창)' })
   end,
 })

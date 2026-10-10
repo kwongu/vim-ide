@@ -912,7 +912,8 @@ augroup VimIdeAerialBg
         \ | endif
 augroup END
 " 아웃라인에서 더블클릭(또는 v)하면 편집 창에서 그 함수를 주석까지 블록으로
-" 잡는다 - ~/.vim/plugin/aerialrange.lua
+" 잡는다. yy(Y) 는 그 범위를 복사, p / P 는 커서의 함수 아래 / 위에 편집 창에서
+" 붙인다 - ~/.vim/plugin/aerialrange.lua
 
 " 프로젝트 전역 심볼 검색(소스인사이트의 Ctrl+O)은 <leader>fs 와 <F7> =
 " :ProjectSymbols 가 담당한다(gtags 색인 기반, 아래 Project files 절).

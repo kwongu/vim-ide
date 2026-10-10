@@ -3635,6 +3635,8 @@ Two things make it behave like Source Insight's Symbol Window:
 |---|---|
 | move the cursor in the outline | the edit window follows to that symbol, focus stays in the outline (`autojump`) |
 | double-click a symbol (or press `v`) | the edit window selects that function **including the comment above it**, with the selection's first line at the top of the window (the cursor sits on that line; `o` goes to the end) |
+| `yy` (or `Y`) on a symbol | copies that function, comment included (the same range), linewise into the register - `"ayy` picks a register, and `p` in the edit window pastes it too |
+| `p` / `P` on a symbol | pastes the register below / above that symbol's function in the edit window (focus stays in the outline); a function copied with `yy` gets one blank line between it and its neighbour, a count repeats it, `u` in the edit window undoes it in one step. This takes aerial's own `p` (scroll the preview), which `autojump` makes unnecessary |
 
 The selection is the useful unit: a function without the comment that says
 what it is for is rarely what you wanted to copy or move. The comment is
