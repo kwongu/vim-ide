@@ -180,6 +180,64 @@ function _G.vimide_dirdiff_picked()
   return first
 end
 
+-- [A] 를 고른 비교 트리의 뿌리가 바뀌었다 (dirdiffview.lua 의 경로 바꾸기): 고른 곳(ctx - 옛 트리의 줄)만 버린다 -
+-- 경로는 디스크에 그대로라 [B] 와 견줄 수 있다
+function _G.vimide_dirdiff_pick_forget(tab)
+  if first and first.ctx and first.ctx.tab == tab then
+    first.ctx = nil
+  end
+end
+
+-- p 의 위 디렉터리 쪽 링크만 푼다 (있는 데까지 - 이름을 바꾼 뒤라 옛 경로의 위가 없을 수 있다). 마지막 이름은 그대로:
+-- [A] 가 링크면 그 링크 자신이다 (first.real 은 가리키는 것이라, 그것으로 견주었더니 링크가 가리키는 파일의 이름을
+-- 바꾸면 [A] 가 링크에서 그 파일로 옮겨 갔다)
+local function real_dir(p)
+  local uv = vim.uv or vim.loop
+  local rest, cur = {}, p
+  while true do
+    local dir, name = cur:match('^(.*)/([^/]+)$')
+    if not dir then
+      return p
+    end
+    table.insert(rest, 1, name)
+    local r = uv.fs_realpath(dir == '' and '/' or dir)
+    if r then
+      return (r:gsub('/$', '')) .. '/' .. table.concat(rest, '/')
+    end
+    cur = dir
+  end
+end
+
+-- [A] 나 그 위 디렉터리의 이름이 바뀌었다 (dirdiffview.lua 의 트리 r, old -> new 절대 경로): [A] 를 새 경로로. 고른
+-- 곳(옛 줄)은 버린다. 그대로 두면 [B] 에서 '먼저 고른 것이 없어져 버렸습니다' 로 [A] 가 버려졌다.
+-- new 가 nil 이면 지웠다 (트리의 d): [A] 를 버린다. old 는 뿌리를 푼 경로(/private/tmp)라 [A] 는 경로 그대로, 아니면
+-- 위 디렉터리를 푼 것으로 견준다 (neo-tree 에서 /tmp 로 골랐다)
+function _G.vimide_dirdiff_pick_moved(old, new)
+  if not first then
+    return
+  end
+  local function under(p)
+    return p == old or p:sub(1, #old + 1) == old .. '/'
+  end
+  local p = first.path
+  if not under(p) then
+    p = real_dir(p)
+  end
+  if not under(p) then
+    -- [A] 는 그대로지만 링크가 가리키던 것이 옮겨졌을 수 있다
+    first.real = (vim.uv or vim.loop).fs_realpath(first.path)
+    return
+  end
+  if new then
+    first.path = new .. p:sub(#old + 1)
+    first.real = (vim.uv or vim.loop).fs_realpath(first.path)
+    first.ctx = nil
+  else
+    first = nil
+  end
+  mark_all()
+end
+
 -- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Tab 과 DirDiff 비교 트리의 Tab 이 같이 쓴다.
 -- ctx: 비교 트리에서 골랐으면 { tab = 세션의 탭, rel = 줄, side = 'a' | 'b' } (neo-tree 는 nil)
 function _G.vimide_dirdiff_pick_path(path, kind, ctx)

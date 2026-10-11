@@ -2438,7 +2438,8 @@ bar with `'laststatus'` 0 or 3); neither scrolls away, and both follow the
 window width. The path line cannot be entered - the cursor goes back to the
 tree, and a click on a half switches to that side (with
 `g:vimide_dirdiff_pair_tab = 0`, `<C-w>k` from the tree passes it and goes on
-to the edit windows above).
+to the edit windows above). A double click on a half edits that path, as in
+Beyond Compare's path fields - see *Changing the paths* below.
 
 The verdict column says `≠` for files that differ and `=` for identical ones,
 and stays empty for one-sided entries (orphans) and folders, as in Beyond
@@ -2543,6 +2544,12 @@ those two windows): the same file in any other window keeps its colors.
 | `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which |
 | `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
 | `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
+| `a` | add a file on the current side (A or B), as `a` in neo-tree: a name ending in `/` makes a folder, and `x/y/z.c` makes the missing folders too. It goes into the row's folder when the row is a folder on that side, otherwise next to the row (on the empty half of a one-sided row: into the same folder on that side, made if missing). The prompt shows that folder and completes names from it. See *Adding, deleting and renaming* below |
+| `A` | add a folder on the current side, at the same place as `a` |
+| `d` | delete on the current side: what was picked there with `<Space>`, without picks the rows of a visual selection, without that the row under the cursor - after a question naming the side, the paths and how many entries each folder holds (the default answer is no; `let g:vimide_dirdiff_confirm_delete = 0` skips it). A symlink is removed, not what it points to |
+| `r` | rename or move the entry on the current side: the prompt holds its path from that side's root, so it can also go into another folder there (missing folders are made); a name ending in `/` moves it into that folder under the same name, as `mv x dir/`; a name that exists is refused |
+| `e` | change the current side's root folder and compare again in the same tab, as editing a path field in Beyond Compare (a double click on that half of the path line does the same); see *Changing the paths* below |
+| `<2-LeftMouse>` | double click: on a row, the same as `<CR>`; on a half of the path line above the tree, change that side's root folder as `e` does (a single click there only switches to that side) |
 | `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
 | `q` | finish: closes the tab and its compare tabs, goes back, removes the buffers it opened (an edited one is kept, and named) |
 | `?` | these keys |
@@ -2554,6 +2561,7 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 |---|---|
 | `\d` | choose the view: *all*, *differences*, *context* - a small menu (`Enter`, a double click or `1` `2` `3` picks, `q` / `Esc` closes, `?` lists these keys); see *View modes* below. The window bar shows the current one |
 | `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same); for two picked files, back to where `[B]` was picked. While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
+| `<2-LeftMouse>` on a window bar | a double click on a window bar changes that side's file and compares the new pair in the same tab (`:DirDiffPath a` / `:DirDiffPath b` in a compare window does the same; a single click still just moves into that window) - see *Changing the paths* below |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c`. Past the last change (before the first one, or in a pair with no changes) the cursor stays and it says so - `마지막 차이 - 다음 차이 파일: <C-n> 다시 또는 Ctrl+M` - and the same key once more right away opens the next (previous) file that differs; see *Next and previous file* below |
 | `<C-m>` / `<C-S-m>` | Ctrl+M / Shift+Ctrl+M: the next / previous file that differs, at any point, in the same compare tab - Beyond Compare's *다음 차이 파일 (Ctrl+M)* / *이전 차이 파일 (Shift+Ctrl+M)*. Only while the window still shows its pair (after `:e` of another file they are the keys they were). Where the terminal sends Ctrl+M as a plain Enter (inside tmux: a server older than 3.2 or `extended-keys off`; Tera Term), `Enter` right after the end-of-changes message does it instead; any other `Enter` stays `Enter`. See *Ctrl+M and Enter* below |
 | `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
@@ -2789,6 +2797,11 @@ Outside DirDiff `,r` / `,e` still cycle the buffers (`3,r` three buffers on).
 - `<CR>` on a pair that already has a compare tab goes to it; `o` opens one in
   the background (the cursor waits on the first change) or reads an open one
   again.
+- A double click on a window bar (or `:DirDiffPath [a|b] [file]` in a compare
+  window) puts another file on that side and compares the new pair in the same
+  tab - see *Changing the paths* below. A tree `d` / `r` on a file a compare
+  tab shows updates the tab: a deleted side becomes `(없음)` (the tab closes
+  when both sides are gone), a renamed file is followed to its new name.
 - `q` in a compare tab, `:tabclose`, or closing its last compare window: back
   to the tree, on that pair's row (two picked files: where `[B]` was picked -
   see *Two picked files*). The buffers the compare opened are removed,
@@ -2926,6 +2939,75 @@ the current one in brackets.
   from the table). `let g:vimide_dirdiff_only_diff = 1` still starts in
   *differences*.
 
+**Adding, deleting and renaming** in the tree (`a` / `A` / `d` / `r`, the
+neo-tree keys) work on the current side - the half the cursor is in, shown as
+`[A 쪽]` / `[B 쪽]` in the status line:
+
+- The files are changed directly (no shell). Nothing is written below a folder
+  that is really a symlink (as the copy does), and deleting a symlink removes
+  the link only; a folder is deleted with everything in it, and when some of
+  it cannot be deleted (a read-only folder) the rest still goes and the error
+  is shown. The side's root itself is never deleted, and a name that leads out
+  of the root (`..`, an absolute path elsewhere) is refused. A name starting
+  with `/` or `~/` is an absolute path; `~name` is just a name. Before a delete
+  or a rename every folder above the entry is checked again on disk: when one
+  has turned into a symlink since the scan (it would point outside the root)
+  the entry is refused with a hint to compare again with `R`.
+- While another comparison tab copies into a folder that overlaps this side's
+  root, `a` `A` `d` `r` wait for that copy, as they do for this tab's own.
+- An entry whose file (or a file below the folder) has unsaved changes in a
+  buffer is skipped and named: deleting it would leave only the buffer, and
+  after a rename `:w` would bring the old name back.
+- Only the changed place is compared again (the entry, or the highest folder
+  that had to be made), as after a copy, and other comparison tabs that hold it
+  follow. The cursor lands on the new or renamed entry once its folder's new
+  listing is in (the folders on the way are opened); after a delete it stays
+  where it was - on the next row when the deleted one is gone from both sides
+  (still on the same side). When the current view hides the new entry it says
+  so instead of moving.
+- Compare tabs of the files involved follow: after a delete the missing side
+  shows `(없음)` and the tab closes when both sides are gone; after a rename
+  the tab keeps comparing the same two files under the new name (a one-sided
+  file just moves to its new row). `[A]` picked with `Tab` follows a rename
+  too. Marks made with `<Space>` follow a rename and are dropped by a delete.
+- `let g:vimide_dirdiff_file_ops = 0` leaves `a` `A` `d` `r` unmapped.
+  `let g:vimide_dirdiff_confirm_delete = 0` deletes without the question - the
+  files do not go to a trash folder, so a slipped `d` deletes a whole folder
+  for good.
+
+**Changing the paths** (Beyond Compare's editable path fields):
+
+```vim
+:DirDiffPath [a|b] [path]   " in the tree tab: that side's root folder; in a compare window: that side's file
+```
+
+- In the tree, `e` (the current side), a double click on that half of the path
+  line, or `:DirDiffPath` with no path asks for the new folder with the current
+  one filled in (folder completion); `:DirDiffPath b ../other` sets it
+  directly. `~`, `$VAR` and paths relative to the current directory work, as
+  for `:DirDiff`; it has to be an existing folder, and not the other side's.
+  The same tab compares again with the new root (the path line, the status
+  line and the tab name follow; open folders stay open where they exist). The
+  compare tabs of the old pairs close - when one of their buffers has unsaved
+  changes it asks first, and such a buffer is kept (and named) as on `q`. Two
+  picked files keep their tab (their paths do not depend on the roots), and
+  `<Space>` marks are dropped; an `[A]` picked in this tree keeps its path.
+- In a compare window, a double click on a window bar or `:DirDiffPath [a|b]
+  [file]` (file completion) puts another file on that side - the missing side
+  of a one-sided pair included - and the tab shows the new pair with its own
+  paths, like two picked files: bars, tab name, undo across the pair and the
+  rest start over, `q` still goes back to the tree row the tab came from, and
+  `q` in the tree still closes it. When the new pair is a pair of this
+  comparison (the same path under A and under B) it becomes that row's
+  ordinary compare tab again. A side whose buffer has unsaved changes asks
+  first (the buffer is kept, and named when the comparison ends with `q` in
+  the tree). When one of the tab's two windows was closed, it is made again
+  first. Going from a binary or too large file back to text files brings the
+  overview bar and the line details back.
+- `let g:vimide_dirdiff_path_edit = 0` leaves the double clicks and `e` alone
+  (a double click on the path line then does nothing, on a window bar it does
+  what it did before); `:DirDiffPath` always works.
+
 Copying in the tree:
 
 - It asks first, naming what goes which way
@@ -3016,7 +3098,11 @@ Copying in the tree:
   0: leave them alone), `g:vimide_dirdiff_file_keys` (1: `<C-m>` / `<C-S-m>` -
   and Enter right after the end-of-changes message - open the next / previous
   file that differs, 0: leave them alone), `g:vimide_dirdiff_pick_vimdiff` (0: two files picked
-  with `Tab` / `Tab` open in a compare tab, 1: the plain vimdiff of before). A comparison
+  with `Tab` / `Tab` open in a compare tab, 1: the plain vimdiff of before),
+  `g:vimide_dirdiff_file_ops` (1: the tree's `a` `A` `d` `r`, 0: unmapped),
+  `g:vimide_dirdiff_confirm_delete` (1: `d` asks first, 0: deletes at once),
+  `g:vimide_dirdiff_path_edit` (1: double clicks and `e` change the paths, 0:
+  only `:DirDiffPath`). A comparison
   keeps the layout it was opened with; the colors change at the next
   `:DirDiff`, color scheme or `'background'` change.
 - `g:vimide_dirdiff_date_format` (`'%Y-%m-%d %p %l:%M:%S'`) is the tree's

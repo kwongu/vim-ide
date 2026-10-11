@@ -79,6 +79,18 @@
 --               항목마다 안전하게 한다 (같은 이름은 덮어쓰고 디렉터리는 합친다 - 지우지
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
+--   a / A       지금 쪽(A/B)에 파일 더하기 (끝이 / 면 디렉터리, x/y/z.c 는 없는 위 디렉터리도) / 디렉터리 더하기
+--               - neo-tree 와 같은 키. 커서 줄이 그쪽의 디렉터리면 그 안, 아니면 그 줄의 부모 디렉터리에 (그쪽에
+--               없는 고아 줄이면 그쪽의 그 부모 - 없으면 만든다). 있는 이름·빈 이름·뿌리 밖(..)은 거절
+--   d           지금 쪽의 것 지우기: 그쪽에서 Space 로 고른 것, 없으면 비주얼 줄, 그것도 없으면 커서 줄. 쪽·이름·
+--               디렉터리 안의 항목 수를 보이고 묻는다 (기본 아니오). 링크는 링크만, 디렉터리는 안의 것째, 뿌리는 아니
+--   r           지금 쪽의 것 이름 바꾸기·옮기기 (그쪽 뿌리 안의 다른 디렉터리로도 - 끝이 / 면 그 디렉터리 안으로 같은
+--               이름째, mv x dir/ 처럼. 새 이름이 있으면 거절). d r 은 위 디렉터리가 훑은 뒤 링크로 바뀌었으면 거절
+--               a A d r 모두 바뀐 곳만 다시 보고 커서는 새 항목으로. 열어 둔 비교 탭은 지운 쪽을 '(없음)' 으로(두 쪽
+--               다 없어지면 닫는다), 이름을 바꾼 쪽은 새 이름을 따라간다. 고친 채인 버퍼가 걸린 것은 하지 않는다
+--   e           지금 쪽의 경로(뿌리 디렉터리) 바꾸고 같은 탭에서 다시 비교 (Beyond Compare 의 경로 칸 고치기). 경로 줄
+--               창의 그 반쪽을 두 번 눌러도 (한 번 누르기는 예전대로 쪽 바꾸기), :DirDiffPath [a|b] [경로] 도.
+--               옛 뿌리의 짝을 보이던 비교 탭은 닫는다 (고친 버퍼가 있으면 먼저 묻는다)
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
 --   ,r / ,e     다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3gt 처럼 3번 탭으로, 3,e 는 세 탭 앞으로).
 --               비교 창에서도. 아래 tab_cycle
@@ -95,6 +107,9 @@
 -- 있는 줄) 덩어리째다 - 여러 줄일 수 있다.
 -- 비교 탭 밖의 <C-r>(되돌리기 취소)·<C-l>(창 옮기기)은 그대로다.
 -- 비교 창의 <C-w>w/<C-w>W 는 곁 창(개요 막대·줄 자세히)을 건너뛴 다음/앞 창이다 (A·B 를 오간다).
+-- 비교 창의 창 머리를 두 번 누르면(또는 비교 창에서 :DirDiffPath [a|b] [경로]) 그쪽 파일을 바꿔 그 탭에서 새 두
+-- 파일을 견준다 - 고른 두 파일처럼 경로를 따로 싣고 세션에 붙은 채 (q 는 트리의 그 줄로), 한쪽에만 있는 파일의 없는
+-- 쪽도 이것으로 정한다.
 -- 비교 창의 <C-z>/<C-y> 는 짝 전체의 되돌리기/다시 실행 (Beyond Compare 처럼 - 커서가 A·B 어느 쪽에 있든 두 파일
 -- 중 마지막으로 바뀐 것을. 타자, <C-r>/<C-l> 복사, dp/do 모두. 횟수, 비주얼도. 삽입 모드의 <C-z> 는 삽입을 끝내고
 -- 방금 친 것부터, 삽입 모드의 <C-y> 는 그대로 - 아래 '짝 전체의 되돌리기'). 비교 창 밖의 <C-z>(nvim 멈추기)·<C-y>
@@ -120,6 +135,9 @@
 --   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때만, 기본: 화면의 40%)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
+--   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
+--   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (휴지통 없이 디스크에서 - 되돌릴 수 없다)
+--   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기(경로 줄·창 머리)와 트리의 e 를 걸지 않기
 --   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
 --   let g:vimide_dirdiff_colors = 'neogit' " Neogit 상태 화면의 색 ('classic' 예전 색, 기본 'bc': Beyond Compare)
 --   let g:vimide_dirdiff_pair_tab = 0      " 파일 짝을 비교 탭 대신 트리 위의 편집 창 둘에서
@@ -773,6 +791,10 @@ local function start_job(s)
         if #msg > 0 then
           say(table.concat(msg, ' / '), vim.log.levels.WARN)
         end
+        -- 상태줄·빈 트리를 '멈춤' 으로 (status_text). 그대로 두면 뿌리가 없어진 비교(다른 탭에서 그 디렉터리를
+        -- 지웠다 - tr.others 의 다시 훑기)가 '훑는 중 0초 · (읽는 중…)' 으로 남았다
+        s.prog_dirty, s.need_full = true, true
+        schedule_render(s)
       end)
     end,
   })
@@ -835,6 +857,20 @@ on_event = function(s, ev)
         ro.ready = true       -- 복사한 뒤의 새 판정이 왔다 - 이제 그 짝을 다시 연다
       end
     end
+    -- 더하기·이름 바꾸기 뒤 (tr.changed): 새 항목이 든 부모의 목록이 왔다 - 커서를 그리로 (먼저 옮기면 옛 목록이라
+    -- 줄이 없다). 그사이 R 로 뒤쪽이 바뀌었으면 버린다
+    local og = s.op_goto
+    if og and og.parent == ev.dir then
+      s.op_goto = nil
+      if og.job == s.job then
+        s.want_rel = og.rel
+        s.want_note = og.rel   -- 그래도 줄이 없으면 render 가 까닭(보기)을 알린다
+      end
+    end
+    -- 접혀 있어 따로 청하는 디렉터리의 아래로 (tr.chain - 새로 생긴 디렉터리 아래의 짝을 다시 열려고): 이 목록이 왔다
+    if s.chain then
+      s.chain[ev.dir] = nil
+    end
     if s.walk and s.walk.wait == ev.dir then
       s.walk.wait = nil
       walk_fn(s)              -- 예전 뒤쪽의 보기 <C-n>/<C-p>: 기다리던 목록이 왔다 (walk)
@@ -843,7 +879,7 @@ on_event = function(s, ev)
     -- 새 뒤쪽이 아직 부모를 훑지 않아 빈 목록을 돌려주었고, 펼친 폴더가 모두 비었다)
     for _, e in ipairs(s.dirs[ev.dir].entries) do
       local c = join(ev.dir, e.name)
-      if is_dir(e) and s.expanded[c] and not s.dirs[c] and not s.loading[c] then
+      if is_dir(e) and (s.expanded[c] or (s.chain and s.chain[c])) and not s.dirs[c] and not s.loading[c] then
         request_list(s, c)
       end
     end
@@ -1427,7 +1463,10 @@ local function status_text(s)
   local function esc(t)
     return (t:gsub('%%', '%%%%'))
   end
-  if p.done then
+  if not (s.job and s.job > 0) then
+    -- 뒤쪽이 죽었다 (뿌리가 없어졌다 등 - start_job 의 on_exit). 그대로 두면 '훑는 중 0초' 로 남았다
+    parts[#parts + 1] = '멈춤 - R 로 다시 훑기'
+  elseif p.done then
     parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
   elseif p.again then
     parts[#parts + 1] = '바뀐 곳을 다시 보는 중'   -- 복사한 곳, :w 로 저장한 파일
@@ -1461,6 +1500,9 @@ end
 
 -- 보이는 줄이 하나도 없을 때
 local function empty_text(s)
+  if not (s.job and s.job > 0) then
+    return '  (비교가 멈췄습니다 - R 로 다시 훑기)'
+  end
   if not (s.prog and s.prog.done) then
     return '  (훑는 중…)'
   end
@@ -1531,6 +1573,11 @@ function tr.head_ensure(s)
     vim.b[b].airline_disable_statusline = 1   -- airline 이 칸 제목(상태줄)을 제 것으로 바꾸지 않게
     vim.bo[b].filetype = 'vimidedirdiffhead'
     pcall(api.nvim_buf_set_name, b, 'DirDiff 경로 #' .. b)
+    -- 두 번 누르기는 누른 쪽의 경로 바꾸기 (tr.head_click). 보통은 첫 누르기에 트리로 돌아가(cmp.bounce) 트리의
+    -- <2-LeftMouse> 가 받지만, 돌아가기(vim.schedule) 앞에 둘째가 오면 여기서 받는다 (그대로면 낱말 고르기 - 비주얼)
+    vim.keymap.set('n', '<2-LeftMouse>', function()
+      tr.head_click(s)
+    end, { buffer = b, nowait = true, silent = true, desc = '누른 쪽(A/B)의 경로 바꾸기' })
     s.hbuf = b
   end
   local w = cmp.open_extra(s.hbuf, { split = 'above', win = s.win_l, height = 1 })
@@ -1685,6 +1732,22 @@ render = function(s)
     s.want_rel = nil
   elseif keep and s.row_of[keep] then
     goto_row(s, s.row_of[keep])
+  elseif keep and #s.rows > 0 then
+    -- 커서 줄이 없어졌다 (지운 것, 보기에서 빠진 것): 그 자리의 줄에서 지금 쪽 그대로. 바이트 칸만 남겨 두었더니
+    -- 다음 줄의 B 반쪽이 더 뒤에서 시작해(여러 바이트 글자) cursor_side 가 A 로 읽었다 - B 에서 지운 뒤의 d 가
+    -- A 의 파일을 겨눴다
+    goto_row(s, math.min(api.nvim_win_get_cursor(s.win_l)[1], #s.rows))
+  end
+  -- 더하기·이름 바꾸기로 기다리던 줄(s.want_note - on_event 의 op_goto)이 부모의 새 목록에도 없다: 항목은 있는데 지금
+  -- 보기가 거른다면 그렇다고 알린다 (말없이 커서만 그대로였다)
+  local wn = s.want_note
+  s.want_note = nil
+  if wn and s.want_rel == wn then
+    local e = entry_of_fn(s, wn)
+    if e and not visible(s, e) then
+      s.want_rel = nil
+      say(('%s 는 지금 보기(%s)에서는 보이지 않습니다 - f 로 보기 바꾸기'):format(shown(wn), MODE[s.mode].label))
+    end
   end
   mark_side(s)
   -- 복사로 바뀐 파일을 보고 있었으면 그 짝을 다시 연다 (없던 쪽이 생겼다). 부모의 새 목록이
@@ -2224,6 +2287,10 @@ local function set_heads(v)
       if side == 'b' then
         text = text .. '%=' .. right
       end
+      -- 두 번 누르면 그쪽 파일 바꾸기 (_G.vimide_dirdiff_bar_click - 한 번 누르기는 예전처럼 그 창으로)
+      if on(vim.g.vimide_dirdiff_path_edit, 1) then
+        text = '%@v:lua.vimide_dirdiff_bar_click@' .. text .. '%X'
+      end
       set_wo(w, 'winbar', text)
     end
   end
@@ -2430,9 +2497,10 @@ local function fill(v, r, jump)
       pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
     end
   elseif not bin and v.bin_cut and not (v.ov or v.ld) and v.tab == api.nvim_get_current_tabpage() then
-    -- 알림 짝 뒤에 같은 탭에 보통 짝을 실었다 (다음 차이 파일이 탭을 다시 채운다 - cmp.fs_open): 닫았던 곁 창을
-    -- 다시 세운다. 예전에는 한 탭이 한 짝이라 알림이 끝이었는데, 그대로 두었더니 그 탭은 그 뒤로 두 창뿐이었다
-    -- (트리에서 바로 연 탭은 개요 막대·줄 자세히까지 넷). 줄 자세히는 지금 탭의 맨 아래에 서므로 그 탭에서만
+    -- 알림 짝 뒤에 같은 탭에 보통 짝을 실었다 (다음 차이 파일이 탭을 다시 채운다 - cmp.fs_open. 비교 창의 경로 바꾸기 -
+    -- cmp.set_path 도): 닫았던 곁 창을 다시 세운다. 예전에는 한 탭이 한 짝이라 알림이 끝이었는데, 그대로 두었더니
+    -- 그 탭은 그 뒤로 두 창뿐이었다 (트리에서 바로 연 탭은 개요 막대·줄 자세히까지 넷). 줄 자세히는 지금 탭의 맨
+    -- 아래에 서므로 그 탭에서만
     v.bin_cut = nil
     cmp.attach(v)
   end
@@ -2590,6 +2658,11 @@ local function open_pair(s, r, jump)
     end
     if #made > 0 and s.list_h then
       pcall(api.nvim_win_set_height, s.win_l, s.list_h)
+    end
+    -- 경로를 바꿔 따로 실었던 두 파일(cmp.set_path)은 버린다 - 이제 트리의 짝이다 (남겨 두면 트리 복사 뒤
+    -- on_copied 가 옛 두 파일로 다시 채웠다)
+    if jump ~= 'refill' then
+      v.pick, v.back = nil, nil
     end
     return fill(v, r, jump == true)
   end
@@ -3243,11 +3316,10 @@ local function act_copy(s, dir, l1, l2)
     local more = #names > 8 and (' 외 %d개'):format(#names - 8) or ''
     local msg = ('%s → %s: %s  (%s%s)\n%s 쪽의 같은 이름은 덮어씁니다. 디렉터리는 합칩니다 (지우지 않음).%s')
       :format(from:upper(), to:upper(), table.concat(what, ', '), table.concat(shown_names, ', '), more,
-        to:upper(), #skipped > 0 and ('\n건너뜀: ' .. table.concat(skipped, ', ')) or '')
-    local yes = vim.fn.confirm(msg, '&Yes\n&No', 2) == 1
-    -- 물음이 차지한 줄을 치운다 - 그대로 두면 다음 알림이 Press ENTER 를 띄우고, 그동안은
-    -- vim.schedule 이 돌지 않아 복사가 키를 누를 때까지 멈춰 있었다
-    vim.cmd('redraw')
+        to:upper(), #skipped > 0 and ('\n건너뜀 %d개: %s'):format(#skipped, tr.few(skipped, 4)) or '')
+    -- tr.confirm: Ctrl+C 도 아니오 (그대로 두면 E5108). 물음이 차지한 줄도 치운다 - 그대로 두면 다음 알림이
+    -- Press ENTER 를 띄우고, 그동안은 vim.schedule 이 돌지 않아 복사가 키를 누를 때까지 멈춰 있었다
+    local yes = tr.confirm(msg)
     if not yes then
       return say('복사하지 않았습니다')
     end
@@ -3284,7 +3356,9 @@ local function rels_in(o, full, rp, link)
 end
 
 -- 다시 볼 곳(rels: 뿌리에서의 경로)의 목록을 버린다 - 그 아래 펼쳐 둔 디렉터리는 부모의 새 목록이
--- 온 뒤에 다시 청한다 (on_event 의 'list'). 보고 있던 짝이 그 안이면 부모의 새 목록이 온 뒤에 다시 연다
+-- 온 뒤에 다시 청한다 (on_event 의 'list'). 보고 있던 짝이 그 안이면 부모의 새 목록이 온 뒤에 다시 연다.
+-- 뒤쪽에 'refresh' 를 보낸 뒤에 부른다 (tr.changed, tr.others. on_copied 는 뒤쪽이 먼저 다시 보았다): 아래에서
+-- 청하는 목록이 refresh 보다 먼저 가면 뒤쪽이 옛 모형으로 답해, 다시 열기가 옛 항목으로 끝났다
 local function forget(s, rels)
   for _, rr in ipairs(rels) do
     for k in pairs(s.dirs) do
@@ -3302,8 +3376,15 @@ local function forget(s, rels)
         local parent = o:match('^(.*)/[^/]+$') or ''
         s.reopen = s.reopen or {}
         s.reopen[o] = { parent = parent }
-        if parent ~= '' and not s.expanded[parent] then
-          request_list(s, parent)   -- 접혀 있어도 새 판정을 받아 온다
+        -- 접혀 있어도(위 디렉터리가 접혀 있어도) 새 판정을 받아 온다. 다시 본 곳(rr)의 아래는 뒤쪽이 아직 모른다
+        -- (refresh 는 rr 을 새로 만들 뿐 그 안은 훑기 전이다 - 바로 청하면 빈 목록이 와 다시 열기가 끝났다): rr 부터
+        -- 청하고 그 아래는 부모의 목록이 오는 대로 차례로 (tr.chain, on_event)
+        if parent ~= '' and not tr.listed(s, parent) then
+          if parent:sub(1, #rr + 1) == rr .. '/' then
+            tr.chain(s, rr, parent)
+          else
+            request_list(s, parent)
+          end
         end
         break
       end
@@ -3357,29 +3438,8 @@ local function on_copied(s, ev)
   schedule_render(s)
   -- 같은 곳이 든 다른 비교에도 알린다 (:w 의 BufWritePost 처럼) - Tab/Tab 으로 연 안쪽 비교에서
   -- 복사했더니 바깥 비교 탭은 R 을 누를 때까지 옛 판정(=)·크기·수를 그대로 보였다. 복사한 디렉터리가
-  -- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (R. 그쪽도 복사하는 중이면 그 복사가 끝난 뒤에)
-  for _, o in pairs(sessions) do
-    if o ~= s and not o.done and not o.solo then
-      local rels, whole = {}, false
-      for _, rr in ipairs(roots) do
-        local full = base .. '/' .. rr
-        local r, w = rels_in(o, full, real(full), false)
-        vim.list_extend(rels, r)
-        whole = whole or w
-      end
-      if whole then
-        if o.copying then
-          o.rescan = true
-        else
-          restart_fn(o)
-        end
-      elseif #rels > 0 then
-        forget(o, rels)
-        schedule_render(o)
-        send(o, { cmd = 'refresh', paths = rels })
-      end
-    end
-  end
+  -- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (tr.others - 트리의 파일 다루기도 같이 쓴다)
+  tr.others(s, to, roots)
   -- Tab/Tab 으로 고른 두 파일의 비교 탭은 위의 다시 채우기(reopen - 트리의 줄을 따른다)에 들지 않는다: 복사한 곳
   -- 아래의 파일을 보이면 여기서 다시 채운다 (보통 짝의 'refill' 처럼, 어느 세션에 붙었든 혼자 섰든). 버퍼를 다시
   -- 읽고 창 머리만 고쳤더니 같은 이름의 바이너리를 덮어써도 글 diff 그대로였다 (알림·판정·diff 는 fill 이 정한다).
@@ -3997,6 +4057,16 @@ local function take_over_view_keys()
       return '<Cmd>lua _G.vimide_dirdiff_pair_quit()<CR>'
     end
   end, 'DirDiff 비교 창: 비교 탭 닫기 (트리의 그 줄로)')
+  -- 비교 창의 창 머리를 두 번 누르기: 그쪽 파일 바꾸기 (_G.vimide_dirdiff_bar_click). 창 머리의 %@ 누르기 처리는 첫
+  -- 누르기만 받는다 - 둘째(<2-LeftMouse>)는 매핑이 먼저라, vim-ide 의 두 번 누르기(.vimrc 의 RvMouseJump - 정의로
+  -- 가기)가 커서 낱말로 뛰었다. 창 머리는 getmousepos 의 line 0, winrow 1 이다. 글 위에서는 원래대로
+  wrap('n', '<2-LeftMouse>', function()
+    local mp = vim.fn.getmousepos()
+    if mp.line == 0 and mp.winrow == 1 and view_of_win(mp.winid) and vim.wo[mp.winid].winbar ~= ''
+        and on(vim.g.vimide_dirdiff_path_edit, 1) then
+      return '<Cmd>lua _G.vimide_dirdiff_bar_click(0, 2, "l")<CR>'
+    end
+  end, 'DirDiff 비교 창: 창 머리를 두 번 누르면 그쪽 파일 바꾸기')
 end
 
 -- Ctrl+Z / Ctrl+Y 를 비교 창에서만: 짝 전체의 되돌리기 / 다시 실행 (_G.vimide_dirdiff_undo, cmp.uview). 노멀과
@@ -4306,6 +4376,8 @@ local HELP_PAIR = {
   '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
   '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
+  '  창 머리를 두 번 누르기  그쪽 파일 바꾸기 - 새 두 파일을 이 탭에서 견준다 (:DirDiffPath [a|b] [경로] 도.',
+  '              한쪽에만 있는 파일의 없는 쪽도 이것으로 정한다. q 는 트리의 그 줄로)',
   '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이) - 마지막·첫 차이에서는 알리고, 곧바로 한 번 더 누르면 다음 / 이전 차이 파일',
   '  <C-m> <C-S-m> 다음 / 이전 차이 파일 (Beyond Compare 의 Ctrl+M / Shift+Ctrl+M): 트리의 <C-n> <C-p> 가 갈 짝을',
@@ -4354,6 +4426,12 @@ local function help()
     '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다)',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
+    '  a A         지금 쪽에 파일 더하기 (끝이 / 면 디렉터리, x/y/z.c 는 위 디렉터리도) / 디렉터리 더하기',
+    '              - 커서 줄이 그쪽 디렉터리면 그 안, 아니면 그 줄의 부모 디렉터리에 (neo-tree 와 같은 키)',
+    '  d           지금 쪽의 것 지우기: 그쪽에서 고른 것, 비주얼 줄, 커서 줄 (묻고 나서 - 링크는 링크만)',
+    '  r           지금 쪽의 것 이름 바꾸기·옮기기 (그쪽 뿌리 안의 다른 디렉터리로도, 끝이 / 면 그 안으로)',
+    '  e           지금 쪽의 경로(뿌리 디렉터리) 바꾸고 다시 비교 - 경로 줄의 그쪽을 두 번 눌러도,',
+    '              :DirDiffPath [a|b] [경로] 도 (비교 창에서는 그쪽 파일)',
     ascii() and '  판정 칸     x 다름  = 같음  ~ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  . 확인 중'
       or '  판정 칸     ≠ 다름  = 같음  ≈ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  · 확인 중',
   }
@@ -4392,7 +4470,8 @@ local function release_view(v, back)
     end
   end
   sweep(s)
-  if #kept > 0 then
+  -- v.quiet: 부른 쪽이 그 버퍼까지 한 알림에 싣는다 (뿌리 바꾸기·지우기 - 알림이 둘이면 Press ENTER 가 떴다)
+  if #kept > 0 and not v.quiet then
     say('고친 채 남겨 둔 버퍼: ' .. table.concat(kept, ', '), vim.log.levels.WARN)
   end
   if s.done then
@@ -4689,6 +4768,7 @@ local function restart(s)
   local r = cur_row(s)
   s.want_rel = r and r.e and r.rel or nil   -- 커서가 있던 줄로 돌아간다 (그 줄이 다시 생기면)
   s.dirs, s.loading, s.dirty, s.prog, s.walk = {}, {}, {}, nil, nil
+  s.chain = nil   -- 옛 뒤쪽에 청하던 차례 (tr.chain)
   s.fstep, s.fs_ids = nil, nil   -- 비교 창이 묻던 다음 차이 파일의 답은 새 뒤쪽에서 오지 않는다 (cmp.fs_pending)
   if not start_job(s) then
     return
@@ -4705,7 +4785,12 @@ local function map_list(s)
     vim.keymap.set('n', lhs, fn, { buffer = b, nowait = true, silent = true, desc = desc })
   end
   m('<CR>', function() act_enter(s, true) end, '비교 탭 열기(있으면 그 탭으로) / 펼치기')
-  m('<2-LeftMouse>', function() act_enter(s, true) end, '비교 열기')
+  -- 경로 줄 창을 두 번 누른 것도 여기로 온다 (첫 누르기에 트리로 돌아와 있다 - cmp.bounce): 그쪽 경로 바꾸기
+  m('<2-LeftMouse>', function()
+    if not tr.head_click(s) then
+      act_enter(s, true)
+    end
+  end, '비교 열기 (경로 줄이면 누른 쪽의 경로 바꾸기)')
   m('o', function() act_enter(s, false) end, '비교 탭을 뒤에서 열기·다시 읽기 (트리에 그대로)')
   m('<C-n>', function() act_step(s, 1) end, '다음 차이 (보기에 따라)')
   m('<C-p>', function() act_step(s, -1) end, '앞 차이 (보기에 따라)')
@@ -4735,6 +4820,27 @@ local function map_list(s)
       vim.cmd('normal! \27')   -- feedkeys('<Esc>', 'x') 는 뒤에 쌓인 키를 비주얼 안에서 먼저 돌렸다
       act_copy(s, spec[2], l1, l2)
     end, { buffer = b, nowait = true, silent = true, desc = spec[2] > 0 and 'A → B 복사' or 'B → A 복사' })
+  end
+  -- 지금 쪽의 파일 다루기 - neo-tree 와 같은 키 (a A d r. 트리에서 비어 있던 글자다 - tr.add ...)
+  if on(vim.g.vimide_dirdiff_file_ops, 1) then
+    m('a', function() tr.add(s, false) end, '지금 쪽에 파일 더하기 (끝이 / 면 디렉터리)')
+    m('A', function() tr.add(s, true) end, '지금 쪽에 디렉터리 더하기')
+    m('d', function() tr.delete(s) end, '지금 쪽의 것 지우기 (고른 것, 없으면 커서 줄 - 묻고 나서)')
+    m('r', function() tr.rename(s) end, '지금 쪽의 것 이름 바꾸기·옮기기')
+    vim.keymap.set('x', 'd', function()
+      local l1, l2 = vim.fn.line('v'), vim.fn.line('.')
+      vim.cmd('normal! \27')
+      vim.cmd('redraw')   -- '-- VISUAL LINE --' 이 물음 위에 남았다
+      tr.delete(s, l1, l2)
+    end, { buffer = b, nowait = true, silent = true, desc = '지금 쪽의 것 지우기 (고른 줄 - 묻고 나서)' })
+  end
+  -- e: 지금 쪽의 경로(뿌리 디렉터리) 바꾸기 - Beyond Compare 의 경로 칸 고치기 (edit). 트리에서 비어 있던 글자고,
+  -- 단어 끝으로 가는 vim 의 e 는 트리에서 쓸 데가 없다
+  if on(vim.g.vimide_dirdiff_path_edit, 1) then
+    m('e', function()
+      cursor_side(s)
+      tr.edit_root(s, s.side)
+    end, '지금 쪽의 경로(뿌리 디렉터리) 바꾸기')
   end
   api.nvim_create_autocmd('CursorMoved', {
     buffer = b,
@@ -4885,6 +4991,1173 @@ function M.open(a, b)
 end
 
 -- ---------------------------------------------------------------------------
+-- 트리의 파일 다루기 (neo-tree 처럼): a 더하기, A 디렉터리 더하기, d 지우기, r 이름 바꾸기·옮기기
+-- ---------------------------------------------------------------------------
+-- 모두 지금 쪽(A/B - 커서가 있는 반쪽, s.side)의 것이다. 키는 neo-tree 와 같다 (.vimrc 의 neo-tree window.mappings:
+-- a 더하기 - 끝이 / 면 디렉터리, A 디렉터리, d 지우기, r 이름 바꾸기) - 트리에서 쓰던 손버릇 그대로.
+-- 디스크는 여기서 바로 바꾼다 (uv - 셸 없이). 링크는 따라가지 않는다: 위 디렉터리가 링크면 그 아래에 만들지 않고
+-- (트리 복사의 copier 와 같은 규칙 - 따라가면 트리 밖에 쓴다), 링크를 지우면 링크만 지운다.
+-- 그 뒤는 트리 복사와 같다: 바뀐 곳(그 항목, 새로 만든 맨 위 디렉터리)만 뒤쪽이 다시 보고 (forget + refresh),
+-- 같은 곳이 든 다른 비교에도 알린다 (tr.others). 커서는 새 항목·새 이름으로 - 부모의 새 목록이 온 뒤에 (s.op_goto,
+-- on_event 의 'list'. 먼저 옮기면 옛 목록이라 줄이 없다). 열어 둔 비교 탭: 지운 쪽은 '(없음)' 으로 다시 채우고
+-- (트리의 짝은 forget 의 reopen, 고른 두 파일은 여기서), 두 쪽 다 없어졌으면 닫는다 (tr.sync_views). 이름을 바꾼
+-- 쪽은 새 이름을 따라간다 (tr.follow - 같은 두 파일을 계속 견준다). 고친 채 저장하지 않은 버퍼가 걸린 항목은
+-- 하지 않는다 (지우면 버퍼만 남고, 옮기면 :w 가 옛 이름으로 되살린다).
+-- g:vimide_dirdiff_file_ops = 0 이면 키를 걸지 않는다, g:vimide_dirdiff_confirm_delete = 0 이면 지울 때 묻지 않는다
+
+-- 뒤쪽이 살아 있고 복사 중이 아닌가 (아니면 알리고 false): 복사하는 동안 대상 쪽을 바꾸면 copier 와 엇갈리고,
+-- 뒤쪽이 죽었으면 다시 볼 수 없어 트리가 옛 그대로 남는다
+-- 다른 비교 탭이 이쪽(side) 뿌리와 겹치는 곳에 복사하는 중이어도 기다린다 (그 copier 가 쓰는 디렉터리를 지우거나
+-- 옮기면 반쯤 쓴 것이 남는다 - 뿌리끼리 겹치는지만 본다)
+function tr.op_ready(s, side)
+  if s.copying then
+    say('복사하는 중입니다 - 끝난 뒤에', vim.log.levels.WARN)
+    return false
+  end
+  if not (s.job and s.job > 0) then
+    say('비교가 멈췄습니다 - R 로 다시 훑은 뒤에', vim.log.levels.WARN)
+    return false
+  end
+  local mine = s[side]
+  for tab, o in pairs(sessions) do
+    local c = o ~= s and not o.done and o.copying
+    local to = c and o[c.to]
+    if to and (to == mine or tr.under(to, { mine }) or tr.under(mine, { to })) then
+      say(('다른 비교 탭(%s)이 %s 에 복사하는 중입니다 - 끝난 뒤에'):format(
+        api.nvim_tabpage_is_valid(tab) and tostring(api.nvim_tabpage_get_number(tab)) or '?',
+        shown(vim.fn.fnamemodify(to, ':~'))), vim.log.levels.WARN)
+      return false
+    end
+  end
+  return true
+end
+
+-- rel 의 위 디렉터리(그리고 뿌리)가 지금도 그쪽의 진짜 디렉터리인가 - 아니면 그 까닭. 트리는 훑은 때의 것이라,
+-- 그 뒤 밖에서 위 디렉터리를 링크로 바꾸었으면 root .. '/' .. rel 은 뿌리 밖을 가리킨다: 그대로 지우거나 옮기면
+-- 트리 밖의 것을 지우고 옮겼다 (fs_lstat 은 마지막 이름만 따라가지 않는다). 뒤쪽 copier 와 같은 규칙
+function tr.real_parents(root, rel)
+  local st = uv.fs_lstat(root)
+  if not st or st.type ~= 'directory' then
+    return '뿌리가 진짜 디렉터리가 아닙니다 (R 로 다시 훑기)'
+  end
+  local parts = vim.split(rel, '/', { plain = true })
+  local cur = root
+  for i = 1, #parts - 1 do
+    cur = cur .. '/' .. parts[i]
+    st = uv.fs_lstat(cur)
+    if not st or st.type ~= 'directory' then
+      return ('위 디렉터리 %s 가 %s (R 로 다시 훑기)'):format(shown(table.concat(parts, '/', 1, i)),
+        not st and '없습니다' or '진짜 디렉터리가 아닙니다 - 링크는 따라가지 않는다')
+    end
+  end
+  return nil
+end
+
+-- 예 / 아니오 (기본 아니오). Ctrl+C 도 아니오 - 그대로 두면 E5108 Keyboard interrupt 와 줄줄이 자취가 떴다
+function tr.confirm(msg)
+  local ok, n = pcall(vim.fn.confirm, msg, '&Yes\n&No', 2)
+  -- 물음이 차지한 줄을 치운다 (그대로 두면 다음 알림이 Press ENTER 를 띄운다 - act_copy 의 설명)
+  vim.cmd('redraw')
+  return ok and n == 1
+end
+
+-- 목록의 앞 n 개만 (', ' 로) - 나머지는 '… 외 k개'
+function tr.few(list, n)
+  local out = table.concat(vim.list_slice(list, 1, n), ', ')
+  if #list > n then
+    out = out .. (' … 외 %d개'):format(#list - n)
+  end
+  return out
+end
+
+-- uv 의 오류 'EACCES: permission denied: /경로' 에서 경로는 뗀다 (알림 앞에 이미 쓴다 - 짧게)
+function tr.errmsg(err)
+  return (tostring(err or '?'):gsub(': /.*$', ''))
+end
+
+-- 그쪽(side)의 종류 (없으면 nil). 'side == "a" and e.ka or e.kb' 는 A 에 없는 줄에서 kb 를 준다 (act_mark 의 설명)
+function tr.kind(e, side)
+  if not e then
+    return nil
+  end
+  if side == 'a' then
+    return e.ka
+  end
+  return e.kb
+end
+
+-- p 가 경로들(rels) 중 하나이거나 그 아래인가
+function tr.under(p, rels)
+  for _, rr in ipairs(rels) do
+    if p == rr or p:sub(1, #rr + 1) == rr .. '/' then
+      return true
+    end
+  end
+  return false
+end
+
+-- 묻는 줄 (vim.fn.input). Esc·Ctrl+C 면 nil. kind: 'rel' 이면 base 디렉터리에서의 이름을 채워 준다
+-- (_G.vimide_dirdiff_complete - input 의 'file' 은 지금 디렉터리에서 채운다), 'dir' / 'file' 은 nvim 의 것
+tr.CANCEL = '\27dirdiff-cancel'
+function tr.ask(prompt, default, kind, base)
+  tr.cbase = base
+  local comp = kind == 'rel' and 'customlist,v:lua.vimide_dirdiff_complete' or kind
+  local ok, text = pcall(vim.fn.input, { prompt = prompt, default = default or '', completion = comp,
+    cancelreturn = tr.CANCEL })
+  tr.cbase = nil
+  -- 묻던 줄을 치운다 (그대로 두면 다음 알림이 Press ENTER 를 띄운다 - act_copy 의 confirm 과 같다)
+  vim.cmd('redraw')
+  if not ok or text == tr.CANCEL then
+    return nil
+  end
+  return text
+end
+
+-- tr.ask 의 채우기: 친 것(lead) 전체가 base 에서의 경로다 (/ ~ 로 시작하면 그대로). 디렉터리는 끝에 /
+function _G.vimide_dirdiff_complete(lead)
+  local base = tr.cbase
+  if not base then
+    return {}
+  end
+  local dir, part = lead:match('^(.*/)([^/]*)$')
+  dir, part = dir or '', part or lead
+  local abs = (dir:match('^/') or dir:match('^~/')) and vim.fn.expand(dir, 1) or (base .. '/' .. dir)
+  local out = {}
+  local h = uv.fs_scandir(abs)
+  while h do
+    local name, t = uv.fs_scandir_next(h)
+    if not name then
+      break
+    end
+    if name:sub(1, #part) == part and (part:sub(1, 1) == '.' or name:sub(1, 1) ~= '.') then
+      local isd = t == 'directory' or ((t == 'link' or not t) and vim.fn.isdirectory(abs .. '/' .. name) == 1)
+      out[#out + 1] = dir .. name .. (isd and '/' or '')
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- 절대 경로의 디렉터리 쪽 링크를 푼다 (있는 데까지 - 뿌리는 M.open 이 풀어 두었다: /tmp -> /private/tmp)
+function tr.abs_real(p)
+  local rest, cur = {}, (p:gsub('/+$', ''))
+  while cur ~= '' do
+    local r = uv.fs_realpath(cur)
+    if r then
+      return #rest > 0 and (r:gsub('/$', '') .. '/' .. table.concat(rest, '/')) or r
+    end
+    local dir, name = cur:match('^(.*)/([^/]*)$')
+    if not dir then
+      break
+    end
+    table.insert(rest, 1, name)
+    cur = dir
+  end
+  return p
+end
+
+-- 친 이름을 그쪽 뿌리에서의 경로로: base(뿌리에서의 디렉터리) 기준. / 나 ~/ 로 시작하면 절대 경로 (그쪽 뿌리 아래여야
+-- 한다 - ~tilde.c 처럼 ~ 로 시작하는 이름은 이름이다). . 와 .. 를 푼다 - 뿌리 위로 나가면 거절, 뿌리 자신도. 끝의
+-- / 는 뗀다 (디렉터리인지는 부른 쪽이 본다)
+function tr.rel_of(s, side, base, text)
+  local root = s[side]
+  local t = vim.trim(text)
+  if t == '' then
+    return nil, '이름이 비었습니다'
+  end
+  if t:match('^/') or t == '~' or t:match('^~/') then
+    local p = (vim.fn.fnamemodify(vim.fn.expand(t, 1), ':p'):gsub('/+$', ''))
+    local r = p == root and '' or (cmp.rel_in(root, p) or cmp.rel_in(root, tr.abs_real(p)))
+    if not r then
+      return nil, ('%s 쪽 뿌리(%s) 밖입니다: %s'):format(side:upper(), shown(vim.fn.fnamemodify(root, ':~')), shown(t))
+    end
+    t, base = r, ''
+  end
+  local parts = {}
+  for part in (base .. '/' .. t):gmatch('[^/]+') do
+    if part == '..' then
+      if #parts == 0 then
+        return nil, ('%s 쪽 뿌리 위로는 나갈 수 없습니다: %s'):format(side:upper(), shown(t))
+      end
+      parts[#parts] = nil
+    elseif part ~= '.' then
+      parts[#parts + 1] = part
+    end
+  end
+  if #parts == 0 then
+    return nil, ('%s 쪽 뿌리 자신입니다'):format(side:upper())
+  end
+  return table.concat(parts, '/')
+end
+
+-- rel 의 위 디렉터리들을 그쪽에 만든다 (없는 것만). 있는 것은 진짜 디렉터리여야 한다 - 링크면 따라가 쓰지 않는다.
+-- 돌려주는 것: 새로 만든 맨 위 디렉터리의 rel (없으면 nil), 실패했으면 둘째 값에 까닭 (그때도 만든 것은 남았다)
+function tr.parents(root, rel)
+  local parts = vim.split(rel, '/', { plain = true })
+  local cur, top = root, nil
+  for i = 1, #parts - 1 do
+    cur = cur .. '/' .. parts[i]
+    local st = uv.fs_lstat(cur)
+    if not st then
+      local ok, err = uv.fs_mkdir(cur, 493)   -- 0755 (umask 를 따른다)
+      if not ok then
+        return top, err
+      end
+      top = top or table.concat(parts, '/', 1, i)
+    elseif st.type ~= 'directory' then
+      return top, ('%s 가 디렉터리가 아닙니다%s'):format(shown(table.concat(parts, '/', 1, i)),
+        st.type == 'link' and ' (링크 - 따라가 쓰지 않는다)' or '')
+    end
+  end
+  return top, nil
+end
+
+-- 이름 하나라도 제외 목록(g:DirDiffExcludes - 뒤쪽은 이름마다 fnmatch)에 걸리는가: 만들어도 트리에 안 보인다
+function tr.excluded(rel)
+  for pat in (vim.g.DirDiffExcludes or ''):gmatch('[^,]+') do
+    local re = '\\C' .. vim.fn.glob2regpat(pat)
+    for part in rel:gmatch('[^/]+') do
+      if vim.fn.match(part, re) >= 0 then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- 같은 곳(그쪽 뿌리에서의 tops)이 든 다른 비교에 알린다 - :w 의 BufWritePost 처럼 그 항목만 다시 보고, 그곳이
+-- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (R. 그쪽이 복사하는 중이면 그 복사가 끝난 뒤에).
+-- 트리 복사(on_copied)와 파일 다루기가 같이 쓴다
+function tr.others(s, side, tops)
+  local base = s[side]
+  for _, o in pairs(sessions) do
+    if o ~= s and not o.done and not o.solo then
+      local rels, whole = {}, false
+      for _, rr in ipairs(tops) do
+        local full = base .. '/' .. rr
+        local r, w = rels_in(o, full, real(full), false)
+        vim.list_extend(rels, r)
+        whole = whole or w
+      end
+      if whole then
+        if o.copying then
+          o.rescan = true
+        else
+          restart_fn(o)
+        end
+      elseif #rels > 0 then
+        send(o, { cmd = 'refresh', paths = rels })   -- forget 이 청하는 목록보다 먼저 (forget 의 설명)
+        forget(o, rels)
+        schedule_render(o)
+      end
+    end
+  end
+end
+
+-- rel 과 그 위 디렉터리가 모두 펼쳐져 있는가 (트리에 보이는 목록이라 뒤쪽이 바뀌면 알려 온다 - 접은 것은 unlist)
+function tr.listed(s, rel)
+  local acc = ''
+  for part in rel:gmatch('[^/]+') do
+    acc = acc == '' and part or (acc .. '/' .. part)
+    if not s.expanded[acc] then
+      return false
+    end
+  end
+  return true
+end
+
+-- 다시 본 곳 top 아래의 디렉터리 dir 의 목록을 받아 온다 (forget - 접혀 있는 곳의 짝을 다시 열려고): top 은 바로,
+-- 그 아래는 부모의 목록이 온 뒤에 하나씩 (on_event 가 s.chain 을 본다). 뒤쪽은 top 을 다 훑기 전에는 그 안의
+-- 이름을 몰라, 한꺼번에 청하면 빈 목록이 왔다 (이름을 바꾼 디렉터리 아래에 열어 둔 짝이 옛 경로 그대로 남았다)
+function tr.chain(s, top, dir)
+  s.chain = s.chain or {}
+  local acc = top
+  for part in dir:sub(#top + 2):gmatch('[^/]+') do
+    acc = acc .. '/' .. part
+    s.chain[acc] = true
+  end
+  if not s.loading[top] then
+    request_list(s, top)
+  end
+end
+
+-- 디스크를 바꾼 뒤: 뒤쪽이 그곳만 다시 보게 하고 (트리 복사의 on_copied 처럼 forget + refresh), 같은 곳이 든 다른
+-- 비교에도 알린다. goto_rel 이 있으면 커서를 그리로: 그 위 디렉터리를 모두 펼치고(새 항목이 보이게), 부모의 새
+-- 목록이 오면 옮긴다 (on_event 의 s.op_goto). 접혀 있던 위 디렉터리는 refresh 뒤에 목록을 청한다 (toggle 처럼 늘 -
+-- 접을 때 목록(s.dirs)은 남지만 뒤쪽은 더 알리지 않아(unlist) 옛 것이다). 새로 만든 디렉터리(tops 아래)는 청하지
+-- 않는다: 뒤쪽이 아직 훑지 않아 빈 목록이 온다 - 부모의 새 목록이 오면 on_event 가 청한다 (펼쳐 둔 아이)
+function tr.changed(s, side, tops, goto_rel)
+  -- refresh 를 먼저: forget 과 아래가 청하는 목록은 그 뒤에 가야 새 모형으로 답한다 (forget 의 설명)
+  send(s, { cmd = 'refresh', paths = tops })
+  forget(s, tops)
+  if goto_rel then
+    local parent = goto_rel:match('^(.*)/[^/]+$') or ''
+    s.op_goto = { parent = parent, rel = goto_rel, job = s.job }
+    local acc = ''
+    for part in parent:gmatch('[^/]+') do
+      acc = acc == '' and part or (acc .. '/' .. part)
+      if not s.expanded[acc] then
+        s.expanded[acc] = true
+        if not s.loading[acc] and not tr.under(acc, tops) then
+          request_list(s, acc)
+        end
+      end
+    end
+    -- 펼친 줄이 생겼다 (위 디렉터리들) - 바뀐 줄만 그리면 안 된다
+    s.need_full = true
+  end
+  schedule_render(s)
+  tr.others(s, side, tops)
+end
+
+-- 비교 탭(view)이 견주는 두 경로: 고른 두 파일은 그 경로, 트리의 짝은 두 뿌리 + 그 줄 (없는 쪽도 그 자리)
+function tr.view_paths(v)
+  if v.pick then
+    return v.pick.a, v.pick.b
+  end
+  if v.rel and not v.s.solo then
+    return v.s.a .. '/' .. v.rel, v.s.b .. '/' .. v.rel
+  end
+end
+
+-- 비교 창 둘이 다 있게 한다 (하나를 닫아 버렸으면 남은 창 옆에 빈 자리로 다시 - 비교 탭은 repair_view, 트리 위 편집
+-- 창 둘은 open_pair 처럼). 둘 다 없으면 false (비교 탭은 repair_view 가 놓았다)
+function tr.whole(v)
+  if v.closed then
+    return false
+  end
+  if not v.inline then
+    return repair_view(v) ~= nil
+  end
+  local okA, okB = api.nvim_win_is_valid(v.win_a), api.nvim_win_is_valid(v.win_b)
+  if okA and okB then
+    return true
+  end
+  if not okA and not okB then
+    return false
+  end
+  local w
+  if okA then
+    w = api.nvim_open_win(scratch(v, 'b', {}), false, { split = 'right', win = v.win_a })
+    v.win_b = w
+  else
+    w = api.nvim_open_win(scratch(v, 'a', {}), false, { split = 'left', win = v.win_b })
+    v.win_a = w
+  end
+  plain_window(w)
+  return true
+end
+
+-- 비교 탭(v)이 보일 두 파일을 바꾼다 (경로 바꾸기, 이름을 바꾼 파일 따라가기): 그 세션이 견주는 짝(두 뿌리 아래
+-- 같은 상대 경로)이고 그 짝의 탭이 따로 없으면 보통 짝으로 (트리의 그 줄과 같은 탭 - <CR> 이 이 탭으로 온다),
+-- 아니면 고른 두 파일처럼 경로를 따로 싣는다 (v.pick - 세션에 붙은 채, q 는 back 의 줄로. 혼자 선 비교는 늘 이것)
+function tr.repoint(v, pa, pb, back)
+  local s = v.s
+  local ra = not s.solo and cmp.rel_in(s.a, pa)
+  local rb = ra and cmp.rel_in(s.b, pb)
+  -- 철자만 다른 같은 파일(macOS 의 대소문자·NFD)도 그 줄의 짝이다: 뒤쪽은 그런 둘을 A 의 철자로 한 줄에 짝짓는다
+  -- (dirdiffscan.py 의 alias). 이름만 견주었더니 대소문자만 바꾼 뒤(r) 그 줄의 <CR> 이 같은 두 파일의 탭을 하나 더 열었다
+  local same = rb and ra ~= rb and uv.fs_lstat(s.b .. '/' .. ra)
+  local pst = same and uv.fs_lstat(pb)
+  if ra and rb and (ra == rb or (pst and same.ino == pst.ino and same.dev == pst.dev)) then
+    local o = view_of_rel(s, ra)
+    if not o or o == v then
+      local e = entry_of(s, ra)
+      if not e or is_dir(e) then
+        e = cmp.pick_entry(pa, pb)
+      end
+      v.pick, v.back = nil, nil
+      fill(v, { rel = ra, e = e, dir = ra:match('^(.*)/[^/]+$') or '' }, false)
+      return
+    end
+  end
+  v.pick = { a = pa, b = pb }
+  if back then
+    v.back = back
+  end
+  cmp.pick_fill(v, false, true)
+end
+
+-- 지운 뒤 (fulls: 지운 절대 경로들): 그곳의 파일을 보이던 비교 탭 - 두 쪽 다 없어졌으면 닫고(편집 창 둘은 처음처럼
+-- 비운다), 고른 두 파일은 지금 디스크로 다시 채운다 (없어진 쪽은 '(없음)'). 트리의 짝은 forget 의 reopen 이 부모의
+-- 새 목록이 온 뒤에 다시 채운다 (새 판정까지) - 두 쪽 다 없어진 짝은 줄이 없어 거기서는 그대로 남았을 것이다
+function tr.sync_views(fulls)
+  local kept = {}
+  for _, v in ipairs(all_views()) do
+    local pa, pb
+    if not v.closed then
+      pa, pb = tr.view_paths(v)
+    end
+    if pa and (tr.under(pa, fulls) or tr.under(pb, fulls)) then
+      if not uv.fs_lstat(pa) and not uv.fs_lstat(pb) then
+        -- 닫으면 내려가는 고친 버퍼(디스크에는 없는 파일)는 부른 쪽의 알림에 (release_view 의 v.quiet)
+        for _, b in ipairs({ v.buf_a or false, v.buf_b or false }) do
+          if b and api.nvim_buf_is_valid(b) and vim.fn.getbufvar(b, '&modified') == 1 then
+            kept[#kept + 1] = vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':~:.')
+          end
+        end
+        if v.inline then
+          tr.reset_main(v.s)
+        else
+          v.quiet = true
+          close_view(v, false)
+        end
+      elseif v.pick then
+        if api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
+          cmp.pick_fill(v, false, true)
+        else
+          cmp.restat(v)
+        end
+      end
+    end
+  end
+  return kept
+end
+
+-- 이름을 바꾼 뒤 (old -> new, 절대 경로): 그 파일(또는 그 아래의 파일)을 보이던 비교 탭이 새 이름을 따라간다 -
+-- 같은 두 파일을 계속 견준다. 트리의 짝은 바꾼 쪽만 새 경로, 다른 쪽은 그대로 (고른 두 파일로 바뀐다 - q 는 새
+-- 이름의 줄로, 없으면 옛 줄로). 다른 쪽이 없던 짝(한쪽에만 있던 파일)이면 새 이름의 줄 자체가 그 짝이라 그 줄을
+-- 따른다 (부모의 새 목록이 오면 forget 의 reopen 이 채운다). 창 하나를 닫아 버린 탭은 경로만 고친다
+function tr.follow(old, new)
+  local function moved(p)
+    if p and (p == old or p:sub(1, #old + 1) == old .. '/') then
+      return new .. p:sub(#old + 1)
+    end
+  end
+  for _, v in ipairs(all_views()) do
+    local pa, pb
+    if not v.closed then
+      pa, pb = tr.view_paths(v)
+    end
+    local na, nb = moved(pa), moved(pb)
+    if na or nb then
+      local s = v.s
+      local whole = api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b)
+      if v.pick and not whole then
+        v.pick = { a = na or pa, b = nb or pb }
+        v.path = { a = v.pick.a, b = v.pick.b }
+        cmp.restat(v)
+      elseif not v.pick and not (na and nb) then
+        local x = na and 'a' or 'b'
+        local y = x == 'a' and 'b' or 'a'
+        local py = y == 'a' and pa or pb
+        local rel_new = cmp.rel_in(s[x], na or nb)
+        if rel_new and not uv.fs_lstat(py) and not view_of_rel(s, rel_new) then
+          v.rel = rel_new
+        elseif whole then
+          local back = { { rel = v.rel, side = y } }
+          if rel_new then
+            table.insert(back, 1, { rel = rel_new, side = x })
+          end
+          tr.repoint(v, na or pa, nb or pb, back)
+        end
+      elseif whole then
+        tr.repoint(v, na or pa, nb or pb, nil)
+      end
+    end
+  end
+end
+
+-- a / A: 지금 쪽에 파일(끝이 / 면 디렉터리) / 디렉터리를 더한다. 어디에: 커서 줄이 그쪽의 디렉터리면 그 안, 아니면
+-- 그 줄의 부모 디렉터리 (그쪽에 없는 고아 줄이면 그쪽의 그 부모 - 없으면 만든다). x/y/z.c 처럼 쓰면 위 디렉터리도
+-- 만든다. 있는 이름, 빈 이름, 뿌리 밖(..)은 거절
+function tr.add(s, dir_only)
+  cursor_side(s)
+  if not tr.op_ready(s, s.side) then
+    return
+  end
+  local side = s.side
+  local S = side:upper()
+  local root = s[side]
+  local r = cur_row(s)
+  local base = ''
+  if r and r.e then
+    base = tr.kind(r.e, side) == 'd' and r.rel or r.dir
+  elseif r and r.loading then
+    base = (r.rel:gsub('/$', ''))   -- '(읽는 중…)' 줄: 읽고 있는 그 디렉터리 안
+  end
+  local babs = base == '' and root or (root .. '/' .. base)
+  local missing = not uv.fs_lstat(babs)
+  local where = tr.mid_path(shown(vim.fn.fnamemodify(babs, ':~')), math.max(20, vim.o.columns - 70))
+  local prompt = ('%s 쪽에 %s%s: %s/'):format(S, dir_only and '새 디렉터리' or '새 파일 (끝이 / 면 디렉터리)',
+    missing and ' - 없는 위 디렉터리도 만든다' or '', where)
+  local text = tr.ask(prompt, '', 'rel', babs)
+  if not text or vim.trim(text) == '' then
+    return say('더하지 않았습니다')
+  end
+  local want_dir = dir_only or vim.trim(text):match('/$') ~= nil
+  local rel, err = tr.rel_of(s, side, base, text)
+  if not rel then
+    return say(err, vim.log.levels.WARN)
+  end
+  local full = root .. '/' .. rel
+  if uv.fs_lstat(full) then
+    return say(('이미 있습니다: %s 쪽 %s'):format(S, shown(rel)), vim.log.levels.WARN)
+  end
+  local top, perr = tr.parents(root, rel)
+  local ok, cerr = false, perr
+  if not perr then
+    if want_dir then
+      ok, cerr = uv.fs_mkdir(full, 493)
+    else
+      local fd
+      fd, cerr = uv.fs_open(full, 'wx', 420)   -- 0644, 없을 때만 (O_EXCL)
+      if fd then
+        uv.fs_close(fd)
+        ok = true
+      end
+    end
+  end
+  if not ok then
+    if top then
+      tr.changed(s, side, { top }, nil)   -- 만든 위 디렉터리는 남았다
+    end
+    return say(('%s 쪽에 %s 를 만들지 못했습니다: %s'):format(S, shown(rel), tr.errmsg(cerr)), vim.log.levels.WARN)
+  end
+  -- 제외 목록에 걸린 이름은 트리에 오지 않는다 - 커서를 옮기지 않는다 (기다릴 목록이 없다)
+  local ex = tr.excluded(rel)
+  tr.changed(s, side, { top or rel }, not ex and rel or nil)
+  say(('%s 쪽에 %s%s 를 더했습니다%s%s'):format(S, shown(rel), want_dir and '/' or '',
+    top and (' (없던 위 디렉터리 %s/ 도 만들었습니다)'):format(shown(top)) or '',
+    ex and ' - 제외 목록(g:DirDiffExcludes)에 걸려 트리에는 보이지 않습니다' or ''))
+end
+
+-- 디렉터리 안의 항목 수 (링크는 따라가지 않는다 - 지우는 것과 같게). t0(uv.hrtime - 묻기 전의 셈 전체가 함께
+-- 쓴다)에서 1.5초를 넘으면 거기까지 (둘째 값 true - 큰 트리에서 묻기까지 오래 멈추지 않게)
+function tr.count(p, t0)
+  local n, stack = 0, { p }
+  while #stack > 0 do
+    local d = table.remove(stack)
+    local h = uv.fs_scandir(d)
+    while h do
+      local name, t = uv.fs_scandir_next(h)
+      if not name then
+        break
+      end
+      n = n + 1
+      if not t then
+        local st = uv.fs_lstat(d .. '/' .. name)
+        t = st and st.type
+      end
+      if t == 'directory' then
+        stack[#stack + 1] = d .. '/' .. name
+      end
+      if n % 1000 == 0 and uv.hrtime() - t0 > 1.5e9 then
+        return n, true
+      end
+    end
+  end
+  return n, false
+end
+
+-- 지운다: 파일·링크는 그것만 (링크가 가리키는 것은 두고), 디렉터리는 안의 것부터 (rm -rf 처럼 - 못 지운 것이
+-- 있어도 나머지는 지운다). 돌려주는 것: 첫 오류, 오류 수
+function tr.rm(p)
+  local first, n = nil, 0
+  local function fail(e)
+    n = n + 1
+    first = first or e
+  end
+  local function rm(x)
+    local st, e = uv.fs_lstat(x)
+    if not st then
+      return fail(e)
+    end
+    if st.type == 'directory' then
+      local h, e2 = uv.fs_scandir(x)
+      if not h then
+        fail(e2)
+      else
+        while true do
+          local name = uv.fs_scandir_next(h)
+          if not name then
+            break
+          end
+          rm(x .. '/' .. name)
+        end
+      end
+      local ok, e3 = uv.fs_rmdir(x)
+      if not ok then
+        fail(e3)
+      end
+    else
+      local ok, e4 = uv.fs_unlink(x)
+      if not ok then
+        fail(e4)
+      end
+    end
+  end
+  rm(p)
+  return first, n
+end
+
+-- d: 지금 쪽의 것을 지운다 - 그쪽에서 Space 로 고른 것 > 비주얼 줄 > 커서 줄 (복사와 같은 차례, picked). 이름과
+-- 디렉터리 안의 항목 수를 보이고 묻는다 (기본 아니오. g:vimide_dirdiff_confirm_delete = 0 이면 묻지 않는다).
+-- 그쪽에 없는 줄, 고친 채인 버퍼가 걸린 것은 건너뛰고 알린다
+function tr.delete(s, l1, l2)
+  cursor_side(s)
+  if not tr.op_ready(s, s.side) then
+    return
+  end
+  local side = s.side
+  local S = side:upper()
+  local root = s[side]
+  local list, by_mark = picked(s, side, l1, l2)
+  local todo, skipped, names = {}, {}, {}
+  local nfile, ndir, inside, cut = 0, 0, 0, false
+  local t0 = uv.hrtime()
+  for _, rel in ipairs(list) do
+    local full = root .. '/' .. rel
+    -- 위 디렉터리가 그새 링크로 바뀌었으면 lstat·셈·지우기 모두 뿌리 밖을 본다 - 먼저 거른다
+    local bad = rel ~= '' and tr.real_parents(root, rel) or nil
+    local st = rel ~= '' and not bad and uv.fs_lstat(full) or nil
+    local w
+    if rel == '' then
+      w = '뿌리는 지우지 않는다'
+    elseif not tr.kind(entry_of(s, rel), side) then
+      w = S .. ' 에 없음'
+    elseif bad then
+      w = bad
+    elseif not st then
+      w = '디스크에 없음 (R 로 다시 훑기)'
+    else
+      local m = modified_under(full, st.type == 'directory')
+      if m then
+        w = '저장하지 않은 버퍼: ' .. m
+      end
+    end
+    if w then
+      skipped[#skipped + 1] = shown(rel) .. ' - ' .. w
+    else
+      local note = ''
+      if st.type == 'directory' then
+        local n, more = tr.count(full, t0)
+        inside, cut = inside + n, cut or more
+        ndir = ndir + 1
+        note = ('/ (항목 %s%s개)'):format(commas(n), more and '+' or '')
+      else
+        nfile = nfile + 1
+        note = st.type == 'link' and ' (링크 - 링크만)' or ''
+      end
+      todo[#todo + 1] = { rel = rel, full = full }
+      names[#names + 1] = shown(rel) .. note
+    end
+  end
+  if #todo == 0 then
+    return say(#skipped > 0 and ('지울 것이 없습니다: ' .. tr.few(skipped, 6)) or '지울 것이 없습니다',
+      vim.log.levels.WARN)
+  end
+  if on(vim.g.vimide_dirdiff_confirm_delete, 1) then
+    local what = {}
+    if nfile > 0 then
+      what[#what + 1] = ('파일 %d'):format(nfile)
+    end
+    if ndir > 0 then
+      what[#what + 1] = ('디렉터리 %d (그 안의 항목 %s%s개)'):format(ndir, commas(inside), cut and '+' or '')
+    end
+    local lines = vim.list_slice(names, 1, 8)
+    if #names > 8 then
+      lines[#lines + 1] = ('… 외 %d개'):format(#names - 8)
+    end
+    -- 건너뛴 것도 앞의 몇 개만 (다 늘어놓았더니 -- More -- 두 쪽 뒤에야 물었다)
+    local msg = ('%s 쪽(%s)에서 지웁니다 - 되돌릴 수 없습니다: %s\n  %s%s'):format(S,
+      shown(vim.fn.fnamemodify(root, ':~')), table.concat(what, ', '), table.concat(lines, '\n  '),
+      #skipped > 0 and ('\n건너뜀 %d개: %s'):format(#skipped, tr.few(skipped, 4)) or '')
+    if not tr.confirm(msg) then
+      return say('지우지 않았습니다')
+    end
+  end
+  local done, failed, tops, fulls = 0, {}, {}, {}
+  for _, it in ipairs(todo) do
+    -- 묻는 동안 위 디렉터리가 바뀌었을 수도 있다 - 지우기 바로 앞에서 다시 본다
+    local bad = tr.real_parents(root, it.rel)
+    local err, nerr
+    if bad then
+      err, nerr = bad, 1
+    else
+      err, nerr = tr.rm(it.full)
+    end
+    if err then
+      failed[#failed + 1] = shown(it.rel) .. ': ' .. tr.errmsg(err) .. (nerr > 1 and (' 외 %d'):format(nerr - 1) or '')
+    else
+      done = done + 1
+    end
+    if not bad then
+      tops[#tops + 1] = it.rel   -- 다 못 지웠어도 바뀌었다
+      if not uv.fs_lstat(it.full) then
+        fulls[#fulls + 1] = it.full
+        -- [A](Tab) 가 지운 것(이나 그 아래)이면 버린다 - 이름 바꾸기가 [A] 를 옮기는 것처럼 (dirdiffpick.lua)
+        if _G.vimide_dirdiff_pick_moved then
+          _G.vimide_dirdiff_pick_moved(it.full, nil)
+        end
+      end
+    end
+  end
+  -- 고른 것: Space 로 고른 것을 지웠으면 그쪽 고른 것을 모두 푼다 (복사처럼), 아니면 지운 곳 아래의 것만
+  if by_mark then
+    s.marks[side] = {}
+  else
+    for k in pairs(vim.deepcopy(s.marks[side])) do
+      if tr.under(k, tops) then
+        s.marks[side][k] = nil
+      end
+    end
+  end
+  local kept = tr.sync_views(fulls)
+  if #tops > 0 then
+    tr.changed(s, side, tops, nil)
+  end
+  -- 알림은 하나로 (둘이면 Press ENTER 가 뜬다)
+  local parts = { ('%s 쪽에서 지웠습니다: %d개'):format(S, done) }
+  if #failed > 0 then
+    parts[#parts + 1] = '실패 ' .. table.concat(failed, '; ')
+  end
+  if #skipped > 0 then
+    parts[#parts + 1] = '건너뜀 ' .. tr.few(skipped, 6)
+  end
+  if #kept > 0 then
+    parts[#parts + 1] = '고친 채 남겨 둔 버퍼 ' .. table.concat(kept, ', ')
+  end
+  say(table.concat(parts, ' / '), #parts > 1 and vim.log.levels.WARN or nil)
+end
+
+-- r: 지금 쪽의 것의 이름을 바꾼다 - 묻는 줄에 그쪽 뿌리에서의 지금 이름을 채워 둔다. 다른 디렉터리로 옮겨도 된다
+-- (같은 뿌리 안, 없는 위 디렉터리는 만든다). 새 이름이 있으면 거절 (대소문자만 바꾸는 것은 된다 - macOS 는 같은
+-- 파일로 본다). 펼쳐 둔 것·고른 것·[A] 는 새 이름으로
+function tr.rename(s)
+  cursor_side(s)
+  if not tr.op_ready(s, s.side) then
+    return
+  end
+  local side = s.side
+  local S = side:upper()
+  local root = s[side]
+  local r = cur_row(s)
+  if not (r and r.e) then
+    return
+  end
+  if not tr.kind(r.e, side) then
+    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 (<S-Tab> 쪽 바꾸기)'):format(S, side == 'a' and 'B' or 'A'))
+  end
+  local old = root .. '/' .. r.rel
+  -- 위 디렉터리가 그새 링크로 바뀌었으면 뿌리 밖의 것을 옮기게 된다 (tr.real_parents)
+  local bad = tr.real_parents(root, r.rel)
+  if bad then
+    return say(('%s 쪽 %s: %s'):format(S, shown(r.rel), bad), vim.log.levels.WARN)
+  end
+  local st = uv.fs_lstat(old)
+  if not st then
+    return say(('디스크에 없습니다: %s 쪽 %s (R 로 다시 훑기)'):format(S, shown(r.rel)), vim.log.levels.WARN)
+  end
+  local m = modified_under(old, st.type == 'directory')
+  if m then
+    return say(('저장하지 않은 버퍼가 있습니다: %s - 저장하거나 버린 뒤에'):format(m), vim.log.levels.WARN)
+  end
+  local where = tr.mid_path(shown(vim.fn.fnamemodify(root, ':~')), math.max(20, vim.o.columns - 80))
+  local text = tr.ask(('%s 쪽 이름 바꾸기·옮기기: %s/'):format(S, where), r.rel, 'rel', root)
+  if not text or vim.trim(text) == '' then
+    return say('이름을 바꾸지 않았습니다')
+  end
+  -- 끝이 / 면 그 디렉터리 안으로 같은 이름째 (mv x dir/ 처럼 - 없으면 만든다). 그대로 두면 'dir' 이라는 파일이
+  -- 되었고, 있는 디렉터리는 '이미 있습니다' 로 거절되었다 (a 는 끝의 / 를 디렉터리로 읽는다)
+  if vim.trim(text):match('/$') then
+    text = vim.trim(text) .. r.rel:match('[^/]+$')
+  end
+  local rel, err = tr.rel_of(s, side, '', text)
+  if not rel then
+    return say(err, vim.log.levels.WARN)
+  end
+  if rel == r.rel then
+    return say('이름이 그대로입니다')
+  end
+  if rel:sub(1, #r.rel + 1) == r.rel .. '/' then
+    return say(('%s 를 제 안으로 옮길 수는 없습니다'):format(shown(r.rel)), vim.log.levels.WARN)
+  end
+  local new = root .. '/' .. rel
+  local tst = uv.fs_lstat(new)
+  local case_only = tst and tst.ino == st.ino and tst.dev == st.dev
+  if tst and not case_only then
+    return say(('이미 있습니다: %s 쪽 %s'):format(S, shown(rel)), vim.log.levels.WARN)
+  end
+  -- 묻는 동안 바뀌었을 수도 있다 - 옮기기 바로 앞에서 원본의 위 디렉터리를 다시 본다 (대상 쪽은 tr.parents 가 본다)
+  bad = tr.real_parents(root, r.rel)
+  if bad then
+    return say(('%s 쪽 %s: %s'):format(S, shown(r.rel), bad), vim.log.levels.WARN)
+  end
+  local top, perr = tr.parents(root, rel)
+  local ok, rerr = false, perr
+  if not perr then
+    ok, rerr = uv.fs_rename(old, new)
+  end
+  if not ok then
+    if top then
+      tr.changed(s, side, { top }, nil)
+    end
+    return say(('%s 쪽 %s 의 이름을 바꾸지 못했습니다: %s'):format(S, shown(r.rel), tr.errmsg(rerr)), vim.log.levels.WARN)
+  end
+  local function moved(t)
+    for k in pairs(vim.deepcopy(t)) do
+      if k == r.rel or k:sub(1, #r.rel + 1) == r.rel .. '/' then
+        t[rel .. k:sub(#r.rel + 1)] = t[k]
+      end
+    end
+  end
+  moved(s.expanded)   -- 펼쳐 둔 디렉터리는 새 이름에서도 펼친 채 (옛 이름은 다른 쪽에 남을 수 있어 그대로)
+  local mk = s.marks[side]
+  moved(mk)
+  for k in pairs(vim.deepcopy(mk)) do
+    if k == r.rel or k:sub(1, #r.rel + 1) == r.rel .. '/' then
+      mk[k] = nil
+    end
+  end
+  if _G.vimide_dirdiff_pick_moved then
+    _G.vimide_dirdiff_pick_moved(old, new)
+  end
+  tr.follow(old, new)
+  if case_only and r.dir == '' then
+    -- 대소문자만 바꿨다: 뒤쪽의 refresh 는 옛 철자로 다시 찾아(같은 파일) 옛 이름을 남긴다 - 부모째 다시 본다.
+    -- 맨 위면 부모가 뿌리라 다시 훑는다
+    restart(s)
+    s.want_rel = rel
+    tr.others(s, side, { r.rel })
+  else
+    -- 제외 목록(g:DirDiffExcludes)에 걸린 새 이름은 트리에 오지 않는다 - 커서는 기다리지 않는다 (tr.add 처럼)
+    tr.changed(s, side, case_only and { r.dir } or { r.rel, top or rel }, not tr.excluded(rel) and rel or nil)
+  end
+  say(('%s 쪽 %s → %s%s'):format(S, shown(r.rel), shown(rel),
+    tr.excluded(rel) and ' - 제외 목록(g:DirDiffExcludes)에 걸려 트리에는 보이지 않습니다' or ''))
+end
+
+-- ---------------------------------------------------------------------------
+-- 경로 바꾸기 (Beyond Compare 의 경로 칸 고치기): 폴더 비교의 뿌리, 비교 탭의 파일
+-- ---------------------------------------------------------------------------
+-- 폴더: 경로 줄 창의 그 반쪽을 두 번 누르기 (한 번 누르기는 예전대로 쪽 바꾸기), 트리의 e (지금 쪽), :DirDiffPath
+-- [a|b] [경로]. 파일: 비교 창의 창 머리를 두 번 누르기 (%@ 누르기 처리 - _G.vimide_dirdiff_bar_click), 비교 창에서
+-- :DirDiffPath [a|b] [경로]. 경로를 안 주면 지금 경로를 채워 묻는다 (디렉터리 / 파일 채우기). ~ 와 $VAR, 상대
+-- 경로(지금 디렉터리에서 - :DirDiff 와 같다)를 푼다. g:vimide_dirdiff_path_edit = 0 이면 두 번 누르기와 e 를 걸지
+-- 않는다 (:DirDiffPath 는 그대로)
+
+-- 트리 위 편집 창 둘(pair_tab = 0)을 처음처럼 비운다 (뿌리를 바꾸었다, 보이던 두 파일이 다 지워졌다)
+function tr.reset_main(s)
+  local v = s.main
+  if not v then
+    return
+  end
+  for _, side in ipairs({ 'a', 'b' }) do
+    local w = v['win_' .. side]
+    if api.nvim_win_is_valid(w) then
+      unview_win(w)
+      api.nvim_win_set_buf(w, scratch(v, side, side == 'a' and { '', '  아래 트리에서 파일을 고르고 Enter  (? 도움말)' } or { '' }))
+    end
+  end
+  cmp.clear(v)
+  v.rel, v.pick, v.back, v.head, v.gone, v.path, v.info, v.bin, v.ut = nil, nil, nil, nil, nil, nil, nil, nil, nil
+  v.buf_a, v.buf_b = nil, nil
+  sweep(s)
+  mark_open(s)
+end
+
+-- 버퍼 이름을 바꾼다. nvim 은 바꾸기 전 이름으로 버퍼를 하나 새로 만들어 둔다 (rename_buffer - 위 scratch 의 설명):
+-- 그것은 지운다 (뿌리를 바꿀 때마다 트리의 옛 이름이 하나씩 쌓였다)
+function tr.rename_buf(b, name)
+  if not api.nvim_buf_is_valid(b) then
+    return
+  end
+  local before = {}
+  for _, x in ipairs(api.nvim_list_bufs()) do
+    before[x] = true
+  end
+  pcall(api.nvim_buf_set_name, b, name)
+  for _, x in ipairs(api.nvim_list_bufs()) do
+    if not before[x] and not api.nvim_buf_is_loaded(x) then
+      pcall(api.nvim_buf_delete, x, { force = true })
+    end
+  end
+end
+
+-- 폴더 비교의 한쪽 뿌리를 바꾼다: 같은 탭에서 새 뿌리로 다시 훑는다 (R 의 restart - 경로 줄·상태줄·탭 이름도).
+-- 옛 뿌리의 짝을 보이던 비교 탭(트리의 짝)은 닫는다 - 고친 채인 버퍼가 있으면 먼저 묻는다 (닫아도 버퍼는 저장하지
+-- 않은 채 남고 알린다 - release_view). 고른 두 파일의 탭은 경로가 따로라 그대로 두되, q 로 돌아갈 줄은 옛 트리의
+-- 것이라 버린다. Space 로 고른 것도 옛 트리의 것이라 푼다. 펼쳐 둔 디렉터리는 그대로 (같은 꼴의 다른 판과 견줄
+-- 때가 많다 - 없는 것은 그냥 안 보인다). [A](Tab) 를 이 트리에서 골랐으면 경로는 두고 고른 곳(옛 줄)만 버린다
+function tr.set_root(s, side, path)
+  if s.solo or s.done then
+    return
+  end
+  if s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에', vim.log.levels.WARN)
+  end
+  local S = side:upper()
+  local t = vim.trim(path or '')
+  if t == '' then
+    return say('경로를 바꾸지 않았습니다')
+  end
+  local d = full_dir(t)
+  d = uv.fs_realpath(d) or d
+  if vim.fn.isdirectory(d) == 0 then
+    return say(('디렉터리가 아닙니다: %s'):format(shown(t)), vim.log.levels.WARN)
+  end
+  if d == s[side] then
+    return say(('%s 쪽 경로가 그대로입니다'):format(S))
+  end
+  local other = side == 'a' and 'b' or 'a'
+  if vim.fn.resolve(d) == vim.fn.resolve(s[other]) then
+    return say(('%s 쪽과 같은 디렉터리입니다: %s'):format(other:upper(), shown(vim.fn.fnamemodify(d, ':~'))),
+      vim.log.levels.WARN)
+  end
+  local na, nb = side == 'a' and d or s.a, side == 'b' and d or s.b
+  for tab, o in pairs(sessions) do
+    if o ~= s and not o.solo and o.a == na and o.b == nb and api.nvim_tabpage_is_valid(tab) then
+      return say(('이 두 디렉터리는 이미 비교 중입니다 (탭 %d)'):format(api.nvim_tabpage_get_number(tab)),
+        vim.log.levels.WARN)
+    end
+  end
+  local closing, mods = {}, {}
+  for _, v in ipairs(views_of(s)) do
+    if v.inline or not v.pick then
+      closing[#closing + 1] = v
+      for _, b in ipairs({ v.buf_a or false, v.buf_b or false }) do
+        -- 읽은 버퍼만 vim.bo 로 (내려 둔 버퍼를 읽으면 그 파일의 마크가 shada 에서 빠진다 - show_file)
+        if b and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
+          mods[#mods + 1] = vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':~:.')
+        end
+      end
+    end
+  end
+  if #mods > 0 then
+    local yes = tr.confirm(('고친 채 저장하지 않은 버퍼가 있습니다: %s\n그 짝의 비교 탭을 닫습니다 - 버퍼는 저장하지 않은 채 남습니다. %s 쪽 경로를 바꿀까요?')
+      :format(table.concat(mods, ', '), S))
+    if not yes then
+      return say('경로를 바꾸지 않았습니다')
+    end
+  end
+  for _, v in ipairs(closing) do
+    if v.inline then
+      tr.reset_main(s)
+    else
+      v.quiet = true   -- 남는 고친 버퍼는 아래 알림 하나에 (물을 때 이미 이름을 보였다)
+      close_view(v, false)
+    end
+  end
+  for _, v in pairs(s.views) do
+    v.back = nil
+  end
+  if _G.vimide_dirdiff_pick_forget then
+    _G.vimide_dirdiff_pick_forget(s.tab)
+  end
+  local was = s[side]
+  s[side] = d
+  s.marks = { a = {}, b = {} }
+  s.reopen, s.op_goto = nil, nil
+  local name = vim.fn.fnamemodify(s.a, ':t') .. ' <> ' .. vim.fn.fnamemodify(s.b, ':t')
+  if api.nvim_tabpage_is_valid(s.tab) then
+    vim.t[s.tab].title = 'DirDiff ' .. name
+  end
+  tr.rename_buf(s.buf_l, 'DirDiff ' .. name .. ' #' .. s.buf_l)
+  restart(s)
+  say(('%s 쪽 경로를 바꾸었습니다: %s → %s%s'):format(S, shown(vim.fn.fnamemodify(was, ':~')),
+    shown(vim.fn.fnamemodify(d, ':~')), #mods > 0 and (' (고친 채 남겨 둔 버퍼: %s)'):format(table.concat(mods, ', ')) or ''),
+    #mods > 0 and vim.log.levels.WARN or nil)
+end
+
+-- 지금 뿌리를 채워 묻고 바꾼다 (트리의 e, 경로 줄의 두 번 누르기, 경로 없는 :DirDiffPath). 묻는 동안 경로 줄의 그쪽이
+-- 연두로 보이게 쪽을 먼저 그리로
+function tr.edit_root(s, side)
+  if s.solo or s.done then
+    return
+  end
+  if s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에', vim.log.levels.WARN)
+  end
+  if s.side ~= side then
+    s.side = side
+    if api.nvim_win_is_valid(s.win_l) then
+      goto_row(s, api.nvim_win_get_cursor(s.win_l)[1])
+    end
+    render(s)
+  end
+  local text = tr.ask(('%s 쪽 디렉터리: '):format(side:upper()), vim.fn.fnamemodify(s[side], ':~'), 'dir')
+  if not text then
+    return say('경로를 바꾸지 않았습니다')
+  end
+  tr.set_root(s, side, text)
+end
+
+-- 경로 줄 창을 두 번 눌렀다 (트리의 <2-LeftMouse>, 경로 줄 버퍼의 것): 누른 반쪽의 경로를 바꾼다. 한 번 누르기는
+-- 예전대로 그쪽으로 바꾸기만 (cmp.bounce). 경로 줄 창이면 true - 트리의 두 번 누르기(지금 줄 열기)로 넘기지
+-- 않는다 (예전에는 경로 줄을 두 번 누르면 트리의 커서 줄이 열렸다)
+function tr.head_click(s)
+  local mp = vim.fn.getmousepos()
+  if not (s.hwin and mp.winid == s.hwin) then
+    return false
+  end
+  -- 경로 줄 창의 상태줄(칸 제목 '이름 … 크기 수정일')을 누른 것도 winid 가 그 창이다 (winrow 가 창 높이 밖) - 받기만
+  local inside = api.nvim_win_is_valid(s.hwin) and mp.winrow >= 1 and mp.winrow <= api.nvim_win_get_height(s.hwin)
+  if inside and on(vim.g.vimide_dirdiff_path_edit, 1) and api.nvim_win_is_valid(s.win_l) then
+    local side = mp.wincol > layout(s).half + 2 and 'b' or 'a'
+    if api.nvim_get_current_win() ~= s.win_l then
+      api.nvim_set_current_win(s.win_l)
+    end
+    vim.schedule(function()
+      if not s.done then
+        tr.edit_root(s, side)
+      end
+    end)
+  end
+  return true
+end
+
+-- 친 파일 경로를 절대 경로로 (있는 이름은 그대로 - 'P$x' 의 $x 를 풀지 않게, 없으면 ~ · $VAR 를 풀어 본다)
+function cmp.full_file(text)
+  local t = vim.trim(text or '')
+  if t == '' then
+    return nil
+  end
+  if not uv.fs_lstat(t) then
+    t = vim.fn.expand(t, 1)
+  end
+  return vim.fn.fnamemodify(t, ':p')
+end
+
+-- 비교 탭의 한쪽 파일을 바꾼다 (창 머리를 두 번 누르기, 비교 창의 :DirDiffPath): 그 탭에서 새 두 파일을 견준다 -
+-- 고른 두 파일처럼 경로를 따로 싣고 세션에 붙은 채 (q 는 트리의 옛 줄로), 그 세션이 견주는 짝이 되면 보통 짝으로
+-- (tr.repoint). 한쪽에만 있던 짝의 없는 쪽도 이것으로 정한다. 고친 채인 버퍼를 내리게 되면 먼저 묻는다 (버퍼는
+-- 저장하지 않은 채 남는다 - 이 비교를 끝낼 때(트리의 q) '고친 채 남겨 둔 버퍼' 로 알린다. 탭의 q 는 지금 두 버퍼만 본다).
+-- 두 창 중 하나를 닫아 버렸으면 남은 창 옆에 다시 세우고 채운다 (tr.whole)
+function cmp.set_path(v, side, path)
+  if v.closed then
+    return
+  end
+  local S = side:upper()
+  local p = cmp.full_file(path)
+  if not p then
+    return say('경로를 바꾸지 않았습니다')
+  end
+  if vim.fn.isdirectory(p) == 1 then
+    return say(('디렉터리입니다 - 파일을 주세요: %s'):format(shown(path)), vim.log.levels.WARN)
+  end
+  if not uv.fs_stat(p) then
+    return say(('없는 파일입니다: %s'):format(shown(path)), vim.log.levels.WARN)
+  end
+  p = cmp.pick_norm(p)
+  local pa, pb = tr.view_paths(v)
+  if not pa then
+    return say('트리에서 짝을 먼저 고르세요')
+  end
+  local na, nb = pa, pb
+  if side == 'a' then
+    na = p
+  else
+    nb = p
+  end
+  if na == pa and nb == pb then
+    return say(('%s 쪽 파일이 그대로입니다'):format(S))
+  end
+  if na == nb then
+    return say('두 쪽이 같은 파일입니다', vim.log.levels.WARN)
+  end
+  local b = v['buf_' .. side]
+  if b and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == '' and vim.bo[b].modified then
+    if not tr.confirm(('%s 쪽 버퍼를 고친 채입니다: %s\n바꾸면 그 버퍼는 저장하지 않은 채 남습니다. 바꿀까요?')
+        :format(S, vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':~:.'))) then
+      return say('경로를 바꾸지 않았습니다')
+    end
+  end
+  -- 창 하나를 닫아 버린 탭: 그대로 채우면 없는 창에 버퍼를 띄우려다 오류로 멈추고(Invalid window id) v.filling 이
+  -- 남아 그 탭을 더 돌보지 않았다
+  if not tr.whole(v) then
+    return say('비교 창이 없습니다 - 트리에서 다시 여세요', vim.log.levels.WARN)
+  end
+  local back = v.back
+  if not v.pick and v.rel then
+    back = { { rel = v.rel } }   -- 트리의 짝이었다: q 는 그 줄로 (쪽은 트리의 지금 쪽 그대로)
+  end
+  tr.repoint(v, na, nb, back)
+  say(('%s 쪽 파일을 바꾸었습니다: %s'):format(S, shown(vim.fn.fnamemodify(p, ':~'))))
+end
+
+-- 지금 파일을 채워 묻고 바꾼다 (창 머리를 두 번 누르기, 경로 없는 :DirDiffPath)
+function cmp.edit_path(v, side)
+  if v.closed then
+    return
+  end
+  local pa, pb = tr.view_paths(v)
+  if not pa then
+    return say('트리에서 짝을 먼저 고르세요')
+  end
+  local text = tr.ask(('%s 쪽 파일: '):format(side:upper()), vim.fn.fnamemodify(side == 'a' and pa or pb, ':~'), 'file')
+  if not text then
+    return say('경로를 바꾸지 않았습니다')
+  end
+  cmp.set_path(v, side, text)
+end
+
+-- 비교 창의 창 머리를 눌렀다 (set_heads 의 %@ - 누른 창은 getmousepos). 한 번은 예전대로 그 창으로, 두 번이면 그쪽
+-- 파일 바꾸기 (묻는 줄은 누르기 처리 밖에서 - vim.schedule)
+function _G.vimide_dirdiff_bar_click(_, clicks, button)
+  local w = vim.fn.getmousepos().winid
+  local v = view_of_win(w)
+  if not v or button ~= 'l' or not api.nvim_win_is_valid(w) then
+    return
+  end
+  if api.nvim_get_current_win() ~= w then
+    api.nvim_set_current_win(w)
+  end
+  if clicks == 2 and on(vim.g.vimide_dirdiff_path_edit, 1) then
+    local side = w == v.win_a and 'a' or 'b'
+    vim.schedule(function()
+      cmp.edit_path(v, side)
+    end)
+  end
+end
+
+-- :DirDiffPath [a|b] [경로]: 비교 창에서는 그쪽 파일, DirDiff 트리 탭에서는 그쪽 뿌리 디렉터리. 쪽을 안 주면 지금
+-- 쪽 (비교 창: 그 창의 쪽, 트리: s.side), 경로를 안 주면 지금 경로를 채워 묻는다. 첫 낱말이 a / b 하나면 쪽이다 (그런
+-- 이름의 디렉터리는 ./a 로)
+function tr.path_cmd(o)
+  local args = o.args or ''
+  local side, rest = args:match('^%s*([aAbB])%s+(.*)$')
+  if not side then
+    side = args:match('^%s*([aAbB])%s*$')
+    rest = side and '' or args
+  end
+  side = side and side:lower()
+  rest = (vim.trim(rest or ''):gsub('\\ ', ' '))
+  local w = api.nvim_get_current_win()
+  local v = view_of_win(w)
+  if v then
+    side = side or (w == v.win_b and 'b' or 'a')
+    if rest == '' then
+      return cmp.edit_path(v, side)
+    end
+    return cmp.set_path(v, side, rest)
+  end
+  local s = sessions[api.nvim_get_current_tabpage()]
+  if s and not s.solo then
+    side = side or s.side
+    if rest == '' then
+      return tr.edit_root(s, side)
+    end
+    return tr.set_root(s, side, rest)
+  end
+  say('DirDiff 트리나 비교 창에서 쓰세요 - :DirDiffPath [a|b] [경로]', vim.log.levels.WARN)
+end
+
+-- :DirDiffPath 의 채우기: 첫 낱말이면 a / b 도, 경로는 비교 창이면 파일, 아니면 디렉터리
+function tr.path_complete(lead, line)
+  local kind = view_of_win(api.nvim_get_current_win()) and 'file' or 'dir'
+  local out = vim.fn.getcompletion(lead, kind)
+  if not line:match('^%s*%S+%s+%S+%s') then
+    for _, x in ipairs({ 'b', 'a' }) do
+      if x:sub(1, #lead) == lead then
+        table.insert(out, 1, x)
+      end
+    end
+  end
+  return out
+end
+
+-- ---------------------------------------------------------------------------
 -- Tab/Tab 으로 고른 두 파일 (겹친 비교): DirDiff 의 비교 탭으로
 -- ---------------------------------------------------------------------------
 -- dirdiffpick.lua 가 [B] 에서 부른다 (_G.vimide_dirdiff_open_files). 예전에는 tabnew + diffsplit 의 맨 vimdiff 라
@@ -4994,9 +6267,9 @@ function cmp.same_bytes(pa, pb, sa, sb, max)
   return x == y and 'same' or 'diff'
 end
 
--- 고른 두 파일을 view 에 채운다 (처음, 다시 세운 뒤, 트리 복사 뒤). 그사이 없어진 쪽은 알린다 - 안전망이다:
+-- 고른 두 파일을 view 에 채운다 (처음, 다시 세운 뒤, 트리 복사 뒤, 경로 바꾸기). 그사이 없어진 쪽은 알린다 - 안전망이다:
 -- dirdiffpick.lua 는 디스크에 없는 파일을 고르지 않는다 (_G.vimide_dirdiff_open_files 를 바로 부르면 온다)
-function cmp.pick_fill(v, jump)
+function cmp.pick_fill(v, jump, quiet)
   local p = v.pick
   local e = cmp.pick_entry(p.a, p.b)
   local gone = {}
@@ -5005,7 +6278,8 @@ function cmp.pick_fill(v, jump)
       gone[#gone + 1] = side:upper() .. ' ' .. shown(vim.fn.fnamemodify(p[side], ':~'))
     end
   end
-  if #gone > 0 then
+  -- quiet: 부른 쪽이 따로 알린다 (경로 바꾸기, 지우기·이름 바꾸기 뒤 - 그때 없는 쪽은 알고 있는 것이다)
+  if #gone > 0 and not quiet then
     say('고른 파일이 없어졌습니다: ' .. table.concat(gone, ', '), vim.log.levels.WARN)
   end
   local na, nb = p.a:match('[^/]+$'), p.b:match('[^/]+$')
@@ -7658,6 +8932,13 @@ api.nvim_create_autocmd('VimLeavePre', {
 
 -- vim-dirdiff 가 없어도 (PlugInstall 전 등) :DirDiff 는 이 트리로. 있으면 dirdifftab.vim 이
 -- 그 플러그인을 읽은 뒤에 같은 것으로 다시 정한다
+-- :DirDiffPath [a|b] [경로] - 트리 탭에서는 그쪽 뿌리 디렉터리, 비교 창에서는 그쪽 파일을 바꾼다 (tr.path_cmd)
+api.nvim_create_user_command('DirDiffPath', function(o)
+  tr.path_cmd(o)
+end, { nargs = '*', complete = function(lead, line)
+  return tr.path_complete(lead, line)
+end, desc = 'DirDiff: A / B 쪽 경로 바꾸기 (트리는 디렉터리, 비교 창은 파일)' })
+
 if vim.fn.exists(':DirDiff') ~= 2 and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
   api.nvim_create_user_command('DirDiff', function(o)
     if #o.fargs ~= 2 then

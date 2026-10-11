@@ -2004,6 +2004,11 @@ let g:vimide_dirdiff_tab = 1
 "           같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로
 "         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
+"         지금 쪽(A/B)의 파일 다루기 - neo-tree 와 같은 키: a 더하기(끝이 / 면 디렉터리, x/y/z.c 는 위 디렉터리도),
+"         A 디렉터리 더하기, d 지우기(그쪽에서 고른 것·비주얼 줄·커서 줄 - 묻고 나서, 링크는 링크만), r 이름 바꾸기·
+"         옮기기. 바뀐 곳만 다시 보고, 열어 둔 비교 탭은 지운 쪽을 '(없음)' 으로 / 새 이름을 따라간다
+"         e 지금 쪽의 경로(뿌리 디렉터리) 바꾸고 같은 탭에서 다시 비교 (경로 줄의 그 반쪽을 두 번 눌러도,
+"         :DirDiffPath [a|b] [경로] 도). 비교 창에서는 창 머리를 두 번 누르거나 :DirDiffPath 로 그쪽 파일을 바꾼다
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
 "            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도,
 "            고른 두 파일은 [B] 를 고른 곳으로),
@@ -2030,6 +2035,9 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때, 기본: 화면의 40%)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
+"   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
+"   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (되돌릴 수 없다 - 아래 설명)
+"   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기·트리의 e 를 걸지 않기 (:DirDiffPath 는 그대로)
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
@@ -2047,6 +2055,16 @@ let g:vimide_dirdiff_ignore_eol = 1
 let g:vimide_dirdiff_eol_max_mb = 4
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
+" 트리의 파일 다루기 (지금 쪽에서 neo-tree 처럼 a 더하기 - 끝이 / 면 디렉터리, A 디렉터리 더하기, d 지우기,
+" r 이름 바꾸기·옮기기): 1 켬, 0 그 키들을 걸지 않기
+let g:vimide_dirdiff_file_ops = 1
+" 트리의 d 가 지우기 전에 묻기 (쪽·이름·디렉터리 안의 항목 수를 보이고, 기본은 아니오): 1 묻기, 0 묻지 않고 바로
+" 지우기 - 휴지통이 아니라 디스크에서 바로 지워져 되돌릴 수 없고, 손이 미끄러진 d 한 번에 디렉터리째 사라진다
+let g:vimide_dirdiff_confirm_delete = 1
+" 경로 바꾸기: 트리 위 경로 줄의 A/B 반쪽이나 비교 창의 창 머리를 두 번 누르면(트리에서는 e 로도) 그쪽 경로(폴더
+" 비교는 뿌리 디렉터리, 비교 탭은 파일)를 고쳐 같은 탭에서 다시 비교: 1 켬, 0 두 번 누르기와 e 를 걸지 않기
+" (한 번 누르기는 늘 예전대로, :DirDiffPath [a|b] [경로] 는 늘 된다)
+let g:vimide_dirdiff_path_edit = 1
 " DirDiff 색: 'bc' = Beyond Compare 의 색 (background 가 dark 면 어두운 짝),
 " 'neogit' = Neogit 상태 화면의 색 (Neogit 이 없으면 예전 색), 'classic' = 예전 색
 let g:vimide_dirdiff_colors = 'bc'
