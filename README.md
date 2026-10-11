@@ -2572,14 +2572,13 @@ compare: A on the left, B on the right, in diff mode. The rows of the pairs
 that have a compare tab are highlighted in the tree. The DirDiff tab itself
 shows only the tree (with its path line), at full height.
 
-`,r` / `,e` move to the next / previous tab of the comparison - the DirDiff tab
-and its compare tabs, in tab order, wrapping around - from the tree and from
-the compare windows alike. With several tabs the tab line shows tabs instead of
-buffers, so the keys that walk the buffers elsewhere walk these tabs here
-(`:bn!` did nothing in the tree, and in a compare window it put another buffer
-in place of the compared file). Other tabs (the one you were editing in,
-another comparison) are reached with `gt` / `gT`; outside DirDiff `,r` / `,e`
-still cycle the buffers.
+`,r` / `,e` in the DirDiff tabs do what `gt` / `gT` do: next / previous tab,
+any tab, wrapping around, and with a count the same way (`3,r` goes to tab 3,
+`3,e` three tabs back) - from the tree and from the compare windows alike. With
+several tabs the tab line shows tabs instead of buffers, so the keys that walk
+the buffers elsewhere walk these tabs here (`:bn!` did nothing in the tree, and
+in a compare window it put another buffer in place of the compared file).
+Outside DirDiff `,r` / `,e` still cycle the buffers (`3,r` three buffers on).
 
 - **Window bars** (Beyond Compare's path field and the info row under it, in
   one line): `A: <path>  2026-10-10 오후 11:09:40  1,286 바이트  utf-8  unix`,
@@ -2699,7 +2698,7 @@ tab, also with `g:vimide_dirdiff_pair_tab = 0`.
 Where the tab belongs depends on where `[B]` was picked:
 
 - `[B]` in a DirDiff tree: the tab joins that comparison. It opens after the
-  comparison's other tabs, `,r` / `,e` go through it, `q` or `:tabclose` goes
+  comparison's other tabs, `q` or `:tabclose` goes
   back to the tree onto the row where `[B]` was picked (or onto the `[A]` row,
   when `[A]` came from the same tree and the `[B]` row is no longer shown), and
   `q` in the tree closes it with the others. `[A]` may come from neo-tree or
@@ -2709,9 +2708,9 @@ Where the tab belongs depends on where `[B]` was picked:
   row.
 - `[B]` in neo-tree: a compare tab of its own, right after the current tab. `q`
   or `:tabclose` closes it and goes back to the window where `[B]` was picked.
-  There is no comparison around it, so `,r` / `,e` there are just the next /
-  previous tab (as `gt` / `gT`) - cycling the buffers would put another file in
-  place of a compared one.
+
+In every one of these tabs `,r` / `,e` are `gt` / `gT`, as in the DirDiff tabs
+(cycling the buffers would put another file in place of a compared one).
 
 Picking the same two files again from the same place - `[B]` in the same
 comparison, or in neo-tree - goes to their tab, and rebuilds a compare window

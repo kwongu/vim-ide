@@ -7,7 +7,7 @@
 -- dirdiffview.lua 의 cmp.open_files). [A] 를 고른 뒤 같은 줄에서 다시 Tab 은 취소. 트리가 달라도
 -- 된다(F9 트리에서 고르고 RelationView 트리에서 비교).
 -- 파일 둘의 비교 탭이 어디에 붙나는 [B] 를 누른 곳이 정한다: DirDiff 의 비교 트리면 그 세션의 탭으로
--- (,r ,e 로 돌고 q 는 그 트리의 줄로), neo-tree 면 혼자 선 비교 탭 (q 는 [B] 를 누른 창으로).
+-- (q 는 그 트리의 줄로), neo-tree 면 혼자 선 비교 탭 (q 는 [B] 를 누른 창으로).
 -- 예전의 맨 vimdiff(새 탭에서 diffsplit)는 g:vimide_dirdiff_pick_vimdiff = 1 이면 (g:vimide_dirdiff_view = 0 -
 -- 디렉터리 둘도 DirDiff.vim 의 목록일 때, dirdiffview.lua 가 없을 때도 그것).
 --

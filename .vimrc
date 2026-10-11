@@ -1994,9 +1994,9 @@ let g:vimide_dirdiff_tab = 1
 "         고른 두 파일: 보통 짝과 같은 비교 탭 (색·창 머리·개요 막대·\d·복사 키·Ctrl+Z 모두, pair_tab = 0 이어도.
 "           창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되 파일 이름과 그 위 디렉터리 둘은 남기고, 그다음
 "           정보를 뺀다. 이름·디렉터리가 다를 수 있다). [B] 를 DirDiff 트리에서 골랐으면 그 비교의 탭으로 붙는다
-"           (그 비교의 탭들 뒤에 열리고 ,r / ,e 로 돈다, q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다.
+"           (그 비교의 탭들 뒤에 열리고, q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다.
 "           그 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 골랐으면 혼자 선 비교 탭
-"           (q 는 [B] 를 고른 창으로, ,r / ,e 는 그냥 다음 / 앞 탭 - 버퍼를 돌리면 비교하던 파일이 바뀐다).
+"           (q 는 [B] 를 고른 창으로).
 "           같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로
 "         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
@@ -3566,13 +3566,16 @@ endif
 " 주석을 줄 위로 올린 이유: :map 은 줄 끝까지를 통째로 오른쪽 항으로 삼는다.
 " 예전에는 `map ,r :bn!<CR>   " Switch to ...` 라서 <CR> 뒤의 글자들이 노멀
 " 모드 키로 딸려 들어갔다.
-func! s:BufCycle(cmd) abort
-	" DirDiff 탭(트리 탭과 그 비교 탭들)에서는 ,r / ,e 가 그 비교의 탭 사이를 오간다 - 탭이 여럿이면
-	" 탭 줄이 탭을 보이므로 (dirdiffview.lua 의 tab_cycle). 트리는 buftype 이 있어 아래에서 막혔고,
+" 횟수: ,r / ,e 는 :<C-u> 로 범위를 지우고 v:count 를 넘긴다 (3,r 은 버퍼 셋 앞으로, DirDiff 탭이면 3gt).
+" 예전에는 횟수가 범위(:.,.+2call)가 되어 함수가 줄마다 불렸고, 줄이 모자라면 E16 이었다
+func! s:BufCycle(cmd, ...) abort
+	let l:count = a:0 ? a:1 : 0
+	" DirDiff 탭(트리 탭과 비교 탭들)에서는 ,r / ,e 가 gt / gT 처럼 탭을 옮긴다 (횟수도 gt / gT 처럼) -
+	" 탭이 여럿이면 탭 줄이 탭을 보이므로 (dirdiffview.lua 의 tab_cycle). 트리는 buftype 이 있어 아래에서 막혔고,
 	" 비교 창에서는 :bn! 이 비교하던 파일을 다른 버퍼로 바꿨다. 먼저 묻는다
 	if has('nvim') && (a:cmd ==# 'bn!' || a:cmd ==# 'bp!')
-				\ && luaeval('_G.vimide_dirdiff_tab_cycle ~= nil and _G.vimide_dirdiff_tab_cycle(_A) or false',
-				\            a:cmd ==# 'bn!' ? 1 : -1)
+				\ && luaeval('_G.vimide_dirdiff_tab_cycle ~= nil and _G.vimide_dirdiff_tab_cycle(_A[1], _A[2]) or false',
+				\            [a:cmd ==# 'bn!' ? 1 : -1, l:count])
 		return
 	endif
 	if &buftype !=# ''
@@ -3582,7 +3585,9 @@ func! s:BufCycle(cmd) abort
 				\ && !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
 		return
 	endif
-	execute a:cmd
+	for l:i in range(max([1, l:count]))
+		execute a:cmd
+	endfor
 endfunc
 
 " <C-^> (대체 버퍼로 전환) 도 같은 자리에서.
@@ -3771,8 +3776,8 @@ if get(g:, 'vimide_replace_ctrl_h', 1)
 	xnoremap <silent> <C-h> :<C-u>call <SID>ReplaceFloat(<SID>VisualText())<CR>
 endif
 
-map ,r :call <SID>BufCycle('bn!')<CR>
-map ,e :call <SID>BufCycle('bp!')<CR>
+map ,r :<C-u>call <SID>BufCycle('bn!', v:count)<CR>
+map ,e :<C-u>call <SID>BufCycle('bp!', v:count)<CR>
 map ,w :call <SID>BufCycle('bw!')<CR>
 
 " 버퍼 번호로 바로 가기 (,1 ~ ,0)

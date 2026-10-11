@@ -40,9 +40,9 @@
 -- 고른 두 파일 (Tab/Tab - 트리에서든 neo-tree 에서든, 이름·디렉터리가 달라도): 보통 짝과 같은 비교 탭이다
 -- (예전의 맨 vimdiff 에는 색·창 머리·곁·키·q 가 없었다). 창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되
 -- 파일 이름과 그 위 디렉터리 둘은 남기고, 그래도 넘치면 정보(인코딩, 크기, 일시)를 뺀다. [B] 를 이
--- 트리에서 골랐으면 이 비교의 탭으로 붙는다 - 이 비교의 탭들 뒤에, ,r / ,e 로 돌고, q·:tabclose 는 [B] 를
+-- 트리에서 골랐으면 이 비교의 탭으로 붙는다 - 이 비교의 탭들 뒤에, q·:tabclose 는 [B] 를
 -- 고른 줄로, 트리의 q 로 같이 닫힌다 (이 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 [B] 면
--- 혼자 선 비교 탭: q 는 [B] 를 고른 창으로, ,r / ,e 는 그냥 다음 / 앞 탭. pair_tab = 0 이어도 비교 탭이다.
+-- 혼자 선 비교 탭: q 는 [B] 를 고른 창으로. pair_tab = 0 이어도 비교 탭이다.
 -- 같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로 (cmp.open_files - 아래 'Tab/Tab
 -- 으로 고른 두 파일'). g:vimide_dirdiff_view = 0 이나 g:vimide_dirdiff_pick_vimdiff = 1 이면 예전의 맨 vimdiff.
 -- 비교 창의 보기 (\d 로 고른다, Beyond Compare 의 글 비교 보기): 모두 보이기(기본 - 접지
@@ -73,8 +73,8 @@
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
---   ,r / ,e     이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이 - 비교 창에서도. 아래 tab_cycle.
---               neo-tree 에서 고른 두 파일의 비교 탭은 묶인 탭이 없어 그냥 다음 / 앞 탭)
+--   ,r / ,e     다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3gt 처럼 3번 탭으로, 3,e 는 세 탭 앞으로).
+--               비교 창에서도. 아래 tab_cycle
 -- 비교 창(비교 탭의 두 창, pair_tab = 0 이면 위의 편집 창 둘)에서는 \d 가 보기 고르기, 비교 탭의
 -- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
 -- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
@@ -3846,56 +3846,28 @@ function cmp.take_undo()
 end
 
 -- .vimrc 를 다시 읽으면(:source) 그 map <C-l> 이 이것을 덮는다 - .vimrc 가 이것을 다시 부른다
--- ,r / ,e (.vimrc 의 BufCycle 이 먼저 묻는다): DirDiff 탭(트리 탭과 그 비교 탭들) 안에서는 버퍼가 아니라
--- 그 비교의 탭 사이를 오간다 (요청). 탭이 여럿이면 airline 의 탭 줄이 버퍼 대신 탭을 보이므로 같은 키가
--- 그 탭들을 따라가는 것이 맞다 - 버퍼 이동(:bn!)은 트리(buftype nofile)에서는 아무 일도 하지 않았고,
--- 비교 창에서는 그 창의 파일을 다른 버퍼로 바꿔 비교를 깼다. 차례는 탭 번호 차례, 끝에서 처음으로 돈다.
--- 그 비교의 탭만 돈다 - 다른 탭(편집하던 탭, 다른 비교)으로는 gt / gT. 다룬 것이면 true (BufCycle 은
--- 그때 :bn! 을 하지 않는다), DirDiff 탭이 아니면 false
-function _G.vimide_dirdiff_tab_cycle(dir)
+-- ,r / ,e (.vimrc 의 BufCycle 이 먼저 묻는다): DirDiff 탭(트리 탭, 비교 탭, neo-tree 에서 고른 두 파일의
+-- 비교 탭) 안에서는 버퍼가 아니라 탭을 옮긴다 - gt / gT 와 같다 (요청): ,r 은 다음 탭, ,e 는 앞 탭, 끝에서
+-- 처음으로. 횟수도 gt / gT 처럼: 3,r 은 3번 탭으로(:3tabnext), 3,e 는 세 탭 앞으로(:3tabprevious).
+-- 탭이 여럿이면 airline 의 탭 줄이 버퍼 대신 탭을 보이므로 같은 키가 그 탭들을 따라가는 것이 맞다 - 버퍼
+-- 이동(:bn!)은 트리(buftype nofile)에서는 아무 일도 하지 않았고, 비교 창에서는 그 창의 파일을 다른 버퍼로
+-- 바꿔 비교를 깼다. (예전에는 그 비교의 탭들만 돌았다 - 편집하던 탭으로 가려면 gt 를 따로 눌러야 했다.)
+-- 다룬 것이면 true (BufCycle 은 그때 :bn! 을 하지 않는다), DirDiff 탭이 아니면 false
+function _G.vimide_dirdiff_tab_cycle(dir, count)
   local cur = api.nvim_get_current_tabpage()
-  local s
+  local mine = false
   for _, x in pairs(sessions) do
     if x.tab == cur or (x.views and x.views[cur]) then
-      s = x
+      mine = true
       break
     end
   end
-  if not s then
+  if not mine then
     return false
   end
-  if s.solo then
-    -- neo-tree 에서 고른 두 파일의 비교 탭(cmp.solo)은 묶인 탭(트리 탭·다른 짝)이 없다: 그냥 다음 / 앞 탭으로.
-    -- :bn! 으로 넘기면 비교하던 파일이 다른 버퍼로 바뀐다
-    vim.cmd(dir < 0 and 'tabprevious' or 'tabnext')
-    return true
-  end
-  local tabs = {}
-  if api.nvim_tabpage_is_valid(s.tab) then
-    tabs[#tabs + 1] = s.tab
-  end
-  for t in pairs(s.views or {}) do
-    if t ~= s.tab and api.nvim_tabpage_is_valid(t) then
-      tabs[#tabs + 1] = t
-    end
-  end
-  if #tabs < 2 then
-    -- pair_tab = 0 이거나 아직 짝을 열지 않았다. :bn! 으로 넘기면 편집 창(비교 창)의 파일이 바뀌므로 막는다
-    say('이 비교의 탭은 하나뿐입니다 (<CR> 로 짝을 열면 비교 탭이 생긴다, 다른 탭은 gt)')
-    return true
-  end
-  table.sort(tabs, function(a, b)
-    return api.nvim_tabpage_get_number(a) < api.nvim_tabpage_get_number(b)
-  end)
-  local idx = 1
-  for i, t in ipairs(tabs) do
-    if t == cur then
-      idx = i
-      break
-    end
-  end
-  idx = (idx - 1 + (dir < 0 and -1 or 1)) % #tabs + 1
-  api.nvim_set_current_tabpage(tabs[idx])
+  local n = tonumber(count) or 0
+  -- 없는 번호(9gt 인데 탭이 셋)는 gt 처럼 조용히 - :9tabnext 는 E16 을 낸다
+  pcall(vim.cmd, (n > 0 and tostring(n) or '') .. (dir < 0 and 'tabprevious' or 'tabnext'))
   return true
 end
 
@@ -4085,7 +4057,7 @@ local HELP_PAIR = {
   '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
   '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
-  '  ,r ,e       이 비교의 다음 / 앞 탭 (neo-tree 에서 고른 두 파일의 탭은 묶인 탭이 없어 그냥 다음 / 앞 탭)',
+  '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
   '  <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w - 트리 판정도 다시)',
   '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널·tmux 3.2 미만 서버에서는 1<C-r> 1<C-l>)',
@@ -4122,10 +4094,10 @@ local function help()
     '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
     '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
-    '  ,r ,e       이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이를 돈다 - 비교 창에서도)',
+    '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로. 비교 창에서도)',
     '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
     '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A]). 파일 둘이면 이 비교의 비교 탭 -',
-    '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, ,r ,e 로 돈다, 트리의 q 로 같이 닫힌다)',
+    '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다)',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
   }
@@ -4664,11 +4636,11 @@ end
 -- cmp 곁·키·되돌리기·close_view·repair_view)을 그대로 쓴다 - 다른 것은 두 경로를 view 에 따로 싣는 것뿐이다
 -- (v.pick = { a, b } - fill 의 r.pick: 이름도 디렉터리도 다를 수 있다. v.rel 은 트리의 줄이 아닌 열쇠).
 -- 어디에 붙나 - [B] 를 누른 곳이 정한다:
---   DirDiff 트리에서 [B]  그 세션의 비교 탭으로 (s.views - 그 세션의 탭들 뒤에). ,r ,e 로 돌고, q 는 [B] 를 고른
+--   DirDiff 트리에서 [B]  그 세션의 비교 탭으로 (s.views - 그 세션의 탭들 뒤에). q 는 [B] 를 고른
 --                         줄로 (보기에서 빠졌으면 같은 세션에서 고른 [A] 줄로 - cmp.back_row), 트리의 q 로 같이
 --                         닫힌다. [A] 가 다른 세션·neo-tree 에서 왔어도 [B] 의 세션이다. 두 경로가 그 세션이 견주는
 --                         짝(같은 상대 경로, A·B 차례 그대로)이면 보통 짝을 연다 (그 줄의 <CR> 과 같다)
---   neo-tree 에서 [B]     혼자 선 비교 탭 (cmp.solo). q 는 [B] 를 고른 창으로, ,r ,e 는 그냥 다음 / 앞 탭
+--   neo-tree 에서 [B]     혼자 선 비교 탭 (cmp.solo). q 는 [B] 를 고른 창으로
 -- 같은 두 파일을 같은 임자(그 세션 / 혼자 선 비교들)에서 다시 고르면 그 탭으로 간다 (창 하나를 닫아 버렸으면
 -- 다시 세운다). :w 하면 그 파일이 든 세션들의 판정 줄을 다시 본다 (BufWritePost - 보통 짝과 같다)
 
@@ -4815,7 +4787,7 @@ end
 
 -- neo-tree 에서 고른 두 파일 (세션 없이): 비교 탭 하나뿐인 작은 세션 (solo). 트리·뒤쪽이 없다 - win_l·buf_l 은
 -- -1 이라 트리를 찾는 곳들(render·mark_open·goto_row·WinResized ...)이 그냥 지나가고, 트리를 견주는 곳(:w 와 트리
--- 복사의 다시 보기, ,r ,e)은 solo 를 따로 본다. sessions 의 열쇠는 그 비교 탭: 탭이 닫히면 세션째 끝난다
+-- 복사의 다시 보기)은 solo 를 따로 본다. sessions 의 열쇠는 그 비교 탭: 탭이 닫히면 세션째 끝난다
 -- (release_view -> finish). q 는 [B] 를 고른 창으로 (origin / origin_win - finish)
 function cmp.solo()
   local origin, back = api.nvim_get_current_tabpage(), api.nvim_get_current_win()
