@@ -438,7 +438,10 @@ def listdir(side, rel):
     try:
         with os.scandir(path) as it:
             for e in it:
-                if excluded(e.name):
+                # 이 뒤쪽이 복사하며 쓰고 있는 임시 파일(copy_file)은 보지 않는다: 아직 훑지 않은 디렉터리에 복사하면
+                # (양측 교환 바로 뒤 - 트리에는 옛 목록이 보여 누를 수 있다) 훑기가 그것을 'B 에만' 으로 담았고,
+                # 복사가 끝나 이름을 바꾼 뒤에도 R 전까지 그 줄이 남았다. 다른 뒤쪽이 남긴 것은 그대로 보인다
+                if excluded(e.name) or e.name.startswith(TMP_MINE):
                     continue
                 try:
                     # d_type 으로 - stat 하지 않는다 (d_type 을 모르는 파일 시스템이면 파이썬이 lstat)
@@ -1197,9 +1200,12 @@ def why(e):
     return getattr(e, 'strerror', None) or str(e)
 
 
+TMP_MINE = '.dirdiff~%d~' % os.getpid()   # 복사의 임시 파일 이름 앞 (listdir 은 이것을 건너뛴다)
+
+
 def copy_file(src, dst, sst):
     d, base = os.path.split(dst)
-    tmp = os.path.join(d, '.dirdiff~%d~%s' % (os.getpid(), base[:80]))
+    tmp = os.path.join(d, TMP_MINE + base[:80])
     try:
         os.unlink(tmp)
     except OSError:

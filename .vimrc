@@ -2009,6 +2009,10 @@ let g:vimide_dirdiff_tab = 1
 "         옮기기. 바뀐 곳만 다시 보고, 열어 둔 비교 탭은 지운 쪽을 '(없음)' 으로 / 새 이름을 따라간다
 "         e 지금 쪽의 경로(뿌리 디렉터리) 바꾸고 같은 탭에서 다시 비교 (경로 줄의 그 반쪽을 두 번 눌러도,
 "         :DirDiffPath [a|b] [경로] 도). 비교 창에서는 창 머리를 두 번 누르거나 :DirDiffPath 로 그쪽 파일을 바꾼다
+"         S 양측 교환 (Beyond Compare 의 '양측 교환' - A·B 뿌리를 바꾸고 같은 탭에서 다시 비교. 경로 줄 가운데의
+"         ⇄ 를 눌러도, :DirDiffSwap 도). 펼친 디렉터리·보기(좌측/우측은 거울 짝)·커서 줄·고른 것·[A] 는 그대로,
+"         비교 탭들도 새 방향으로 (버퍼는 창만 바꾼다 - 고친 것·Ctrl+Z 그대로). 비교 창에서는 :DirDiffSwap 이나 B 창
+"         머리 맨 앞의 ⇄ 로 그 탭만 (:DirDiffSwap! 는 비교 전체)
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
 "            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도,
 "            고른 두 파일은 [B] 를 고른 곳으로),
@@ -2038,6 +2042,7 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
 "   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (되돌릴 수 없다 - 아래 설명)
 "   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기·트리의 e 를 걸지 않기 (:DirDiffPath 는 그대로)
+"   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄·B 창 머리)를 걸지 않기 (:DirDiffSwap 은 그대로)
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
@@ -2065,6 +2070,10 @@ let g:vimide_dirdiff_confirm_delete = 1
 " 비교는 뿌리 디렉터리, 비교 탭은 파일)를 고쳐 같은 탭에서 다시 비교: 1 켬, 0 두 번 누르기와 e 를 걸지 않기
 " (한 번 누르기는 늘 예전대로, :DirDiffPath [a|b] [경로] 는 늘 된다)
 let g:vimide_dirdiff_path_edit = 1
+" 양측 교환 (Beyond Compare 의 '양측 교환' 단추): 트리의 S, 트리 위 경로 줄 가운데의 ⇄ 한 번 누르기(A·B 뿌리째 - 같은
+" 탭에서 다시 비교), 비교 창 B 의 창 머리 맨 앞 ⇄ 누르기(그 탭의 두 파일만): 1 켬, 0 그 키와 단추를 걸지 않기
+" (:DirDiffSwap[!] 는 늘 된다)
+let g:vimide_dirdiff_swap_keys = 1
 " DirDiff 색: 'bc' = Beyond Compare 의 색 (background 가 dark 면 어두운 짝),
 " 'neogit' = Neogit 상태 화면의 색 (Neogit 이 없으면 예전 색), 'classic' = 예전 색
 let g:vimide_dirdiff_colors = 'bc'

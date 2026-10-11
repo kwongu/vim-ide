@@ -2439,7 +2439,10 @@ window width. The path line cannot be entered - the cursor goes back to the
 tree, and a click on a half switches to that side (with
 `g:vimide_dirdiff_pair_tab = 0`, `<C-w>k` from the tree passes it and goes on
 to the edit windows above). A double click on a half edits that path, as in
-Beyond Compare's path fields - see *Changing the paths* below.
+Beyond Compare's path fields - see *Changing the paths* below. Between the two
+halves, above the verdict column, sits a `⇄` (`<>` with `g:vimide_ascii_icons`):
+a single click on it swaps the two sides, like Beyond Compare's *양측 교환*
+toolbar button - see *Swapping sides* below.
 
 The verdict column says `≠` for files that differ and `=` for identical ones,
 and stays empty for one-sided entries (orphans) and folders, as in Beyond
@@ -2549,7 +2552,8 @@ those two windows): the same file in any other window keeps its colors.
 | `d` | delete on the current side: what was picked there with `<Space>`, without picks the rows of a visual selection, without that the row under the cursor - after a question naming the side, the paths and how many entries each folder holds (the default answer is no; `let g:vimide_dirdiff_confirm_delete = 0` skips it). A symlink is removed, not what it points to |
 | `r` | rename or move the entry on the current side: the prompt holds its path from that side's root, so it can also go into another folder there (missing folders are made); a name ending in `/` moves it into that folder under the same name, as `mv x dir/`; a name that exists is refused |
 | `e` | change the current side's root folder and compare again in the same tab, as editing a path field in Beyond Compare (a double click on that half of the path line does the same); see *Changing the paths* below |
-| `<2-LeftMouse>` | double click: on a row, the same as `<CR>`; on a half of the path line above the tree, change that side's root folder as `e` does (a single click there only switches to that side) |
+| `S` | swap the sides - A's root becomes B's and B's becomes A's, compared again in the same tab, as Beyond Compare's *양측 교환* (*좌, 우측 기본 폴더를 교환하기*). A click on the `⇄` between the halves of the path line and `:DirDiffSwap` do the same. Open folders, the view (*left newer* becomes *right newer* and so on), the cursor row (on the other side, so it stays on the same file), `<Space>` picks (moved to the other side), a pending `[A]` and the compare tabs (now the other way round, edits kept) stay; see *Swapping sides* below |
+| `<2-LeftMouse>` | double click: on a row, the same as `<CR>`; on a half of the path line above the tree, change that side's root folder as `e` does (a single click there only switches to that side; a single click on the `⇄` between the halves swaps the sides, as `S` does) |
 | `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
 | `q` | finish: closes the tab and its compare tabs, goes back, removes the buffers it opened (an edited one is kept, and named) |
 | `?` | these keys |
@@ -2562,6 +2566,7 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | `\d` | choose the view: *all*, *differences*, *context* - a small menu (`Enter`, a double click or `1` `2` `3` picks, `q` / `Esc` closes, `?` lists these keys); see *View modes* below. The window bar shows the current one |
 | `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same); for two picked files, back to where `[B]` was picked. While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<2-LeftMouse>` on a window bar | a double click on a window bar changes that side's file and compares the new pair in the same tab (`:DirDiffPath a` / `:DirDiffPath b` in a compare window does the same; a single click still just moves into that window) - see *Changing the paths* below |
+| `:DirDiffSwap` | swap the two files of this compare tab only - A's file goes to the right and B's to the left; a click on the `⇄` at the start of B's window bar does the same, and doing it again swaps them back. `:DirDiffSwap!` swaps the whole comparison, as `S` in the tree. No key is taken for it in the compare windows, where every plain key is vim's (the obvious `\s` is already vim-ide's) - see *Swapping sides* below |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c`. Past the last change (before the first one, or in a pair with no changes) the cursor stays and it says so - `마지막 차이 - 다음 차이 파일: <C-n> 다시 또는 Ctrl+M` - and the same key once more right away opens the next (previous) file that differs; see *Next and previous file* below |
 | `<C-m>` / `<C-S-m>` | Ctrl+M / Shift+Ctrl+M: the next / previous file that differs, at any point, in the same compare tab - Beyond Compare's *다음 차이 파일 (Ctrl+M)* / *이전 차이 파일 (Shift+Ctrl+M)*. Only while the window still shows its pair (after `:e` of another file they are the keys they were). Where the terminal sends Ctrl+M as a plain Enter (inside tmux: a server older than 3.2 or `extended-keys off`; Tera Term), `Enter` right after the end-of-changes message does it instead; any other `Enter` stays `Enter`. See *Ctrl+M and Enter* below |
 | `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
@@ -2721,7 +2726,10 @@ Outside DirDiff `,r` / `,e` still cycle the buffers (`3,r` three buffers on).
   (`~/…/packagegroups/packagegroup-subcore-tsound.bb`) and only a file name
   wider than the whole bar is cut. The side that has no file says `(없음)`
   before the path. With the `'bc'` colors the current window's bar is green
-  and the time, size and encoding are dark grey.
+  and the time, size and encoding are dark grey. B's bar starts with a `⇄`
+  (`<>` in ASCII) - right where the two bars meet, as Beyond Compare's swap
+  button sits in the middle of its toolbar: a click swaps this tab's two files
+  (see *Swapping sides*).
 - **Colors** (`'bc'`): text that is the same on both sides - unchanged lines
   and the unchanged parts of changed lines - is plain text (black on a light
   screen, the normal text color on a dark one), without syntax colors, as in
@@ -3008,6 +3016,64 @@ neo-tree keys) work on the current side - the half the cursor is in, shown as
   (a double click on the path line then does nothing, on a window bar it does
   what it did before); `:DirDiffPath` always works.
 
+**Swapping sides** (Beyond Compare's *양측 교환* button, *좌, 우측 기본 폴더를
+교환하기*):
+
+```vim
+:DirDiffSwap     " in the tree tab: swap A and B; in a compare window: that tab's two files only
+:DirDiffSwap!    " in a compare window: swap the whole comparison, as S in the tree
+```
+
+- In the tree, `S`, a single click on the `⇄` between the two halves of the
+  path line, or `:DirDiffSwap` makes A's root folder B's and B's root A's, and
+  the same tab compares again - the scan starts over, as after `R`, but the
+  tree does not go blank meanwhile: the rows already known are shown the other
+  way round right away (sizes, dates, colors and verdicts change sides, an
+  orphan of A becomes an orphan of B) and are replaced as the new listing comes
+  in (a folder opened in the meantime is filled in once its parent has been
+  scanned again). What you were looking at stays: open folders stay open; the
+  view stays, and one that names a side takes the mirrored one (*좌측 최신*
+  becomes *우측 최신*, *좌측 고아* becomes *우측 고아* - the same files stay
+  listed); the cursor stays on its row and moves to the other half, so it is
+  still on the same file (`[A 쪽]` becomes `[B 쪽]`); `<Space>` picks move to
+  the other side with their entries; an `[A]` picked with `Tab` keeps its file
+  (now on the other side) and `q` from a picked pair still lands on the row
+  where `[B]` was picked, on that file's side. The path line, the status line,
+  the tab name and the tree's buffer name follow. Doing it again gives back
+  the original comparison. On macOS a name that differs between the sides
+  only in case or Unicode normalization (`Foo.c` / `foo.c`, NFC / NFD) is one
+  row under A's spelling, so after the swap that row takes the other spelling;
+  open folders, picks, the cursor and its compare tab follow it.
+- The comparison's compare tabs follow at once: a pair from the tree shows the
+  new orientation (left is the new A), and two picked files (`Tab` / `Tab`, or
+  a pair whose path was changed) swap their two paths. Only the windows change
+  buffers - nothing is read again, so unsaved edits stay, `<C-z>` / `<C-y>` go
+  on with the same timeline (it follows the buffers), and the cursor and scroll
+  position go with each file into its new window; the window you were in
+  follows its file too, so you stay where you were typing. The window bars,
+  colors (A's pink, red or Neogit red stays on the left window, now on the
+  other file), overview bar, line details, arrows, the view chosen with `\d` and
+  the tab names are refreshed. A `≈` pair does not repeat its line ending
+  message.
+- In a compare window, `:DirDiffSwap` or a click on the `⇄` at the start of
+  B's window bar swaps the two files of that tab only (the tree keeps its
+  orientation). A pair from the tree then becomes a tab with its own two paths,
+  like two picked files, still part of the comparison: `q` goes back to its
+  row, the row stays highlighted as having a tab, `<CR>` on the row goes to
+  that tab (it says the pair is swapped) instead of opening a second one, and
+  `o` reads it again still swapped. Swapping again turns it back into the row's
+  ordinary compare tab. Ctrl+M (and `<C-n>` past the last change) still walks
+  the tree's order from there; the next file comes in the tree's orientation.
+  Two picked files, and the compare tab of two files picked in neo-tree, just
+  trade places. With `g:vimide_dirdiff_pair_tab = 0` the two edit windows above
+  the tree swap the same way, and `<CR>` on that row keeps them swapped.
+- It waits while a tree copy runs (the scan would be cut short, as with `R`),
+  and says so. A comparison of the same two folders the other way round that is
+  already open in another tab refuses it, as `:DirDiffPath` does.
+- `let g:vimide_dirdiff_swap_keys = 0` leaves `S` unmapped and takes the two
+  `⇄` away (a single click there does what it did before); `:DirDiffSwap`
+  always works.
+
 Copying in the tree:
 
 - It asks first, naming what goes which way
@@ -3102,7 +3168,8 @@ Copying in the tree:
   `g:vimide_dirdiff_file_ops` (1: the tree's `a` `A` `d` `r`, 0: unmapped),
   `g:vimide_dirdiff_confirm_delete` (1: `d` asks first, 0: deletes at once),
   `g:vimide_dirdiff_path_edit` (1: double clicks and `e` change the paths, 0:
-  only `:DirDiffPath`). A comparison
+  only `:DirDiffPath`), `g:vimide_dirdiff_swap_keys` (1: the tree's `S` and the
+  two `⇄` swap the sides, 0: only `:DirDiffSwap`). A comparison
   keeps the layout it was opened with; the colors change at the next
   `:DirDiff`, color scheme or `'background'` change.
 - `g:vimide_dirdiff_date_format` (`'%Y-%m-%d %p %l:%M:%S'`) is the tree's

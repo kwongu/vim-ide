@@ -91,6 +91,11 @@
 --   e           지금 쪽의 경로(뿌리 디렉터리) 바꾸고 같은 탭에서 다시 비교 (Beyond Compare 의 경로 칸 고치기). 경로 줄
 --               창의 그 반쪽을 두 번 눌러도 (한 번 누르기는 예전대로 쪽 바꾸기), :DirDiffPath [a|b] [경로] 도.
 --               옛 뿌리의 짝을 보이던 비교 탭은 닫는다 (고친 버퍼가 있으면 먼저 묻는다)
+--   S           양측 교환 (Beyond Compare 의 '양측 교환' - 좌, 우측 기본 폴더를 교환하기): A·B 뿌리를 바꾸고 같은
+--               탭에서 다시 비교. 경로 줄 창 가운데(두 반쪽 사이)의 ⇄ 를 한 번 눌러도, :DirDiffSwap 도. 펼친 디렉터리·
+--               보기(좌측·우측 최신·고아는 거울 짝으로)·커서 줄(쪽은 뒤집어 같은 파일)·Space 로 고른 것(다른 쪽으로)·
+--               고른 [A] 는 그대로, 이 비교의 비교 탭들도 새 방향으로 (버퍼는 창만 바꾼다 - 고친 것·Ctrl+Z 그대로).
+--               복사하는 동안은 하지 않는다. 아래 '양측 교환'
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
 --   ,r / ,e     다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3gt 처럼 3번 탭으로, 3,e 는 세 탭 앞으로).
 --               비교 창에서도. 아래 tab_cycle
@@ -110,6 +115,8 @@
 -- 비교 창의 창 머리를 두 번 누르면(또는 비교 창에서 :DirDiffPath [a|b] [경로]) 그쪽 파일을 바꿔 그 탭에서 새 두
 -- 파일을 견준다 - 고른 두 파일처럼 경로를 따로 싣고 세션에 붙은 채 (q 는 트리의 그 줄로), 한쪽에만 있는 파일의 없는
 -- 쪽도 이것으로 정한다.
+-- 비교 창의 :DirDiffSwap(또는 B 창 머리 맨 앞의 ⇄ 누르기)은 그 탭만 양측 교환 - 두 파일이 자리를 바꾼다 (트리의 짝이면
+-- 경로를 따로 실은 탭이 되고, 트리의 방향은 그대로. 한 번 더 하면 원래대로). :DirDiffSwap! 는 그 비교 전체 (트리의 S).
 -- 비교 창의 <C-z>/<C-y> 는 짝 전체의 되돌리기/다시 실행 (Beyond Compare 처럼 - 커서가 A·B 어느 쪽에 있든 두 파일
 -- 중 마지막으로 바뀐 것을. 타자, <C-r>/<C-l> 복사, dp/do 모두. 횟수, 비주얼도. 삽입 모드의 <C-z> 는 삽입을 끝내고
 -- 방금 친 것부터, 삽입 모드의 <C-y> 는 그대로 - 아래 '짝 전체의 되돌리기'). 비교 창 밖의 <C-z>(nvim 멈추기)·<C-y>
@@ -138,6 +145,7 @@
 --   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
 --   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (휴지통 없이 디스크에서 - 되돌릴 수 없다)
 --   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기(경로 줄·창 머리)와 트리의 e 를 걸지 않기
+--   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄 가운데·B 창 머리)를 걸지 않기
 --   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
 --   let g:vimide_dirdiff_colors = 'neogit' " Neogit 상태 화면의 색 ('classic' 예전 색, 기본 'bc': Beyond Compare)
 --   let g:vimide_dirdiff_pair_tab = 0      " 파일 짝을 비교 탭 대신 트리 위의 편집 창 둘에서
@@ -234,14 +242,16 @@ local MODES = {
   { id = 'no-orphans', label = '고아 없음 보이기', bits = SAME + NA + NB + DX, both = true },
   { id = 'diff-no-orphans', label = '고아 없는 차이 보이기', bits = NA + NB + DX },
   { id = 'orphans', label = '고아 보이기', bits = OA + OB },
-  { id = 'left-newer', label = '좌측 최신 보이기', bits = NA },
-  { id = 'right-newer', label = '우측 최신 보이기', bits = NB },
-  { id = 'left-newer-orphans', label = '좌측의 최신과 고아 보이기', bits = NA + OA },
-  { id = 'right-newer-orphans', label = '우측 최신과 고아 보이기', bits = NB + OB },
-  { id = 'left-orphans', label = '좌측 고아 보이기', bits = OA },
-  { id = 'right-orphans', label = '우측 고아 보이기', bits = OB },
+  { id = 'left-newer', label = '좌측 최신 보이기', bits = NA, swap = 'right-newer' },
+  { id = 'right-newer', label = '우측 최신 보이기', bits = NB, swap = 'left-newer' },
+  { id = 'left-newer-orphans', label = '좌측의 최신과 고아 보이기', bits = NA + OA, swap = 'right-newer-orphans' },
+  { id = 'right-newer-orphans', label = '우측 최신과 고아 보이기', bits = NB + OB, swap = 'left-newer-orphans' },
+  { id = 'left-orphans', label = '좌측 고아 보이기', bits = OA, swap = 'right-orphans' },
+  { id = 'right-orphans', label = '우측 고아 보이기', bits = OB, swap = 'left-orphans' },
   { id = 'same', label = '동일 보이기', bits = SAME },
 }
+-- swap: 양측 교환(tr.swap) 뒤의 보기 - 좌측·우측을 말하는 보기는 거울 짝으로 (A 가 최신이던 파일은 이제 B 가
+-- 최신이다 - 같은 파일들이 보이게). 나머지는 양쪽에 대해 같은 말이라 그대로
 local MODE = {}
 for i, md in ipairs(MODES) do
   md.i = i
@@ -355,6 +365,10 @@ local HL = {
   -- 칸 제목은 nocombine: 상태줄의 토막 색은 StatusLine 과 섞여서 jellybeans 의 기울임이 따라왔다
   { 'VimIdeDirDiffColHead', nil, { link = 'StatusLineNC' },
     C('#303030', 236, '#f6f6f6', 255, { nocombine = true }), C('#b0b0b0', 249, '#202020', 234, { nocombine = true }) },
+  -- 양측 교환 단추 ⇄ (경로 줄의 두 반쪽 사이, 비교 창 B 의 창 머리 맨 앞 - Beyond Compare 의 도구 막대 단추): 누를
+  -- 수 있는 것으로 보이게 굵은 파랑. 바탕은 그 자리 것 그대로 (경로 줄의 칸 제목색, 창 머리)
+  { 'VimIdeDirDiffSwap', { 'NeogitSectionHeader' }, { link = 'Title' },
+    C('#0050d0', 26, nil, nil, BOLD), C('#8fb4ff', 111, nil, nil, BOLD) },
   -- 트리 상태줄의 수 (다름·A만·B만). 여섯째 true: 'background' 가 아니라 상태줄 바탕으로 밝은·어두운 짝을
   -- 고른다 - jellybeans 는 어두운 화면에 밝은 상태줄이라 어두운 짝(옅은 빨강·파랑)이 바탕에 묻혔다
   { 'VimIdeDirDiffStChanged', nil, { link = 'VimIdeDirDiffChanged' }, C('#e00000', 160), C('#ff6b6b', 203), true },
@@ -807,12 +821,31 @@ local function start_job(s)
 end
 
 local function request_list(s, rel)
+  -- 양측 교환 뒤(restart 의 keep - s.stale): 옛 목록의 줄이 그대로 보여 누를 수 있지만, 새 뒤쪽은 부모를 아직 훑지
+  -- 않았을 수 있다 - 그때 청하면 빈 목록이 오고(dirdiffscan.py 의 find 가 못 찾는다) 그것을 새 목록으로 받아, S 바로
+  -- 뒤에 펼친 디렉터리가 R 전까지 빈 채였다 (부모의 새 목록이 와도 다시 청하지 않는다 - 이미 새 것이라). 부모의 새
+  -- 목록이 아직이면 s.chain 에 적어 두고 부모를 먼저: 그 목록이 오면 on_event 가 청한다 (tr.chain 과 같은 길)
+  if s.stale and rel ~= '' then
+    local p = rel:match('^(.*)/[^/]+$') or ''
+    if s.stale[p] or not s.dirs[p] then
+      s.chain = s.chain or {}
+      s.chain[rel] = true
+      if not s.loading[p] then
+        request_list(s, p)
+      end
+      return
+    end
+  end
   s.req = s.req + 1
   s.loading[rel] = true
   send(s, { cmd = 'list', id = s.req, dir = rel })
 end
 
 local function store_list(s, rel, entries)
+  -- 양측 교환 뒤 그 디렉터리의 첫 새 목록: 철자만 다른 짝의 이름이 바뀌었으면 rel 로 적어 둔 것을 옮긴다 (tr.realias)
+  if s.stale and s.stale[rel] and s.dirs[rel] then
+    tr.realias(s, rel, entries)
+  end
   local d = { entries = {}, idx = {} }
   for _, e in ipairs(entries) do
     local x = { name = e[1], ka = nz(e[2]), kb = nz(e[3]), sa = nz(e[4]), sb = nz(e[5]),
@@ -825,6 +858,9 @@ local function store_list(s, rel, entries)
   end
   s.dirs[rel] = d
   s.loading[rel] = nil
+  if s.stale then
+    s.stale[rel] = nil   -- 양측 교환 뒤 새 뒤쪽의 목록이 왔다 (restart 의 keep)
+  end
   s.need_full = true
 end
 
@@ -842,6 +878,20 @@ end
 
 local function is_item(e)
   return (BAD[e.st] and not both_dirs(e)) or e.rerr ~= nil
+end
+
+-- 부모(dir)의 새 목록이 왔다: 펼쳐 둔(또는 s.chain 에 적은) 아래 디렉터리 중 목록이 없는 것을 청한다. R 뒤: 펼쳐
+-- 두었던 아래 디렉터리는 부모의 목록이 온 뒤에 청한다 (한꺼번에 청했더니 새 뒤쪽이 아직 부모를 훑지 않아 빈 목록을
+-- 돌려주었고, 펼친 폴더가 모두 비었다). 양측 교환 뒤에는 옛 목록(A·B 를 바꿔 둔 것 - s.stale)이 있어도 청한다: 새
+-- 뒤쪽은 그것을 모른다 (청하지 않으면 바뀌어도 알려 오지 않는다)
+function tr.want_kids(s, dir)
+  for _, e in ipairs(s.dirs[dir].entries) do
+    local c = join(dir, e.name)
+    if is_dir(e) and (s.expanded[c] or (s.chain and s.chain[c])) and (not s.dirs[c] or (s.stale and s.stale[c]))
+        and not s.loading[c] then
+      request_list(s, c)
+    end
+  end
 end
 
 on_event = function(s, ev)
@@ -875,19 +925,24 @@ on_event = function(s, ev)
       s.walk.wait = nil
       walk_fn(s)              -- 예전 뒤쪽의 보기 <C-n>/<C-p>: 기다리던 목록이 왔다 (walk)
     end
-    -- R 뒤: 펼쳐 두었던 아래 디렉터리는 부모의 목록이 온 뒤에 청한다 (한꺼번에 청했더니
-    -- 새 뒤쪽이 아직 부모를 훑지 않아 빈 목록을 돌려주었고, 펼친 폴더가 모두 비었다)
-    for _, e in ipairs(s.dirs[ev.dir].entries) do
-      local c = join(ev.dir, e.name)
-      if is_dir(e) and (s.expanded[c] or (s.chain and s.chain[c])) and not s.dirs[c] and not s.loading[c] then
-        request_list(s, c)
-      end
-    end
+    tr.want_kids(s, ev.dir)
     schedule_render(s)
   elseif k == 'lists' or k == 'reveal' then
-    for rel, entries in pairs(ev.lists or {}) do
-      store_list(s, rel, entries)
+    -- 부모부터 (이름 차례면 부모가 제 아래 것보다 앞이다): 양측 교환 뒤 부모의 새 목록이 철자만 다른 짝의 이름을
+    -- 옮겨야(tr.realias) 그 아래의 새 목록이 제 열쇠에 앉는다
+    local rels = vim.tbl_keys(ev.lists or {})
+    table.sort(rels)
+    for _, rel in ipairs(rels) do
+      store_list(s, rel, ev.lists[rel])
       s.expanded[rel] = true
+    end
+    -- 양측 교환 뒤: 여기서 새로 받은 목록 아래의 펼쳐 둔 옛 목록도 청한다 ('list' 처럼 - 이 디렉터리의 'list' 는 더
+    -- 오지 않는다. 안 청하면 옛 목록 그대로 바뀌어도 알려 오지 않았다)
+    for _, rel in ipairs(s.stale and rels or {}) do
+      if s.chain then
+        s.chain[rel] = nil
+      end
+      tr.want_kids(s, rel)
     end
     local path = nz(ev.path)   -- JSON null 은 vim.NIL (참) 이다
     -- 비교 창의 '다음 / 이전 차이 파일' 이 물은 것: 트리를 옮기고 알리는 대신 그 짝을 연다 (cmp.fs_found). 그 뒤에
@@ -1020,7 +1075,8 @@ render_rows = function(s)
   local function walk(rel, depth, pa, pb)
     local d = s.dirs[rel]
     if not d then
-      if s.loading[rel] then
+      -- s.chain: 부모의 새 목록이 오면 청할 것 (양측 교환 바로 뒤에 처음 펼친 디렉터리 - request_list) - 그것도 읽는 중
+      if s.loading[rel] or (s.chain and s.chain[rel]) then
         rows[#rows + 1] = { rel = rel .. '/', depth = depth, loading = true, pa = pa, pb = pb, la = true, lb = true }
       end
       return
@@ -1594,15 +1650,19 @@ function tr.head_ensure(s)
   return true
 end
 
--- 경로 줄: 반쪽마다 ' A  경로' (넘치면 앞쪽을 자른다), 지금 쪽 칸은 연두
+-- 경로 줄: 반쪽마다 ' A  경로' (넘치면 앞쪽을 자른다), 지금 쪽 칸은 연두. 두 반쪽 사이 세 칸(트리의 판정 칸 위)
+-- 가운데에 양측 교환 단추 ⇄ (ASCII '<>' - Beyond Compare 의 도구 막대 단추. 누르기는 cmp.bounce, tr.swap_btn).
+-- g:vimide_dirdiff_swap_keys = 0 이면 예전처럼 빈칸
 function tr.head_line(s, L)
   local function half(tag, path)
     return ' ' .. tag .. '  ' .. tr.fit_left(shown(vim.fn.fnamemodify(path, ':~')), L.half - 4)
   end
   local a, b = half('A', s.a), half('B', s.b)
-  local line = a .. '   ' .. b
+  local swap = on(vim.g.vimide_dirdiff_swap_keys, 1)
+  local mid = swap and (ascii() and ' <>' or ' ⇄ ') or '   '
+  local line = a .. mid .. b
   line = line .. string.rep(' ', math.max(0, L.W - vim.fn.strdisplaywidth(line)))
-  local ob = #a + 3
+  local ob = #a + #mid
   local hls = {
     { s.side == 'a' and 'VimIdeDirDiffPathOn' or 'VimIdeDirDiffPath', 0, #a },
     { 'VimIdeDirDiffColHead', #a, ob },
@@ -1611,7 +1671,19 @@ function tr.head_line(s, L)
     { 'VimIdeDirDiffHeader', 1, 2 },
     { 'VimIdeDirDiffHeader', ob + 1, ob + 2 },
   }
+  if swap then
+    hls[#hls + 1] = { 'VimIdeDirDiffSwap', #a + 1, ob - (ascii() and 0 or 1) }
+  end
   return line, hls
+end
+
+-- 경로 줄 창의 그 칸(wincol, 1 부터)이 두 반쪽 사이의 양측 교환 단추(세 칸 모두 - 작은 단추라 넉넉히)인가
+function tr.swap_btn(s, wincol)
+  if not on(vim.g.vimide_dirdiff_swap_keys, 1) then
+    return false
+  end
+  local half = layout(s).half
+  return wincol > half and wincol <= half + 3
 end
 
 function tr.head_render(s, L)
@@ -1676,12 +1748,11 @@ local function mark_open(s)
   end
   api.nvim_buf_clear_namespace(s.buf_l, ns_open, 0, -1)
   local rels = {}
-  if s.main and s.main.rel then
-    rels[s.main.rel] = true
-  end
-  for _, v in pairs(s.views) do
-    if v.rel then
-      rels[v.rel] = true
+  -- 양측을 바꾼 짝(cmp.swapped_rel - 그 줄의 두 파일을 B | A 로 견주는 탭)도 그 줄에 탭이 있는 것이다
+  for _, v in ipairs(views_of(s)) do
+    local r = v.rel and (cmp.swapped_rel(v) or v.rel)
+    if r then
+      rels[r] = true
     end
   end
   -- 커서 줄에도 단다. line_hl_group 이 아니라 줄 끝까지(hl_eol) 덮는 글자 색으로, 고른 반 칸(mark_side,
@@ -2234,8 +2305,14 @@ local function set_heads(v)
     if h and api.nvim_win_is_valid(w) then
       local tg = pal() == 'bc' and 'VimIdeDirDiffHeader' or (side == 'a' and 'VimIdeDirDiffOnlyA' or 'VimIdeDirDiffOnlyB')
       local gone = (v.gone and v.gone[side]) and ' (없음)' or ''
-      local left = ' ' .. hl_part(tg, side:upper() .. ':') .. gone .. ' %<'
-      local used = 1 + 2 + sw(gone) + 1
+      -- B 쪽 맨 앞(A | B 의 가운데 - Beyond Compare 의 도구 막대 단추 자리)에 양측 교환 단추 '⇄ ' (cmp.swap_btn). 앞의
+      -- 빈칸 자리에 선다
+      local icon, bw = nil, 1
+      if side == 'b' then
+        icon, bw = cmp.swap_btn()
+      end
+      local left = (icon and '' or ' ') .. hl_part(tg, side:upper() .. ':') .. gone .. ' %<'
+      local used = bw + 2 + sw(gone) + 1
       local W = api.nvim_win_get_width(w)
       -- 경로는 파일 이름과 맨 앞(~/…/)만큼은 남게 - 정보·보기·키는 그것이 안 들어가면 뺀다
       local need = math.min(sw(h), sw(vim.fn.fnamemodify(h, ':t')) + 4)
@@ -2290,6 +2367,10 @@ local function set_heads(v)
       -- 두 번 누르면 그쪽 파일 바꾸기 (_G.vimide_dirdiff_bar_click - 한 번 누르기는 예전처럼 그 창으로)
       if on(vim.g.vimide_dirdiff_path_edit, 1) then
         text = '%@v:lua.vimide_dirdiff_bar_click@' .. text .. '%X'
+      end
+      -- 단추는 제 누르기 칸 (%@ 는 겹칠 수 없어 경로 바꾸기 칸 앞에 따로). 뒤의 빈칸까지 누르는 칸이다
+      if icon then
+        text = '%@v:lua.vimide_dirdiff_swap_click@' .. hl_part('VimIdeDirDiffSwap', icon) .. ' %X' .. text
       end
       set_wo(w, 'winbar', text)
     end
@@ -2413,8 +2494,9 @@ local function fill(v, r, jump)
     api.nvim_win_set_buf(v.win_b, scratch(v, 'b', info))
   else
     -- 줄 끝만 다른 짝(트리의 ≈)의 eol - 쪽마다 3 비트 (dirdiffscan.py). % 4 == 1 이면 그쪽은 줄마다 CRLF 라 dos 로
-    -- 읽는다 (show_file - 뒤쪽도 그렇게 견주었다: 섞인 쪽은 CR 을 글로 두고 견주어 같을 때만 ≈)
-    local eol = not rp and e.st == 'same' and e.eol or nil
+    -- 읽는다 (show_file - 뒤쪽도 그렇게 견주었다: 섞인 쪽은 CR 을 글로 두고 견주어 같을 때만 ≈). 고른 두 파일의
+    -- 항목(cmp.pick_entry)에는 없다 - 양측을 바꾼 트리의 짝만 그 줄의 것을 싣는다 (cmp.pick_fill)
+    local eol = e.st == 'same' and e.eol or nil
     local function crlf(side)
       return eol ~= nil and math.floor(eol / (side == 'a' and 1 or 8)) % 4 == 1
     end
@@ -2443,7 +2525,9 @@ local function fill(v, r, jump)
     -- 뒤에, 그때의 v:echospace 에 맞춰 (tr.eol_text). 줄마다 CRLF 인데 dos 로 읽지 못한 쪽(사용자가 열어 둔 버퍼
     -- - show_file 이 그대로 둔다)은 ^M 줄이 차이로 보이니 그것도 말한다
     local said = r.rel .. ':' .. tostring(eol)
-    if eol and v.eol_said ~= said then
+    if eol and v.eol_said ~= said and v.eol_hush then
+      v.eol_said = said   -- 양측 교환 (cmp.swap_refill): 같은 두 파일이라 되풀이하지 않는다
+    elseif eol and v.eol_said ~= said then
       v.eol_said = said
       local raw = {}
       for _, x in ipairs({ { 'a', v.win_a }, { 'b', v.win_b } }) do
@@ -2660,13 +2744,23 @@ local function open_pair(s, r, jump)
       pcall(api.nvim_win_set_height, s.win_l, s.list_h)
     end
     -- 경로를 바꿔 따로 실었던 두 파일(cmp.set_path)은 버린다 - 이제 트리의 짝이다 (남겨 두면 트리 복사 뒤
-    -- on_copied 가 옛 두 파일로 다시 채웠다)
+    -- on_copied 가 옛 두 파일로 다시 채웠다). 이 줄의 두 파일을 양측 교환한 채(cmp.swapped_rel)면 그대로 다시 채운다
     if jump ~= 'refill' then
+      if cmp.swapped_rel(v) == r.rel then
+        return cmp.pick_fill(v, jump == true)
+      end
       v.pick, v.back = nil, nil
     end
     return fill(v, r, jump == true)
   end
   v = view_of_rel(s, r.rel)
+  -- 이 줄의 짝을 양측 교환한 탭 (B | A - cmp.swap_tab): <CR> 은 그 탭으로, o 는 그 탭을 교환한 채 다시 읽는다 -
+  -- 같은 두 파일의 탭을 하나 더 열지 않는다
+  -- 그 탭이 두 창을 다 닫아 버려 놓였으면(swapped_open 이 false) 보통 짝을 연다
+  local sv = not v and jump ~= 'refill' and cmp.swapped_of(s, r.rel)
+  if sv and cmp.swapped_open(sv, jump) then
+    return
+  end
   local repaired = false
   if v then
     v, repaired = repair_view(v)
@@ -2747,7 +2841,7 @@ local function act_enter(s, jump)
     if r.e.ka and r.e.kb and not both_dirs(r.e) then
       -- 비교 탭이 멀쩡히 있으면 <CR> 로 펼치고 접을 때마다 다시 읽지 않는다. o 는 다시 읽고(파일
       -- 줄의 o 와 같게), 창 하나를 닫아 버린 탭이면 <CR> 도 다시 세운다
-      local v = not s.main and view_of_rel(s, r.rel)
+      local v = not s.main and (view_of_rel(s, r.rel) or cmp.swapped_of(s, r.rel))
       local intact = v and api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b)
       if jump == false or not intact then
         open_pair(s, r, false)
@@ -4060,11 +4154,19 @@ local function take_over_view_keys()
   -- 비교 창의 창 머리를 두 번 누르기: 그쪽 파일 바꾸기 (_G.vimide_dirdiff_bar_click). 창 머리의 %@ 누르기 처리는 첫
   -- 누르기만 받는다 - 둘째(<2-LeftMouse>)는 매핑이 먼저라, vim-ide 의 두 번 누르기(.vimrc 의 RvMouseJump - 정의로
   -- 가기)가 커서 낱말로 뛰었다. 창 머리는 getmousepos 의 line 0, winrow 1 이다. 글 위에서는 원래대로
+  -- 창 머리 맨 앞의 양측 교환 단추(B 쪽 - cmp.swap_btn)를 두 번 눌렀으면 둘째는 받기만 한다: 첫 누르기가 이미 바꾸었다
+  -- (그대로 넘기면 경로를 묻거나 RvMouseJump 가 돌았다)
   wrap('n', '<2-LeftMouse>', function()
     local mp = vim.fn.getmousepos()
-    if mp.line == 0 and mp.winrow == 1 and view_of_win(mp.winid) and vim.wo[mp.winid].winbar ~= ''
-        and on(vim.g.vimide_dirdiff_path_edit, 1) then
-      return '<Cmd>lua _G.vimide_dirdiff_bar_click(0, 2, "l")<CR>'
+    local v = mp.line == 0 and mp.winrow == 1 and view_of_win(mp.winid)
+    if v and vim.wo[mp.winid].winbar ~= '' then
+      local icon, bw = cmp.swap_btn()
+      if icon and mp.winid == v.win_b and mp.wincol <= bw then
+        return ''
+      end
+      if on(vim.g.vimide_dirdiff_path_edit, 1) then
+        return '<Cmd>lua _G.vimide_dirdiff_bar_click(0, 2, "l")<CR>'
+      end
     end
   end, 'DirDiff 비교 창: 창 머리를 두 번 누르면 그쪽 파일 바꾸기')
 end
@@ -4378,6 +4480,8 @@ local HELP_PAIR = {
   '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
   '  창 머리를 두 번 누르기  그쪽 파일 바꾸기 - 새 두 파일을 이 탭에서 견준다 (:DirDiffPath [a|b] [경로] 도.',
   '              한쪽에만 있는 파일의 없는 쪽도 이것으로 정한다. q 는 트리의 그 줄로)',
+  '  :DirDiffSwap 이 짝만 양측 교환 - 두 파일이 자리를 바꾼다 (B 창 머리 맨 앞의 ⇄ / <> 를 눌러도. 트리는 그대로,',
+  '              한 번 더 하면 원래대로). :DirDiffSwap! 는 비교 전체 (트리의 S)',
   '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이) - 마지막·첫 차이에서는 알리고, 곧바로 한 번 더 누르면 다음 / 이전 차이 파일',
   '  <C-m> <C-S-m> 다음 / 이전 차이 파일 (Beyond Compare 의 Ctrl+M / Shift+Ctrl+M): 트리의 <C-n> <C-p> 가 갈 짝을',
@@ -4432,6 +4536,9 @@ local function help()
     '  r           지금 쪽의 것 이름 바꾸기·옮기기 (그쪽 뿌리 안의 다른 디렉터리로도, 끝이 / 면 그 안으로)',
     '  e           지금 쪽의 경로(뿌리 디렉터리) 바꾸고 다시 비교 - 경로 줄의 그쪽을 두 번 눌러도,',
     '              :DirDiffPath [a|b] [경로] 도 (비교 창에서는 그쪽 파일)',
+    ('  S           양측 교환 - A·B 뿌리를 바꾸고 다시 비교 (경로 줄 가운데의 %s 를 눌러도, :DirDiffSwap 도).'):format(
+      ascii() and '<>' or '⇄'),
+    '              펼친 것·보기·커서 줄·고른 것·[A] 와 비교 탭들(새 방향, 고친 것 그대로)은 그대로 둔다',
     ascii() and '  판정 칸     x 다름  = 같음  ~ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  . 확인 중'
       or '  판정 칸     ≠ 다름  = 같음  ≈ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  · 확인 중',
   }
@@ -4753,7 +4860,10 @@ local function finish(s, stay)
 end
 cmp.finish = finish   -- 앞에 있는 release_view 가 부른다 (혼자 선 비교 - 맨 위 지역 이름을 늘리지 않으려고 표에)
 
-local function restart(s)
+-- keep: 지금 목록(s.dirs)을 새 뒤쪽의 목록이 올 때까지 그대로 보인다 (양측 교환 - tr.swap 이 A·B 를 바꿔 둔 것). 비우면
+-- 트리가 '(훑는 중…)' 으로 비었다가 다시 차며 커서·화면 자리가 흔들렸다 - 같은 줄들이니 그대로 두고 새 목록이 오는
+-- 대로 바꾼다. 그 목록들은 s.stale 에 적어, 펼쳐 둔 디렉터리를 부모의 새 목록이 온 뒤에 청한다 (on_event 의 'list')
+local function restart(s, keep)
   -- q 처럼 복사가 끝나기를 기다린다. 뒤쪽을 바꾸면 하던 복사가 중간에 끊기고(대상에 반쯤 쓴
   -- 디렉터리가 남았다), 그 'copied' 는 새 뒤쪽에서 오지 않아 q 와 복사가 끝내 거절되었다
   if s.copying then
@@ -4767,7 +4877,16 @@ local function restart(s)
   end
   local r = cur_row(s)
   s.want_rel = r and r.e and r.rel or nil   -- 커서가 있던 줄로 돌아간다 (그 줄이 다시 생기면)
-  s.dirs, s.loading, s.dirty, s.prog, s.walk = {}, {}, {}, nil, nil
+  s.stale = nil
+  if keep then
+    s.stale = {}
+    for k in pairs(s.dirs) do
+      s.stale[k] = true
+    end
+  else
+    s.dirs = {}
+  end
+  s.loading, s.dirty, s.prog, s.walk = {}, {}, nil, nil
   s.chain = nil   -- 옛 뒤쪽에 청하던 차례 (tr.chain)
   s.fstep, s.fs_ids = nil, nil   -- 비교 창이 묻던 다음 차이 파일의 답은 새 뒤쪽에서 오지 않는다 (cmp.fs_pending)
   if not start_job(s) then
@@ -4841,6 +4960,12 @@ local function map_list(s)
       cursor_side(s)
       tr.edit_root(s, s.side)
     end, '지금 쪽의 경로(뿌리 디렉터리) 바꾸기')
+  end
+  -- S: 양측 교환 (Beyond Compare 의 '양측 교환' - A·B 뿌리를 바꾸고 같은 탭에서 다시 비교, tr.swap). 트리에서 비어
+  -- 있던 글자고 (vim 의 S 는 줄 바꾸기라 고칠 수 없는 트리에서는 쓸 데가 없다), 비교 전체를 다루는 키가 대문자인
+  -- 것(R O X F U)과 같은 꼴이다. 소문자 s 는 neo-tree 에서 '세로로 갈라 열기' 라 손버릇으로 눌려 다시 훑지 않게 비운다
+  if on(vim.g.vimide_dirdiff_swap_keys, 1) then
+    m('S', function() tr.swap(s) end, '양측 교환 (A·B 뿌리를 바꾸고 다시 비교)')
   end
   api.nvim_create_autocmd('CursorMoved', {
     buffer = b,
@@ -5993,6 +6118,11 @@ function tr.head_click(s)
   end
   -- 경로 줄 창의 상태줄(칸 제목 '이름 … 크기 수정일')을 누른 것도 winid 가 그 창이다 (winrow 가 창 높이 밖) - 받기만
   local inside = api.nvim_win_is_valid(s.hwin) and mp.winrow >= 1 and mp.winrow <= api.nvim_win_get_height(s.hwin)
+  -- 두 반쪽 사이의 양측 교환 단추를 두 번 눌렀다: 첫 누르기가 이미 바꾸었다 (cmp.bounce) - 둘째는 받기만 (경로를 묻지
+  -- 않는다, 두 번 바꾸지도 않는다)
+  if inside and tr.swap_btn(s, mp.wincol) then
+    return true
+  end
   if inside and on(vim.g.vimide_dirdiff_path_edit, 1) and api.nvim_win_is_valid(s.win_l) then
     local side = mp.wincol > layout(s).half + 2 and 'b' or 'a'
     if api.nvim_get_current_win() ~= s.win_l then
@@ -6158,6 +6288,382 @@ function tr.path_complete(lead, line)
 end
 
 -- ---------------------------------------------------------------------------
+-- 양측 교환 (Beyond Compare 의 '양측 교환' 단추 - '좌, 우측 기본 폴더를 교환하기')
+-- ---------------------------------------------------------------------------
+-- 폴더 비교 (tr.swap): A 의 뿌리가 B 로, B 의 것이 A 로 가고 같은 탭에서 다시 견준다. 트리의 S, 경로 줄 가운데의 ⇄ 를
+-- 한 번 누르기, 트리에서 :DirDiffSwap (비교 창에서는 :DirDiffSwap!). 보던 것은 그대로 둔다 - 펼친 디렉터리, 보기(좌측·
+-- 우측을 말하는 보기는 거울 짝으로 - MODES 의 swap), 커서 줄(같은 상대 경로)과 지금 쪽(뒤집어서 같은 파일을 가리킨다),
+-- Space 로 고른 것(다른 쪽으로 옮긴다), 이 트리에서 고른 [A](Tab - 경로는 그대로라 고른 쪽만 뒤집는다). 다시 훑는 것은
+-- 경로 바꾸기(tr.set_root)처럼 뒤쪽을 새 뿌리로 다시 띄우는 R 의 길(restart)이다. 그동안 지금 목록을 A·B 를 바꾼 꼴로
+-- (tr.mirror) 그대로 보인다: 같은 줄들이라 트리가 비지 않고 커서·화면 자리가 흔들리지 않는다 (새 목록이 오는 대로 바뀐다).
+-- 이 비교의 비교 탭들도 따른다 (cmp.swap_refill): 트리의 짝은 새 방향으로 (왼쪽이 새 A), 이 비교에 붙은 고른 두
+-- 파일(Tab/Tab, 경로 바꾸기)은 두 경로를 바꾼다. 버퍼는 창만 바꾼다 - 다시 읽지 않아 고친 것이 그대로고, 짝 전체의
+-- 되돌리기 줄(Ctrl+Z)도 이어진다 (버퍼마다 적은 것이다). 창 머리·색·개요 막대·줄 자세히·화살표·탭 이름은 채우기
+-- (fill)가 새로 한다. 복사하는 동안은 하지 않는다 (뒤쪽을 바꾸면 그 복사가 끊긴다 - R 과 같은 까닭).
+-- 비교 탭 하나만 (cmp.swap_tab): 그 탭의 두 파일을 바꾼다 - 비교 창에서 :DirDiffSwap, B 창 머리 맨 앞의 ⇄ 누르기.
+-- 트리의 짝은 고른 두 파일처럼 경로를 따로 실은 탭이 되고 (세션에 붙은 채, q 는 그 줄로 - 트리의 방향은 그대로),
+-- 고른 두 파일·혼자 선 비교는 두 경로를 바꾼다. 한 번 더 하면 원래대로 (트리의 짝이면 다시 보통 짝 - tr.repoint).
+-- 그 줄의 <CR> 은 그 탭으로 간다 - 같은 두 파일의 탭을 하나 더 열지 않는다 (cmp.swapped_of).
+-- g:vimide_dirdiff_swap_keys = 0 이면 S 와 두 ⇄ 를 걸지 않는다 (:DirDiffSwap 은 늘 된다)
+
+-- 항목 하나를 A·B 를 바꾼 꼴로 (그 자리에서): 종류·크기·시각, 판정의 A에만 / B에만, 못 읽은 쪽(rerr 'a' 'b' 'ab'),
+-- 표시(mask)의 최신·고아 비트(NA <-> NB, OA <-> OB), 줄 끝 표시(eol - 쪽마다 3 비트, A 가 아래)
+tr.SWAP_ST = { onlyA = 'onlyB', onlyB = 'onlyA' }
+function tr.mirror(e)
+  e.ka, e.kb, e.sa, e.sb, e.ma, e.mb = e.kb, e.ka, e.sb, e.sa, e.mb, e.ma
+  e.st = tr.SWAP_ST[e.st] or e.st
+  if e.rerr then
+    e.rerr = (e.rerr:gsub('[ab]', { a = 'b', b = 'a' }))
+  end
+  if e.m then
+    local m = e.m
+    local function has(x)
+      return band(m, x) ~= 0
+    end
+    e.m = m - band(m, NA + NB + OA + OB) + (has(NA) and NB or 0) + (has(NB) and NA or 0)
+      + (has(OA) and OB or 0) + (has(OB) and OA or 0)
+  end
+  if e.eol then
+    e.eol = tr.eol_swap(e.eol)
+  end
+end
+
+-- 줄 끝 표시(eol)의 A·B 를 바꾼 것: 쪽마다 3 비트 (A 가 아래), 그 위는 그대로
+function tr.eol_swap(x)
+  return math.floor(x / 64) * 64 + (x % 8) * 8 + math.floor(x / 8) % 8
+end
+
+-- 양측 교환 뒤 그 디렉터리(dir)의 첫 새 목록(entries)이 왔다 (store_list - 옛 목록은 아직 s.dirs[dir]). 뒤쪽은 철자만
+-- 다른 짝(macOS 의 대소문자·NFC/NFD - dirdiffscan.py 의 alias)을 A 의 철자로 한 줄에 싣는데, A 가 바뀌었으니 그런
+-- 줄은 이름이 바뀐다 ('Foo.c' -> 'foo.c'). rel 로 적어 둔 것을 새 이름으로 옮긴다 (tr.rekey) - 안 옮기면 펼친
+-- 디렉터리가 접히고 커서가 다른 줄로 가며, 그 줄의 비교 탭을 못 찾아 <CR> 이 같은 두 파일의 탭을 하나 더 열었다.
+-- 옛 목록에만 있는 양쪽 이름과 새 목록에만 있는 양쪽 이름을 새 A 쪽 디스크에서 같은 파일인지(lstat - 뒤쪽과 같은
+-- 잣대)로 잇는다. 대개 둘 다 비어 디스크를 보지 않는다
+function tr.realias(s, dir, entries)
+  local old = {}
+  for _, e in ipairs(s.dirs[dir].entries) do
+    if e.ka and e.kb then
+      old[e.name] = true
+    end
+  end
+  local new = {}
+  for _, e in ipairs(entries) do
+    if old[e[1]] then
+      old[e[1]] = nil
+    elseif nz(e[2]) and nz(e[3]) then
+      new[#new + 1] = e[1]
+    end
+  end
+  if #new == 0 or next(old) == nil then
+    return
+  end
+  local base = dir == '' and s.a or (s.a .. '/' .. dir)
+  local id = {}
+  for n in pairs(old) do
+    local st = uv.fs_lstat(base .. '/' .. n)
+    if st then
+      id[st.dev .. ':' .. st.ino] = n
+    end
+  end
+  for _, n in ipairs(new) do
+    local st = uv.fs_lstat(base .. '/' .. n)
+    local o = st and id[st.dev .. ':' .. st.ino]
+    if o then
+      tr.rekey(s, join(dir, o), join(dir, n))
+    end
+  end
+end
+
+-- rel 로 적어 둔 것들에서 from (과 그 아래)을 to 로 (tr.realias): 펼친 것·목록·청한 것, Space 로 고른 것, 돌아갈
+-- 커서 줄, 비교 탭의 짝과 q 로 돌아갈 줄, 이 비교에 붙은 고른 두 파일의 경로 (양측을 바꾼 짝 - cmp.swapped_rel 이 그
+-- 줄을 찾게). 새 열쇠에 이미 있는 것(새 목록)은 덮지 않는다
+function tr.rekey(s, from, to)
+  local function mv(rel)
+    if rel == from then
+      return to
+    end
+    if type(rel) == 'string' and rel:sub(1, #from + 1) == from .. '/' then
+      return to .. rel:sub(#from + 1)
+    end
+  end
+  -- s.loading 은 그대로: 옛 철자로 청한 것이 오면 거기서 지운다 (옮기면 새 철자가 '읽는 중' 인 채 남는다)
+  for _, t in ipairs({ s.expanded, s.dirs, s.stale or {}, s.chain or {}, s.reopen or {}, s.marks.a, s.marks.b }) do
+    local moved = {}
+    for k, val in pairs(t) do
+      local n = mv(k)
+      if n then
+        moved[#moved + 1] = { k, n, val }
+      end
+    end
+    for _, x in ipairs(moved) do
+      t[x[1]] = nil
+      if t[x[2]] == nil then
+        t[x[2]] = x[3]
+      end
+    end
+  end
+  s.want_rel = s.want_rel and mv(s.want_rel) or s.want_rel
+  -- 커서 줄도 (render 는 옛 rel 로 그 줄을 찾는다 - 못 찾으면 그 자리의 다른 줄에 섰다)
+  local r = cur_row(s)
+  if not s.want_rel and r and r.rel and mv(r.rel) then
+    s.want_rel = mv(r.rel)
+  end
+  for _, ro in pairs(s.reopen or {}) do
+    ro.parent = mv(ro.parent) or ro.parent
+  end
+  for _, v in ipairs(views_of(s)) do
+    v.rel = v.rel and mv(v.rel) or v.rel
+    for _, b in ipairs(v.back or {}) do
+      b.rel = b.rel and mv(b.rel) or b.rel
+    end
+    if v.pick then
+      local was = '\0' .. v.pick.a .. '\0' .. v.pick.b
+      for _, side in ipairs({ 'a', 'b' }) do
+        for _, root in ipairs({ s.a, s.b }) do
+          local pr = cmp.rel_in(root, v.pick[side])
+          if pr and mv(pr) then
+            v.pick[side] = root .. '/' .. mv(pr)
+            break
+          end
+        end
+      end
+      if v.rel == was then
+        v.rel = '\0' .. v.pick.a .. '\0' .. v.pick.b   -- 고른 두 파일의 열쇠 (cmp.pick_fill - 바뀌면 fill 이 보기를 처음으로)
+      end
+    end
+  end
+end
+
+function tr.swap(s)
+  if not s or s.solo or s.done then
+    return
+  end
+  if s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에 양측 교환', vim.log.levels.WARN)
+  end
+  -- 거꾸로 견주는 비교(B | A)가 이미 따로 있으면 같은 비교가 둘이 된다 - 경로 바꾸기(tr.set_root)와 같은 규칙
+  for tab, o in pairs(sessions) do
+    if o ~= s and not o.solo and not o.done and o.a == s.b and o.b == s.a and api.nvim_tabpage_is_valid(tab) then
+      return say(('B | A 로 이미 비교 중입니다 (탭 %d)'):format(api.nvim_tabpage_get_number(tab)), vim.log.levels.WARN)
+    end
+  end
+  s.a, s.b = s.b, s.a
+  s.side = s.side == 'a' and 'b' or 'a'
+  s.marks = { a = s.marks.b, b = s.marks.a }
+  s.mode = MODE[s.mode].swap or s.mode
+  for _, d in pairs(s.dirs) do
+    for _, e in ipairs(d.entries) do
+      tr.mirror(e)
+    end
+  end
+  if _G.vimide_dirdiff_pick_swapped then
+    _G.vimide_dirdiff_pick_swapped(s.tab)
+  end
+  -- q 로 돌아갈 줄의 쪽 ([B] 를 고른 쪽 - cmp.back_row)도 뒤집는다: 같은 파일을 가리키게
+  for _, v in ipairs(views_of(s)) do
+    for _, b in ipairs(v.back or {}) do
+      if b.side then
+        b.side = b.side == 'a' and 'b' or 'a'
+      end
+    end
+  end
+  local name = vim.fn.fnamemodify(s.a, ':t') .. ' <> ' .. vim.fn.fnamemodify(s.b, ':t')
+  if api.nvim_tabpage_is_valid(s.tab) then
+    vim.t[s.tab].title = 'DirDiff ' .. name
+  end
+  tr.rename_buf(s.buf_l, 'DirDiff ' .. name .. ' #' .. s.buf_l)
+  restart(s, true)
+  for _, v in ipairs(views_of(s)) do
+    if not v.closed and (v.pick or v.rel) then
+      local na, nb
+      if v.pick then
+        na, nb = v.pick.b, v.pick.a
+      else
+        na, nb = s.a .. '/' .. v.rel, s.b .. '/' .. v.rel
+      end
+      cmp.swap_refill(v, na, nb, nil)
+    end
+  end
+  mark_open(s)
+  -- 두 경로를 지금 알림 줄에 들게 줄인다 (80 칸이면 v:echospace 68 - 'DirDiff: 양측 교환 - A: , B: ' 가 29 칸).
+  -- 넘치면 fitmsg 가 가운데를 잘라 경로가 '/…/t/v/r/d/B' 꼴이 되었다
+  local room = math.max(12, math.floor((vim.v.echospace - 31) / 2))
+  local function short(p)
+    return tr.mid_path(shown(vim.fn.fnamemodify(p, ':~')), room)
+  end
+  say(('양측 교환 - A: %s, B: %s'):format(short(s.a), short(s.b)))
+end
+
+-- 비교 탭(v)의 두 창을 na | nb 로 다시 채운다 (양측 교환 - 폴더째와 그 탭만이 같이 쓴다). 길은 경로 바꾸기의 tr.repoint
+-- (트리의 짝이 되면 보통 짝, 아니면 경로를 따로 싣는다). 바뀌는 것은 두 버퍼의 창뿐이다:
+--   되돌리기 줄(v.ut)과 빈 쪽 버퍼(scratch)는 쪽째 바꾼다 - cmp.utrack 이 같은 두 버퍼로 보아 줄을 잇는다 (한쪽에만
+--   있는 파일의 빈 쪽이 새 버퍼가 되면 줄이 새로 시작했다)
+--   \d 로 고른 보기는 그대로 (fill 은 다른 짝을 실으면 처음 보기로 돌린다 - 고른 두 파일은 열쇠가 바뀐다)
+--   커서·화면은 버퍼를 따라간다: A 창에서 보던 자리가 이제 B 창의 그 버퍼에. 그 탭의 지금 창도 따라간다 - 고치던 파일에
+--   그대로 있다 (트리의 지금 쪽을 뒤집는 것과 같다)
+-- 두 창 중 하나를 닫아 버렸으면 다시 세운다 (tr.whole). 비교 창이 없으면 false
+function cmp.swap_refill(v, na, nb, back)
+  if not tr.whole(v) then
+    return false
+  end
+  local wa, wb = v.win_a, v.win_b
+  local cur = api.nvim_tabpage_is_valid(v.tab) and api.nvim_tabpage_get_win(v.tab) or nil
+  local va, vb = api.nvim_win_call(wa, vim.fn.winsaveview), api.nvim_win_call(wb, vim.fn.winsaveview)
+  local ba, bb = api.nvim_win_get_buf(wa), api.nvim_win_get_buf(wb)
+  local fm = v.fmode
+  if v.ut then
+    v.ut.a, v.ut.b = v.ut.b, v.ut.a
+  end
+  v.empty_a, v.empty_b = v.empty_b, v.empty_a
+  v.fs_side = nil   -- 다음 차이 파일의 고른 쪽 (cmp.fs_cursor) - 창이 뜻하는 쪽이 바뀌었다
+  -- 줄 끝만 다른 짝(≈)의 알림은 되풀이하지 않는다 - 같은 두 파일이다 (fill 이 새 열쇠만 적는다 - 그 뒤 o 로 다시
+  -- 읽어도 말하지 않는다)
+  v.eol_hush = true
+  tr.repoint(v, na, nb, back)
+  v.eol_hush = nil
+  if v.closed then
+    return true
+  end
+  if v.fmode ~= fm then
+    v.fmode = fm
+    apply_fmode(v)
+  end
+  for _, x in ipairs({ { wb, ba, va }, { wa, bb, vb } }) do
+    if api.nvim_win_is_valid(x[1]) and api.nvim_win_get_buf(x[1]) == x[2] then
+      pcall(api.nvim_win_call, x[1], function()
+        vim.fn.winrestview(x[3])
+      end)
+    end
+  end
+  if cur == wa or cur == wb then
+    local to = cur == wa and wb or wa
+    if api.nvim_win_is_valid(to) then
+      if v.tab == api.nvim_get_current_tabpage() then
+        api.nvim_set_current_win(to)
+      else
+        pcall(api.nvim_tabpage_set_win, v.tab, to)
+      end
+    end
+  end
+  cmp.kick(v)
+  return true
+end
+
+-- 비교 탭 하나만 양측 교환 (위 머리글). 트리의 짝이면 q 로 돌아갈 곳은 그 줄 (경로 바꾸기 cmp.set_path 와 같다)
+function cmp.swap_tab(v)
+  if not v or v.closed then
+    return
+  end
+  if v.s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에 양측 교환', vim.log.levels.WARN)
+  end
+  local pa, pb = tr.view_paths(v)
+  if not pa then
+    return say('트리에서 짝을 먼저 고르세요')
+  end
+  local back = v.back
+  if not v.pick and v.rel then
+    back = { { rel = v.rel } }
+  end
+  if not cmp.swap_refill(v, pb, pa, back) then
+    return say('비교 창이 없습니다 - 트리에서 다시 여세요', vim.log.levels.WARN)
+  end
+  if v.closed then
+    return
+  end
+  if not v.pick then
+    say('양측 교환: 이 짝을 원래대로 (트리의 A | B)')
+  elseif cmp.swapped_rel(v) then
+    say('양측 교환: 이 짝만 B | A (다시 하면 원래대로)')
+  else
+    say('양측 교환: 두 파일의 자리를 바꾸었습니다')
+  end
+end
+
+-- 양측을 바꾼 트리의 짝인가: 그 세션의 B 뿌리 + rel | A 뿌리 + rel 를 견주는 고른 두 파일이면 그 rel (cmp.swap_tab 이
+-- 만든 것, Tab/Tab 으로 거꾸로 고른 것도). 트리에는 그 줄의 탭이 있는 것으로 보인다 (mark_open)
+function cmp.swapped_rel(v)
+  local s = v.s
+  if not v.pick or s.solo then
+    return nil
+  end
+  local ra = cmp.rel_in(s.b, v.pick.a)
+  if ra and ra == cmp.rel_in(s.a, v.pick.b) then
+    return ra
+  end
+end
+
+-- 그 줄(rel)의 짝을 양측을 바꿔 보이는 비교 탭
+function cmp.swapped_of(s, rel)
+  for _, v in pairs(s.views) do
+    if not v.closed and cmp.swapped_rel(v) == rel then
+      return v
+    end
+  end
+end
+
+-- 그 줄의 <CR> / o 가 양측을 바꾼 탭(v)을 만났다: <CR> 은 그 탭으로, o 는 그 탭을 바꾼 채 다시 읽는다 (open_pair). 두
+-- 창을 다 닫아 버려 탭을 놓았으면 false - 보통 짝을 연다
+function cmp.swapped_open(v, jump)
+  local rv, repaired = repair_view(v)
+  if not rv then
+    return false
+  end
+  if jump then
+    api.nvim_set_current_tabpage(rv.tab)
+    if repaired then
+      cmp.pick_fill(rv, true)
+    end
+    say('이 짝은 B | A 로 바꾼 채 - :DirDiffSwap 으로 원래대로')
+  else
+    cmp.pick_fill(rv, false)
+    say(('비교 탭을 다시 읽었습니다 (탭 %d, B | A) - <CR> 로 그리로'):format(api.nvim_tabpage_get_number(rv.tab)))
+  end
+  return true
+end
+
+-- 양측 교환 단추 (B 창 머리 맨 앞 - set_heads): 글자, 그리고 'B:' 앞에 차지하는 칸 (단추와 빈칸, 없으면 빈칸 하나)
+function cmp.swap_btn()
+  if not on(vim.g.vimide_dirdiff_swap_keys, 1) then
+    return nil, 1
+  end
+  local icon = ascii() and '<>' or '⇄'
+  return icon, vim.fn.strdisplaywidth(icon) + 1
+end
+
+-- B 창 머리의 ⇄ 를 눌렀다 (set_heads 의 %@): 그 탭만 양측 교환. 두 번 누르기의 둘째는 매핑이 받아 버린다
+-- (take_over_view_keys 의 <2-LeftMouse>) - 여기 오는 것은 첫 누르기뿐이지만, 둘째가 와도 두 번 바꾸지 않게 하나만
+function _G.vimide_dirdiff_swap_click(_, clicks, button)
+  local v = view_of_win(vim.fn.getmousepos().winid)
+  if not v or button ~= 'l' or clicks ~= 1 then
+    return
+  end
+  -- 누르기 처리 안에서 창 머리를 다시 쓰지 않게 그 밖에서 (bar_click 의 묻는 줄처럼)
+  vim.schedule(function()
+    cmp.swap_tab(v)
+  end)
+end
+
+-- :DirDiffSwap[!]: 트리 탭(편집 창 둘이 아닌 곳)에서는 폴더 비교째, 비교 창에서는 그 탭만 (! 면 그 비교째 - 혼자 선
+-- 비교는 탭이 전부라 그 탭)
+function tr.swap_cmd(bang)
+  local tab = api.nvim_get_current_tabpage()
+  local v = view_of_win(api.nvim_get_current_win())
+  local s = sessions[tab]
+  if not v and not (s and not s.solo) then
+    v = view_of_tab(tab)   -- 비교 탭의 다른 창 (사용자가 가른 창)
+  end
+  if v and not (bang and not v.s.solo) then
+    return cmp.swap_tab(v)
+  end
+  s = v and v.s or s
+  if s and not s.solo then
+    return tr.swap(s)
+  end
+  say('DirDiff 트리나 비교 창에서 쓰세요', vim.log.levels.WARN)
+end
+
+-- ---------------------------------------------------------------------------
 -- Tab/Tab 으로 고른 두 파일 (겹친 비교): DirDiff 의 비교 탭으로
 -- ---------------------------------------------------------------------------
 -- dirdiffpick.lua 가 [B] 에서 부른다 (_G.vimide_dirdiff_open_files). 예전에는 tabnew + diffsplit 의 맨 vimdiff 라
@@ -6272,6 +6778,15 @@ end
 function cmp.pick_fill(v, jump, quiet)
   local p = v.pick
   local e = cmp.pick_entry(p.a, p.b)
+  -- 양측을 바꾼 트리의 짝(cmp.swapped_rel): 줄 끝만 다른 짝(≈)이면 그 줄의 판정과 eol 을 쪽을 바꿔 싣는다 (A 창에
+  -- 트리의 B 파일). 안 실었더니 다시 읽을 때(o, 트리 복사 뒤) CRLF 쪽을 unix 로 읽어 줄마다 ^M 이 붙고 모든 줄이
+  -- 빨강이었다 (fill 은 eol 이 없으면 dos 로 읽지 않는다). 없는 쪽은 그 줄의 고아 쪽이라 알리지 않는다
+  local sr = cmp.swapped_rel(v)
+  local te = sr and entry_of(v.s, sr)
+  if te and te.st == 'same' and te.eol then
+    e.st, e.eol = 'same', tr.eol_swap(te.eol)
+  end
+  quiet = quiet or sr ~= nil
   local gone = {}
   for _, side in ipairs({ 'a', 'b' }) do
     if not e['k' .. side] then
@@ -7317,12 +7832,16 @@ function cmp.uticks(v)
   return t
 end
 
--- 짝을 채운 뒤: 같은 두 버퍼가 채우는 동안 바뀌지 않았으면 줄을 두고, 아니면 새 줄. 지금 자리를 기준으로
+-- 짝을 채운 뒤: 같은 두 버퍼가 채우는 동안 바뀌지 않았으면 줄을 두고, 아니면 새 줄. 지금 자리를 기준으로.
+-- 빈 쪽·알림 버퍼(파일이 아니다 - 줄에 들지 않는다)는 채울 때마다 글을 다시 써서 틱이 늘 바뀐다: 그것은 보지 않는다
+-- (보았더니 한쪽에만 있는 파일은 다시 채울 때마다 - 양측 교환도 - 있는 쪽의 줄이 새로 시작했다). 내린 버퍼는 vim.bo 를
+-- 읽지 않는다 (is_loaded 먼저 - shada 마크)
 function cmp.utrack(v, ticks)
   local ut = v.ut
   local keep = ut and ut.a == v.buf_a and ut.b == v.buf_b
   for _, b in ipairs(keep and { ut.a, ut.b } or {}) do
-    if not (api.nvim_buf_is_valid(b) and ticks[b] == api.nvim_buf_get_changedtick(b)) then
+    local note = api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) and vim.bo[b].buftype ~= ''
+    if not (note or (api.nvim_buf_is_valid(b) and ticks[b] == api.nvim_buf_get_changedtick(b))) then
       keep = false
     end
   end
@@ -8058,10 +8577,16 @@ function cmp.bounce(w, click)
             return
           end
         end
-        if click then
+        -- 두 반쪽 사이의 ⇄ 를 눌렀다: 양측 교환 (한 번 누르기 - Beyond Compare 의 도구 막대 단추). 쪽은 tr.swap 이
+        -- 뒤집는다 (같은 파일을 가리키게)
+        local swap = click and mp.winrow >= 1 and mp.winrow <= api.nvim_win_get_height(w) and tr.swap_btn(s, mp.wincol)
+        if click and not swap then
           s.side = mp.wincol > layout(s).half + 2 and 'b' or 'a'
         end
         api.nvim_set_current_win(s.win_l)
+        if swap then
+          return tr.swap(s)
+        end
         goto_row(s, api.nvim_win_get_cursor(s.win_l)[1])
         mark_side(s)
         s.prog_dirty = true
@@ -8172,7 +8697,8 @@ function cmp.fk_end(v, w, d)
     long = short .. '입니다'
   end
   local s = v.s
-  if v.pick or s.solo or s.done or not s.job then
+  -- 양측을 바꾼 트리의 짝(cmp.swapped_rel)은 트리 차례가 있다 - 고른 두 파일과 달리 건다
+  if (v.pick and not cmp.swapped_rel(v)) or s.solo or s.done or not s.job then
     return say(long)
   end
   local pos, b = api.nvim_win_get_cursor(w), api.nvim_win_get_buf(w)
@@ -8260,7 +8786,7 @@ function cmp.fstep(v, d, more)
     cur.more = cur.more + 1 + (more or 0)
     return
   end
-  if v.pick or s.solo then
+  if (v.pick and not cmp.swapped_rel(v)) or s.solo then
     return say('고른 두 파일(Tab/Tab)에는 트리 차례가 없습니다')
   end
   if not v.rel then
@@ -8282,7 +8808,8 @@ function cmp.fstep(v, d, more)
     fs.pre[rel] = true
   end
   s.fstep = fs
-  cmp.fs_send(s, fs, v.rel)
+  -- 양측을 바꾼 짝은 그 줄에서 (v.rel 은 고른 두 파일의 열쇠다 - fs.rel 은 그 열쇠로 두어 fs_open 이 같은 탭인지 본다)
+  cmp.fs_send(s, fs, cmp.swapped_rel(v) or v.rel)
 end
 
 -- from 의 다음(앞) 것을 묻는다: 뒤쪽의 next (트리의 <C-n> 과 같다), 예전 뒤쪽의 보기면 여기서 걷는다 (act_step 처럼).
@@ -8462,7 +8989,7 @@ function cmp.fs_open(s, fs, path)
   end
   -- 앞의 끝 알림('마지막 차이입니다 - …')이 새 파일 아래에 남아 있지 않게 지운다 (창 머리가 새 파일을 말한다)
   vim.cmd('echo ""')
-  local other = view_of_rel(s, path)
+  local other = view_of_rel(s, path) or cmp.swapped_of(s, path)
   if other and other ~= v then
     cmp.fs_tree(s, path)
     open_pair(s, r, true)
@@ -8491,6 +9018,8 @@ function cmp.fs_open(s, fs, path)
     end
   end
   local fm = v.fmode
+  -- 양측을 바꾼 탭(cmp.swapped_rel)이었으면 이제 트리의 짝이다 - 다음 파일은 트리의 방향으로 (그 교환은 앞 파일의 것)
+  v.pick, v.back = nil, nil
   fill(v, r, false)
   -- \d 로 고른 보기는 이 탭에 남는다 (Beyond Compare 의 다음 파일처럼 - fill 은 다른 짝을 실으면 처음 보기로 돌린다)
   if v.fmode ~= fm then
@@ -8938,6 +9467,10 @@ api.nvim_create_user_command('DirDiffPath', function(o)
 end, { nargs = '*', complete = function(lead, line)
   return tr.path_complete(lead, line)
 end, desc = 'DirDiff: A / B 쪽 경로 바꾸기 (트리는 디렉터리, 비교 창은 파일)' })
+-- :DirDiffSwap[!] - 양측 교환: 트리 탭에서는 A·B 뿌리째, 비교 창에서는 그 탭만 (! 면 그 비교째 - tr.swap_cmd)
+api.nvim_create_user_command('DirDiffSwap', function(o)
+  tr.swap_cmd(o.bang)
+end, { nargs = 0, bang = true, desc = 'DirDiff: 양측 교환 (트리는 A·B 뿌리째, 비교 창은 그 탭만, ! 는 비교 전체)' })
 
 if vim.fn.exists(':DirDiff') ~= 2 and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
   api.nvim_create_user_command('DirDiff', function(o)

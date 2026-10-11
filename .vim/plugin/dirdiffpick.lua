@@ -188,6 +188,15 @@ function _G.vimide_dirdiff_pick_forget(tab)
   end
 end
 
+-- [A] 를 고른 비교 트리가 양측을 바꾸었다 (dirdiffview.lua 의 양측 교환 - A·B 뿌리를 바꾼다): 경로와 줄은 그대로고
+-- 그 파일이 이제 다른 쪽에 있다 - 고른 쪽만 뒤집는다 ([B] 의 비교 탭이 q 로 돌아갈 [A] 줄의 쪽)
+function _G.vimide_dirdiff_pick_swapped(tab)
+  local c = first and first.ctx
+  if c and c.tab == tab and (c.side == 'a' or c.side == 'b') then
+    c.side = c.side == 'a' and 'b' or 'a'
+  end
+end
+
 -- p 의 위 디렉터리 쪽 링크만 푼다 (있는 데까지 - 이름을 바꾼 뒤라 옛 경로의 위가 없을 수 있다). 마지막 이름은 그대로:
 -- [A] 가 링크면 그 링크 자신이다 (first.real 은 가리키는 것이라, 그것으로 견주었더니 링크가 가리키는 파일의 이름을
 -- 바꾸면 [A] 가 링크에서 그 파일로 옮겨 갔다)
