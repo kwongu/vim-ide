@@ -10,7 +10,14 @@
 -- g:vimide_dirdiff_date_format). 반쪽이 좁으면 시각, 날짜, 크기 순으로 뺀다. 맨 위 한 줄(경로 줄
 -- 창)에 A·B 의 뿌리, 그 아래 한 줄에 칸 제목(이름 크기 수정일) - 트리를 내려도 그대로다.
 -- 가운데 칸이 판정이다 (Beyond Compare 처럼 다른 파일과 같은 파일에만):
---   ≠(x) 다르다      =  같다      ·(.) 확인 중      (고아와 폴더는 비운다)
+--   ≠(x) 다르다      =  같다      ≈(~) 줄 끝만 다르다      ·(.) 확인 중      (고아와 폴더는 비운다)
+-- ≈ 는 바이트는 다르지만 CRLF/LF, 파일 끝 줄바꿈만 다른 짝이다 (뒤쪽 dirdiffscan.py 의 eol -
+-- g:vimide_dirdiff_ignore_eol). 비교 탭의 줄 비교(vim diff)는 줄 끝을 보지 않아 차이가 하나도 없는데
+-- 트리만 빨강 ≠ 이었다 (사용자 보고: 2,008 / 2,009 바이트, A 에 마지막 줄바꿈이 없을 뿐). 그래서 같은 파일로
+-- 다룬다 - 양쪽 보통 글자, 상태줄·보기·<C-n>/<C-p>·폴더 색에서 같음. 여는 비교 탭에서 왜 같은지 한 줄로 알린다.
+-- 줄마다 CRLF 인 쪽은 비교 탭에서 처음 읽을 때 dos 로 읽는다 (show_file - fileformats=unix 면 줄마다 ^M 이 차이로
+-- 보였다). CRLF·LF 가 섞인 쪽은 편집기가 dos 로 읽지 못해 ^M 줄이 차이로 보이므로 뒤쪽이 그런 짝을 ≈ 로 두지
+-- 않는다 (그 CR 까지 같을 때만 - 끝 줄바꿈만 다른 섞인 파일). 그래서 ≈ 면 비교 탭에도 차이가 없다
 -- 색 (g:vimide_dirdiff_colors = 'bc', 기본 - Beyond Compare 의 색. background 가 dark 면 어두운 짝):
 --   같은 파일 보통 글자, 다른 파일은 수정 시각이 늦은 쪽 빨강·이른 쪽 회색 (시각이 같거나 모르면
 --   둘 다 빨강), 고아 파일(한쪽에만 있는 파일)은 파랑. 폴더는 (한쪽에만 있는 것도) 이름은 보통 글자,
@@ -101,13 +108,15 @@
 -- Tab/Tab 으로 고른 두 파일은 트리 차례가 없다
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
--- 먼저), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음', 나머지만 뒤에서
--- 내용을 읽는다. 편집기는 한 번도 기다리지 않는다.
+-- 먼저), 크기가 다르면 바로 '다름'(줄 끝만 다를 수 있는 짝 - 1~2 바이트나 줄 수만큼 - 은 뒤에서 읽어 본다),
+-- 크기·시각이 같으면 '같음', 나머지만 뒤에서 내용을 읽는다. 편집기는 한 번도 기다리지 않는다.
 --
 --   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
 --   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이 보이기
 --   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (아래 MODES 의 id, only_diff 보다 먼저)
 --   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
+--   let g:vimide_dirdiff_ignore_eol = 0    " 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일도 다름으로 (기본 1: 같음 ≈)
+--   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (기본 4, 넘으면 크기가 다르면 다름)
 --   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때만, 기본: 화면의 40%)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
@@ -225,8 +234,11 @@ local function ascii()
   return (tonumber(vim.g.vimide_ascii_icons) or 0) ~= 0
 end
 
--- 예전 판정 칸 (neogit·classic 색). bc 는 tr.verdict
+-- 예전 판정 칸 (neogit·classic 색). bc 는 tr.verdict. 'eol' 은 같음인데 줄 끝만 다른 짝 (tr.verdict 가 고른다)
 local function sym(st)
+  if st == 'eol' then
+    return ascii() and '~' or '≈'
+  end
   if ascii() then
     return ({ same = '=', diff = 'x', onlyA = '<', onlyB = '>', pend = '.' })[st] or ' '
   end
@@ -304,6 +316,8 @@ local HL = {
   { 'VimIdeDirDiffNeq', nil, { link = 'VimIdeDirDiffChanged' },
     C('#f00000', 196, nil, nil, BOLD), C('#ff6b6b', 203, nil, nil, BOLD) },
   { 'VimIdeDirDiffEq', nil, { link = 'VimIdeDirDiffPending' }, BOLD, BOLD },
+  -- ≈ 줄 끝만 다른 같은 파일: = 와 같은 색 (같은 파일이다 - 글자만 다르다)
+  { 'VimIdeDirDiffSimilar', nil, { link = 'VimIdeDirDiffEq' } },
   -- 트리의 지금 줄 (창에만 CursorLine 을 이것으로 - tree_opts)
   { 'VimIdeDirDiffSelect', nil, { link = 'CursorLine' }, C(nil, nil, '#d7ffd0', 194), C(nil, nil, '#24402a', 22) },
   { 'VimIdeDirDiffOpened', nil, { link = 'Visual' }, C(nil, nil, '#e8eefc', 189), C(nil, nil, '#2a3346', 237) },
@@ -699,7 +713,9 @@ local menu_fill, step_bits, restart_fn, walk_fn
 local function start_job(s)
   local excl = vim.g.DirDiffExcludes or ''
   local cmd = { 'python3', '-X', 'utf8', script_path(), s.a, s.b, '--exclude', excl,
-    '--trust-mtime', (tonumber(vim.g.vimide_dirdiff_trust_mtime) or 1) ~= 0 and '1' or '0' }
+    '--trust-mtime', (tonumber(vim.g.vimide_dirdiff_trust_mtime) or 1) ~= 0 and '1' or '0',
+    '--ignore-eol', on(vim.g.vimide_dirdiff_ignore_eol, 1) and '1' or '0',
+    '--eol-max-mb', tostring(tonumber(vim.g.vimide_dirdiff_eol_max_mb) or 4) }
   if (tonumber(vim.g.vimide_dirdiff_debug) or 0) ~= 0 then
     cmd[#cmd + 1] = '--debug'
   end
@@ -778,7 +794,7 @@ local function store_list(s, rel, entries)
   local d = { entries = {}, idx = {} }
   for _, e in ipairs(entries) do
     local x = { name = e[1], ka = nz(e[2]), kb = nz(e[3]), sa = nz(e[4]), sb = nz(e[5]),
-      ma = nz(e[6]), mb = nz(e[7]), st = e[8], rerr = nz(e[9]), m = nz(e[10]) }
+      ma = nz(e[6]), mb = nz(e[7]), st = e[8], rerr = nz(e[9]), m = nz(e[10]), eol = tr.eol_of(e[11]) }
     d.entries[#d.entries + 1] = x
     d.idx[x.name] = x
     if e[10] == nil then
@@ -878,6 +894,7 @@ on_event = function(s, ev)
       local x = ev.e
       if type(x) == 'table' then
         e.sa, e.sb, e.ma, e.mb, e.rerr, e.m = nz(x[4]), nz(x[5]), nz(x[6]), nz(x[7]), nz(x[9]), nz(x[10])
+        e.eol = tr.eol_of(x[11])
       end
       s.dirty[join(ev.d, ev.n)] = true
       schedule_render(s)
@@ -1261,8 +1278,58 @@ function tr.classes(e, side)
   return nil, nil, nil
 end
 
--- 가운데 판정 칸 (글자, 색). bc: 다른 파일 ≠, 같은 파일 =, 확인 중 ·, 고아와 양쪽에 있는 폴더는 비운다
--- (Beyond Compare 처럼). neogit·classic 은 예전 것 (◀ ▶ 까지)
+-- 뒤쪽이 주는 eol (항목의 열한째): 0 이 아니면 그 수, 아니면 nil. 같음인데 줄 끝만 다른 짝 - 쪽마다 3 비트
+-- (A 아래 3 비트, B 그 위): 1 CRLF 줄이 있다, 2 LF 만인 줄이 있다, 4 파일 끝 줄바꿈이 없다 (dirdiffscan.py)
+function tr.eol_of(v)
+  local n = tonumber(v)
+  return (n and n ~= 0) and n or nil
+end
+
+-- 줄 끝만 다른 짝을 열 때의 한 줄: 왜 빨강이 아닌지. 두 쪽에서 다른 것만 - 줄 끝 꼴(CRLF / LF / 섞임)이
+-- 다르면 그것, 끝 줄바꿈이 한쪽에만 없으면 그쪽. 맞은편에 줄바꿈이 하나도 없으면('x' 와 'x\r\n') 이쪽의 CRLF·섞임을
+-- 말한다 (LF 는 보통이라 빼고) - 빠뜨렸더니 끝 줄바꿈을 넣어 저장한 뒤에도 ≈ 로 남아 놀랐다 (이번엔 'A: LF,
+-- B: CRLF'). raw: 줄마다 CRLF 인데 unix 로 열린 쪽 ('A' / 'B' - fill) - ^M 줄이 차이로 보인다.
+-- 알림 칸(v:echospace - 1, fitmsg)에 드는 가장 긴 꼴을 고른다: 80 칸 화면은 67 칸 남짓이라 긴 글이 가운데에서
+-- '…' 로 잘려 'A: CRLF' 같은 쪽 표시가 빠졌다 (검토에서 실측). 'DirDiff: ' 는 say 가 붙인다
+function tr.eol_text(n, raw)
+  local function bits(x)
+    local kind = ({ [1] = 'CRLF', [2] = 'LF', [3] = 'CRLF/LF 섞임' })[x % 4]   -- nil: 줄바꿈이 하나도 없다
+    return kind, x >= 4
+  end
+  local ka, na = bits(n % 8)
+  local kb, nb = bits(math.floor(n / 8) % 8)
+  local function side(k, other, noeol, other_noeol)
+    local t = {}
+    if k and k ~= other and (other or k ~= 'LF') then
+      t[#t + 1] = k
+    end
+    if noeol and not other_noeol then
+      t[#t + 1] = #t > 0 and '끝 줄바꿈 없음' or '파일 끝 줄바꿈 없음'
+    end
+    return table.concat(t, '·')
+  end
+  local parts = {}
+  for _, x in ipairs({ { 'A', side(ka, kb, na, nb) }, { 'B', side(kb, ka, nb, na) } }) do
+    if x[2] ~= '' then
+      parts[#parts + 1] = x[1] .. ': ' .. x[2]
+    end
+  end
+  -- 두 쪽 모두 섞였는데 자리만 다른 것 등 (뒤쪽이 그런 짝은 ≈ 로 두지 않는다 - 예전 뒤쪽 대비)
+  local why = '(' .. (#parts > 0 and table.concat(parts, ', ') or '줄마다 CRLF/LF 가 다름') .. ')'
+  local note = (raw and #raw > 0) and (' - %s 는 unix 로 열려 ^M 이 보임'):format(table.concat(raw, '·')) or ''
+  local room = (tonumber(vim.v.echospace) or 80) - 1 - #'DirDiff: '
+  local list = { '내용은 같고 줄 끝만 다릅니다 ' .. why .. note, '줄 끝만 다릅니다 ' .. why .. note,
+    '줄 끝만 다름 ' .. why .. note, note ~= '' and ('줄 끝만 다름' .. note) or nil }
+  for _, m in ipairs(list) do
+    if vim.fn.strdisplaywidth(m) <= room then
+      return m
+    end
+  end
+  return list[#list]
+end
+
+-- 가운데 판정 칸 (글자, 색). bc: 다른 파일 ≠, 같은 파일 =, 줄 끝만 다른 파일 ≈, 확인 중 ·, 고아와 양쪽에 있는
+-- 폴더는 비운다 (Beyond Compare 처럼). neogit·classic 은 예전 것 (◀ ▶ 까지, ≈ 도 같은 자리에)
 function tr.verdict(e)
   local st = e.st
   if pal() ~= 'bc' then
@@ -1273,7 +1340,7 @@ function tr.verdict(e)
       g = (st == 'diff' and 'VimIdeDirDiffChanged') or (st == 'onlyA' and 'VimIdeDirDiffOnlyA')
         or (st == 'onlyB' and 'VimIdeDirDiffOnlyB') or 'VimIdeDirDiffPending'
     end
-    return sym(st), g
+    return sym((st == 'same' and e.eol) and 'eol' or st), g
   end
   if both_dirs(e) then
     return ' ', nil
@@ -1281,6 +1348,9 @@ function tr.verdict(e)
   if st == 'diff' then
     return ascii() and 'x' or '≠', 'VimIdeDirDiffNeq'
   elseif st == 'same' then
+    if e.eol then
+      return ascii() and '~' or '≈', 'VimIdeDirDiffSimilar'
+    end
     return '=', 'VimIdeDirDiffEq'
   elseif st == 'pend' then
     return ascii() and '.' or '·', 'VimIdeDirDiffPending'
@@ -1368,6 +1438,12 @@ local function status_text(s)
   parts[#parts + 1] = hl_part('VimIdeDirDiffStChanged', ('다름 %s'):format(commas(p.diff or 0)))
   parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyA', ('A만 %s'):format(commas(p.onlyA or 0)))
   parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyB', ('B만 %s'):format(commas(p.onlyB or 0)))
+  local wide = (s.win_l and api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_width(s.win_l) or vim.o.columns) >= 100
+  if (tonumber(p.eol) or 0) > 0 and wide then
+    -- 줄 끝만 다른 같은 파일 (판정 칸의 ≈ - 다름에는 들지 않는다). 좁은 창(100 칸 아래)에서는 뺀다: 80 칸에서는
+    -- 상태줄이 이미 넘쳐 앞('DirDiff 끝 N초')이 잘리는데 이 토막이 더 밀어냈다 - 같음의 일부라 빠져도 수는 맞다
+    parts[#parts + 1] = ('%s %s'):format(ascii() and '~' or '≈', commas(p.eol))
+  end
   if (p.pend or 0) > 0 then
     parts[#parts + 1] = hl_part('VimIdeDirDiffPending', ('확인 중 %s'):format(commas(p.pend)))
   end
@@ -1830,7 +1906,8 @@ end
 
 -- 한쪽에만 있는 파일: 있는 쪽에 파일을, 없는 쪽에는 빈 버퍼를 diff 로 (Beyond Compare
 -- 처럼 - 있는 쪽 줄이 모두 '더해진 줄'로 보인다). 무엇인지는 창 머리(winbar)에 쓴다.
-local function show_file(v, win, path, side)
+-- dos: 줄 끝만 다른 짝(트리의 ≈)에서 줄마다 CRLF 인 쪽 - 'fileformats' 를 unix,dos 로 놓고 읽는다 (아래)
+local function show_file(v, win, path, side, dos)
   local s = v.s
   if not path then
     api.nvim_win_set_buf(win, scratch(v, side, {}))
@@ -1841,11 +1918,10 @@ local function show_file(v, win, path, side)
   -- 놓고 트리에서 같은 줄을 o / Enter 로 다시 열 때 (서버에서 실제로 났다, 재현).
   -- 고친 것을 그대로 두고 비교만 다시 맞춘다 (고치지 않았으면 디스크에서 다시 읽는다)
   local cur = api.nvim_win_get_buf(win)
-  if vim.bo[cur].modified then
-    local rc, rp = uv.fs_realpath(api.nvim_buf_get_name(cur)), uv.fs_realpath(path)
-    if rc and rc == rp then
-      return
-    end
+  local rc = uv.fs_realpath(api.nvim_buf_get_name(cur))
+  local again = rc ~= nil and rc == uv.fs_realpath(path)   -- :edit 이 이 버퍼를 다시 읽는다
+  if again and vim.bo[cur].modified then
+    return
   end
   -- 누구 버퍼인지는 열기 바로 앞에 본다 (비교를 시작할 때 한 번 찍어 둔 목록으로 보았더니,
   -- 그 뒤 사용자가 연 버퍼를 비교가 연 것으로 알고 지웠다). 이름으로 찾지 않고 연 뒤의 버퍼가
@@ -1865,13 +1941,33 @@ local function show_file(v, win, path, side)
   -- 이름은 Ex 줄로 만들지 않고 인자로 넘긴다: 이름에 줄바꿈이 있으면 fnameescape 로도 줄이
   -- 갈라져, 없는 'nl\' 을 열고 나머지 'name.c' 를 명령으로 돌렸다 (E492). magic.file=false 라
   -- % # 이나 무늬도 풀지 않는다
-  local wi = vim.o.wildignore
+  -- dos (줄 끝만 다른 짝의 줄마다 CRLF 인 쪽): vim-ide 는 fileformats=unix 라 그대로 읽으면 줄마다 ^M 이 붙어
+  -- 비교 탭의 모든 줄이 빨강이었다 - 트리는 같다(≈)는데. 'fileformats' 를 unix,dos 로 두고 읽어 편집기가 파일을
+  -- 보고 정하게 한다 (훑은 뒤에 LF 만인 줄이 생겼으면 unix 그대로 - dos 로 읽은 채 저장해 그 줄까지 CRLF 가 되는
+  -- 일이 없다). 처음 읽을 때 정한다: 읽은 뒤 ':e ++ff=dos' 로 다시 읽었더니 그 다시 읽기가 'undoreload' 로
+  -- 되돌리기 한 단계가 되어, 열자마자 u / Ctrl+Z 한 번이면 unix 로 읽은 글(줄마다 CR)이 dos 버퍼로 돌아오고
+  -- :w 가 줄마다 CR CR LF 를 썼다 (검토에서 실측). noautocmd 다시 읽기는 그쪽의 구문 색도 걷었다.
+  -- 이 창에 떠 있는 이 비교의 버퍼를 다시 읽을 때(o, 트리 복사 뒤의 다시 채우기)도 그때의 판정대로 - 짝이 = / ≠
+  -- 가 되었으면 unix 로 (두 쪽이 늘 같은 규칙으로 읽힌다: 복사로 = 가 된 짝의 한쪽만 dos 로 남으면 모든 줄이
+  -- 빨강이다). 'fileformat' 이 바뀌는 다시 읽기는 되돌리기로 남기지 않는다 (cmp.ff_flips - 고치지 않은 버퍼의
+  -- 되돌리기를 버린다). 사용자 버퍼는 그대로 둔다 (fill 의 알림이 말한다)
+  local mine = again and vim.b[cur].vimide_dirdiff
+  if again and not mine then
+    dos = false
+  end
+  local wi, ffs, ur = vim.o.wildignore, vim.o.fileformats, vim.o.undoreload
   vim.o.wildignore = ''
+  if mine and cmp.ff_flips(cur, path, dos) then
+    vim.o.undoreload = 0
+  end
+  if dos then
+    vim.o.fileformats = 'unix,dos'
+  end
   local ok, err = pcall(api.nvim_win_call, win, function()
     vim.cmd.edit({ args = { path }, magic = { file = false },
       mods = { silent = true, keepalt = true, noautocmd = true, hide = true } })
   end)
-  vim.o.wildignore = wi
+  vim.o.wildignore, vim.o.fileformats, vim.o.undoreload = wi, ffs, ur
   if not ok then
     -- nvim_win_call 이 붙여 오는 stack traceback 은 뺀다 (여러 줄이라 Press ENTER 가 떴다)
     say((tostring(err):gsub('\nstack traceback:.*$', ''):gsub('^.-(E%d+:)', '%1')), vim.log.levels.WARN)
@@ -2240,21 +2336,30 @@ local function fill(v, r, jump)
       st = cmp.same_bytes(pa, pb, sa, sb, max)
     end
     local verdict = ({ same = '같다', diff = '다르다', onlyA = 'A 에만', onlyB = 'B 에만', pend = '확인 중' })[st]
+    if st == 'same' and e.eol then
+      verdict = '같다 (줄 끝만 다름)'
+    end
     if verdict then
       vim.list_extend(info, { '', '  판정: ' .. verdict })
     end
     api.nvim_win_set_buf(v.win_a, scratch(v, 'a', info))
     api.nvim_win_set_buf(v.win_b, scratch(v, 'b', info))
   else
+    -- 줄 끝만 다른 짝(트리의 ≈)의 eol - 쪽마다 3 비트 (dirdiffscan.py). % 4 == 1 이면 그쪽은 줄마다 CRLF 라 dos 로
+    -- 읽는다 (show_file - 뒤쪽도 그렇게 견주었다: 섞인 쪽은 CR 을 글로 두고 견주어 같을 때만 ≈)
+    local eol = not rp and e.st == 'same' and e.eol or nil
+    local function crlf(side)
+      return eol ~= nil and math.floor(eol / (side == 'a' and 1 or 8)) % 4 == 1
+    end
     if na then
       api.nvim_win_set_buf(v.win_a, scratch(v, 'a', { '', na }))
     else
-      show_file(v, v.win_a, pa, 'a')
+      show_file(v, v.win_a, pa, 'a', crlf('a'))
     end
     if nb then
       api.nvim_win_set_buf(v.win_b, scratch(v, 'b', { '', nb }))
     else
-      show_file(v, v.win_b, pb, 'b')
+      show_file(v, v.win_b, pb, 'b', crlf('b'))
     end
     for _, w in ipairs({ v.win_a, v.win_b }) do
       pcall(api.nvim_win_call, w, function()
@@ -2264,6 +2369,23 @@ local function fill(v, r, jump)
         if vim.bo.buftype == '' then
           vim.cmd('silent! doautocmd <nomodeline> BufEnter')
         end
+      end)
+    end
+    -- 줄 끝만 다른 짝(트리의 ≈): 두 창에 차이가 없는데 바이트는 다르다 - 왜 그런지 한 줄로. 같은 짝을 다시 채울
+    -- 때(복사·저장 뒤, o 로 다시 읽기)는 되풀이하지 않는다. 여는 동안의 다른 알림(BufEnter 등)에 덮이지 않게
+    -- 뒤에, 그때의 v:echospace 에 맞춰 (tr.eol_text). 줄마다 CRLF 인데 dos 로 읽지 못한 쪽(사용자가 열어 둔 버퍼
+    -- - show_file 이 그대로 둔다)은 ^M 줄이 차이로 보이니 그것도 말한다
+    local said = r.rel .. ':' .. tostring(eol)
+    if eol and v.eol_said ~= said then
+      v.eol_said = said
+      local raw = {}
+      for _, x in ipairs({ { 'a', v.win_a }, { 'b', v.win_b } }) do
+        if crlf(x[1]) and api.nvim_win_is_valid(x[2]) and vim.bo[api.nvim_win_get_buf(x[2])].fileformat ~= 'dos' then
+          raw[#raw + 1] = x[1]:upper()
+        end
+      end
+      vim.schedule(function()
+        say(tr.eol_text(eol, raw))
       end)
     end
   end
@@ -3211,9 +3333,16 @@ local function on_copied(s, ev)
       for _, p in ipairs(tops) do
         if rn == p or rn:sub(1, #p + 1) == p .. '/' then
           if vim.b[b].vimide_dirdiff then
+            -- dos 로 읽은 쪽(줄 끝만 다른 짝 - show_file)이 unix 로 바뀌는 다시 읽기는 되돌리기로 남기지 않는다
+            -- (cmp.ff_flips - 이 복사를 u 로 되돌리면 CRLF 파일이 LF 로 저장된다). 그 쪽은 복사를 u 로 되돌릴 수 없다
+            local ur = vim.o.undoreload
+            if cmp.ff_flips(b, n, false) then
+              vim.o.undoreload = 0
+            end
             pcall(api.nvim_buf_call, b, function()
               vim.cmd('silent! noautocmd edit!')
             end)
+            vim.o.undoreload = ur
           else
             pcall(vim.cmd, 'silent! checktime ' .. b)
           end
@@ -4225,6 +4354,8 @@ local function help()
     '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다)',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
+    ascii() and '  판정 칸     x 다름  = 같음  ~ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  . 확인 중'
+      or '  판정 칸     ≠ 다름  = 같음  ≈ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  · 확인 중',
   }
   vim.list_extend(lines, help_pair())
   vim.notify(table.concat(lines, '\n'))
@@ -4814,6 +4945,29 @@ function cmp.pick_entry(pa, pb)
     end
   end
   return e
+end
+
+-- 버퍼 b 를 path 에서 다시 읽으면 'fileformat' 이 바뀌는가 (dos: 'fileformats' 를 unix,dos 로 놓고 읽는다 -
+-- show_file). 바뀌는 다시 읽기는 되돌리기로 남기지 않는다 ('undoreload' 0 - show_file, 트리 복사의 on_copied):
+-- 되돌리면 옛 줄이 새 꼴의 버퍼로 돌아와, unix 로 읽은 CRLF 글(줄마다 CR)이 dos 버퍼로 오면 :w 가 줄마다 CR CR
+-- LF 를 쓰고(검토에서 실측 - 열자마자 u 한 번), dos 로 읽은 글(CR 없음)이 unix 버퍼로 오면 CRLF 파일을 LF 로 쓴다.
+-- vim-ide 는 fileformats=unix 라 예전에는 바뀔 일이 없었다 - dos 로 읽는 것은 줄 끝만 다른 짝(≈)뿐이다
+function cmp.ff_flips(b, path, dos)
+  local ffs = dos and 'unix,dos' or vim.o.fileformats
+  local will = (ffs:find('dos', 1, true) and cmp.all_crlf(path)) and 'dos' or 'unix'
+  return vim.bo[b].fileformat ~= will
+end
+
+-- 이 파일을 'fileformats' unix,dos 로 읽으면 dos 인가: 줄바꿈이 있고 모두 CRLF (편집기도 LF 만인 줄이 하나라도
+-- 있으면 unix 로 다시 읽는다). cmp.ff_flips 가 dos 로 읽거나 dos 버퍼를 다시 읽을 때만 본다
+function cmp.all_crlf(path)
+  local f = io.open(path, 'rb')
+  if not f then
+    return false
+  end
+  local d = f:read('*a') or ''
+  f:close()
+  return d:find('\n', 1, true) ~= nil and not d:find('^\n') and not d:find('[^\r]\n')
 end
 
 -- 바이너리 알림의 판정 (고른 두 파일): 크기가 다르면 다르다, 같으면 내용을 견준다 (큰 파일은 모른다 - nil)

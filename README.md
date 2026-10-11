@@ -2415,6 +2415,7 @@ windows on top of the tree, showing one pair at a time (two files picked with
  sub                   2026-10-10 오후 11:09:40    sub                   2026-09-20 오전 2:15:49
 ├─▪ d1.c              2 2026-10-10 오후 11:09:40 ≠ ├─▪ d1.c              2 2026-09-20 오전 2:15:49
 ├─▪ hunks.c         111 2026-10-10 오후 11:09:40 ≠ ├─▪ hunks.c         118 2026-09-20 오전 2:15:49
+├─▪ noeol.h       2,008 2026-10-10 오후 11:09:40 ≈ ├─▪ noeol.h       2,009 2026-09-20 오전 2:15:49
 ├─▪ onlyA.c           2 2026-10-10 오후 11:09:40   │
 │                                                  ├─▪ onlyB.c           2 2026-09-20 오전 2:15:49
 └─▪ same.c            5 2026-10-10 오후 11:09:40 = └─▪ same.c            5 2026-10-10 오후 11:09:40
@@ -2442,13 +2443,55 @@ to the edit windows above).
 The verdict column says `≠` for files that differ and `=` for identical ones,
 and stays empty for one-sided entries (orphans) and folders, as in Beyond
 Compare; `·` marks a file not checked yet (`x = .` with
-`g:vimide_ascii_icons`). The status line shows the progress and the totals.
+`g:vimide_ascii_icons`). `≈` (`~` in ASCII) marks a file whose bytes differ
+only in line endings - CRLF against LF, or a missing newline at the end of the
+file - and counts as identical everywhere (see *Line endings* below). The
+status line shows the progress and the totals (`≈ N` when there are such
+files and the window is at least 100 columns wide; they are not in `다름`).
+
+**Line endings.** The compare tab's line diff does not see line endings, so a
+pair like `tsnd_alsa.h` - 2,008 bytes in A, 2,009 in B, A only lacking the
+final newline - showed a red `≠` in the tree and no difference at all in its
+compare tab. Such a pair is now the same file with `≈`: plain text on both
+sides, left out of the *differences*, orphan and newer views, skipped by
+`<C-n>` / `<C-p>`, and a folder holding only identical and `≈` files is an
+identical folder. Opening it says why in one line, for example
+`내용은 같고 줄 끝만 다릅니다 (A: 파일 끝 줄바꿈 없음)` or `(A: CRLF, B: LF)`.
+In the compare tab a side that uses CRLF throughout is read as `dos` when it
+is first loaded: vim-ide sets `'fileformats'` to `unix`, which would show `^M`
+on every line and mark every line changed, so the pair shows no differences
+and the window bars say `dos` / `unix` (saving keeps CRLF). A file that mixes
+CRLF and LF lines cannot be read as `dos` (vim falls back to `unix` and keeps
+the CRs), so its `^M` lines would show as differences - such a pair stays `≠`
+unless its CRs match too and only the final newline differs. A buffer you had
+already opened yourself is left as it is; the message then adds that it is
+open as `unix` and shows `^M`.
+The helper compares the two files the way the compare tab reads them: CRLF
+turned into LF on a side that uses CRLF throughout, bytes as they are on a
+side that mixes them, and a newline added where the last one is missing. It
+reads only pairs that can differ that way - a size difference of 1 or 2 bytes
+(the final newline), or one that fits the number of lines (up to a quarter of
+the smaller file plus the final newline; any for files up to 4 KB) - and only
+files up to `g:vimide_dirdiff_eol_max_mb` (4 MB); larger ones with different
+sizes stay `≠`. Those reads go to the same background readers as the other
+content checks; the first 64 KB of one file usually settles a real edit in a
+single open (for a gap over 2 bytes the larger file must use CRLF on every
+line; for 1-2 bytes the smaller one must lack the final newline or have at
+most four lines). Reading stops at the first difference, and a file with a NUL
+byte (binary) is never `≈`. Two files of the same size whose bytes differ are
+checked this way only when the first differing block holds a CR and one side
+has a single line break (`a\r\nb` against `a\nb\n` is the only same-size
+form). After `:w` (with `'fixendofline'` on, saving the side without the
+final newline makes the two identical: `≈` turns `=`) or a tree copy the pair
+is checked again by the same rule. `let g:vimide_dirdiff_ignore_eol = 0`
+compares bytes exactly, as before.
 
 The colors are Beyond Compare's (`g:vimide_dirdiff_colors = 'bc'`, the
 default; with `'background'` dark a matching dark set is used, and 256-color
 terminals get the nearest colors):
 
-- An identical file is plain text. A file that differs is red on the side
+- An identical file is plain text, and so is one that differs only in line
+  endings (`≈`). A file that differs is red on the side
   whose modification time is later and grey on the earlier side (red on both
   when the times are equal or unknown). An orphan file - one that exists on
   one side only - is blue. A name that is a folder on one side and a file on
@@ -2941,7 +2984,8 @@ Copying in the tree:
   top level is on screen in under 0.1 s; everything fills in as it is found.
   Folders are read with `readdir` alone (no `stat` per entry - one `stat` on
   that server's filesystem takes milliseconds), a different size is marked
-  different on the spot, the same size and modification time counts as the
+  different on the spot (unless it can be a line ending difference - see
+  *Line endings*), the same size and modification time counts as the
   same (`let g:vimide_dirdiff_trust_mtime = 0` to read those too), and only
   the rest is read. The folder you open is checked first, the rest in screen
   order, with the listing and the reading done by separate workers so neither
@@ -2958,6 +3002,9 @@ Copying in the tree:
   with any view from *Views* (it wins over `only_diff`), and
   `g:vimide_dirdiff_list_height` sets the tree height with
   `g:vimide_dirdiff_pair_tab = 0` (default 40% of the screen).
+  `g:vimide_dirdiff_ignore_eol` (1: a file that differs only in line endings
+  is identical, `≈`; 0: bytes exactly) and `g:vimide_dirdiff_eol_max_mb` (4:
+  the largest file read for that check) belong to the tree.
 - Options of the compare side: `g:vimide_dirdiff_colors` (`'bc'` /
   `'neogit'` / `'classic'`), `g:vimide_dirdiff_pair_tab` (1: compare tabs, 0:
   edit windows above the tree), `g:vimide_dirdiff_file_view` (`'all'` /

@@ -2,6 +2,7 @@
 # dirdiffscan.py - vim-ide DirDiff 의 뒤쪽: 두 디렉터리를 훑어 비교 트리를 만든다
 #
 #   python3 -X utf8 dirdiffscan.py <A> <B> [--exclude 'pat,pat'] [--trust-mtime 1]
+#                                          [--ignore-eol 1] [--eol-max-mb 4]
 #                                          [--workers 16] [--debug]
 #
 # nvim(dirdiffview.lua)이 stdin 으로 명령을, 이 프로그램이 stdout 으로 사건을 한 줄에
@@ -17,6 +18,20 @@
 #     디렉터리의 항목(크기·날짜를 보일 것)에만
 #   * 크기가 다르면 그 자리에서 '다름', 크기와 수정 시각이 같으면 '같음' (Beyond Compare
 #     의 빠른 비교와 같다, --trust-mtime 0 으로 끈다). 나머지만 내용을 읽는다
+#   * 줄 끝만 다른 짝 (--ignore-eol 1, 기본): 바이트가 달라도 CRLF -> LF 로 맞추고 파일 끝 줄바꿈이
+#     없는 쪽에 하나 붙여 보아 같으면 '같음' 이고 항목에 eol 표시(아래)를 단다. 편집기의 줄 비교(vim
+#     diff)는 줄 끝을 보지 않아 비교 탭에는 차이가 하나도 없는데, 트리만 크기가 1 바이트 다르다고
+#     빨강 ≠ 이었다 (사용자 보고: tsnd_alsa.h 2,008 / 2,009 바이트 - A 에 마지막 줄바꿈이 없을 뿐).
+#     맞추는 것은 비교 탭이 읽는 대로다: 줄마다 CRLF 인 쪽만 dos 로 읽어 CR 이 빠지고(dirdiffview.lua
+#     의 show_file), CRLF·LF 가 섞인 쪽은 CR 이 글로 남아 ^M 줄이 차이로 보인다 - 그래서 섞인 쪽은
+#     CRLF 를 맞추지 않는다 (eol_same 의 두 번째 견주기. 트리는 ≈ 인데 비교 탭은 빨강이면 거꾸로 된
+#     같은 어긋남이다). 크기가 다른 짝을 모두 읽지는 않는다 - 그럴 수 있는 것만 (eol_maybe: 차이가
+#     1~2 바이트(끝 줄바꿈), 또는 줄 수만큼(CRLF<->LF - 한 줄 평균 4 바이트 넘게 잡아 작은 쪽의 1/4 + 2
+#     까지, 4 KB 이하 파일은 줄마다 1 바이트까지), 두 파일 모두 --eol-max-mb 이하). 그런 짝도 크기를
+#     본 그 자리에서 정하지 않고 내용 읽기 패로 넘긴다 (편집기는 기다리지 않는다, 순서도 그대로). 거기서도
+#     한쪽의 앞 64 KB 로 먼저 거른다 (eol_sizes - 정말 고친 파일은 대개 열기 한 번에 끝난다). 읽다가 처음
+#     어긋나는 곳에서 멈추고, NUL 이 있으면(바이너리) 그 자리에서 '다름'. 크기가 같은데 바이트가
+#     다른 짝은 어긋난 덩어리에 CR 이 있을 때만 다시 맞춰 본다 (CR 이 없으면 줄 끝 차이일 수 없다)
 #   * readdir·stat·내용 읽기를 일꾼 여럿이 함께 - 네트워크 파일 시스템은 한 번 한 번이
 #     기다림이라 여럿이 동시에 하면 그만큼 빠르다
 #   * 순서 (job_key): nvim 이 펼쳐 둔 디렉터리의 항목 > 펼쳐 둔 디렉터리 아래 > 나머지,
@@ -41,7 +56,7 @@
 #                                            다시 본다. 끝나면 'copied' 를 먼저, 그다음 부모 'list'
 #   {"cmd":"quit"}
 # 사건 (여기 -> nvim)
-#   {"ev":"list","id":N,"dir":rel,"entries":[[name,ka,kb,sa,sb,ma,mb,st,rerr,mask],...]}
+#   {"ev":"list","id":N,"dir":rel,"entries":[[name,ka,kb,sa,sb,ma,mb,st,rerr,mask,eol],...]}
 #   {"ev":"u","d":dir,"n":name,"s":st,"e":[...같은 항목...]}   목록을 받아 간 디렉터리 안
 #   {"ev":"reveal","id":N,"path":rel|null,"lists":{dir:[entries]}}
 #   {"ev":"lists","id":N,"lists":{dir:[entries]}}
@@ -51,6 +66,10 @@
 #    "roots":[rel,...]}                      roots: 다시 본 곳 (그 아래 목록은 새로 받는다)
 # 상태: same diff onlyA onlyB pend   종류: d f l o (없으면 null)
 # 표시(mask): 보기(Beyond Compare 의 보기 거르기 - 좌측 최신, 고아 ...)에 쓴다. 아래 SAME ... UNK
+# eol: 0, 또는 '같음' 인데 줄 끝만 다른 짝 - 쪽마다 3 비트 (A 는 아래 3 비트, B 는 그 위 3 비트):
+#   1 CRLF 줄이 있다   2 LF 만인 줄이 있다   4 파일 끝 줄바꿈이 없다. 상태는 'same', 표시는 SAME 그대로라
+#   보기·<C-n>/<C-p>·폴더의 판정·수(same)는 같은 파일로 다룬다 - nvim 은 이것으로 판정 칸에 ≈ 를 단다.
+#   progress 의 eol 은 그런 짝의 수 (same 에 들어 있다)
 
 import collections
 import fnmatch
@@ -94,6 +113,12 @@ EXCLUDES = [p for p in opt('--exclude', '').split(',') if p]
 EXCLUDE_RE = re.compile('|'.join('(?:%s)' % fnmatch.translate(p) for p in EXCLUDES)).match \
     if EXCLUDES else None
 TRUST_MTIME = opt('--trust-mtime', '1') == '1'
+IGNORE_EOL = opt('--ignore-eol', '1') == '1'
+try:
+    EOL_MAX = int(float(opt('--eol-max-mb', '4')) * 1048576)
+except (ValueError, OverflowError):
+    # 'inf'·'1e400' 은 OverflowError (nvim 에서 1.0/0 을 넘기면 tostring 이 'inf' 다) - 시작부터 죽었다
+    EOL_MAX = 4 << 20
 WORKERS = max(1, int(opt('--workers', '16')))
 DEBUG = '--debug' in sys.argv
 
@@ -113,7 +138,7 @@ def excluded(name):
 class Node:
     __slots__ = ('name', 'parent', 'ka', 'kb', 'sa', 'sb', 'ma', 'mb', 'status', 'kids',
                  'scanned', 'pend', 'bad', 'sub', 'depth', 'done', 'waiters', 'group',
-                 'queued', 'rerr', 'dead', 'mask', 'agg')
+                 'queued', 'rerr', 'dead', 'mask', 'agg', 'eol')
 
     def __init__(self, name, parent):
         self.name = name
@@ -135,6 +160,7 @@ class Node:
         self.dead = False         # refresh 로 모형에서 떼어 냈다 (늦게 온 결과는 버린다)
         self.mask = 0             # 표시 (SAME ... UNK)
         self.agg = None           # 훑은 '양쪽 디렉터리': 자식들의 표시 비트마다 그 비트를 가진 자식 수
+        self.eol = 0              # 같음인데 줄 끝만 다르다 (쪽마다 3 비트 - 맨 위의 eol)
 
     def rel(self):
         parts = []
@@ -177,7 +203,8 @@ def flush():
     last_flush[0] = time.monotonic()
 
 
-counts = {'pend': 0, 'diff': 0, 'onlyA': 0, 'onlyB': 0, 'same': 0, 'dirs': 0, 'err': 0}
+counts = {'pend': 0, 'diff': 0, 'onlyA': 0, 'onlyB': 0, 'same': 0, 'dirs': 0, 'err': 0,
+          'eol': 0}       # eol: same 가운데 줄 끝만 다른 것 (따로 더하지 않는다)
 masks = {}                # 표시 -> 항목 수 (counts 처럼 한쪽에만 있는 디렉터리 안은 세지 않는다)
 masks_ver = [0]
 root = Node('', None)
@@ -208,7 +235,7 @@ def post(item):
 
 
 def entry(n):
-    return [n.name, n.ka, n.kb, n.sa, n.sb, n.ma, n.mb, n.status, n.rerr, n.mask]
+    return [n.name, n.ka, n.kb, n.sa, n.sb, n.ma, n.mb, n.status, n.rerr, n.mask, n.eol]
 
 
 def is_item(n):
@@ -469,18 +496,177 @@ def lstat(side, rel):
         return None
 
 
-def same_content(rel):
+def eol_maybe(sa, sb):
+    # 크기가 다른 짝이 줄 끝만 다를 수 있는가 (그런 것만 내용을 읽는다 - 크기가 다른 짝은 대개 정말
+    # 고친 파일이고, 예전에는 읽지 않고 곧바로 '다름' 이었다). 차이 d 는 CRLF 줄 수의 차 + 끝 줄바꿈
+    # (0~2 바이트). 빈 파일은 줄 끝을 맞출 것이 없다 ('' 와 '\n' 은 다르다)
+    if not IGNORE_EOL or sa is None or sb is None:
+        return False
+    lo, hi = min(sa, sb), max(sa, sb)
+    if lo <= 0 or hi > EOL_MAX:
+        return False
+    d = hi - lo
+    # 끝 줄바꿈 (LF 1, CRLF 2) / CRLF<->LF: 한 줄 평균이 4 바이트를 넘는다고 보고 작은 쪽의 1/4 (+ 끝
+    # 줄바꿈) 까지 / 4 KB 이하는 읽기가 한 번이라 줄마다 1 바이트(짧은 줄)까지. 고른 짝도 eol_sizes 가
+    # 한쪽의 앞 64 KB 로 먼저 거르므로 (1/8 이던 것을) 넓혔다 - 'abc\r\n' 같은 짧은 줄 파일
+    return d <= 2 or (d - 2) * 4 <= lo or (hi <= 4096 and d <= lo + 2)
+
+
+class _EolSide:
+    # 줄 끝을 맞춘 글을 조금씩 (eol_same). held: 덩어리 끝의 CR - 다음 덩어리가 LF 로 시작하면 CRLF.
+    # norm: CRLF 를 LF 로 맞춘다 (False: 바이트 그대로 - 끝 줄바꿈만 맞춘다. 섞인 쪽, eol_same)
+    __slots__ = ('f', 'buf', 'held', 'eof', 'bits', 'total', 'last', 'norm')
+
+    def __init__(self, f, norm=True):
+        self.f = f
+        self.buf = b''
+        self.held = False
+        self.eof = False
+        self.bits = 0         # 1 CRLF 줄, 2 LF 만인 줄, 4 끝 줄바꿈 없음 (맨 위의 eol)
+        self.total = 0
+        self.last = 0
+        self.norm = norm
+
+    def feed(self, size):
+        raw = self.f.read(size)
+        if not raw:
+            self.eof = True
+            if self.held:
+                self.buf += b'\r'    # 파일 끝의 홀로 선 CR 은 줄 끝이 아니라 글이다
+                self.held = False
+            if self.total and self.last != 10:
+                self.bits |= 4
+                self.buf += b'\n'    # 끝 줄바꿈이 없는 쪽에 하나 (vim 의 noeol 과 같게 본다)
+            return True
+        if b'\0' in raw:
+            return False          # 바이너리 - 줄 끝을 맞출 것이 아니다
+        self.total += len(raw)
+        self.last = raw[-1]
+        if self.held:
+            raw = b'\r' + raw
+            self.held = False
+        if raw[-1] == 13:
+            raw = raw[:-1]
+            self.held = True
+        crlf = raw.count(b'\r\n')
+        if crlf:
+            self.bits |= 1
+            if self.norm:
+                raw = raw.replace(b'\r\n', b'\n')
+        if raw.count(b'\n') > crlf:
+            self.bits |= 2
+        self.buf += raw
+        return True
+
+
+def eol_same(fa, fb, na=True, nb=True):
+    # 줄 끝을 맞추면 같은가: 같으면 eol 표시(0 이 아닌 수), 아니면 False. 앞에서부터 처음 어긋나는 곳까지만
+    # 읽는다 (덩어리는 64 KB 에서 1 MB 까지 늘린다 - 정말 다른 파일은 대개 앞쪽에서 끝난다).
+    # na / nb: 그쪽의 CRLF 를 맞춘다. 처음에는 두 쪽 다 맞춰 보고, 섞인 쪽(CRLF 줄과 LF 만인 줄이 함께 -
+    # bits & 3 == 3)이 있으면 비교 탭이 읽는 대로 한 번 더 견준다: 편집기는 줄마다 CRLF 인 파일만 dos 로
+    # 읽고('fileformats' 가 unix,dos 여도 LF 만인 줄이 하나라도 있으면 unix), 섞인 쪽의 CR 은 글로 남는다.
+    # 그러니 섞인 쪽은 바이트 그대로, 맞은편은 줄마다 CRLF 일 때만 맞춘다. 맞추지 않으면 트리는 ≈(같음,
+    # 보기·<C-n> 에서 빠진다)인데 비교 탭은 ^M 줄마다 빨강이었다 - 사용자 보고의 거꾸로 (검토에서 실측).
+    # 두 번째 견주기는 섞인 파일에서만 (드물다)
+    a, b = _EolSide(fa, na), _EolSide(fb, nb)
+    size = 1 << 16
+    while True:
+        for x in (a, b):
+            if not x.eof and len(x.buf) < size and not x.feed(size):
+                return False
+        m = min(len(a.buf), len(b.buf))
+        if m:
+            if a.buf[:m] != b.buf[:m]:
+                return False
+            a.buf = a.buf[m:]
+            b.buf = b.buf[m:]
+        if a.eof and b.eof:
+            if a.buf or b.buf:
+                return False
+            bits = a.bits | b.bits << 3
+            if na and nb and (a.bits & 3 == 3 or b.bits & 3 == 3):
+                # 섞인 쪽은 norm=False 라 다시 들어와도 여기는 지나지 않는다
+                fa.seek(0)
+                fb.seek(0)
+                return bits if eol_same(fa, fb, a.bits & 3 == 1, b.bits & 3 == 1) else False
+            return bits or 1
+        if (a.eof and not a.buf and b.buf) or (b.eof and not b.buf and a.buf):
+            return False
+        size = min(size << 1, 1 << 20)
+
+
+def eol_sizes(pa, pb, sa, sb):
+    # 크기가 다른 짝 (eol_maybe 가 고른 것). 두 파일을 견주기 앞에 한쪽의 앞 64 KB 로 거른다 - 크기가
+    # 조금 다른 짝은 대개 정말 고친 파일이고(예전에는 읽지 않고 '다름'), 서버의 파일 시스템은 열기 한
+    # 번이 몇 ms 다. 차이 d 로 (섞인 쪽은 CRLF 를 맞추지 않으니 - eol_same - 그런 짝의 크기는 끝 줄바꿈
+    # 1 바이트밖에 다를 수 없다):
+    #   d > 2   CRLF<->LF 뿐이고 큰 쪽이 줄마다 CRLF 다. 큰 쪽의 앞에 LF 만인 줄이 있거나, 다 읽혔는데
+    #           CRLF 가 d - 1 개보다 적으면(끝 줄바꿈은 많아야 2 바이트) 다르다 - 작은 쪽은 열지도 않는다
+    #   d <= 2  끝 줄바꿈만 다르면 작은 쪽에 끝 줄바꿈이 없다. 작은 쪽이 줄바꿈으로 끝나면 CRLF<->LF 인데
+    #           그러면 줄이 넷 이하다 (n 줄의 크기 차는 n-2 ~ n+1) - 줄바꿈이 넷을 넘으면 다르다. 1~2
+    #           바이트 고친 파일(오타, 숫자 하나)은 대개 여기서 끝난다
+    big, small = (pa, pb) if sa > sb else (pb, pa)
+    d = abs(sa - sb)
+    with open(big if d > 2 else small, 'rb') as f:
+        head = f.read(1 << 16)
+        nl = head.count(b'\n')
+        if d > 2:
+            crlf = head.count(b'\r\n')   # 맨 앞의 LF 는 앞에 CR 이 없다 (파일의 처음)
+            if nl > crlf or (len(head) < 1 << 16 and crlf < d - 1):
+                return False
+        elif nl > 4:
+            if len(head) < 1 << 16:
+                tail = head[-1:]
+            else:
+                f.seek(-1, 2)
+                tail = f.read(1)
+            if tail == b'\n':
+                return False
+    with open(pa, 'rb') as fa, open(pb, 'rb') as fb:
+        return eol_same(fa, fb)
+
+
+def same_content(rel, sa=None, sb=None):
+    # True 같음, False 다름, None 못 읽음, 0 이 아닌 수: 줄 끝만 다르다 (eol 표시)
     pa = os.path.join(ROOT['a'], rel)
     pb = os.path.join(ROOT['b'], rel)
     try:
+        if sa != sb:
+            # 크기가 다르면 eol_maybe 가 고른 것만 읽는다 - 보통은 on_stat 이 고른 것만 오지만, INFO(펼친
+            # 디렉터리의 날짜)로 크기를 먼저 안 짝은 submit_pending 이 on_stat 을 거치지 않고 곧바로 보낸다
+            # (--ignore-eol 0 이나 한도를 넘는 파일도)
+            if not eol_maybe(sa, sb):
+                return False
+            try:
+                return eol_sizes(pa, pb, sa, sb)
+            except OSError:
+                # 크기가 달라 '다름' 은 이미 안다 - 줄 끝만 다른지 보려던 것이라 읽기 실패로 세지 않는다
+                # (예전처럼 ≠ 만. 세었더니 못 읽는 파일이 상태줄에 '읽기 실패' 로 새로 나왔다)
+                return False
         with open(pa, 'rb') as fa, open(pb, 'rb') as fb:
+            held = False
+            nl = 0
             while True:
                 x = fa.read(1 << 20)
                 y = fb.read(1 << 20)
                 if x != y:
+                    # 크기가 같은데 다르다: 줄 끝만 다르려면 처음 어긋난 자리가 어느 쪽의 CR 이어야
+                    # 한다 (앞은 같으니) - 그 덩어리에 CR 이 없으면 다시 읽지 않는다. 또 크기가 같으면
+                    # 'X\r\nY' 와 'X\nY\n' 꼴뿐이다 (줄마다 CRLF 인 쪽의 CRLF 하나 = 맞은편의 끝 줄바꿈 -
+                    # eol_sizes 의 크기 셈) - 한쪽의 줄바꿈이 하나여야 한다. CRLF 파일 안에서 고친 글자
+                    # (크기 같음)를 처음부터 다시 읽지 않는다
+                    if IGNORE_EOL and sa is not None and 0 < sa <= EOL_MAX and \
+                            (held or b'\r' in x or b'\r' in y) and \
+                            nl + min(x.count(b'\n'), y.count(b'\n')) <= 1:
+                        fa.seek(0)
+                        fb.seek(0)
+                        return eol_same(fa, fb)
                     return False
                 if not x:
                     return True
+                held = x[-1] == 13
+                if nl < 2:
+                    nl += x.count(b'\n')   # 둘이 넘으면 더 셀 것 없다 (같은 파일을 끝까지 읽는 길)
     except OSError:
         return None
 
@@ -533,7 +719,7 @@ def worker(role):
                         same_link = False
                 res.append((n, kind, ra, rb, same_link))
             else:
-                r = same_content(rel)
+                r = same_content(rel, n.sa, n.sb)
                 dbg('compared', rel, r)
                 res.append((n, r))
         ops[kind] += len(todo)
@@ -691,7 +877,11 @@ def on_stat(n, kind, ra, rb, same_link):
         set_status(n, 'diff')
         return
     if n.sa != n.sb:
-        set_status(n, 'diff')
+        if eol_maybe(n.sa, n.sb):
+            notify_parent(n)   # 크기·날짜가 생겼다 - 줄 끝만 다른지는 내용 읽기 패가 본다
+            submit(CMP, n)
+        else:
+            set_status(n, 'diff')
     elif n.sa == 0 or (TRUST_MTIME and n.ma == n.mb):
         set_status(n, 'same')
     else:
@@ -703,6 +893,10 @@ def on_cmp(n, r):
     if n.status == 'pend':
         if r is None:
             counts['err'] += 1
+        elif r is not True and r:
+            # 줄 끝만 다르다: 표시를 먼저 달아야 set_status 가 알리는 항목에 실린다
+            n.eol = r
+            count(n, 'eol', 1)
         set_status(n, 'same' if r else 'diff')
 
 
@@ -827,14 +1021,14 @@ def progress(done):
     with job_lock:
         waiting = len(jobs[0]) + len(jobs[1])
     snap = (done, counts['dirs'], counts['pend'], counts['diff'], counts['onlyA'],
-            counts['onlyB'], counts['same'], counts['err'], masks_ver[0])
+            counts['onlyB'], counts['same'], counts['err'], counts['eol'], masks_ver[0])
     if done and snap == last_snap[0]:
         return
     last_snap[0] = snap
     emit({'ev': 'progress', 'done': done, 'dirs': counts['dirs'], 'queued': waiting,
           'files': counts['pend'] + counts['diff'] + counts['onlyA'] + counts['onlyB'] + counts['same'],
           'pend': counts['pend'], 'diff': counts['diff'], 'onlyA': counts['onlyA'],
-          'onlyB': counts['onlyB'], 'same': counts['same'], 'err': counts['err'],
+          'onlyB': counts['onlyB'], 'same': counts['same'], 'err': counts['err'], 'eol': counts['eol'],
           'ops': list(ops), 'backlog': len(inbox), 'again': again[0] and not done,
           'cats': {str(k): v for k, v in masks.items() if v > 0},
           'sec': finished[0] if done else round(time.monotonic() - started, 1)})
@@ -861,6 +1055,8 @@ def detach(n):
     while stack:
         x = stack.pop()
         count(x, x.status, -1)
+        if x.eol:
+            count(x, 'eol', -1)
         if not x.both_dirs() and x.parent.agg is not None:
             tally(x.mask, -1)
         if x.scanned:

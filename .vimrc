@@ -1974,10 +1974,14 @@ let g:vimide_dirdiff_tab = 1
 " - 뒤에서 python3(~/.vim/tools/dirdiffscan.py)이 훑으며 보내고(펼쳐 둔 디렉터리 먼저,
 " 그다음 맨 위 폴더 순서대로), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음',
 " 나머지만 내용을 읽는다. 제외는 위의 g:DirDiffExcludes 를 같이 쓴다.
+" 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일은 '같음'(판정 칸 ≈) - 비교 탭의 줄 비교에도 차이가 없다
+" (줄마다 CRLF 인 쪽은 dos 로 읽는다. CRLF·LF 가 섞인 파일은 ^M 줄이 차이로 보여 다름 그대로).
+" 크기 차이가 그럴 만한 것만 내용을 읽어 본다 (g:vimide_dirdiff_ignore_eol, g:vimide_dirdiff_eol_max_mb).
 " 한쪽에만 있는 파일은 없는 쪽을 빈 버퍼로 두고 diff (A만: 왼쪽에 파일, B만: 오른쪽에).
 " 꼴과 색은 Beyond Compare 를 따른다 (g:vimide_dirdiff_colors = 'bc'):
 "   트리  반쪽마다 이름(안내선·폴더 아이콘) | 크기 | 수정일(오전/오후), 맨 위에 A·B 경로 줄과 칸 제목.
 "         같은 파일 보통 글자 =, 다른 파일은 늦은 쪽 빨강·이른 쪽 회색 ≠, 고아 파일(한쪽에만) 파랑,
+"         줄 끝만 다른 파일은 같은 파일처럼 보통 글자 ≈ (열면 무엇이 다른지 한 줄로 알린다),
 "         폴더(한쪽에만 있는 것도)는 보통 글자에 아이콘이 그 아래(늦은 차이 빨강 / 이른 차이 회색),
 "         지금 줄은 커서가 있는 쪽(A/B) 반 칸만 연두
 "   비교 탭  바뀐 줄 분홍 바탕·다른 글자 빨강, 같은 글은 구문 색 없이 보통 글자색(그 두 창에서만),
@@ -2021,6 +2025,8 @@ let g:vimide_dirdiff_tab = 1
 "                                          "  left-newer right-newer left-newer-orphans right-newer-orphans
 "                                          "  left-orphans right-orphans same, only_diff 보다 먼저)
 "   let g:vimide_dirdiff_trust_mtime = 0   " 크기·시각이 같아도 내용까지 읽기
+"   let g:vimide_dirdiff_ignore_eol = 0    " 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일도 다름(≠)으로 (예전처럼 바이트 그대로)
+"   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (MB)
 "   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때, 기본: 화면의 40%)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
@@ -2033,6 +2039,12 @@ let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
 let g:vimide_dirdiff_filter = ''
 let g:vimide_dirdiff_trust_mtime = 1
+" 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일: 1 = 같음(판정 칸 ≈, 보통 글자 - 비교 탭은 줄마다 CRLF 인 쪽을
+" dos 로 읽어 차이가 없다. CRLF·LF 가 섞인 파일은 그 CR 이 비교 탭에 차이로 보이니 다름), 0 = 바이트가 다르면
+" 다름(≠). 트리가 빨강인데 비교 탭에는 차이가 없던 것을 막는다
+let g:vimide_dirdiff_ignore_eol = 1
+" 줄 끝만 다른지 읽어 볼 파일 크기 한도(MB). 이보다 큰 파일은 크기가 다르면 읽지 않고 그대로 다름
+let g:vimide_dirdiff_eol_max_mb = 4
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
 " DirDiff 색: 'bc' = Beyond Compare 의 색 (background 가 dark 면 어두운 짝),
