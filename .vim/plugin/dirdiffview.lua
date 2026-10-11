@@ -5854,6 +5854,11 @@ function cmp.uflush()
       for _, v in ipairs(all_views()) do
         if v.ut and not v.closed and (v.ut.a == b or v.ut.b == b) then
           cmp.uobserve(v, b, q.set[b] == 'force')
+          -- 개요 막대·줄 자세히·화살표·연보라도 다시 센다. TextChanged 는 지금 버퍼에만 오고, 맞은편 버퍼를 고치는
+          -- 복사(<C-r>/<C-l>)·Ctrl+Z·dp 뒤에는 0.12 가 DiffUpdated 도 보내지 않아(:diffupdate 를 불러도 - 실측)
+          -- 두 파일이 같아진 뒤에도 곁 창이 '다르다' 로 남았다 (다른 창에 다녀와야 고쳐졌다). 이 버퍼 감시(on_lines)
+          -- 는 어디서 바뀌었든 온다
+          cmp.kick(v, true)
         end
       end
     end
