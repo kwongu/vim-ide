@@ -2388,7 +2388,10 @@ let g:vimide_edit_winmove = 0   " vim's own behaviour
 In neo-tree (F9, F11 or the RelationView tree), press `Tab` on the first
 directory - its row gets an `[A]` at the end - and `Tab` on the one to compare
 it with: that one becomes `[B]` and the comparison opens straight away. Two
-files instead of two directories open side by side in vimdiff. `Tab` again on
+files instead of two directories open in a DirDiff compare tab - the same
+window as a pair picked in the DirDiff tree, with its colors, window bars,
+overview bar, `\d`, copy and undo keys and `q` (see *Two picked files* under
+*Compare tabs* below); they may have different names and folders. `Tab` again on
 the `[A]` row cancels it, and the two can come from different trees (pick `[A]`
 in the F9 sidebar, `[B]` in the RelationView tree). `\d` is the same key under
 another name.
@@ -2403,7 +2406,8 @@ compare: one window holds A's tree, a verdict column, and B's tree next to
 each other, and each file pair you pick opens in a *compare tab* of its own (A
 on the left, B on the right, in diff mode; see *Compare tabs* below).
 `let g:vimide_dirdiff_pair_tab = 0` keeps the earlier layout instead: two edit
-windows on top of the tree, showing one pair at a time.
+windows on top of the tree, showing one pair at a time (two files picked with
+`Tab` / `Tab` still open in a compare tab of their own - see *Two picked files*).
 
 ```
  A  ~/work/a                                        B  ~/work/b
@@ -2492,7 +2496,7 @@ those two windows): the same file in any other window keeps its colors.
 | `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree) |
 | `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below |
 | `F` | switch between *all* and *differences* |
-| `<Tab>` | pick something to compare, as `Tab` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Tab` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: vimdiff). `Tab` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
+| `<Tab>` | pick something to compare, as `Tab` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Tab` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: a compare tab of this comparison, names and folders may differ - see *Two picked files* below). `Tab` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
 | `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which |
 | `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
 | `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
@@ -2506,7 +2510,7 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | in the edit windows | |
 |---|---|
 | `\d` | choose the view: *all*, *differences*, *context* - a small menu (`Enter`, a double click or `1` `2` `3` picks, `q` / `Esc` closes, `?` lists these keys); see *View modes* below. The window bar shows the current one |
-| `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same). While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
+| `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same); for two picked files, back to where `[B]` was picked. While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c` |
 | `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
@@ -2663,7 +2667,8 @@ still cycle the buffers.
   the background (the cursor waits on the first change) or reads an open one
   again.
 - `q` in a compare tab, `:tabclose`, or closing its last compare window: back
-  to the tree, on that pair's row. The buffers the compare opened are removed,
+  to the tree, on that pair's row (two picked files: where `[B]` was picked -
+  see *Two picked files*). The buffers the compare opened are removed,
   an edited one is kept and named. `q` in the tree closes every compare tab of
   that comparison.
 - One-sided files, binary and too large files, and a name that is a folder on
@@ -2678,6 +2683,51 @@ still cycle the buffers.
   or line details.
 - vim-ide's sidebar guard leaves a compare tab alone (`t:vimide_dirdiff_pair`),
   as it does the DirDiff tab.
+
+**Two picked files.** `Tab` / `Tab` on two files - in neo-tree, in a DirDiff
+tree, or one in each - opens them in a compare tab like any pair from the tree.
+It used to be a plain vimdiff in a new tab: the default diff colors whatever
+`g:vimide_dirdiff_colors` said, no window bars or overview bar, and no `q`,
+`\d`, copy keys or `,r` / `,e`. The two files may have different names and lie
+in different folders. Each window bar shows that file's path, in full when
+there is room. When the bar is narrow the path is shortened in the middle
+first, down to the file name and the two folders above it
+(`/…/A/scripts/start.sh`), and only then do the key hint, the encoding, size
+and time go.
+The tab is named after both (`start.sh <> run.sh`). It is always a compare
+tab, also with `g:vimide_dirdiff_pair_tab = 0`.
+Where the tab belongs depends on where `[B]` was picked:
+
+- `[B]` in a DirDiff tree: the tab joins that comparison. It opens after the
+  comparison's other tabs, `,r` / `,e` go through it, `q` or `:tabclose` goes
+  back to the tree onto the row where `[B]` was picked (or onto the `[A]` row,
+  when `[A]` came from the same tree and the `[B]` row is no longer shown), and
+  `q` in the tree closes it with the others. `[A]` may come from neo-tree or
+  from another comparison's tree - it is still `[B]`'s comparison. When the two
+  files are a pair that comparison already has (the same path under A and
+  under B, A first), you get that pair's own compare tab, as with `<CR>` on its
+  row.
+- `[B]` in neo-tree: a compare tab of its own, right after the current tab. `q`
+  or `:tabclose` closes it and goes back to the window where `[B]` was picked.
+  There is no comparison around it, so `,r` / `,e` there are just the next /
+  previous tab (as `gt` / `gT`) - cycling the buffers would put another file in
+  place of a compared one.
+
+Picking the same two files again from the same place - `[B]` in the same
+comparison, or in neo-tree - goes to their tab, and rebuilds a compare window
+that was closed; picked from somewhere else, they get a tab there as well.
+`:w` in either window updates the verdict of every comparison whose trees hold
+that file, as for a pair from the tree, and a tree copy that overwrites one of
+them reads the tab again. Binary and too large files get the usual note (the
+line copy keys say they cannot copy lines; a tree copy only works for a pair
+with the same path). Both files must exist when `[B]` is picked: a `[B]` that
+is no longer on disk is refused with a message, and when `[A]` has gone the
+message says so and the file under the cursor becomes the new `[A]`.
+Everything above - colors, bars, views, keys, undo across the pair, closing -
+is the same as for a pair from the tree.
+`let g:vimide_dirdiff_pick_vimdiff = 1` brings back the plain vimdiff, and so
+does `g:vimide_dirdiff_view = 0` (with it two folders open the plugin's list,
+so two files open as before too).
 
 #### View modes
 
@@ -2789,7 +2839,8 @@ Copying in the tree:
 - The window bars (`A: …` / `B: …`), the compare colors and diff mode belong
   to the two compare windows only. Opening a file shown there in another
   window or tab (`:tabnew file`, `:e`, `:vsplit file`, `:split` in a compare
-  window, `Enter` in neo-tree, a `Tab` / `Tab` vimdiff) gives a plain window:
+  window, `Enter` in neo-tree, the plain vimdiff of
+  `g:vimide_dirdiff_pick_vimdiff = 1`) gives a plain window:
   nvim copies the options of the window that shows the buffer, and the bar,
   the `'winhighlight'`, `diff`, `scrollbind`, `cursorbind`, the diff folds and
   the view's fold level are taken off again there. Another file opened in a
@@ -2820,7 +2871,8 @@ Copying in the tree:
   opens its own (so does `Tab` / `Tab` on two folders in a tree). Any number of
   comparisons can be open side by side, each tab with its own tree, helper and
   buffers; `q` or `:tabclose` on one leaves the others working.
-- `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again;
+- `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again
+  (and `Tab` / `Tab` on two files a plain vimdiff, as before);
   `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
   starts with only the differences, `let g:vimide_dirdiff_filter = '<id>'`
   with any view from *Views* (it wins over `only_diff`), and
@@ -2834,7 +2886,8 @@ Copying in the tree:
   `g:vimide_dirdiff_line_details` (1: the line details, 0: none),
   `g:vimide_dirdiff_plain_text` (1: same text in plain colors, 0: syntax
   colors), `g:vimide_dirdiff_undo_keys` (1: `<C-z>` / `<C-y>` across the pair,
-  0: leave them alone). A comparison
+  0: leave them alone), `g:vimide_dirdiff_pick_vimdiff` (0: two files picked
+  with `Tab` / `Tab` open in a compare tab, 1: the plain vimdiff of before). A comparison
   keeps the layout it was opened with; the colors change at the next
   `:DirDiff`, color scheme or `'background'` change.
 - `g:vimide_dirdiff_date_format` (`'%Y-%m-%d %p %l:%M:%S'`) is the tree's

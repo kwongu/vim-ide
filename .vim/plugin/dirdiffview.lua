@@ -37,6 +37,14 @@
 -- 같은 짝을 다시 고르면 그 탭으로 간다. 비교 탭의 q 는 그 탭을
 -- 닫고 트리의 그 줄로 (:tabclose 도 같다). 트리를 끝내면(q) 그 비교 탭들도 닫힌다.
 -- g:vimide_dirdiff_pair_tab = 0 이면 예전처럼 트리 탭 위쪽의 편집 창 둘에서 본다.
+-- 고른 두 파일 (Tab/Tab - 트리에서든 neo-tree 에서든, 이름·디렉터리가 달라도): 보통 짝과 같은 비교 탭이다
+-- (예전의 맨 vimdiff 에는 색·창 머리·곁·키·q 가 없었다). 창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되
+-- 파일 이름과 그 위 디렉터리 둘은 남기고, 그래도 넘치면 정보(인코딩, 크기, 일시)를 뺀다. [B] 를 이
+-- 트리에서 골랐으면 이 비교의 탭으로 붙는다 - 이 비교의 탭들 뒤에, ,r / ,e 로 돌고, q·:tabclose 는 [B] 를
+-- 고른 줄로, 트리의 q 로 같이 닫힌다 (이 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 [B] 면
+-- 혼자 선 비교 탭: q 는 [B] 를 고른 창으로, ,r / ,e 는 그냥 다음 / 앞 탭. pair_tab = 0 이어도 비교 탭이다.
+-- 같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로 (cmp.open_files - 아래 'Tab/Tab
+-- 으로 고른 두 파일'). g:vimide_dirdiff_view = 0 이나 g:vimide_dirdiff_pick_vimdiff = 1 이면 예전의 맨 vimdiff.
 -- 비교 창의 보기 (\d 로 고른다, Beyond Compare 의 글 비교 보기): 모두 보이기(기본 - 접지
 -- 않는다), 차이 보이기(바뀐 줄만, 나머지는 접는다), 문맥 보이기(바뀐 줄과 위아래 N 줄).
 -- 접기는 foldmethod=diff 그대로라 zR(모두) / zM(접기)도 된다.
@@ -54,8 +62,9 @@
 --   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...)
 --   F           모두 보이기 <-> 차이 보이기
 --   <Tab>       비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 곧바로 새
---               탭에서 비교 (디렉터리 둘이면 DirDiff, 파일 둘이면 vimdiff). [A] 줄에서 다시 Tab 은
---               취소. neo-tree 의 Tab 과 같은 [A] 다 (dirdiffpick.lua) - 트리가 달라도 된다
+--               탭에서 비교 (디렉터리 둘이면 DirDiff, 파일 둘이면 이 비교의 비교 탭 - 아래 '고른 두
+--               파일'). [A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A] 다 (dirdiffpick.lua) -
+--               트리가 달라도 된다
 --   <S-Tab>     A 쪽 / B 쪽 (커서가 그쪽 이름으로. 마우스로 눌러도 된다)
 --   <Space>     지금 쪽의 항목 고르기/풀기 (다음 줄로)       U  고른 것 모두 풀기
 --   <C-r>/<C-l> A → B / B → A 로 파일·디렉터리 복사: 원본 쪽(A→B 면 A 트리)에서 고른 것,
@@ -64,7 +73,8 @@
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
---   ,r / ,e     이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이 - 비교 창에서도. 아래 tab_cycle)
+--   ,r / ,e     이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이 - 비교 창에서도. 아래 tab_cycle.
+--               neo-tree 에서 고른 두 파일의 비교 탭은 묶인 탭이 없어 그냥 다음 / 앞 탭)
 -- 비교 창(비교 탭의 두 창, pair_tab = 0 이면 위의 편집 창 둘)에서는 \d 가 보기 고르기, 비교 탭의
 -- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
 -- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
@@ -102,6 +112,7 @@
 --   let g:vimide_dirdiff_line_details = 0  " 비교 탭 맨 아래의 줄 자세히(두 줄) 없이
 --   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로 (기본 1: 같은 글은 보통 글자색)
 --   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기 (짝 전체 되돌리기 없이)
+--   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 맨 vimdiff 로 (dirdiffpick.lua 가 본다)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -2047,6 +2058,12 @@ local function set_heads(v)
       local W = api.nvim_win_get_width(w)
       -- 경로는 파일 이름과 맨 앞(~/…/)만큼은 남게 - 정보·보기·키는 그것이 안 들어가면 뺀다
       local need = math.min(sw(h), sw(vim.fn.fnamemodify(h, ':t')) + 4)
+      -- Tab/Tab 으로 고른 두 파일은 디렉터리가 다르다 (트리의 짝은 같은 상대 경로라 트리가 말해 준다): 경로는
+      -- 파일 이름과 그 위 디렉터리 둘(맨 앞/…/x/y/이름 - cmp.pick_min)만큼은 남기고 키 안내·정보를 뺀다 (보기
+      -- 이름은 보통 짝처럼 - 지금 보기라 안내보다 먼저 남는다). 그만큼 남으면 정보(일시·크기·인코딩)는 보통 짝처럼
+      -- 두고 경로를 가운데부터 줄인다. 처음에는 경로를 다 보이려고 정보부터 뺐더니 200 칸 화면(창 98 칸)에서도
+      -- B 쪽에 일시·크기가 없었다 (실제 프로젝트의 깊은 경로면 거의 늘)
+      local pneed = v.pick and math.max(need, sw(cmp.pick_min(h))) or need
       local right, rw = '', 0
       if side == 'b' then
         -- B 쪽 끝의 보기와 키: 좁으면 키 안내, 그다음 보기 이름을 뺀다 (파일 이름이 먼저다)
@@ -2059,7 +2076,7 @@ local function set_heads(v)
         local function width_of(lb, ks)
           return (lb ~= '' and 1 + sw(lb) or 0) + (ks ~= '' and 2 + sw(ks) or 1)
         end
-        if W - used - need - width_of(label, keys) < 0 then
+        if W - used - pneed - width_of(label, keys) < 0 then
           keys = ''
         end
         if W - used - need - width_of(label, keys) < 0 then
@@ -2075,7 +2092,7 @@ local function set_heads(v)
       -- (20 칸만 남겼더니 긴 파일 이름이 잘린 채 일시가 보였다). 남은 칸에 경로를 가운데부터 줄여 넣는다
       -- (tr.mid_path - 파일 이름은 끝까지 남는다). %< 는 그래도 넘칠 때(창이 더 좁다)의 마지막 자르기
       local parts = cmp.info(v, side)
-      local room = W - used - need - rw
+      local room = W - used - pneed - rw
       local info = table.concat(parts, '  ')
       while #parts > 0 and 2 + sw(info) > room do
         parts[#parts] = nil
@@ -2128,19 +2145,26 @@ local function unview_win(w)
   diff_whl(w, nil)
   cmp.ungone(w)
   vim.w[w].overview_off = nil
-  -- 화살표·연보라 빈 줄은 버퍼에 단 것이라 (창에만 보이게 한 것은 nvim__ns_set 이 있을 때뿐) 걷는다
+  -- 화살표·연보라 빈 줄은 버퍼에 단 것이라 (창에만 보이게 한 것은 nvim__ns_set 이 있을 때뿐) 걷는다. 지금 탭의
+  -- 다른 비교가 같은 버퍼를 보이면 그것의 표시라 그대로 (cmp.wipe - 뒤의 탭을 다시 채울 때)
   local b = api.nvim_win_get_buf(w)
-  api.nvim_buf_clear_namespace(b, NS.arrow, 0, -1)
-  api.nvim_buf_clear_namespace(b, NS.blank, 0, -1)
+  if not cmp.held(nil, w)[b] then
+    api.nvim_buf_clear_namespace(b, NS.arrow, 0, -1)
+    api.nvim_buf_clear_namespace(b, NS.blank, 0, -1)
+  end
 end
 
--- 짝을 view 의 두 창에 채운다. jump: 커서를 첫 차이로
+-- 짝을 view 의 두 창에 채운다. jump: 커서를 첫 차이로.
+-- 트리의 짝은 뿌리 + r.rel 이고, Tab/Tab 으로 고른 두 파일(cmp.pick_fill)은 r.pick = { a, b } 에 경로를 따로
+-- 싣는다 - 이름도 디렉터리도 다를 수 있다 (트리의 줄 r 에는 pa / pb 가 이미 있다 - 안내선 거리). 그때 r.rel 은
+-- 트리의 줄이 아닌 열쇠(NUL 로 시작 - 트리의 상대 경로와 겹치지 않는다), r.label 은 알림·탭 이름에 쓸 이름이다
 local function fill(v, r, jump)
   local s = v.s
   local e = r.e
-  local rel = shown(r.rel)
-  local pa = e.ka and (s.a .. '/' .. r.rel) or nil
-  local pb = e.kb and (s.b .. '/' .. r.rel) or nil
+  local rel = r.label or shown(r.rel)
+  local rp = r.pick
+  local pa = e.ka and (rp and rp.a or (s.a .. '/' .. r.rel)) or nil
+  local pb = e.kb and (rp and rp.b or (s.b .. '/' .. r.rel)) or nil
   local ka, kb = real_kind(e.ka, pa), real_kind(e.kb, pb)
   -- 디렉터리를 :edit 하면 nvim-tree 가 창을 가져간다 - 파일(과 파일 링크)만 연다
   local function note(k, side, p)
@@ -2187,9 +2211,16 @@ local function fill(v, r, jump)
       '',
       '  A: ' .. (e.ka and (commas(sa) .. ' 바이트') or '없음'),
       '  B: ' .. (e.kb and (commas(sb) .. ' 바이트') or '없음'),
-      '',
-      '  판정: ' .. ({ same = '같다', diff = '다르다', onlyA = 'A 에만', onlyB = 'B 에만', pend = '확인 중' })[e.st],
     }
+    -- 판정: 트리의 짝은 뒤쪽의 것, 고른 두 파일은 여기서 (뒤쪽이 견주지 않았다 - cmp.same_bytes, 큰 파일은 모른다)
+    local st = e.st
+    if not st and rp and pa and pb then
+      st = cmp.same_bytes(pa, pb, sa, sb, max)
+    end
+    local verdict = ({ same = '같다', diff = '다르다', onlyA = 'A 에만', onlyB = 'B 에만', pend = '확인 중' })[st]
+    if verdict then
+      vim.list_extend(info, { '', '  판정: ' .. verdict })
+    end
     api.nvim_win_set_buf(v.win_a, scratch(v, 'a', info))
     api.nvim_win_set_buf(v.win_b, scratch(v, 'b', info))
   else
@@ -2214,14 +2245,19 @@ local function fill(v, r, jump)
       end)
     end
   end
-  -- 없는 쪽은 경로를 보이되 (없음) 을 붙인다 - (없음) 은 자르지 않는 자리에 (set_heads)
-  local function head(k, root)
+  -- 없는 쪽은 경로를 보이되 (없음) 을 붙인다 - (없음) 은 자르지 않는 자리에 (set_heads). 고른 두 파일은
+  -- 그 경로 그대로 (없어진 쪽도 - 무엇이 없어졌는지 보이게)
+  local function head(k, side)
+    local p = rp and rp[side]
+    if p then
+      return shown(vim.fn.fnamemodify(p, ':~'))
+    end
     if k == nil then
       return rel
     end
-    return shown(vim.fn.fnamemodify(root .. '/' .. r.rel, ':~'))
+    return shown(vim.fn.fnamemodify(s[side] .. '/' .. r.rel, ':~'))
   end
-  v.head = { a = head(e.ka, s.a), b = head(e.kb, s.b) }
+  v.head = { a = head(e.ka, 'a'), b = head(e.kb, 'b') }
   v.gone = { a = e.ka == nil, b = e.kb == nil }
   if v.rel ~= r.rel then
     v.fmode = s.fmode   -- 다른 짝을 실었다 (pair_tab = 0 의 편집 창) - 처음 보기로
@@ -2252,8 +2288,11 @@ local function fill(v, r, jump)
   -- 탭 이름: airline 의 탭 줄은 탭에 목록 버퍼가 없으면 첫 창의 버퍼 이름을 쓴다 - 두 창이 다 알림이면 그
   -- 첫 창이 개요 막대라 'DirDiff 개요 #20' 이 떴다. 그때만 짝의 파일 이름을 t:title 로 (보통 짝은 airline
   -- 이 파일 이름을 그대로 쓴다)
+  -- 고른 두 파일은 늘 'A이름 <> B이름' (이름이 다르면 airline 은 첫 창의 것 하나만 보였다)
   if not v.inline and api.nvim_tabpage_is_valid(v.tab) then
-    if vim.fn.buflisted(v.buf_a) == 0 and vim.fn.buflisted(v.buf_b) == 0 then
+    if r.label then
+      vim.t[v.tab].title = r.label
+    elseif vim.fn.buflisted(v.buf_a) == 0 and vim.fn.buflisted(v.buf_b) == 0 then
       vim.t[v.tab].title = vim.fn.fnamemodify(rel, ':t')
     else
       pcall(api.nvim_tabpage_del_var, v.tab, 'title')
@@ -2825,9 +2864,12 @@ local function act_pick(s)
       vim.log.levels.WARN)
   end
   local tab = api.nvim_get_current_tabpage()
-  _G.vimide_dirdiff_pick_path(path, kind)
-  -- [B] 로 새 탭을 열었다. 새 탭은 편집 창에서 연다 (M.open, dirdiffpick.lua 의 tab_from_edit) -
-  -- 그대로 두면 그 탭을 닫고 돌아왔을 때 이 탭의 커서가 위의 편집 창에 있다. 트리로 되돌려 둔다
+  -- 어느 세션의 어느 줄·쪽인지도 넘긴다: [B] 면 파일 짝을 이 세션의 비교 탭으로 열고(q 는 이 줄로), [A] 면
+  -- dirdiffpick.lua 가 들고 있다가 [B] 때 돌려준다 (cmp.open_files)
+  _G.vimide_dirdiff_pick_path(path, kind, { tab = s.tab, rel = r.rel, side = side })
+  -- [B] 로 새 탭을 열었다. 디렉터리 둘의 새 탭은 편집 창에서 연다 (M.open) - 그대로 두면 그 탭을 닫고
+  -- 돌아왔을 때 이 탭의 커서가 위의 편집 창에 있다. 트리로 되돌려 둔다 (파일 둘의 비교 탭은 트리 창에서
+  -- 연다 - cmp.open_files·new_view. 되돌려도 같다)
   -- (키는 모두 트리에 있다). 잠깐 오가는 것이라 autocmd 는 돌리지 않는다
   if api.nvim_get_current_tabpage() ~= tab and api.nvim_win_is_valid(s.win_l) then
     local w = api.nvim_get_current_win()
@@ -3154,7 +3196,7 @@ local function on_copied(s, ev)
   -- 복사했더니 바깥 비교 탭은 R 을 누를 때까지 옛 판정(=)·크기·수를 그대로 보였다. 복사한 디렉터리가
   -- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (R. 그쪽도 복사하는 중이면 그 복사가 끝난 뒤에)
   for _, o in pairs(sessions) do
-    if o ~= s and not o.done then
+    if o ~= s and not o.done and not o.solo then
       local rels, whole = {}, false
       for _, rr in ipairs(roots) do
         local full = base .. '/' .. rr
@@ -3172,6 +3214,19 @@ local function on_copied(s, ev)
         forget(o, rels)
         schedule_render(o)
         send(o, { cmd = 'refresh', paths = rels })
+      end
+    end
+  end
+  -- Tab/Tab 으로 고른 두 파일의 비교 탭은 위의 다시 채우기(reopen - 트리의 줄을 따른다)에 들지 않는다: 복사한 곳
+  -- 아래의 파일을 보이면 여기서 다시 채운다 (보통 짝의 'refill' 처럼, 어느 세션에 붙었든 혼자 섰든). 버퍼를 다시
+  -- 읽고 창 머리만 고쳤더니 같은 이름의 바이너리를 덮어써도 글 diff 그대로였다 (알림·판정·diff 는 fill 이 정한다).
+  -- 창 하나를 닫아 버렸으면 머리만 - 다시 세우는 것은 다시 고를 때 (cmp.open_files)
+  for _, v in ipairs(all_views()) do
+    if v.pick and not v.closed and cmp.pick_under(v, tops) then
+      if api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
+        cmp.pick_fill(v, false)
+      else
+        cmp.restat(v)
       end
     end
   end
@@ -3542,15 +3597,16 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
   local tb = put and theirs or mine
   -- 양쪽 다 진짜 파일이어야 한다: 빈 쪽(한쪽에만 있는 파일)·안내 쪽에서 가져오면 안내 글이
   -- 파일에 들어가거나 줄이 지워졌다
+  -- 트리의 파일째 복사는 짝(같은 상대 경로)만 된다: Tab/Tab 으로 고른 두 파일(이름·디렉터리가 다를 수 있다,
+  -- neo-tree 에서 골랐으면 트리도 없다)에는 그 안내를 붙이지 않는다
+  local hint = v.pick and '' or ' - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요'
   for _, b in ipairs({ mine, theirs }) do
     if vim.bo[b].buftype ~= '' then
       if v.bin then
-        return say('바이너리·큰 파일은 줄로 복사할 수 없습니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
-          vim.log.levels.WARN)
+        return say('바이너리·큰 파일은 줄로 복사할 수 없습니다' .. hint, vim.log.levels.WARN)
       end
       local side = (b == v.empty_a or api.nvim_win_get_buf(v.win_a) == b) and 'A' or 'B'
-      return say(side .. ' 쪽은 파일이 아닙니다 - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요',
-        vim.log.levels.WARN)
+      return say(side .. ' 쪽은 파일이 아닙니다' .. hint, vim.log.levels.WARN)
     end
   end
   -- 덩어리째는 대상 버퍼를 직접 바꾸므로(copy_rows) 미리 본다 - 그대로 두면 API 오류가 파일·줄
@@ -3808,6 +3864,12 @@ function _G.vimide_dirdiff_tab_cycle(dir)
   if not s then
     return false
   end
+  if s.solo then
+    -- neo-tree 에서 고른 두 파일의 비교 탭(cmp.solo)은 묶인 탭(트리 탭·다른 짝)이 없다: 그냥 다음 / 앞 탭으로.
+    -- :bn! 으로 넘기면 비교하던 파일이 다른 버퍼로 바뀐다
+    vim.cmd(dir < 0 and 'tabprevious' or 'tabnext')
+    return true
+  end
   local tabs = {}
   if api.nvim_tabpage_is_valid(s.tab) then
     tabs[#tabs + 1] = s.tab
@@ -4022,6 +4084,8 @@ local HELP_PAIR = {
   '  \\d          보기 고르기: 모두 보이기(기본) / 차이 보이기 / 문맥 보이기 (Enter 고르기, 1 2 3)',
   '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
+  '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
+  '  ,r ,e       이 비교의 다음 / 앞 탭 (neo-tree 에서 고른 두 파일의 탭은 묶인 탭이 없어 그냥 다음 / 앞 탭)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
   '  <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w - 트리 판정도 다시)',
   '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널·tmux 3.2 미만 서버에서는 1<C-r> 1<C-l>)',
@@ -4060,7 +4124,8 @@ local function help()
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
     '  ,r ,e       이 비교의 다음 / 앞 탭 (트리 탭과 비교 탭들 사이를 돈다 - 비교 창에서도)',
     '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
-    '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A])',
+    '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A]). 파일 둘이면 이 비교의 비교 탭 -',
+    '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, ,r ,e 로 돈다, 트리의 q 로 같이 닫힌다)',
     '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
     '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
   }
@@ -4086,6 +4151,11 @@ local function release_view(v, back)
       pcall(api.nvim_buf_delete, b, { force = true })
     end
   end
+  if s.solo then
+    -- 혼자 선 비교(neo-tree 에서 고른 두 파일 - cmp.solo)는 이 탭이 전부다: 세션째 끝낸다. 연 버퍼 치우기·고친
+    -- 것 알리기·돌아가기([B] 를 고른 창)는 finish 가 (여기서도 알리면 같은 알림이 두 번 떴다)
+    return cmp.finish(s, not back)
+  end
   local kept = {}
   for _, b in ipairs({ v.buf_a or false, v.buf_b or false }) do
     if b and s.opened[b] and api.nvim_buf_is_valid(b) and #vim.fn.win_findbuf(b) == 0
@@ -4105,7 +4175,7 @@ local function release_view(v, back)
     api.nvim_set_current_tabpage(s.tab)
     if api.nvim_win_is_valid(s.win_l) then
       api.nvim_set_current_win(s.win_l)
-      local i = v.rel and s.row_of[v.rel]
+      local i = (v.pick and cmp.back_row(s, v)) or (v.rel and s.row_of[v.rel])
       if i then
         goto_row(s, i)
         mark_side(s)
@@ -4302,7 +4372,9 @@ local function finish(s, stay)
   end
   sessions[s.tab] = nil
   local m = s.main
-  if api.nvim_tabpage_is_valid(s.tab) then
+  -- 혼자 선 비교(cmp.solo)의 s.tab 은 그 비교 탭이다 - 위에서 닫았다 (마지막 탭이라 남았으면 보통 탭으로 두었다.
+  -- 트리 탭처럼 'only | enew' 로 비우면 사용자가 보던 두 파일이 사라진다)
+  if not s.solo and api.nvim_tabpage_is_valid(s.tab) then
     api.nvim_set_current_tabpage(s.tab)
     local was = {}
     for _, w in ipairs(m and { m.win_a, m.win_b } or {}) do
@@ -4341,6 +4413,11 @@ local function finish(s, stay)
     api.nvim_set_current_tabpage(here)
   elseif s.origin and api.nvim_tabpage_is_valid(s.origin) then
     api.nvim_set_current_tabpage(s.origin)
+    -- 혼자 선 비교는 [B] 를 고른 창으로 (neo-tree - cmp.solo, 다른 탭에서 다시 고르면 그 자리로 바뀐다)
+    local ow = s.origin_win
+    if ow and api.nvim_win_is_valid(ow) and api.nvim_win_get_tabpage(ow) == s.origin then
+      api.nvim_set_current_win(ow)
+    end
   end
   local kept = {}
   for b in pairs(s.opened) do
@@ -4367,6 +4444,7 @@ local function finish(s, stay)
   end
   dip_sync()
 end
+cmp.finish = finish   -- 앞에 있는 release_view 가 부른다 (혼자 선 비교 - 맨 위 지역 이름을 늘리지 않으려고 표에)
 
 local function restart(s)
   -- q 처럼 복사가 끝나기를 기다린다. 뒤쪽을 바꾸면 하던 복사가 중간에 끊기고(대상에 반쯤 쓴
@@ -4575,6 +4653,258 @@ function M.open(a, b)
   end
   request_list(s, '')
   render(s)
+end
+
+-- ---------------------------------------------------------------------------
+-- Tab/Tab 으로 고른 두 파일 (겹친 비교): DirDiff 의 비교 탭으로
+-- ---------------------------------------------------------------------------
+-- dirdiffpick.lua 가 [B] 에서 부른다 (_G.vimide_dirdiff_open_files). 예전에는 tabnew + diffsplit 의 맨 vimdiff 라
+-- bc 색·창 머리·개요 막대·줄 자세히·화살표·\d·복사 키·Ctrl+Z / Ctrl+Y·q·,r ,e·'diffopt' 맞추기가 하나도 없었다
+-- (사용자 보고: 색이 'bc' 인데 기본 색, q 로 못 나가고 탭도 못 옮긴다). 보통 짝과 같은 길(new_view·fill·set_heads·
+-- cmp 곁·키·되돌리기·close_view·repair_view)을 그대로 쓴다 - 다른 것은 두 경로를 view 에 따로 싣는 것뿐이다
+-- (v.pick = { a, b } - fill 의 r.pick: 이름도 디렉터리도 다를 수 있다. v.rel 은 트리의 줄이 아닌 열쇠).
+-- 어디에 붙나 - [B] 를 누른 곳이 정한다:
+--   DirDiff 트리에서 [B]  그 세션의 비교 탭으로 (s.views - 그 세션의 탭들 뒤에). ,r ,e 로 돌고, q 는 [B] 를 고른
+--                         줄로 (보기에서 빠졌으면 같은 세션에서 고른 [A] 줄로 - cmp.back_row), 트리의 q 로 같이
+--                         닫힌다. [A] 가 다른 세션·neo-tree 에서 왔어도 [B] 의 세션이다. 두 경로가 그 세션이 견주는
+--                         짝(같은 상대 경로, A·B 차례 그대로)이면 보통 짝을 연다 (그 줄의 <CR> 과 같다)
+--   neo-tree 에서 [B]     혼자 선 비교 탭 (cmp.solo). q 는 [B] 를 고른 창으로, ,r ,e 는 그냥 다음 / 앞 탭
+-- 같은 두 파일을 같은 임자(그 세션 / 혼자 선 비교들)에서 다시 고르면 그 탭으로 간다 (창 하나를 닫아 버렸으면
+-- 다시 세운다). :w 하면 그 파일이 든 세션들의 판정 줄을 다시 본다 (BufWritePost - 보통 짝과 같다)
+
+-- 고른 경로를 견줄 꼴로: 디렉터리 쪽 링크만 푼다 (macOS 의 /tmp -> /private/tmp - 트리의 뿌리도 M.open 이 풀어
+-- 두었다). 파일 자신이 링크면 그대로 둔다 (그 링크를 골랐다 - 가리키는 파일로 바꾸면 이름이 달라진다)
+function cmp.pick_norm(p)
+  p = vim.fn.fnamemodify(p, ':p')
+  local dir, name = p:match('^(.*)/([^/]+)$')
+  if not dir then
+    return p
+  end
+  local rd = uv.fs_realpath(dir == '' and '/' or dir) or dir
+  return rd:gsub('/$', '') .. '/' .. name
+end
+
+-- p 가 뿌리 root 아래면 뿌리에서의 경로 (아니면 nil)
+function cmp.rel_in(root, p)
+  local pre = root .. '/'
+  if p:sub(1, #pre) == pre then
+    return p:sub(#pre + 1)
+  end
+end
+
+-- 고른 두 파일의 창 머리에서 경로를 줄여도 남길 만큼 (set_heads): 맨 앞(~ 또는 /)과 파일 이름, 그 위 디렉터리 둘 -
+-- tr.mid_path 가 줄인 꼴과 같다 ('/…/A/scripts/start.sh'). 줄일 것이 없으면 그대로
+function cmp.pick_min(h)
+  local parts = vim.split(h, '/', { plain = true })
+  if #parts <= 4 then
+    return h
+  end
+  local m = parts[1] .. '/…/' .. table.concat(parts, '/', #parts - 2)
+  return vim.fn.strdisplaywidth(m) < vim.fn.strdisplaywidth(h) and m or h
+end
+
+-- 고른 두 파일의 항목 (트리 항목의 꼴로 - fill 이 보는 것만): 디스크에서 지금 읽는다. 없어진 쪽은 비운다 (ka / kb
+-- 가 nil - fill 이 한쪽에만 있는 파일처럼 빈 쪽·빗금·'(없음)' 으로 보인다). 판정(st)은 없다 - 뒤쪽이 견주지 않았다
+function cmp.pick_entry(pa, pb)
+  local e = { name = pa:match('[^/]+$') }
+  for side, p in pairs({ a = pa, b = pb }) do
+    local st = uv.fs_lstat(p)
+    if st then
+      e['k' .. side] = ({ file = 'f', link = 'l', directory = 'd' })[st.type] or 'o'
+      e['s' .. side] = st.size
+      e['m' .. side] = st.mtime and st.mtime.sec
+    end
+  end
+  return e
+end
+
+-- 바이너리 알림의 판정 (고른 두 파일): 크기가 다르면 다르다, 같으면 내용을 견준다 (큰 파일은 모른다 - nil)
+function cmp.same_bytes(pa, pb, sa, sb, max)
+  if sa ~= sb then
+    return 'diff'
+  end
+  if (sa or 0) > max then
+    return nil
+  end
+  local function read(p)
+    local f = io.open(p, 'rb')
+    if not f then
+      return nil
+    end
+    local d = f:read('*a')
+    f:close()
+    return d
+  end
+  local x, y = read(pa), read(pb)
+  if not (x and y) then
+    return nil
+  end
+  return x == y and 'same' or 'diff'
+end
+
+-- 고른 두 파일을 view 에 채운다 (처음, 다시 세운 뒤, 트리 복사 뒤). 그사이 없어진 쪽은 알린다 - 안전망이다:
+-- dirdiffpick.lua 는 디스크에 없는 파일을 고르지 않는다 (_G.vimide_dirdiff_open_files 를 바로 부르면 온다)
+function cmp.pick_fill(v, jump)
+  local p = v.pick
+  local e = cmp.pick_entry(p.a, p.b)
+  local gone = {}
+  for _, side in ipairs({ 'a', 'b' }) do
+    if not e['k' .. side] then
+      gone[#gone + 1] = side:upper() .. ' ' .. shown(vim.fn.fnamemodify(p[side], ':~'))
+    end
+  end
+  if #gone > 0 then
+    say('고른 파일이 없어졌습니다: ' .. table.concat(gone, ', '), vim.log.levels.WARN)
+  end
+  local na, nb = p.a:match('[^/]+$'), p.b:match('[^/]+$')
+  fill(v, { rel = '\0' .. p.a .. '\0' .. p.b, e = e, pick = p,
+    label = shown(na == nb and na or (na .. ' <> ' .. nb)) }, jump)
+end
+
+-- 같은 두 파일을 보이는 비교 탭: s 의 것, s 가 없으면 혼자 선 비교들의 것
+function cmp.find_pick(s, pa, pb)
+  for _, o in pairs(sessions) do
+    if (s and o == s) or (not s and o.solo) then
+      for _, v in pairs(o.views) do
+        if v.pick and not v.closed and v.pick.a == pa and v.pick.b == pb then
+          return v
+        end
+      end
+    end
+  end
+end
+
+-- q·:tabclose 뒤 돌아갈 트리 줄 (고른 두 파일의 비교 탭): [B] 를 고른 줄, 보기에서 빠졌으면(거르기·접기) [A] 줄
+-- (같은 세션에서 골랐을 때). 그 줄을 고른 쪽(A/B)으로 커서를 둔다
+function cmp.back_row(s, v)
+  for _, b in ipairs(v.back or {}) do
+    local i = s.row_of[b.rel]
+    if i then
+      if b.side and b.side ~= s.side then
+        s.side = b.side
+        s.prog_dirty = true   -- 상태줄의 [A 쪽] / [B 쪽]
+        schedule_render(s)
+      end
+      return i
+    end
+  end
+end
+
+-- 고른 두 파일 중 하나가 경로들(tops - 링크를 푼 것) 자신이거나 그 아래인가 (트리 복사 - on_copied)
+function cmp.pick_under(v, tops)
+  for _, side in ipairs({ 'a', 'b' }) do
+    local rp = real(v.pick[side])
+    for _, p in ipairs(tops) do
+      if rp == p or rp:sub(1, #p + 1) == p .. '/' then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- 창 머리의 수정 일시·크기를 디스크에서 다시 (트리 복사로 바뀌었는데 창 하나가 없을 때 - on_copied)
+function cmp.restat(v)
+  v.info = v.info or {}
+  for _, side in ipairs({ 'a', 'b' }) do
+    local p = v.path and v.path[side]
+    v.info[side] = p and uv.fs_stat(p) or nil
+  end
+  set_heads(v)
+end
+
+-- neo-tree 에서 고른 두 파일 (세션 없이): 비교 탭 하나뿐인 작은 세션 (solo). 트리·뒤쪽이 없다 - win_l·buf_l 은
+-- -1 이라 트리를 찾는 곳들(render·mark_open·goto_row·WinResized ...)이 그냥 지나가고, 트리를 견주는 곳(:w 와 트리
+-- 복사의 다시 보기, ,r ,e)은 solo 를 따로 본다. sessions 의 열쇠는 그 비교 탭: 탭이 닫히면 세션째 끝난다
+-- (release_view -> finish). q 는 [B] 를 고른 창으로 (origin / origin_win - finish)
+function cmp.solo()
+  local origin, back = api.nvim_get_current_tabpage(), api.nvim_get_current_win()
+  local s = {
+    solo = true, tab = origin, win_l = -1, buf_l = -1, views = {}, opened = {}, unload = {},
+    rows = {}, row_of = {}, marks = { a = {}, b = {} }, side = 'a', mode = 'all', fmode = start_fmode(),
+    origin = origin, origin_win = back,
+  }
+  -- 곁창(neo-tree)에서 :tabnew 하면 새 창이 그 창 옵션을 물려받고 neo-tree 가 가져간다 - EDIT 창에서 (M.open 처럼)
+  local w = _G.vimide_edit_slot and _G.vimide_edit_slot()
+  if w and w ~= 0 and api.nvim_win_is_valid(w) then
+    api.nvim_set_current_win(w)
+  end
+  local v = new_view(s)   -- s.tab(= 떠난 탭) 바로 뒤에
+  s.tab = v.tab
+  sessions[s.tab] = s
+  -- 떠난 탭의 지금 창은 [B] 를 고른 창으로 (EDIT 창으로 옮긴 채 두면 gT 로 돌아갔을 때 커서가 거기 있다)
+  if back ~= w and api.nvim_win_is_valid(back) and api.nvim_win_get_tabpage(back) == origin then
+    pcall(api.nvim_tabpage_set_win, origin, back)
+  end
+  return s, v
+end
+
+-- [B] 에서: a = [A] 의 경로, b = [B] 의 경로, ctx = { a = [A] 의 곳, b = [B] 의 곳 } (DirDiff 트리에서 골랐으면
+-- { tab = 세션의 탭, rel, side }, neo-tree 면 nil - act_pick)
+function cmp.open_files(a, b, ctx)
+  set_hl()   -- 색 다시 보기 (M.open 처럼 - g:vimide_dirdiff_colors 를 바꿨을 수 있다)
+  cmp.plain_rebuild()
+  local pa, pb = cmp.pick_norm(a), cmp.pick_norm(b)
+  local cb = ctx.b
+  local s = cb and sessions[cb.tab]
+  if s and (s.done or s.solo) then
+    s = nil
+  end
+  if s then
+    local ra, rb = cmp.rel_in(s.a, pa), cmp.rel_in(s.b, pb)
+    if ra and ra == rb then
+      -- 그 디렉터리를 펼치지 않아 항목이 없으면 디스크에서 (판정은 모른다)
+      local e = entry_of(s, ra)
+      if not e or is_dir(e) then
+        e = cmp.pick_entry(pa, pb)
+      end
+      return open_pair(s, { rel = ra, e = e, dir = ra:match('^(.*)/[^/]+$') or '' }, true)
+    end
+  end
+  local back = {}
+  if s then
+    back[1] = { rel = cb.rel, side = cb.side }
+    local ca = ctx.a
+    if ca and ca.tab == cb.tab then
+      back[2] = { rel = ca.rel, side = ca.side }
+    end
+  end
+  local v = cmp.find_pick(s, pa, pb)
+  if v then
+    -- 다시 고른 곳으로 돌아가게 (q). 혼자 선 비교의 탭 안에서(그 탭의 F9 트리) 다시 골랐으면 돌아갈 곳은 그대로:
+    -- 그 탭으로 바꿔 두었더니 q 가 닫는 탭이라 돌아갈 곳이 없어 옆 탭에 떨어졌다
+    local o = v.s
+    if o.solo then
+      if api.nvim_get_current_tabpage() ~= o.tab then
+        o.origin, o.origin_win = api.nvim_get_current_tabpage(), api.nvim_get_current_win()
+      end
+    else
+      v.back = back
+    end
+    local rv, repaired = repair_view(v)
+    if rv then
+      api.nvim_set_current_tabpage(rv.tab)
+      if repaired then
+        cmp.pick_fill(rv, true)
+      end
+      return
+    end
+    if o.solo then
+      cmp.finish(o, true)   -- 두 창을 다 닫아 버렸다 (repair_view 가 놓았다): 빈 세션을 남기지 않는다
+    end
+  end
+  if s then
+    v = new_view(s)
+  else
+    s, v = cmp.solo()
+  end
+  v.pick = { a = pa, b = pb }
+  v.back = back
+  cmp.pick_fill(v, true)
+end
+
+function _G.vimide_dirdiff_open_files(a, b, ctx)
+  cmp.open_files(a, b, ctx or {})
 end
 
 -- ---------------------------------------------------------------------------
@@ -4788,9 +5118,11 @@ function cmp.clear(v)
     end
     v.cx.timer = nil
   end
+  -- 지금 탭의 다른 비교가 보이는 버퍼는 그것의 표시라 그대로 (cmp.wipe - :2tabclose 로 뒤의 짝을 닫았다)
+  local held = cmp.held(v)
   for _, t in ipairs({ v.ab or {}, v.mb or {} }) do
     for _, b in pairs(t) do
-      if api.nvim_buf_is_valid(b) then
+      if api.nvim_buf_is_valid(b) and not held[b] then
         api.nvim_buf_clear_namespace(b, NS.arrow, 0, -1)
         api.nvim_buf_clear_namespace(b, NS.blank, 0, -1)
       end
@@ -5037,18 +5369,46 @@ function cmp.block_at(d, side, l)
   return best
 end
 
+-- 화살표·연보라는 버퍼에 단다 (cmp.scope). 같은 파일을 보이는 비교 탭이 둘이면(Tab/Tab 으로 고른 짝과 그 파일의
+-- 보통 짝, 뿌리를 같이 쓰는 비교 둘) 두 탭의 것이 한 버퍼에 겹쳤다: 고른 짝의 A 창에 화살표·괄호선이 둘, sign 칸이
+-- 늘어 글이 두 칸 밀렸다 (새 view 는 지난번에 단 버퍼가 없어 남의 것을 걷지 않았다). 그래서 다시 그리는 view 는
+-- 지난번 버퍼(t - v.ab / v.mb)와 지금 버퍼의 그 이름 공간을 모두 걷고 새로 단다. 다만 뒤에 있는 탭의 view 는
+-- 지금 탭의 비교가 보이는 버퍼를 건드리지 않는다 - 늦게 온 다시 그리기(o 로 뒤에서 연 짝의 시계)가 보이는 탭의
+-- 것을 걷거나 덮었다. 그 탭에 들어가면 TabEnter 가 다시 센다. 돌려주는 것: 달지 않을 버퍼 (cmp.held)
+function cmp.wipe(v, t, ns)
+  local held = cmp.held(v)
+  for _, side in ipairs({ 'a', 'b' }) do
+    for _, b in ipairs({ t[side] or false, cmp.pbuf(v, side) or false }) do
+      if b and not held[b] and api.nvim_buf_is_valid(b) then
+        api.nvim_buf_clear_namespace(b, ns, 0, -1)
+      end
+    end
+    t[side] = nil
+  end
+  return held
+end
+
+-- 지금 탭의 비교(v 가 아닌 것)가 비교 창에 보이는 버퍼 (set). w 가 그 비교의 창이면 빈 것 (unview_win)
+function cmp.held(v, w)
+  local out = {}
+  local cv = view_of_tab(api.nvim_get_current_tabpage())
+  if cv and cv ~= v and not (w and (w == cv.win_a or w == cv.win_b)) then
+    for _, side in ipairs({ 'a', 'b' }) do
+      local b = cmp.pbuf(cv, side)
+      if b then
+        out[b] = true
+      end
+    end
+  end
+  return out
+end
+
 -- 노란 화살표 (Beyond Compare 의 지금 차이): 커서가 있는(없으면 가까운) 덩어리의 첫 줄에 A ⇨, B ⇦,
 -- 그 덩어리 끝까지 옅은 괄호선 (│ … └ - 500 줄 넘으면 끝만). 줄이 없는 쪽(빈자리 - 끼인 줄은 sign 을 달
 -- 수 없다)은 빗금 바로 위 줄에 (첫 줄 위면 그 아래 줄에)
 function cmp.arrows(v)
   v.ab = v.ab or {}
-  for _, side in ipairs({ 'a', 'b' }) do
-    local old = v.ab[side]
-    if old and api.nvim_buf_is_valid(old) then
-      api.nvim_buf_clear_namespace(old, NS.arrow, 0, -1)
-    end
-    v.ab[side] = nil
-  end
+  local held = cmp.wipe(v, v.ab, NS.arrow)
   local d = v.dd
   if not (d and #d.blocks > 0) then
     return
@@ -5065,8 +5425,8 @@ function cmp.arrows(v)
   for _, side in ipairs({ 'a', 'b' }) do
     local b = cmp.pbuf(v, side)
     -- 줄이 하나도 없는 쪽(한쪽에만 있는 파일의 빈 쪽)에는 달지 않는다: 빗금을 모두 지나 맨 아래의 빈 줄에
-    -- 홀로 섰다 (끼인 줄에는 sign 을 달 수 없다)
-    if b and d['n' .. side] > 0 then
+    -- 홀로 섰다 (끼인 줄에는 sign 을 달 수 없다). 지금 탭의 다른 비교가 보이는 버퍼에도 (cmp.wipe)
+    if b and not held[b] and d['n' .. side] > 0 then
       local n = api.nvim_buf_line_count(b)
       local x0, x1 = blk[side .. '0'], blk[side .. '1']
       local at = x0
@@ -5097,14 +5457,10 @@ end
 -- 한쪽에만 있는 줄의 글자 빨강도 여기서 (같은 이름 공간 - 같이 걷는다)
 function cmp.marks(v)
   v.mb = v.mb or {}
+  local held = cmp.wipe(v, v.mb, NS.blank)
   for _, side in ipairs({ 'a', 'b' }) do
-    local old = v.mb[side]
-    if old and api.nvim_buf_is_valid(old) then
-      api.nvim_buf_clear_namespace(old, NS.blank, 0, -1)
-    end
-    v.mb[side] = nil
     local b = cmp.pbuf(v, side)
-    if v.dd and pal() == 'bc' and b then
+    if v.dd and pal() == 'bc' and b and not held[b] then
       -- line_hl_group 은 diff 의 줄 색(DiffAdd·DiffChange)에 진다 (실측) - 줄 끝까지 가는 범위 색은 이긴다
       local n = api.nvim_buf_line_count(b)
       -- 줄 l0 ~ l1-1 (1 부터): 끝은 다음 줄 첫머리. 마지막 줄이면 버퍼 끝 너머(줄 수, 0 - strict = false)로:
@@ -6474,8 +6830,10 @@ api.nvim_create_autocmd('BufWritePost', {
     local rp = real(full)
     -- 어느 이름으로 찾는지는 rels_in 에 (트리 복사의 on_copied 와 같이 쓴다)
     local link = (uv.fs_lstat(full) or {}).type == 'link'
+    -- Tab/Tab 으로 고른 두 파일의 비교 탭에서 저장해도 같다: 그 파일이 든 세션이면 어느 것이든 (붙은 세션이
+    -- 아니어도). 혼자 선 비교(cmp.solo)는 트리가 없다
     for _, s in pairs(sessions) do
-      local paths = rels_in(s, full, rp, link)
+      local paths = not s.solo and rels_in(s, full, rp, link) or {}
       if #paths > 0 then
         send(s, { cmd = 'refresh', paths = paths })
       end

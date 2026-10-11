@@ -2,9 +2,14 @@
 --
 -- 트리에서 비교할 첫 번째 디렉터리(또는 파일) 위에서 Tab 을 누르면 그 줄 끝에 [A] 가
 -- 붙고, 두 번째 위에서 Tab 을 누르면 [B] 로 삼아 곧바로 비교 창을 띄운다: 디렉터리
--- 둘이면 DirDiff(나란한 트리, dirdiffview.lua), 파일 둘이면 새 탭에서 vimdiff. [A] 를
--- 고른 뒤 같은 줄에서 다시 Tab 은 취소. 트리가 달라도 된다(F9 트리에서 고르고
--- RelationView 트리에서 비교).
+-- 둘이면 DirDiff(나란한 트리, dirdiffview.lua), 파일 둘이면 DirDiff 의 비교 탭(보통 짝과 같은
+-- 창 - 색·창 머리·개요 막대·\d·복사 키·Ctrl+Z·q 모두. 이름·디렉터리가 달라도 된다 -
+-- dirdiffview.lua 의 cmp.open_files). [A] 를 고른 뒤 같은 줄에서 다시 Tab 은 취소. 트리가 달라도
+-- 된다(F9 트리에서 고르고 RelationView 트리에서 비교).
+-- 파일 둘의 비교 탭이 어디에 붙나는 [B] 를 누른 곳이 정한다: DirDiff 의 비교 트리면 그 세션의 탭으로
+-- (,r ,e 로 돌고 q 는 그 트리의 줄로), neo-tree 면 혼자 선 비교 탭 (q 는 [B] 를 누른 창으로).
+-- 예전의 맨 vimdiff(새 탭에서 diffsplit)는 g:vimide_dirdiff_pick_vimdiff = 1 이면 (g:vimide_dirdiff_view = 0 -
+-- 디렉터리 둘도 DirDiff.vim 의 목록일 때, dirdiffview.lua 가 없을 때도 그것).
 --
 -- Tab 은 neo-tree 기본의 select(여러 줄 골라 두기)였다 - vim-ide 는 그것을 쓰지 않고,
 -- 여러 줄은 V 로 골라도 된다. '=' 가 아닌 것은 트리의 = 가 이미 색인 목록
@@ -12,7 +17,8 @@
 -- window.mappings ['<Tab>'] / ['<leader>d'] 에 있다.
 --
 -- DirDiff 의 비교 트리(dirdiffview.lua)의 Tab 도 같은 [A] 를 쓴다 (_G.vimide_dirdiff_pick_path):
--- 비교 트리에서 [A], 다른 비교 탭이나 neo-tree 에서 [B] 도 된다. [A] 는 하나다.
+-- 비교 트리에서 [A], 다른 비교 탭이나 neo-tree 에서 [B] 도 된다. [A] 는 하나다. 비교 트리는 고른
+-- 곳(세션·줄·쪽 - ctx)도 넘긴다: [A] 의 것은 여기 들고 있다가 [B] 때 같이 돌려준다.
 
 if vim.g.loaded_vimide_dirdiffpick then
   return
@@ -21,7 +27,7 @@ vim.g.loaded_vimide_dirdiffpick = 1
 
 local levels = vim.log.levels
 local api = vim.api
-local first = nil -- { path = ..., kind = 'dir' | 'file', real = 링크를 푼 경로 }
+local first = nil -- { path = ..., kind = 'dir' | 'file', real = 링크를 푼 경로, ctx = 고른 곳(비교 트리) }
 local ns = api.nvim_create_namespace('vimide_dirdiff_pick')
 
 api.nvim_set_hl(0, 'VimIdeDirDiffPickA', { link = 'Search', default = true })
@@ -174,8 +180,9 @@ function _G.vimide_dirdiff_picked()
   return first
 end
 
--- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Tab 과 DirDiff 비교 트리의 Tab 이 같이 쓴다
-function _G.vimide_dirdiff_pick_path(path, kind)
+-- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Tab 과 DirDiff 비교 트리의 Tab 이 같이 쓴다.
+-- ctx: 비교 트리에서 골랐으면 { tab = 세션의 탭, rel = 줄, side = 'a' | 'b' } (neo-tree 는 nil)
+function _G.vimide_dirdiff_pick_path(path, kind, ctx)
   -- [A] 줄에서 다시 누르면 취소. 디스크에서 없어졌어도 - 파일 감시를 꺼 두어
   -- (use_libuv_file_watcher) 밖에서 지운 줄은 R 로 새로 고칠 때까지 트리에 남는다
   if first and same_path(path) then
@@ -194,7 +201,7 @@ function _G.vimide_dirdiff_pick_path(path, kind)
     mark_all()
   end
   if not first then
-    first = { path = path, kind = kind, real = (vim.uv or vim.loop).fs_realpath(path) }
+    first = { path = path, kind = kind, real = (vim.uv or vim.loop).fs_realpath(path), ctx = ctx }
     mark_all()
     return say(('[A] %s: %s - 비교할 곳에서 %s ([B]). 같은 줄에서 다시 누르면 취소')
       :format(kind_name(kind), short(path), key()))
@@ -203,7 +210,7 @@ function _G.vimide_dirdiff_pick_path(path, kind)
     return say(('%s %s 비교합니다 - [A]: %s (같은 줄에서 다시 누르면 취소)')
       :format(JOSA[first.kind].topic, JOSA[first.kind].with, short(first.path)), levels.WARN)
   end
-  local a = first.path
+  local a, actx = first.path, first.ctx
   first = nil
   mark_all()
   if kind == 'dir' then
@@ -215,7 +222,15 @@ function _G.vimide_dirdiff_pick_path(path, kind)
     else
       say('dirdifftab.vim 이 없습니다', levels.WARN)
     end
+  elseif _G.vimide_dirdiff_open_files and (tonumber(vim.g.vimide_dirdiff_pick_vimdiff) or 0) == 0
+      and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
+    -- 파일 둘: DirDiff 의 비교 탭 (dirdiffview.lua). 맨 vimdiff 는 비교 탭이 아니라 bc 색·창 머리·\d·
+    -- 복사 키·q·,r ,e 가 없었다 (사용자 보고). g:vimide_dirdiff_view = 0 (나란한 트리 대신 DirDiff.vim 의
+    -- 목록)이면 위의 디렉터리 둘처럼 이것도 예전 것으로 - 디렉터리는 예전 목록인데 파일만 새 비교 탭이면 어긋난다
+    _G.vimide_dirdiff_open_files(a, path, { a = actx, b = ctx })
   else
+    -- 예전 그대로의 vimdiff (g:vimide_dirdiff_pick_vimdiff = 1, g:vimide_dirdiff_view = 0, dirdiffview.lua 가
+    -- 없을 때).
     -- 이름은 Ex 줄로 만들지 않고 인자로 (dirdiffview.lua 의 show_file 과 같은 까닭): 이름에
     -- 줄바꿈이 있으면 fnameescape 로도 줄이 갈라져 없는 'x\' 를 열고 나머지를 명령으로 돌렸다
     tab_from_edit({ cmd = 'tabnew', args = { a }, magic = { file = false } })

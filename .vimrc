@@ -1155,7 +1155,7 @@ _G.rv_setup('neo-tree', {
       -- neo-tree 기본의 open_with_window_picker 자리를 넘겨받는다.
       ['w'] = function() _G.neotree_toggle_wide() end,
       -- \d 두 번으로 두 곳을 비교한다: 첫 번째 위에서 \d , 두 번째 위에서 \d
-      -- (디렉터리 둘이면 DirDiff, 파일 둘이면 vimdiff - dirdiffpick.lua).
+      -- (디렉터리 둘이면 DirDiff, 파일 둘이면 DirDiff 의 비교 탭 - dirdiffpick.lua).
       -- = 는 이미 색인 목록 정보다 (projectfiles_neotree.lua)
       -- Tab 두 번: [A] 를 고르고(줄 끝에 [A]), 비교할 곳에서 Tab 이면 [B] - 곧바로 비교 창.
       -- neo-tree 기본의 Tab(select, 여러 줄 골라 두기)을 넘겨받는다 (여러 줄은 V 로).
@@ -1953,7 +1953,8 @@ filetype plugin indent on     " required!
 "                      nvim 은 아래의 나란한 트리, vim 과 :DirDiffClassic 은 플러그인의 목록
 "   neo-tree 에서 Tab  비교할 첫 번째 위에서 Tab (줄 끝에 [A]), 비교할 곳에서 Tab ([B])
 "                      이면 곧바로 비교 창 (dirdiffpick.lua). \d 도 같다. 파일 둘이면
-"                      새 탭에서 vimdiff. 같은 줄에서 다시 Tab 은 취소
+"                      DirDiff 의 비교 탭 (이름·디렉터리가 달라도 된다 - 아래 '고른 두 파일').
+"                      같은 줄에서 다시 Tab 은 취소
 "   (플러그인의) 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
@@ -1990,10 +1991,18 @@ let g:vimide_dirdiff_tab = 1
 "         R 다시, q 끝(비교 탭들도), ? 도움말
 "         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
 "         <Tab> 비교할 곳 고르기 ([A] 에서 Tab, [B] 에서 Tab -> 새 탭에서 비교. neo-tree 와 같은 [A])
+"         고른 두 파일: 보통 짝과 같은 비교 탭 (색·창 머리·개요 막대·\d·복사 키·Ctrl+Z 모두, pair_tab = 0 이어도.
+"           창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되 파일 이름과 그 위 디렉터리 둘은 남기고, 그다음
+"           정보를 뺀다. 이름·디렉터리가 다를 수 있다). [B] 를 DirDiff 트리에서 골랐으면 그 비교의 탭으로 붙는다
+"           (그 비교의 탭들 뒤에 열리고 ,r / ,e 로 돈다, q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다.
+"           그 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 골랐으면 혼자 선 비교 탭
+"           (q 는 [B] 를 고른 창으로, ,r / ,e 는 그냥 다음 / 앞 탭 - 버퍼를 돌리면 비교하던 파일이 바뀐다).
+"           같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로
 "         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
-"            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도),
+"            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도,
+"            고른 두 파일은 [B] 를 고른 곳으로),
 "            <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
 "            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term, tmux 3.2 미만 서버처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
 "            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
@@ -2001,7 +2010,7 @@ let g:vimide_dirdiff_tab = 1
 "            <C-z>/<C-y> = 짝 전체의 되돌리기/다시 실행 (커서가 A·B 어느 쪽에 있든 두 파일의 마지막 변경 -
 "            Beyond Compare 처럼. 횟수·비주얼도, 삽입 모드의 <C-z> 는 삽입을 끝내고 방금 친 것부터 되돌린다.
 "            삽입 모드의 <C-y>, 비교 탭 밖의 <C-z>·<C-y> 는 그대로)
-"   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
+"   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로 (Tab/Tab 의 파일 둘도 맨 vimdiff)
 "   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
 "   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (all diff no-orphans diff-no-orphans orphans
 "                                          "  left-newer right-newer left-newer-orphans right-newer-orphans
@@ -2013,6 +2022,7 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
+"   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 새 탭의 맨 vimdiff 로
 let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
 let g:vimide_dirdiff_filter = ''
@@ -2041,6 +2051,10 @@ let g:vimide_dirdiff_plain_text = 1
 " 비교 창의 <C-z>/<C-y> 를 짝 전체의 되돌리기/다시 실행으로 (A·B 어느 쪽에서든 두 파일의 마지막 변경): 1 켬,
 " 0 가로채지 않기 (u 와 :redo 는 어느 쪽이든 늘 그 버퍼만이다)
 let g:vimide_dirdiff_undo_keys = 1
+" Tab/Tab 으로 고른 두 파일을 어디서 견주나: 0 = DirDiff 의 비교 탭 (보통 짝과 같은 색·창 머리·개요 막대·\d·
+" 복사 키·Ctrl+Z·q - 비교 트리에서 [B] 를 골랐으면 그 비교의 탭으로), 1 = 예전처럼 새 탭의 맨 vimdiff
+" (g:vimide_dirdiff_view = 0 이면 이것과 상관없이 맨 vimdiff - 디렉터리 둘도 예전 목록이다)
+let g:vimide_dirdiff_pick_vimdiff = 0
 
 " Ease my eyes
 "colorscheme solarized
