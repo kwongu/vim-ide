@@ -2479,7 +2479,9 @@ named `VimIdeDirDiff…` (`VimIdeDirDiffNewer`, `VimIdeDirDiffOlder`,
 `VimIdeDirDiffOrphan`, `VimIdeDirDiffSelect`, `VimIdeDirDiffAddA`,
 `VimIdeDirDiffFiller`, `VimIdeDirDiffArrow` ... - `:hi` one of them to change
 it; that is kept over a color scheme or `'background'` change). The compare
-colors are window-local (`'winhighlight'`) to DirDiff's own two windows only.
+colors are window-local (`'winhighlight'`) to DirDiff's own two windows only,
+and so is the plain text of *Compare tabs* below (a highlight namespace on
+those two windows): the same file in any other window keeps its colors.
 
 | in the tree | |
 |---|---|
@@ -2509,9 +2511,35 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
 | `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when Ctrl+Shift reaches it as its own key - see *Ctrl+Shift in tmux* below; Tera Term usually sends a plain `<C-r>` / `<C-l>` |
+| `<C-z>` / `<C-y>` | undo / redo across the pair, as in Beyond Compare: wherever the cursor is, `<C-z>` undoes the latest change to *either* file - typing on either side, the `<C-r>` / `<C-l>` copies (which change the other file), `dp` / `do` / `:diffput` / `:diffget` - and `<C-y>` redoes what was undone, most recent first. A count repeats (`3<C-z>`); in visual mode it ends the selection first; in insert mode `<C-z>` ends the insert (what was typed becomes one undo step) and undoes from there, leaving you in normal mode (`<C-y>` keeps its insert-mode meaning). The cursor goes to where it happened: on the other side, to the line facing it (scrolling keeps both sides aligned), and focus stays. It says what it did (`B 쪽 되돌림 (줄 12)`). See *Undo across the pair* below |
 | `1<C-r>` / `1<C-l>`, `N<C-r>`, visual | work in every terminal: a count copies that many lines from the cursor (`1<C-r>` is the cursor line, with the same rule on an unchanged line as `<C-S-r>`), a visual selection exactly its lines. Lines of the other side just above the first of those lines are not part of them (as with nvim's `:1,1diffget`); when nothing in the lines differs it says so |
 
 The copy goes into the other buffer and `:w` saves it. Unsaved edits on either side are what is compared and copied, and each copy is one undo step in the buffer it changed. When one side is not a file (the empty side of a one-sided file, a note - a binary or too large file too) the keys refuse and point to the tree copy. Block copies count the rows of both windows (filler lines included) and replace exactly the block's lines, instead of handing nvim a line range: with linematch, a range one line wider than the block also took the next piece and deleted lines on the other side, and nvim's own `:diffput` loses a line when the target is a file with a single empty line (or empties one partway through) and leaves a line behind on `u` after copying into an empty file. On a very large diff (counting takes over 0.25 s), or when `'diffopt'` has `iblank` or lacks `filler` (the rows of the two windows no longer line up), it falls back to `:diffput` / `:diffget` with a range around the block - except into an empty file, which is always filled directly (one `u` empties it again), and into a file holding a single empty line, where the few rows can still be told apart. `do` / `dp` still work. Outside the DirDiff tab `<C-r>` is redo and `<C-l>` moves to the right window, exactly as before, and `<C-S-r>` / `<C-S-l>` do what nvim does without a mapping (`let g:vimide_dirdiff_copy_keys = 0` leaves all four alone everywhere).
+
+**Undo across the pair.** vim's `u` works per buffer, so a block copied from A
+into B had to be undone from B. `<C-z>` / `<C-y>` keep one timeline per pair:
+every change to either buffer (one undo step - a whole insert is one) is
+recorded in order, from the buffer change events. Whether an entry is still
+applied is read from each buffer's undo tree at the time, so a plain `u`,
+`:undo` or `:redo` used directly in one buffer does not confuse it: what it
+undid can be redone with `<C-y>`, what it redid becomes the latest change. A new
+change clears the redo list, as in Beyond Compare (`u` / `:redo` in that buffer
+still reach the rest of its own undo tree). When the timeline has nothing left
+to undo, `<C-z>` is a plain `u` in the current window (changes made before the
+pair was opened - a closed and reopened pair starts with an empty timeline;
+reading the pair again after a tree copy starts a new one). Each `<C-z>` undoes
+exactly one step, and before it both undo trees are read again, so a buffer
+re-read with `:e!` (which drops nvim's change events for it - it is watched
+again) or reloaded with its history gone (a large file over `'undoreload'`), or
+unloaded with `:bd`, cannot make it undo several steps at once or get stuck on
+an entry that no longer exists (that entry is dropped and the next one taken).
+In insert mode only `<C-z>` is taken over (nvim has no insert-mode `<C-z>`, so
+it used to type a `^Z` into the file): it ends the insert and undoes, which
+takes back what was just typed first. `<C-y>` keeps choosing a completion and
+copying the character above there. Outside the compare windows `<C-z>` still
+suspends nvim and `<C-y>` scrolls (`let g:vimide_dirdiff_undo_keys = 0` leaves
+both alone everywhere). The tree's verdict follows the saved files (`:w`), as
+before; the overview bar, arrows and line details follow at once.
 
 **Ctrl+Shift in tmux.** In iTerm2 nothing has to be turned on: when nvim, or the
 tmux in between, asks for modifyOtherKeys level 2, iTerm2 sends Ctrl+Shift+R as
@@ -2559,15 +2587,41 @@ still cycle the buffers.
   wider than the whole bar is cut. The side that has no file says `(없음)`
   before the path. With the `'bc'` colors the current window's bar is green
   and the time, size and encoding are dark grey.
-- **Colors** (`'bc'`): a changed line has a light pink background, with the
-  characters that differ in red (the identical parts stay as they are); a line
-  that exists on one side only is pink with all its text red; where one side
+- **Colors** (`'bc'`): text that is the same on both sides - unchanged lines
+  and the unchanged parts of changed lines - is plain text (black on a light
+  screen, the normal text color on a dark one), without syntax colors, as in
+  Beyond Compare; a changed line has a light pink background, with only the
+  characters that differ in red; a line that exists on one side only is pink
+  with all its text red; where one side
   has no lines (vim's filler lines) there is a grey hatched area
   (`'fillchars'` `diff:╱`, `/` with `g:vimide_ascii_icons`, set on those two
   windows only), and nothing is drawn below the end of the file. Blank lines
   inside a change are lavender - Beyond Compare's *unimportant* lines: a blank
   line with no counterpart, or with a blank counterpart (only whitespace
   differs).
+- **Plain text** (`g:vimide_dirdiff_plain_text`, 1): the syntax colors -
+  `:syntax`, treesitter, LSP semantic tokens and vim-ide's Source Insight
+  symbol colors - are turned off in the two compare windows only, through a
+  highlight namespace on those windows (`nvim_win_set_hl_ns`) in which the
+  syntax groups are empty: every `@` group, the `:h group-name` groups except
+  `Added` / `Changed` / `Removed` (gitsigns' signs link to them), the `Si…`
+  symbol groups (not `SiRefHighlight` or `SiYellowMark`) and the groups of the
+  pair's `:syntax list` (read once per loaded syntax, `b:current_syntax` -
+  with treesitter `'syntax'` is just `ON` for every file). Groups that link to
+  those (`cStatement` -> `Statement`, `@keyword.function.c` -> `@keyword`) end
+  up empty too. The same buffer in another window or tab keeps its syntax and
+  treesitter colors.
+  The cursor line, the visual selection, search and `*` highlights, vim-mark
+  words, the word under the cursor, signs, diagnostics, folds and the window
+  bars keep their colors (a UI group that links to a syntax group, like
+  `NeogitSubtleText` -> `Comment`, gets its resolved color in the namespace).
+  nvim ignores `'winhighlight'` in a window that has a namespace, so the
+  namespace carries the same `Diff*` / `WinBar` links. It is rewritten in place
+  on a color scheme or `'background'` change (the same two namespaces for the
+  whole session - new ones would pile up in a long-running nvim) and taken off
+  when the window stops being a compare window (another file, `q`,
+  `:tabclose`, `:tabonly` ...). `0` keeps the syntax colors (the earlier look);
+  `'classic'` colors always keep them.
 - **Arrows**: the change the cursor is in (or the nearest one) has a yellow
   `⇨` in A's sign column and `⇦` in B's on its first line, with a thin bracket
   down to its last line (`>` `<` `|` with `g:vimide_ascii_icons`). On a side
@@ -2777,7 +2831,10 @@ Copying in the tree:
   edit windows above the tree), `g:vimide_dirdiff_file_view` (`'all'` /
   `'diff'` / `'context'`), `g:vimide_dirdiff_context` (3),
   `g:vimide_dirdiff_overview` (1: the overview bar, 0: none),
-  `g:vimide_dirdiff_line_details` (1: the line details, 0: none). A comparison
+  `g:vimide_dirdiff_line_details` (1: the line details, 0: none),
+  `g:vimide_dirdiff_plain_text` (1: same text in plain colors, 0: syntax
+  colors), `g:vimide_dirdiff_undo_keys` (1: `<C-z>` / `<C-y>` across the pair,
+  0: leave them alone). A comparison
   keeps the layout it was opened with; the colors change at the next
   `:DirDiff`, color scheme or `'background'` change.
 - `g:vimide_dirdiff_date_format` (`'%Y-%m-%d %p %l:%M:%S'`) is the tree's

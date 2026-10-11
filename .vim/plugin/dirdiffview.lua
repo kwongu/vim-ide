@@ -25,7 +25,9 @@
 -- 파일 짝은 비교 탭에서 본다 (g:vimide_dirdiff_pair_tab = 1, 기본): 짝마다 탭 하나 - A | B 를
 -- diff 로 (Beyond Compare 의 글 비교처럼). 창 머리(winbar)에 쪽·경로(좁으면 가운데를 줄인다)·수정
 -- 일시·크기(바이트)·인코딩·줄 끝, B 쪽 끝에 보기와 키. 바뀐 줄은 연분홍 바탕, 줄 안의 다른
--- 글자와 한쪽에만 있는 줄은 빨강, 다른 쪽의 빈자리(끼인 줄)는 회색 빗금(╱). 지금 차이 덩어리의
+-- 글자와 한쪽에만 있는 줄은 빨강, 다른 쪽의 빈자리(끼인 줄)는 회색 빗금(╱). 두 쪽이 같은 글(바뀌지 않은
+-- 줄, 바뀐 줄의 같은 부분)은 구문 색 없이 보통 글자색(밝은 화면이면 검정 - Beyond Compare 처럼, 그 두 창에서만.
+-- g:vimide_dirdiff_plain_text, cmp.plain). 지금 차이 덩어리의
 -- 첫 줄에 노란 화살표(A ⇨, B ⇦)와 덩어리 끝까지 가는 괄호선, 탭 맨 왼쪽에 개요 막대(파일 전체를
 -- 줄여서 - 빨강 차이, 회색 빗금 빈자리, 파랑 빈 줄, 오른쪽 칸이 보이는 곳. 누르면 그리로,
 -- g:vimide_dirdiff_overview), 맨 아래에 줄 자세히 두 줄(커서 줄과 맞은편 줄, 빈칸 · 탭 → 줄 끝 ¶,
@@ -74,6 +76,10 @@
 -- 있는 줄) 덩어리째다 - 여러 줄일 수 있다.
 -- 비교 탭 밖의 <C-r>(되돌리기 취소)·<C-l>(창 옮기기)은 그대로다.
 -- 비교 창의 <C-w>w/<C-w>W 는 곁 창(개요 막대·줄 자세히)을 건너뛴 다음/앞 창이다 (A·B 를 오간다).
+-- 비교 창의 <C-z>/<C-y> 는 짝 전체의 되돌리기/다시 실행 (Beyond Compare 처럼 - 커서가 A·B 어느 쪽에 있든 두 파일
+-- 중 마지막으로 바뀐 것을. 타자, <C-r>/<C-l> 복사, dp/do 모두. 횟수, 비주얼도. 삽입 모드의 <C-z> 는 삽입을 끝내고
+-- 방금 친 것부터, 삽입 모드의 <C-y> 는 그대로 - 아래 '짝 전체의 되돌리기'). 비교 창 밖의 <C-z>(nvim 멈추기)·<C-y>
+-- (화면을 한 줄 위로)는 그대로다.
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
 -- 먼저), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음', 나머지만 뒤에서
@@ -94,6 +100,8 @@
 --   let g:vimide_dirdiff_date_format = '%Y-%m-%d %H:%M'  " 수정일 꼴 (strftime + %p 오전/오후, %l 12시간제 시)
 --   let g:vimide_dirdiff_overview = 0      " 비교 탭 맨 왼쪽의 개요 막대 없이
 --   let g:vimide_dirdiff_line_details = 0  " 비교 탭 맨 아래의 줄 자세히(두 줄) 없이
+--   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로 (기본 1: 같은 글은 보통 글자색)
+--   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기 (짝 전체 되돌리기 없이)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -399,17 +407,24 @@ end
 set_hl()
 -- Neogit 도 ColorScheme 에서 제 무리를 다시 정한다 - 그 뒤에 (먼저 보면 :hi clear 로 비어 있어 예전 색이 된다).
 -- bc 는 'background' 로 밝은·어두운 짝을 고르므로 그것이 바뀔 때도 (색 구성표 없이 :set bg= 만 해도)
+-- 비교 창의 맨 글자 공간(cmp.plain)도 그 뒤에 다시 짓는다 - 무리의 정의(링크·색)가 바뀌었다
 api.nvim_create_autocmd('ColorScheme', {
   group = api.nvim_create_augroup('VimIdeDirDiffViewHl', { clear = true }),
   callback = function()
-    vim.schedule(set_hl)
+    vim.schedule(function()
+      set_hl()
+      cmp.plain_rebuild()
+    end)
   end,
 })
 api.nvim_create_autocmd('OptionSet', {
   group = 'VimIdeDirDiffViewHl',
   pattern = 'background',
   callback = function()
-    vim.schedule(set_hl)
+    vim.schedule(function()
+      set_hl()
+      cmp.plain_rebuild()
+    end)
   end,
 })
 
@@ -431,18 +446,26 @@ local WHL = {
   b = 'DiffAdd:VimIdeDirDiffAddB,DiffChange:VimIdeDirDiffChangeB,DiffText:VimIdeDirDiffTextB,DiffDelete:VimIdeDirDiffFiller',
   bc = ',WinBar:VimIdeDirDiffBarOn,WinBarNC:VimIdeDirDiffBar,EndOfBuffer:VimIdeDirDiffEob',
 }
-local function diff_whl(win, side)
-  if not api.nvim_win_is_valid(win) then
-    return
-  end
+-- 그쪽(side) 비교 창의 winhighlight (classic 이면 비운다). 맨 글자의 이름 공간(cmp.plain)도 같은 짝을 링크로 넣는다
+function cmp.whl(side)
   local p = pal()
   local want = (side and p ~= 'classic') and WHL[side] or ''
   if side and p == 'bc' then
     want = want .. WHL.bc
   end
+  return want
+end
+local function diff_whl(win, side)
+  if not api.nvim_win_is_valid(win) then
+    return
+  end
+  local p = pal()
+  local want = cmp.whl(side)
   if vim.wo[win].winhighlight ~= want then
     pcall(api.nvim_set_option_value, 'winhighlight', want, { scope = 'local', win = win })
   end
+  -- 같은 글은 보통 글자색으로 (구문 색을 이 창에서만 끈다 - cmp.plain). 걷을 때도 여기서
+  cmp.plain_win(win, side)
   if side then
     if p == 'bc' then
       set_wo(win, 'fillchars', cmp.fillchars())
@@ -1721,6 +1744,8 @@ local function plain_window(win)
       vim.cmd('setlocal ' .. o .. '<')
     end)
   end
+  -- 맨 글자의 이름 공간도 (옵션이 아니라 setlocal < 로 걷히지 않는다 - cmp.plain)
+  cmp.plain_win(win, nil)
 end
 
 -- :diffoff 는 foldmethod 가 manual 로 돌아오면 diff 가 만든 접기를 manual 접기로 남겨 두고 'foldenable' 을
@@ -2133,6 +2158,8 @@ local function fill(v, r, jump)
     and api.nvim_tabpage_get_win(v.tab) or nil
   -- 다른 버퍼로 바꾸는 동안은 아래 BufWinEnter(짝이 아닌 버퍼면 색·머리를 걷는다)가 보지 않게
   v.filling = true
+  -- 짝 전체의 되돌리기 줄을 둘지 (채우는 동안 버퍼가 다시 읽혔으면 새로 - cmp.utrack)
+  local ticks = cmp.uticks(v)
   -- 창 머리(winbar)·winhighlight 도 걷고 나서 버퍼를 바꾼다: nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을
   -- 적어 두었다가(wininfo) 그 버퍼를 새 창에 띄울 때 입힌다 - 그대로 두었더니 앞에 본 파일을 다른 탭에서
   -- 열면(Tab/Tab 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_heads 가 단다
@@ -2210,6 +2237,9 @@ local function fill(v, r, jump)
   diff_whl(v.win_a, not bin and 'a' or nil)
   diff_whl(v.win_b, not bin and 'b' or nil)
   cmp.gone_side(v)
+  -- 맨 글자 공간에 이 짝의 구문 무리까지 (cmp.plain), Ctrl+Z / Ctrl+Y 의 줄 (cmp.utrack)
+  cmp.plain_bufs(v)
+  cmp.utrack(v, ticks)
   -- 알림(바이너리·큰 파일)에는 곁 창이 쓸모없다 (빈 개요 막대, 'A – B –' 뿐인 줄 자세히) - 닫고 두 창을 반반으로
   if bin and (v.ov or v.ld) then
     cmp.detach(v)
@@ -3739,6 +3769,26 @@ local function take_over_view_keys()
   end, 'DirDiff 비교 창: 비교 탭 닫기 (트리의 그 줄로)')
 end
 
+-- Ctrl+Z / Ctrl+Y 를 비교 창에서만: 짝 전체의 되돌리기 / 다시 실행 (_G.vimide_dirdiff_undo, cmp.uview). 노멀과
+-- 비주얼(고르기를 끝내고 한다), 삽입 모드는 Ctrl+Z 만 - 삽입을 끝내고(<Esc>, 친 것이 한 단계) 되돌린다 (노멀 모드로
+-- 남는다). 삽입 모드에는 Ctrl+Z 의 뜻이 없어 ^Z 글자가 파일에 들어갔다 (윈도 버릇으로 치다가 누른다). 삽입 모드의
+-- Ctrl+Y 는 그대로 (완성 고르기·윗줄 글자 복사 - 다시 실행은 <Esc> 뒤에). 비교 창 밖에서는 원래대로 (Ctrl+Z 는 nvim
+-- 멈추기, Ctrl+Y 는 화면을 한 줄 위로 - 감싸기 전의 매핑이 있으면 그것). g:vimide_dirdiff_undo_keys = 0 이면 가로채지
+-- 않는다 (나중에 0 으로 해도 원래 뜻으로)
+function cmp.take_undo()
+  for _, spec in ipairs({ { '<C-z>', -1, { 'n', 'x', 'i' } }, { '<C-y>', 1, { 'n', 'x' } } }) do
+    for _, mode in ipairs(spec[3]) do
+      wrap(mode, spec[1], function()
+        if on(vim.g.vimide_dirdiff_undo_keys, 1) and cmp.uview(api.nvim_get_current_win()) then
+          return (mode == 'i' and '<Esc>' or '') .. ('<Cmd>lua _G.vimide_dirdiff_undo(%d)<CR>'):format(spec[2])
+        end
+      end, 'DirDiff 비교 창: ' .. (mode == 'i' and '삽입을 끝내고 짝(A·B)의 마지막 변경 되돌리기 (방금 친 것부터)'
+        or spec[2] < 0 and '짝(A·B)의 마지막 변경 되돌리기 - 커서가 어느 쪽에 있든'
+        or '되돌린 것 다시 실행 - 커서가 어느 쪽에 있든'))
+    end
+  end
+end
+
 -- .vimrc 를 다시 읽으면(:source) 그 map <C-l> 이 이것을 덮는다 - .vimrc 가 이것을 다시 부른다
 -- ,r / ,e (.vimrc 의 BufCycle 이 먼저 묻는다): DirDiff 탭(트리 탭과 그 비교 탭들) 안에서는 버퍼가 아니라
 -- 그 비교의 탭 사이를 오간다 (요청). 탭이 여럿이면 airline 의 탭 줄이 버퍼 대신 탭을 보이므로 같은 키가
@@ -3792,6 +3842,9 @@ function _G.vimide_dirdiff_take_over()
     take_over()
   end
   take_over_view_keys()
+  if on(vim.g.vimide_dirdiff_undo_keys, 1) then
+    cmp.take_undo()
+  end
 end
 _G.vimide_dirdiff_take_over()
 
@@ -3974,6 +4027,11 @@ local HELP_PAIR = {
   '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널·tmux 3.2 미만 서버에서는 1<C-r> 1<C-l>)',
   '                - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
   '  N<C-r> N<C-l> 커서 줄부터 N 줄, 비주얼은 고른 줄만',
+  '  <C-z> <C-y> 짝 전체의 되돌리기 / 다시 실행 - 커서가 A·B 어느 쪽에 있든 두 파일의 마지막 변경',
+  '              (타자·복사·dp·do 모두, 횟수도. 삽입 모드의 <C-z> 는 삽입을 끝내고 방금 친 것부터 되돌린다.',
+  '              삽입 모드의 <C-y>, 비교 탭 밖의 <C-z>·<C-y> 는 그대로)',
+  '  bc 색: 같은 글은 보통 글자색, 다른 글자·한쪽에만 있는 줄만 빨강 (구문 색은 이 두 창에서만 끈다.',
+  '              neogit 색도 구문 색을 끄고, classic 색은 구문 색 그대로)',
 }
 
 -- 옛 tmux 서버 안이면 지금 Ctrl+Shift 가 안 온다는 줄을 붙인다
@@ -4452,7 +4510,9 @@ function M.open(a, b)
     return say('python3 이 없습니다 - :DirDiffClassic 을 쓰세요', vim.log.levels.WARN)
   end
   -- 색 다시 보기: g:vimide_dirdiff_colors 를 바꿨거나 Neogit 이 늦게 setup 되었으면 이 비교부터
+  -- (맨 글자 공간의 winhighlight 짝도 색 무리를 따른다 - cmp.plain)
   set_hl()
+  cmp.plain_rebuild()
   local s = {
     a = a, b = b, req = 0, dirs = {}, loading = {}, dirty = {},
     expanded = { [''] = true }, rows = {}, row_of = {}, opened = {}, unload = {},
@@ -5063,6 +5123,662 @@ function cmp.marks(v)
       end
       v.mb[side] = b
     end
+  end
+end
+
+-- 맨 글자 (Beyond Compare 의 글 비교 - g:vimide_dirdiff_plain_text, 기본 1): 비교 창 둘에서 두 쪽이 같은 글
+-- (바뀌지 않은 줄, 바뀐 줄의 같은 부분)은 보통 글자색(밝은 화면이면 검정), 다른 글자와 한쪽에만 있는 줄만 빨강.
+-- 구문 색(syntax, treesitter, LSP 의미 토큰, vim-ide 의 Source Insight 심볼 색)이 남아 있으면 같은 글도 초록·파랑
+-- 으로 칠해져 어디가 다른지가 묻혔다 (사용자가 Beyond Compare 그림을 보이며 바랐다).
+-- 끄는 것은 그 창에만: 창에 하이라이트 이름 공간(nvim_win_set_hl_ns)을 달고 그 공간에서 구문 무리를 빈 정의로
+-- 둔다. 같은 파일을 다른 창·탭에 띄우면 거기는 구문 색 그대로다. 버린 길 둘:
+--   버퍼의 syntax·treesitter 를 끄기 - 같은 버퍼를 보이는 다른 창도 꺼진다 (다른 데 안 보일 때만 끄고 되돌리는
+--     것은 그 버퍼를 다른 창에 띄우는 모든 길을 지켜야 한다)
+--   extmark 로 글자색을 덮기 - 고칠 때마다 모든 줄에 다시 달아야 하고, treesitter·LSP 의 우선순위와 다툰다
+-- nvim 은 무리를 풀 때 링크 한 걸음마다 그 창의 공간을 먼저 본다 (0.12 의 syn_ns_get_final_id): cStatement ->
+-- Statement 처럼 구문 파일의 무리는 끝이 빈 무리에 닿아 빈 것이 되고, '@keyword.function.c' 는 부모 '@keyword...'
+-- 로 내려가다 빈 것을 만난다. 그래서 빈 정의는 끝이 되는 무리에만 둔다 (cmp.plain_blank):
+--   '@' 로 시작하는 모든 무리 (treesitter, LSP 의미 토큰 @lsp.*)
+--   :h group-name 의 구문 무리 - Added·Changed·Removed 는 뺀다 (gitsigns 의 표시가 그것에 잇는다)
+--   vim-ide 의 Source Insight 심볼 색 Si... (sihlindex·sihllocal) - 지금 낱말 SiRefHighlight, 노란 표시
+--     SiYellowMark 는 뺀다 (검색 하이라이트 같은 것이다)
+--   비교 중인 버퍼의 :syntax list 에 있는 무리 - 글자색을 직접 갖거나 화면 무리에 잇는 구문 무리
+--     (markdownH1 -> Title, diffAdded -> Added)
+-- 화면 무리(CursorLine, Visual, Search, MatchParen, Diff*, VimIdeDirDiff*, 진단·gitsigns·vim-mark ...)는 공간에
+-- 없으니 전역 그대로다. 화면 무리인데 구문 무리에 잇는 것(NeogitSubtleText -> Comment 같은 것 - neogit 색의 창
+-- 머리 정보가 그것이다, DiagnosticUnnecessary -> Comment)은 공간에 전역에서 푼 색을 적는다 - 그러지 않으면 빈
+-- 것이 되어 사라진다. 이름이 소문자로 시작하는 낱말(cStatement, shDeref - vim 구문 무리의 이름 꼴)은 구문 무리로
+-- 보아 그대로 빈 것이 되게 둔다.
+-- 창에 이름 공간이 있으면 nvim 은 그 창의 'winhighlight' 를 보지 않는다 (0.12 실측 - winhighlight 를 다시 넣어도
+-- 공간이 이긴다). 그래서 diff_whl 의 짝(DiffAdd:VimIdeDirDiffAddA ...)도 공간에 링크로 넣는다 - A 쪽·B 쪽 공간이
+-- 따로다 (모든 비교 창이 같이 쓴다). winhighlight 는 그대로 단다: strip_inherited 의 표시이고, 공간을 걷으면 다시
+-- 넣어 살린다 (cmp.plain_win). 갈라 만든 창은 공간을 물려받지 않는다 (실측 - 그 창의 winhighlight 공간이 선다).
+-- 색 구성표·'background'·색 무리가 바뀌면 같은 공간 둘(이름 있는 것)을 그 자리에서 다시 쓴다 (nvim_set_hl 은
+-- 정의를 통째로 바꾼다). 새 공간을 만들면 nvim 이 지우지 않아 쌓였다 (다시 지을 때마다 공간 둘·무리 수백 개 - 며칠
+-- 띄워 두는 nvim 에서 늘기만 한다). 공간의 정의를 '없음' 으로 되돌리는 API 는 없어서, 이번에 빠진 무리(색 구성표가
+-- 바뀌어 이제 구문 무리에 잇지 않는 화면 무리, 사라진 '@' 무리, bc 에서 neogit 으로 바뀌어 빠진 WinBar 짝)는 전역
+-- 정의(링크면 링크)를 그대로 적는다 - 공간에 없을 때와 같게 풀린다. 한 번 적은 무리는 다시 지을 때마다 그렇게
+-- 새로 적는다 (cmp.pl.def - 전역이 바뀌어도 옛 것이 남지 않게). 'classic' 색은 예전 꼴 그대로라 쓰지 않는다
+cmp.STD = {}
+for _, g in ipairs({ 'Comment', 'Constant', 'String', 'Character', 'Number', 'Boolean', 'Float', 'Identifier',
+  'Function', 'Statement', 'Conditional', 'Repeat', 'Label', 'Operator', 'Keyword', 'Exception', 'PreProc',
+  'Include', 'Define', 'Macro', 'PreCondit', 'Type', 'StorageClass', 'Structure', 'Typedef', 'Special',
+  'SpecialChar', 'Tag', 'Delimiter', 'SpecialComment', 'Debug', 'Underlined', 'Ignore', 'Error', 'Todo' }) do
+  cmp.STD[g] = true
+end
+cmp.SI_KEEP = { SiRefHighlight = true, SiYellowMark = true }
+-- a, b: 공간 둘 (한 번 만들고 다시 쓴다), ids: 그 둘 (창에 단 것이 우리 것인지), def: 공간마다 적은 무리 (true 이번에
+-- 지은 것, false 빠져서 전역 정의를 옮겨 둔 것), blank: 빈 정의를 둔 무리, syn: :syntax list 에서 모은 무리, synk:
+-- 이미 읽은 구문 (cmp.plain_syntax 의 열쇠)
+cmp.pl = { ids = {}, def = {}, blank = {}, syn = {}, synk = {} }
+
+function cmp.plain_on()
+  return on(vim.g.vimide_dirdiff_plain_text, 1) and pal() ~= 'classic'
+    and api.nvim_win_set_hl_ns ~= nil and api.nvim_get_hl_ns ~= nil
+end
+
+function cmp.plain_blank(name)
+  return name:sub(1, 1) == '@' or cmp.STD[name] or cmp.pl.syn[name]
+    or (name:match('^Si%u') ~= nil and not cmp.SI_KEEP[name])
+end
+
+-- 새 무리(새로 읽은 구문, 나중에 정한 '@' 무리)를 공간에 더한다. full: 다 새로 (화면 무리의 색 옮기기까지)
+function cmp.plain_extend(full)
+  local p = cmp.pl
+  local all = api.nvim_get_hl(0, {})
+  local new = {}
+  local function add(name)
+    if not p.blank[name] and cmp.plain_blank(name) then
+      p.blank[name] = true
+      new[#new + 1] = name
+    end
+  end
+  for name in pairs(all) do
+    add(name)
+  end
+  for name in pairs(p.syn) do
+    add(name)
+  end
+  if not full and #new == 0 then
+    return
+  end
+  for _, ns in ipairs({ p.a, p.b }) do
+    for _, name in ipairs(new) do
+      pcall(api.nvim_set_hl, ns, name, {})
+      p.def[ns][name] = true
+    end
+  end
+  -- 구문 무리에 잇는 화면 무리: 전역에서 푼 색을 그대로 (빈 것이 되지 않게). 푸는 것은 전역 표(all)의 링크를
+  -- 따라가서 - nvim_get_hl(0, { link = false }) 는 지금 창의 공간을 거쳐 풀어서, 비교 창에서 다시 지으면(색 구성표
+  -- 바꾸기, 비교 창에서 :DirDiff) 'link = Comment' 가 그대로 와 그 무리가 빈 것이 되었다 (실측)
+  for name, d in pairs(all) do
+    if d.link and not p.blank[name] and not name:match('^%l%w*$') then
+      local x, hit, fin = d.link, false, nil
+      for _ = 1, 30 do
+        hit = hit or p.blank[x] == true
+        local dx = all[x]
+        if not (dx and dx.link) then
+          fin = dx or {}
+          break
+        end
+        x = dx.link
+      end
+      if hit and fin then
+        fin.default = nil
+        for _, ns in ipairs({ p.a, p.b }) do
+          pcall(api.nvim_set_hl, ns, name, fin)
+          p.def[ns][name] = true
+        end
+      end
+    end
+  end
+  -- winhighlight 의 짝 (공간이 있으면 nvim 이 winhighlight 를 보지 않는다). 마지막에 - 위의 것보다 먼저다
+  for _, side in ipairs({ 'a', 'b' }) do
+    for from, to in cmp.whl(side):gmatch('([^,:]+):([^,]+)') do
+      pcall(api.nvim_set_hl, p[side], from, { link = to })
+      p.def[p[side]][from] = true
+    end
+  end
+end
+
+-- 공간 둘을 (그 자리에서) 다시 짓고 그것을 단 창(지금 비교 창)에 다시 단다 - 다시 달아야 nvim 이 그 창의 색을 새로
+-- 푼다. 그사이 'classic' 이 되었거나 꺼졌으면 걷는다
+function cmp.plain_build()
+  local p = cmp.pl
+  if not p.a then
+    p.a = api.nvim_create_namespace('vimide_dirdiff_plain_a')
+    p.b = api.nvim_create_namespace('vimide_dirdiff_plain_b')
+    p.ids = { [p.a] = true, [p.b] = true }
+    p.def = { [p.a] = {}, [p.b] = {} }
+  end
+  local old = p.def
+  p.def = { [p.a] = {}, [p.b] = {} }
+  p.blank = {}
+  cmp.plain_extend(true)
+  -- 이번에 빠진 무리: 전역 정의 그대로 (공간에 없을 때와 같게 - 위 머리글)
+  for ns, names in pairs(old) do
+    for name in pairs(names) do
+      if not p.def[ns][name] then
+        local ok, d = pcall(api.nvim_get_hl, 0, { name = name })
+        if ok and type(d) == 'table' then
+          d.default = nil
+          pcall(api.nvim_set_hl, ns, name, d)
+        end
+        p.def[ns][name] = false
+      end
+    end
+  end
+  for _, v in ipairs(all_views()) do
+    for _, side in ipairs({ 'a', 'b' }) do
+      local w = v['win_' .. side]
+      if api.nvim_win_is_valid(w) and p.ids[api.nvim_get_hl_ns({ winid = w })] then
+        cmp.plain_win(w, side, true)
+      end
+    end
+  end
+end
+
+-- 색이 바뀐 뒤 (ColorScheme, 'background', 새 비교 - 색 무리). 한 번도 짓지 않았으면 쓸 때 짓는다
+function cmp.plain_rebuild()
+  if cmp.pl.a then
+    cmp.plain_build()
+  end
+end
+
+-- 버퍼의 구문 무리를 모은다 (:syntax list - 같은 구문은 한 번만). 새로 모았으면 true.
+-- 열쇠는 실제로 읽힌 구문(b:current_syntax)과 filetype: 'syntax' 는 treesitter 버퍼면 모두 "ON" 이다 (.vimrc 의
+-- additional_vim_regex_highlighting - treesitter 가 'syntax' 를 ON 으로 두고 filetype 의 구문을 읽는다). 'syntax'
+-- 를 열쇠로 했더니 처음 연 treesitter 버퍼(conf.lua)의 무리만 모이고, 뒤에 연 .patch 의 diffRemoved(-> Removed,
+-- 검붉은)·diffAdded(-> Added, 초록), markdown 의 제목(-> Title)·**굵게**(htmlBold)가 같은 글에 남았다
+function cmp.plain_syntax(b)
+  if not (b and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b)) then
+    return false
+  end
+  local syn = vim.bo[b].syntax
+  if syn == '' then
+    return false
+  end
+  local key = table.concat({ tostring(vim.b[b].current_syntax or ''), vim.bo[b].filetype, syn }, '|')
+  if cmp.pl.synk[key] then
+    return false
+  end
+  cmp.pl.synk[key] = true
+  local ok, out = pcall(api.nvim_buf_call, b, function()
+    return vim.fn.execute('syntax list')
+  end)
+  if not ok or type(out) ~= 'string' then
+    return false
+  end
+  for name in out:gmatch('\n([%w_]+)%s+xxx') do
+    cmp.pl.syn[name] = true
+  end
+  return true
+end
+
+-- 짝을 채운 뒤·구문이 바뀐 뒤: 그 버퍼들의 구문 무리까지 공간에
+function cmp.plain_bufs(v)
+  if not (cmp.pl.a and cmp.plain_on()) then
+    return
+  end
+  local more = false
+  for _, side in ipairs({ 'a', 'b' }) do
+    if cmp.plain_syntax(cmp.pbuf(v, side)) then
+      more = true
+    end
+  end
+  if more then
+    cmp.plain_extend(false)
+  end
+end
+
+-- 창에 맨 글자 공간을 단다(side: 'a' / 'b') / 걷는다(nil). 걷을 때는 그 창의 winhighlight 공간을 다시 세운다 -
+-- 공간을 0 으로 돌리면 nvim 은 winhighlight 를 다시 읽지 않는다 (실측: 다시 넣어야 선다). again: 같은 공간이어도
+-- 다시 단다 (공간의 정의를 그 자리에서 바꾼 뒤 - cmp.plain_build)
+function cmp.plain_win(win, side, again)
+  if not (api.nvim_win_is_valid(win) and api.nvim_get_hl_ns) then
+    return
+  end
+  local cur = api.nvim_get_hl_ns({ winid = win })
+  if side and cmp.plain_on() then
+    if not cmp.pl.a then
+      cmp.plain_build()
+    end
+    if again or cur ~= cmp.pl[side] then
+      api.nvim_win_set_hl_ns(win, cmp.pl[side])
+    end
+  elseif cmp.pl.ids[cur] then
+    api.nvim_win_set_hl_ns(win, 0)
+    local whl = vim.wo[win].winhighlight
+    if whl ~= '' then
+      pcall(api.nvim_set_option_value, 'winhighlight', whl, { scope = 'local', win = win })
+    end
+  end
+end
+
+-- 짝 전체의 되돌리기 (Ctrl+Z / Ctrl+Y - g:vimide_dirdiff_undo_keys, 기본 1): 비교 창 둘(비교 탭, pair_tab = 0 의
+-- 편집 창 둘) 어디에 커서가 있든 Ctrl+Z 는 짝의 두 파일 중 마지막으로 바뀐 쪽을 되돌리고 Ctrl+Y 는 되돌린 것을
+-- 다시 한다 - 윈도의 Beyond Compare 처럼. vim 의 u 는 버퍼마다라, A 에서 <C-r> 로 B 에 복사한 것을 무르려면
+-- B 로 가서 u 해야 했다.
+-- 짝마다 줄 하나(v.ut.T): 바뀐 차례대로 { 버퍼, 되돌리기 번호(seq) }. 버퍼가 바뀌면(nvim_buf_attach 의 on_lines -
+-- 고치는 한가운데라 나무를 읽지 않는다) 그 틱 끝에 모아서(cmp.uflush) 버퍼의 되돌리기 나무(undotree)를 본다:
+-- 새 번호가 생겼으면 새 변경이다 (삽입 모드에서 친 글자들은 한 번호 - 되돌리기 한 단계가 한 줄이다. 두 버퍼가
+-- 한 틱에 바뀌면 처음 바뀐 차례로). 줄의 것이 지금 걸려 있는지는 적어 두지 않고 그때그때 나무에서 본다: 뿌리에서
+-- 지금 자리(seq_cur)까지의 길에 있으면 걸려 있다. 그래서 한 버퍼에서 u·:undo·:redo 를 직접 해도 어긋나지 않는다 -
+-- 길이 바뀐 것을 보고 따라간다 (cmp.uobserve - 우리 Ctrl+Z / Ctrl+Y 도 같은 길로 적는다):
+--   길에서 빠진 것(되돌린 것)은 다시 하기 목록(R)에 쌓는다 - 나중에 되돌린 것이 위
+--   길에 다시 든 것(다시 한 것)은 줄 끝으로 옮기고 R 에서 뺀다 - 가장 최근에 한 일이다
+--   길에 든 새 번호(새 변경)는 줄 끝에 붙이고 R 을 비운다 (새로 고치면 다시 하기는 없다), 걸려 있지 않은 것은
+--   줄에서 뺀다 (직접 :undo N 으로 다시 걸면 위의 둘째 길로 다시 붙는다)
+--   나무에서 아주 사라진 번호(큰 파일을 :checktime·:e! 로 다시 읽으면 'undoreload' 를 넘어 되돌리기 기록이 지워진다)
+--   는 줄과 R 에서 뺀다 - 되돌릴 수도 다시 할 수도 없다
+-- Ctrl+Z: 줄 끝에서부터 걸려 있는 첫 것을 그 버퍼에서 한 단계 되돌린다 (그 버퍼의 비교 창에서 :undo). 누르기 전에
+-- 두 버퍼의 나무를 다시 읽으므로 그것이 그 버퍼의 지금 자리다 - 예전에는 '그것 바로 앞 번호로' :undo N 으로 뛰어서,
+-- 줄에 적히지 않은 변경이 그 뒤에 있으면 한 번에 여럿이 되돌려졌다. Ctrl+Y: R 의 위에서부터 아직 걸려 있지 않은 것을
+-- :undo 그 번호로. 횟수(3<C-z>)는 그만큼. 해 보아도 아무것도 바뀌지 않는 것(버퍼를 내렸다 - :bd, 짝 바꾸기의 정리 -
+-- 기록이 지워졌다)은 줄에서 빼고 다음 것으로 - 예전에는 그것을 늘 다시 골라 '되돌릴 것이 없습니다' 에 멈췄다. 내린
+-- 버퍼는 vim.bo 를 읽지 않는다 (그것이 shada 의 마크를 지운다). 줄에 되돌릴 것이 없으면 Ctrl+Z 는 지금 창의 u
+-- 그대로 (짝을 열기 전의 변경 - 짝을 닫았다 다시 열면 줄은 빈 채 시작한다).
+-- Ctrl+Y 는 R 뿐이다 (새로 고쳐 비운 다시 하기가 버퍼의 :redo 로 살아나지 않게).
+-- 삽입 모드의 Ctrl+Z 는 삽입을 끝내고(<Esc> - 친 것이 한 단계가 된다) 위의 Ctrl+Z 를 한다: 방금 친 것부터 되돌린다.
+-- 삽입 모드에 Ctrl+Z 의 뜻이 없어 ^Z 글자가 파일에 들어갔다 (윈도 버릇으로 치는 중에 누른다). 삽입 모드의 Ctrl+Y 는
+-- 그대로 (완성 고르기·윗줄 글자 복사)
+-- 한 뒤에는 바뀐 자리로: 지금 창의 버퍼면 vim 이 커서를 거기 둔다. 맞은편이면 그 줄과 마주 보는 줄로 지금
+-- 창의 커서를 옮긴다 (cmp.compute 의 가지런한 행) - cursorbind·scrollbind 가 맞은편을 따라온다. 초점은 그대로.
+-- 짝을 다시 채우면(트리 복사 뒤, o) 버퍼가 다시 읽혔을 때만 줄을 새로 한다 (cmp.utrack)
+cmp.ua = {}                          -- nvim_buf_attach 한 버퍼
+cmp.uq = { list = {}, set = {} }     -- 이 틱에 바뀐 버퍼 (바뀐 차례, set 의 값 'force' 는 다시 읽었다 - on_reload)
+
+-- 버퍼의 되돌리기 자리: cur(seq_cur), last(seq_last), path(뿌리에서 지금 자리까지의 번호), on(path 의 집합),
+-- par(나무에 있는 번호마다 부모 - 없는 번호는 nil)
+function cmp.ustate(b)
+  local ok, t = pcall(vim.fn.undotree, b)
+  if not ok or type(t) ~= 'table' then
+    return nil
+  end
+  local cur = t.seq_cur or 0
+  -- 부모: 목록은 오래된 것부터 한 가지(줄기)이고, alt 는 그 항목과 부모가 같은 다른 가지다
+  local parent = {}
+  local function walk(list, par)
+    local p = par
+    for _, e in ipairs(list) do
+      parent[e.seq] = p
+      if type(e.alt) == 'table' then
+        walk(e.alt, p)
+      end
+      p = e.seq
+    end
+  end
+  walk(t.entries or {}, 0)
+  -- 나무에 있는 번호만: 기록이 지워지면(큰 파일을 다시 읽기) entries 는 비는데 seq_cur 는 그대로 남는다 - 그것을 길로
+  -- 치면 없는 변경이 걸려 있는 것이 된다
+  local rev, x = {}, cur
+  while x and x > 0 and parent[x] ~= nil and #rev < 100000 do
+    rev[#rev + 1] = x
+    x = parent[x]
+  end
+  local path, set = {}, {}
+  for i = #rev, 1, -1 do
+    path[#path + 1] = rev[i]
+    set[rev[i]] = true
+  end
+  return { cur = cur, last = t.seq_last or 0, path = path, on = set, par = parent }
+end
+
+-- 채우기 앞의 changedtick (cmp.utrack 이 견준다)
+function cmp.uticks(v)
+  local t = {}
+  for _, b in ipairs(v.ut and { v.ut.a or false, v.ut.b or false } or {}) do
+    if b and api.nvim_buf_is_valid(b) then
+      t[b] = api.nvim_buf_get_changedtick(b)
+    end
+  end
+  return t
+end
+
+-- 짝을 채운 뒤: 같은 두 버퍼가 채우는 동안 바뀌지 않았으면 줄을 두고, 아니면 새 줄. 지금 자리를 기준으로
+function cmp.utrack(v, ticks)
+  local ut = v.ut
+  local keep = ut and ut.a == v.buf_a and ut.b == v.buf_b
+  for _, b in ipairs(keep and { ut.a, ut.b } or {}) do
+    if not (api.nvim_buf_is_valid(b) and ticks[b] == api.nvim_buf_get_changedtick(b)) then
+      keep = false
+    end
+  end
+  if not keep then
+    ut = { a = v.buf_a, b = v.buf_b, T = {}, R = {}, k = {} }
+    v.ut = ut
+  end
+  for _, b in ipairs({ v.buf_a or false, v.buf_b or false }) do
+    if b and api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == '' then
+      ut.k[b] = cmp.ustate(b)
+      cmp.uattach(b)
+    end
+  end
+end
+
+function cmp.uattach(b)
+  if cmp.ua[b] then
+    return
+  end
+  local ok, res = pcall(api.nvim_buf_attach, b, false, {
+    on_lines = function(_, buf)
+      return cmp.uchanged(buf)
+    end,
+    on_reload = function(_, buf)
+      cmp.uchanged(buf, true)
+    end,
+    -- :e!(:e) 는 붙인 것을 떼기만 하고 다시 붙이지 않는다 (on_reload 가 아니라 on_detach - 0.12 실측, :checktime 은
+    -- on_reload). 그대로 두었더니 그 뒤의 변경이 줄에 적히지 않아 Ctrl+Z 가 맞은편을 먼저 되돌렸다. 짝이 아직 그
+    -- 버퍼를 보면 다시 붙이고 그사이 바뀐 것을 적는다 (다시 읽기도 'undoreload' 안이면 되돌리기 한 단계다)
+    on_detach = function(_, buf)
+      cmp.ua[buf] = nil
+      vim.schedule(function()
+        cmp.ureattach(buf)
+      end)
+    end,
+  })
+  if ok and res then
+    cmp.ua[b] = true
+  end
+end
+
+function cmp.ureattach(b)
+  -- 지운 버퍼·내린 버퍼(:bd)는 그만 - vim.bo 는 보지 않는다
+  if not (api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b)) then
+    return
+  end
+  for _, v in ipairs(all_views()) do
+    if v.ut and not v.closed and (v.ut.a == b or v.ut.b == b) then
+      cmp.uattach(b)
+      cmp.uobserve(v, b, true)
+    end
+  end
+end
+
+-- 버퍼가 바뀌었다: 틱 끝에 본다. 이 버퍼를 보는 짝이 이제 없으면 뗀다 (true). force: 다시 읽었다 (cmp.uobserve)
+function cmp.uchanged(b, force)
+  local any = false
+  for _, v in ipairs(all_views()) do
+    if v.ut and (v.ut.a == b or v.ut.b == b) then
+      any = true
+      break
+    end
+  end
+  if not any then
+    cmp.ua[b] = nil
+    return true
+  end
+  local q = cmp.uq
+  if not q.set[b] then
+    q.list[#q.list + 1] = b
+    if #q.list == 1 then
+      vim.schedule(cmp.uflush)
+    end
+  end
+  q.set[b] = (force or q.set[b] == 'force') and 'force' or true
+end
+
+function cmp.uflush()
+  local q = cmp.uq
+  cmp.uq = { list = {}, set = {} }
+  for _, b in ipairs(q.list) do
+    if api.nvim_buf_is_valid(b) then
+      for _, v in ipairs(all_views()) do
+        if v.ut and not v.closed and (v.ut.a == b or v.ut.b == b) then
+          cmp.uobserve(v, b, q.set[b] == 'force')
+        end
+      end
+    end
+  end
+end
+
+-- 짝의 줄(T)과 R 에서 버퍼 b 의 것을 뺀다: keep(seq) 가 거짓인 것만 (keep 이 없으면 모두)
+function cmp.udrop(ut, b, keep)
+  for _, t in ipairs({ ut.T, ut.R }) do
+    for i = #t, 1, -1 do
+      if t[i].b == b and not (keep and keep(t[i].seq)) then
+        table.remove(t, i)
+      end
+    end
+  end
+end
+
+-- 버퍼 b 의 되돌리기 자리가 바뀐 것을 짝의 줄에 적는다 (위 머리글의 길들). force: changenr() 로 건너뛰지 않는다
+-- (다시 읽어 기록이 지워져도 seq_cur 는 그대로라, Ctrl+Z 앞에서와 다시 읽은 뒤에는 나무를 꼭 읽는다)
+function cmp.uobserve(v, b, force)
+  local ut = v.ut
+  local k = ut.k[b]
+  -- 친 글자마다 온다: 지금 버퍼면 changenr()(= seq_cur) 로 먼저 - 같은 되돌리기 단계 안이면 나무를 읽지 않는다
+  if not force and k and b == api.nvim_get_current_buf() and vim.fn.changenr() == k.cur then
+    return
+  end
+  -- 내린 버퍼(:bd, 짝 바꾸기의 정리)는 되돌리기 기록도 같이 내려갔다 - 그 버퍼의 것을 모두 빼고 잊는다 (다시 띄우면
+  -- 채우기가 새 줄로 - cmp.utrack). vim.bo 는 읽지 않는다
+  if not api.nvim_buf_is_loaded(b) then
+    if k then
+      cmp.udrop(ut, b)
+      ut.k[b] = nil
+    end
+    return
+  end
+  local st = cmp.ustate(b)
+  if not st then
+    return
+  end
+  if not k then
+    ut.k[b] = st
+    return
+  end
+  if st.cur == k.cur and st.last == k.last and #st.path == #k.path then
+    return
+  end
+  local function drop(t, s)
+    for i = #t, 1, -1 do
+      if t[i].b == b and t[i].seq == s then
+        table.remove(t, i)
+      end
+    end
+  end
+  -- 나무에서 사라진 번호는 어디서든 뺀다 (기록이 지워졌다)
+  cmp.udrop(ut, b, function(s)
+    return st.par[s] ~= nil
+  end)
+  for i = #k.path, 1, -1 do
+    if not st.on[k.path[i]] and st.par[k.path[i]] ~= nil then
+      drop(ut.R, k.path[i])
+      ut.R[#ut.R + 1] = { b = b, seq = k.path[i] }
+    end
+  end
+  local new = false
+  for _, s in ipairs(st.path) do
+    if not k.on[s] then
+      drop(ut.T, s)
+      drop(ut.R, s)
+      ut.T[#ut.T + 1] = { b = b, seq = s }
+      new = new or s > k.last
+    end
+  end
+  ut.k[b] = st
+  if new then
+    ut.R = {}
+    local keep = {}
+    for _, e in ipairs(ut.T) do
+      local ke = ut.k[e.b]
+      if ke and ke.on[e.seq] then
+        keep[#keep + 1] = e
+      end
+    end
+    ut.T = keep
+  end
+  while #ut.T > 2000 do
+    table.remove(ut.T, 1)
+  end
+end
+
+-- Ctrl+Z / Ctrl+Y 를 받을 창의 짝: 짝을 보이는 비교 창이고 그 창에 짝의 버퍼(또는 알림)가 떠 있을 때. :e 로 다른
+-- 파일을 띄운 비교 창, 아직 짝이 없는 편집 창(pair_tab = 0 의 처음)은 nil - 키는 원래 뜻이다
+function cmp.uview(w)
+  local v = view_of_win(w)
+  if not (v and v.rel and not v.closed and v.ut) then
+    return nil
+  end
+  if api.nvim_win_get_buf(w) ~= v[(w == v.win_a) and 'buf_a' or 'buf_b'] then
+    return nil
+  end
+  return v
+end
+
+-- 되돌릴 것 (줄 끝에서부터 걸려 있는 첫 것) / 다시 할 것 (R 의 위에서부터 걸려 있지 않은 첫 것 - 꺼낸다). 버퍼가
+-- 없거나 내려간 것은 빼며 지나간다 (is_loaded 를 먼저 - 내린 버퍼의 vim.bo 를 읽지 않게)
+function cmp.upick(ut, dir)
+  local t = dir < 0 and ut.T or ut.R
+  for i = #t, 1, -1 do
+    local e = t[i]
+    local k = api.nvim_buf_is_valid(e.b) and api.nvim_buf_is_loaded(e.b) and ut.k[e.b]
+    if not k then
+      table.remove(t, i)
+    elseif dir < 0 then
+      if k.on[e.seq] then
+        return e
+      end
+    else
+      table.remove(t, i)
+      if not k.on[e.seq] and k.par[e.seq] ~= nil then
+        return e
+      end
+    end
+  end
+end
+
+-- e 를 줄과 R 에서 뺀다 (해 보아도 아무것도 바뀌지 않았다)
+function cmp.uforget(ut, e)
+  cmp.udrop(ut, e.b, function(s)
+    return s ~= e.seq
+  end)
+end
+
+-- 버퍼 b 에서 cmd 를 (그 버퍼를 보이는 짝의 창에서 - 커서가 바뀐 자리로 간다. 없으면 잠깐 창 없이). 바뀐 것이
+-- 없으면 nil, 오류였으면(알렸다) nil, true
+function cmp.urun(v, b, cmd)
+  -- 알림·빈 쪽(파일이 아닌 버퍼)은 되돌릴 것이 없다 ('modifiable' 꺼짐 - :undo 가 E21 로 거절한다). 내린 버퍼도
+  -- (vim.bo 보다 먼저 - 내린 버퍼의 vim.bo 읽기가 shada 마크를 지운다)
+  if not (api.nvim_buf_is_valid(b) and api.nvim_buf_is_loaded(b)) or vim.bo[b].buftype ~= '' then
+    return nil
+  end
+  local side = b == v.buf_a and 'a' or (b == v.buf_b and 'b' or nil)
+  local w = side and cmp.pbuf(v, side) and v['win_' .. side] or nil
+  local before = vim.fn.undotree(b).seq_cur
+  local ok, err = pcall(function()
+    if w then
+      api.nvim_win_call(w, function()
+        vim.cmd(cmd)
+      end)
+    else
+      api.nvim_buf_call(b, function()
+        vim.cmd(cmd)
+      end)
+    end
+  end)
+  if not ok then
+    say(tostring(err):gsub('\nstack traceback:.*$', ''):gsub('^.-(E%d+:)', '%1'), vim.log.levels.WARN)
+    return nil, true
+  end
+  if vim.fn.undotree(b).seq_cur == before then
+    return nil
+  end
+  return { b = b, side = side, win = w, line = w and api.nvim_win_get_cursor(w)[1] }
+end
+
+-- 맞은편에서 되돌렸으면 지금 창의 커서를 그 줄과 마주 보는 줄로 (맞은편은 cursorbind 가 따라온다)
+function cmp.ushow(v, w, last)
+  if not (last and last.win and last.win ~= w and api.nvim_win_is_valid(w)) then
+    return
+  end
+  cmp.compute(v)
+  local line = last.line
+  local d = v.dd
+  if d and last.side then
+    local row, other = cmp.locate(d, last.side, line)
+    line = other or cmp.line_at(d, w == v.win_b and 'b' or 'a', row)
+  end
+  local n = api.nvim_buf_line_count(api.nvim_win_get_buf(w))
+  pcall(api.nvim_win_set_cursor, w, { math.max(1, math.min(line, n)), api.nvim_win_get_cursor(w)[2] })
+end
+
+-- Ctrl+Z (dir < 0) / Ctrl+Y (dir > 0): 짝 전체에서 (횟수만큼). 비주얼이면 끝내고
+function _G.vimide_dirdiff_undo(dir)
+  local w = api.nvim_get_current_win()
+  local v = cmp.uview(w)
+  if not v then
+    return
+  end
+  local n = vim.v.count1
+  if api.nvim_get_mode().mode:match('^[vV\22]') then
+    vim.cmd('normal! \27')
+  end
+  cmp.uflush()   -- 이 틱에 바뀐 것을 먼저 적는다
+  local ut = v.ut
+  -- 두 버퍼의 나무를 다시 읽는다: 붙이지 못한 사이의 변경, 다시 읽어 지워진 기록, 내린 버퍼까지 (cmp.uobserve).
+  -- 떨어진 것은 다시 붙인다 (붙어 있으면 그대로). 내린 버퍼는 vim.bo 를 읽지 않고 그 버퍼의 것만 뺀다
+  for _, b in ipairs({ ut.a or false, ut.b or false }) do
+    if b and api.nvim_buf_is_valid(b) then
+      if api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == '' then
+        cmp.uattach(b)
+        cmp.uobserve(v, b, true)
+      elseif ut.k[b] then
+        cmp.uobserve(v, b, true)
+      end
+    end
+  end
+  local done, by, last, failed = 0, { a = 0, b = 0 }, nil, false
+  while done < n do
+    local e = cmp.upick(ut, dir)
+    local r
+    if e then
+      -- 되돌리기는 한 단계 (e 가 그 버퍼의 지금 자리다 - 위에서 나무를 다시 읽었다), 다시 하기는 그 번호로
+      local err
+      r, err = cmp.urun(v, e.b, dir < 0 and 'silent undo' or ('silent undo ' .. e.seq))
+      if err then
+        failed = true
+        break   -- 오류는 알렸다 (E21 같은 것) - 맞은편의 다른 것을 대신 되돌리지 않는다
+      elseif not r then
+        -- 아무것도 바뀌지 않았다 (기록이 지워졌다): 빼고 다음 것으로 - 뺄 때마다 줄어드니 끝난다
+        cmp.uforget(ut, e)
+      end
+    elseif dir < 0 then
+      -- 줄에 없다 (짝을 열기 전의 변경): 지금 창의 버퍼에서 u 그대로 - 되돌린 것은 R 에 쌓여 Ctrl+Y 로 돌아온다.
+      -- 다시 하기에는 이 길을 두지 않는다: 새로 고쳐 R 을 비웠는데 버퍼에 남은 다시 하기(:redo)가 살아났다
+      r, failed = cmp.urun(v, api.nvim_get_current_buf(), 'silent undo')
+      if not r then
+        break
+      end
+    else
+      break
+    end
+    if r then
+      if ut.k[r.b] then
+        cmp.uobserve(v, r.b, true)
+      end
+      done = done + 1
+      if r.side then
+        by[r.side] = by[r.side] + 1
+      end
+      last = r
+    end
+  end
+  local what = dir < 0 and '되돌림' or '다시 실행'
+  if done == 0 then
+    if failed then
+      return   -- 오류를 알린 것이 보이게
+    end
+    return say(dir < 0 and '되돌릴 것이 없습니다' or '다시 실행할 것이 없습니다')
+  end
+  pcall(vim.cmd, 'diffupdate')
+  cmp.ushow(v, w, last)
+  if done == 1 then
+    say(('%s 쪽 %s%s'):format((last.side or '?'):upper(), what, last.line and (' (줄 %d)'):format(last.line) or ''))
+  else
+    say(('%s %d번 - A %d · B %d'):format(what, done, by.a, by.b))
   end
 end
 
@@ -5726,6 +6442,23 @@ api.nvim_create_autocmd('BufWinEnter', {
     end
     -- 화살표·연보라·개요 막대·줄 자세히도 (짝이 아닌 쪽은 비운다 - cmp.pbuf)
     cmp.kick(v, true)
+  end,
+})
+-- 비교 창의 버퍼가 구문을 새로 읽으면(:set ft=, :syntax on) 그 구문의 무리도 맨 글자 공간에 (cmp.plain_bufs)
+api.nvim_create_autocmd('Syntax', {
+  group = group,
+  callback = function(ev)
+    if next(sessions) == nil then
+      return
+    end
+    for _, v in ipairs(all_views()) do
+      if ev.buf == cmp.pbuf(v, 'a') or ev.buf == cmp.pbuf(v, 'b') then
+        vim.schedule(function()
+          cmp.plain_bufs(v)
+        end)
+        return
+      end
+    end
   end,
 })
 -- 비교 중인 두 디렉터리 안의 파일을 :w 로 저장하면 그 항목만 다시 본다 (트리 복사처럼).

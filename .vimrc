@@ -1979,7 +1979,8 @@ let g:vimide_dirdiff_tab = 1
 "         같은 파일 보통 글자 =, 다른 파일은 늦은 쪽 빨강·이른 쪽 회색 ≠, 고아 파일(한쪽에만) 파랑,
 "         폴더(한쪽에만 있는 것도)는 보통 글자에 아이콘이 그 아래(늦은 차이 빨강 / 이른 차이 회색),
 "         지금 줄은 커서가 있는 쪽(A/B) 반 칸만 연두
-"   비교 탭  바뀐 줄 분홍 바탕·다른 글자 빨강, 빈자리 회색 빗금, 지금 차이에 노란 화살표,
+"   비교 탭  바뀐 줄 분홍 바탕·다른 글자 빨강, 같은 글은 구문 색 없이 보통 글자색(그 두 창에서만),
+"         빈자리 회색 빗금, 지금 차이에 노란 화살표,
 "         맨 왼쪽 개요 막대(누르면 그리로), 맨 아래 줄 자세히(빈칸 · 탭 → 줄 끝 ¶), 창 머리에
 "         경로·수정 일시·크기·인코딩. 덩어리 안의 빈 줄은 연보라. 개요 막대·줄 자세히에는 들어가지
 "         않는다 (비교 창의 <C-w>w/<C-w>W 는 그 둘을 건너뛰고 A·B 를 오간다)
@@ -1996,7 +1997,10 @@ let g:vimide_dirdiff_tab = 1
 "            <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
 "            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term, tmux 3.2 미만 서버처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
 "            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
-"            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로)
+"            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로),
+"            <C-z>/<C-y> = 짝 전체의 되돌리기/다시 실행 (커서가 A·B 어느 쪽에 있든 두 파일의 마지막 변경 -
+"            Beyond Compare 처럼. 횟수·비주얼도, 삽입 모드의 <C-z> 는 삽입을 끝내고 방금 친 것부터 되돌린다.
+"            삽입 모드의 <C-y>, 비교 탭 밖의 <C-z>·<C-y> 는 그대로)
 "   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로
 "   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
 "   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (all diff no-orphans diff-no-orphans orphans
@@ -2007,6 +2011,8 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
+"   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
+"   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
 let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
 let g:vimide_dirdiff_filter = ''
@@ -2029,6 +2035,12 @@ let g:vimide_dirdiff_date_format = '%Y-%m-%d %p %l:%M:%S'
 let g:vimide_dirdiff_overview = 1
 " 비교 탭 맨 아래의 줄 자세히 (커서 줄과 맞은편 줄을 빈칸이 보이게 두 줄로): 1 켬, 0 끔
 let g:vimide_dirdiff_line_details = 1
+" 비교 창에서 두 쪽이 같은 글을 보통 글자색으로 (Beyond Compare 처럼 다른 글자만 빨강 - 구문 색은 그 두 창에서만
+" 끈다, 같은 파일을 띄운 다른 창은 그대로. 'classic' 색은 예전대로 구문 색): 1 켬, 0 구문 색 그대로
+let g:vimide_dirdiff_plain_text = 1
+" 비교 창의 <C-z>/<C-y> 를 짝 전체의 되돌리기/다시 실행으로 (A·B 어느 쪽에서든 두 파일의 마지막 변경): 1 켬,
+" 0 가로채지 않기 (u 와 :redo 는 어느 쪽이든 늘 그 버퍼만이다)
+let g:vimide_dirdiff_undo_keys = 1
 
 " Ease my eyes
 "colorscheme solarized
