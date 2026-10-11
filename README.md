@@ -2567,8 +2567,9 @@ with `g:vimide_dirdiff_pair_tab = 0`):
 | `q` | in a compare tab: close it and go back to the tree, onto that pair's row (`:tabclose` does the same); for two picked files, back to where `[B]` was picked. While a macro is being recorded `q` stops it as usual; in the edit windows of `g:vimide_dirdiff_pair_tab = 0` it is the macro key as before |
 | `<2-LeftMouse>` on a window bar | a double click on a window bar changes that side's file and compares the new pair in the same tab (`:DirDiffPath a` / `:DirDiffPath b` in a compare window does the same; a single click still just moves into that window) - see *Changing the paths* below |
 | `:DirDiffSwap` | swap the two files of this compare tab only - A's file goes to the right and B's to the left; a click on the `⇄` at the start of B's window bar does the same, and doing it again swaps them back. `:DirDiffSwap!` swaps the whole comparison, as `S` in the tree. No key is taken for it in the compare windows, where every plain key is vim's (the obvious `\s` is already vim-ide's) - see *Swapping sides* below |
-| `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c`. Past the last change (before the first one, or in a pair with no changes) the cursor stays and it says so - `마지막 차이 - 다음 차이 파일: <C-n> 다시 또는 Ctrl+M` - and the same key once more right away opens the next (previous) file that differs; see *Next and previous file* below |
-| `<C-m>` / `<C-S-m>` | Ctrl+M / Shift+Ctrl+M: the next / previous file that differs, at any point, in the same compare tab - Beyond Compare's *다음 차이 파일 (Ctrl+M)* / *이전 차이 파일 (Shift+Ctrl+M)*. Only while the window still shows its pair (after `:e` of another file they are the keys they were). Where the terminal sends Ctrl+M as a plain Enter (inside tmux: a server older than 3.2 or `extended-keys off`; Tera Term), `Enter` right after the end-of-changes message does it instead; any other `Enter` stays `Enter`. See *Ctrl+M and Enter* below |
+| `<C-n>` / `<C-p>` | `]c` / `[c` (next / previous change); a count works as on `]c` / `[c`. Past the last change (before the first one, or in a pair with no changes) the cursor stays and it says so, with the keys that open the next (previous) file that differs - `마지막 차이 - 다음 차이 파일: Shift+Ctrl+N 또는 Ctrl+M`. They never change files themselves: pressed again there they only say it again. See *Next and previous file* below |
+| `<C-S-n>` / `<C-S-p>` | Shift+Ctrl+N / Shift+Ctrl+P: the next / previous file that differs, at any point, in the same compare tab; a count goes on that many files (`3<C-S-n>`). Only while the window still shows its pair (after `:e` of another file they are the keys they were, as outside the compare windows - with no mapping of its own nvim pages down / up with them). nvim sees them only when Ctrl+Shift reaches it as its own key, as with `<C-S-r>`: under a tmux server older than 3.2 they arrive as `<C-n>` / `<C-p>` - see *Shift+Ctrl+N, Ctrl+M and Enter* below |
+| `<C-m>` / `<C-S-m>` | Ctrl+M / Shift+Ctrl+M: the same as `<C-S-n>` / `<C-S-p>` - Beyond Compare's *다음 차이 파일 (Ctrl+M)* / *이전 차이 파일 (Shift+Ctrl+M)*. Where the terminal sends Shift+Ctrl+N as Ctrl+N and Ctrl+M as a plain Enter (inside tmux: a server older than 3.2 or `extended-keys off`; Tera Term), `Enter` right after the end-of-changes message opens the next (previous) file instead; any other `Enter` stays `Enter`. See *Shift+Ctrl+N, Ctrl+M and Enter* below |
 | `<C-w>w` / `<C-w><C-w>` / `<C-w>W` | next / previous window, skipping the overview bar and the line details (and the tree's path line) - in a compare tab it goes back and forth between A and B. With a count, as usual |
 | `<C-r>` / `<C-l>` | copy the whole change under the cursor to the right (B) / to the left (A): every changed line of that block on both sides, lines that exist on one side only included - what `:diffput` / `:diffget` without a range is meant to do, with the pieces linematch cuts one change into counted as one. On an unchanged line with lines of the other side right above (first) or below it, that change. On any other unchanged line it says so and does nothing |
 | `<C-S-r>` / `<C-S-l>` | copy only the line under the cursor - on an unchanged line with lines of the other side right above (first) or below it, that block of other-side lines, as `<C-r>` does there (it can be several lines, or a whole file against an empty one). nvim sees these only when Ctrl+Shift reaches it as its own key - see *Ctrl+Shift in tmux* below; Tera Term usually sends a plain `<C-r>` / `<C-l>` |
@@ -2605,17 +2606,30 @@ before; the overview bar, arrows and line details follow at once.
 **Next and previous file.** At the last difference Beyond Compare's text compare
 says `차이 없음. 다음 차이 파일 (Ctrl+M)`, at the first `이전 차이 파일
 (Shift+Ctrl+M)`, and either key moves on to another file without going back to
-the folder compare. The compare windows do the same. `<C-n>` past the last change
-(`<C-p>` before the first, either one in a pair with no line changes - identical
-files, a binary or too large pair) leaves the cursor where it is and says
-`마지막 차이 - 다음 차이 파일: <C-n> 다시 또는 Ctrl+M` (`첫 차이 - 이전 차이 파일:
-…`, `차이 없음 - …` for identical files, `바이너리 - …` / `큰 파일 - …`); the same
-key once more right after - nothing else typed, cursor and text unchanged - opens
-the next (previous) file. Ctrl+M and Shift+Ctrl+M do it at any point. The
-messages are kept short enough for an 80-column screen with `showcmd` (58 cells
-after `DirDiff: `), so they are never cut in the middle. When the comparison has
-stopped (the scanner died) the message has no hint: there is nothing to look the
-next file up in until `R`.
+the folder compare. In the compare windows Shift+Ctrl+N / Shift+Ctrl+P do that at
+any point, and so do Ctrl+M / Shift+Ctrl+M. `<C-n>` past the last change (`<C-p>`
+before the first, either one in a pair with no line changes - identical files, a
+binary or too large pair) leaves the cursor where it is and says so with the keys:
+`마지막 차이 - 다음 차이 파일: Shift+Ctrl+N 또는 Ctrl+M` (`첫 차이 - 이전 차이 파일:
+Shift+Ctrl+P 또는 Shift+Ctrl+M`, `차이 없음 - …` for identical files, `바이너리 -
+…` / `큰 파일 - …`). `<C-n>` / `<C-p>` never change files: pressed again there they
+only say it again (the second press used to open the next file; that is
+Shift+Ctrl+N / Shift+Ctrl+P now, so walking the changes with `<C-n>` stops at the
+end of the file). Where Shift+Ctrl+N cannot arrive (see *Shift+Ctrl+N, Ctrl+M and
+Enter* below) the message names Enter instead: `마지막 차이 - 다음 차이 파일: Enter
+(<C-S-n> 은 tmux 3.2+)` inside a tmux server older than 3.2, `… Enter (<C-S-n> 이
+안 오면)` elsewhere (for a terminal not on the list below that is a guess, hence
+the "if"). Once a Shift+Ctrl+N / Shift+Ctrl+P has arrived there as its own key
+(say, through the iTerm2 key binding below) it says `… Shift+Ctrl+N 또는 Enter` -
+Ctrl+M may still be a plain Enter there, so Enter after the message keeps working.
+The messages are kept short enough for an 80-column screen with `showcmd` (58
+cells after `DirDiff: ` - hence no brackets around `또는 Ctrl+M`, and the vim name
+of the key in the Enter one), so they are never cut in the middle.
+Without a way to open the next file the message names no keys: when the
+comparison has stopped (the scanner died - there is nothing to look the next file
+up in until `R`), for two picked files, and with `g:vimide_dirdiff_file_keys = 0`
+(also when it was 0 at start-up and set to 1 later: the keys are taken only when
+the plugin loads or `~/.vimrc` is sourced again).
 
 - Which file: the one the tree's `<C-n>` / `<C-p>` would land on from that
   pair's row - in the same view (in *left newer* the next file newer in A, in
@@ -2640,21 +2654,42 @@ next file up in until `R`.
   keep the edits and go (`K`: the buffer stays loaded, modified and hidden, and is
   named; opening that pair again shows the edits, and finishing the comparison
   names it again), or cancel (`C`, the default).
-- Pressing Ctrl+M again while the next file is still being looked up counts:
-  holding Ctrl+M walks on file by file. `<C-n>` / `<C-p>` pressed during the
-  lookup do nothing (they would act on the pair that is about to be replaced and
-  skip a whole file). A lookup whose answer can no longer come (`R`, `O` / `X`,
-  the scanner died) is dropped, so the keys never go silent.
+- Pressing Shift+Ctrl+N (or Ctrl+M) again while the next file is still being
+  looked up counts: holding the key walks on file by file. The other direction
+  takes one off - Shift+Ctrl+N and Shift+Ctrl+P in quick succession stay on the
+  pair you were on (only the last key used to count, so that went one file back).
+  `<C-n>` / `<C-p>` pressed during the lookup do nothing (they would act on the
+  pair that is about to be replaced). A lookup whose answer can no longer come
+  (`R`, `O` / `X`, the scanner died) is dropped, so the keys never go silent.
 - The side: the one you were on. When a file exists on one side only the cursor
   goes to the other side for that file, and the next step goes back to yours.
 - Two files picked with `Tab` / `Tab` have no place in the tree's order: the end
-  message has no hint, and Ctrl+M says so.
+  message names no keys, and Shift+Ctrl+N / Ctrl+M say so.
 
-**Ctrl+M and Enter.** A terminal sends Ctrl+M as the same byte as Enter (0x0D)
-unless it reports modified keys: iTerm2 does with modifyOtherKeys level 2 when
-nvim or tmux asks for it, and inside tmux the **server** has to be 3.2 or newer
-with `set -s extended-keys on` (as for *Ctrl+Shift in tmux* below) - then
-Ctrl+M arrives as `CSI 27;5;109~` and Shift+Ctrl+M as `CSI 27;6;77~`. nvim 0.12
+**Shift+Ctrl+N, Ctrl+M and Enter.** A terminal sends Shift+Ctrl+N as the same
+byte as Ctrl+N (0x0E), Shift+Ctrl+P as Ctrl+P (0x10) and Ctrl+M as the same byte
+as Enter (0x0D) unless it reports modified keys: iTerm2 does with modifyOtherKeys
+level 2 when nvim or tmux asks for it, and inside tmux the **server** has to be
+3.2 or newer with `set -s extended-keys on` - the same condition as for
+Ctrl+Shift+R (*Ctrl+Shift in tmux* below). Then Shift+Ctrl+N arrives as
+`CSI 27;6;78~`, Shift+Ctrl+P as `CSI 27;6;80~`, Ctrl+M as `CSI 27;5;109~` and
+Shift+Ctrl+M as `CSI 27;6;77~`. Under a tmux server older than 3.2 (3.0a, the apt
+package of Ubuntu 20.04), with `extended-keys off`, or in Tera Term, Shift+Ctrl+N /
+Shift+Ctrl+P arrive as a plain `<C-n>` / `<C-p>` - just as Ctrl+Shift+R arrives as
+`<C-r>` - so there they move to the next / previous change, and at the end the
+message names Enter. A 0x0E never reaches the `<C-S-n>` mapping (nvim files it
+under Shift plus 0x0E, which no terminal sends - measured), so a plain Ctrl+N
+keeps its meaning everywhere. If iTerm2 still sends Shift+Ctrl+N as Ctrl+N
+(`:JumpKeyTest` and then Shift+Ctrl+N shows `<C-N>` - for instance with *Apps can
+change how keys are reported* turned off), key bindings can send the reported
+form every time: *Profiles > Keys > Key Mappings*, `+`, ⌃⇧N → *Send Escape
+Sequence* `[27;6;78~` and ⌃⇧P → `[27;6;80~` (iTerm2 puts the Esc in front). nvim
+reads them as `<C-S-N>` / `<C-S-P>`; inside tmux, as above, only a 3.2 or newer
+server is known to pass them on - it has not been tried through a 3.0a server. Such
+a binding fires in every program of that profile, not only in nvim: a shell (or
+anything else that does not read the sequence) gets stray text such as `7;6;78~`
+at the prompt. Keep it in a profile of its own for the server, or remove it if
+that gets in the way. nvim 0.12
 keeps `<C-m>` and `<CR>` apart as mappings: a reported Ctrl+M goes to the `<C-m>`
 mapping, and a 0x0D goes to the `<CR>` mapping - but only when there is one: with
 a `<C-m>` mapping alone nvim runs it for 0x0D too (measured by sending both byte
@@ -2671,16 +2706,21 @@ case applies is decided once: inside tmux from the server - older than 3.2, or
 `extended-keys` off, means Enter; outside tmux iTerm2 (`TERM_PROGRAM`, or
 `LC_TERMINAL` over ssh), kitty, WezTerm and ghostty are known to tell the keys
 apart and any other terminal is taken to send Enter; and once a Ctrl+M has
-arrived as its own key the terminal is known to tell them apart. A tmux 3.2+
-server with `extended-keys on` reached from a terminal that cannot report
-Ctrl+M (Tera Term) is the one case guessed wrong: Ctrl+M after the message is
-then a plain Enter, and `<C-n>` once more still works. nvim also hangs
+arrived as its own key the terminal is known to tell them apart (the end message
+then names Shift+Ctrl+N and Ctrl+M). A Shift+Ctrl+N / Shift+Ctrl+P arriving on its
+own does not settle it - it may come from the key binding above while Ctrl+M is
+still Enter - and only puts Shift+Ctrl+N into the Enter message. A tmux 3.2+ server
+with `extended-keys on` reached from a terminal that cannot report modified keys
+(Tera Term) is the one case guessed wrong: the message names Shift+Ctrl+N, which
+arrives as `<C-n>`, and Ctrl+M after it is a plain Enter - open the next file
+from the tree there. nvim also hangs
 the `<C-S-m>` mapping on Shift+Enter (`<S-CR>`, what Shift+Ctrl+M simplifies to);
 a Shift+Enter that reaches it is passed on unchanged. In a compare window a
 reported Ctrl+M is this key, not the first half of *Ctrl+M twice* for the marks
-list. `let g:vimide_dirdiff_file_keys = 0` leaves `<C-m>`, `<C-S-m>` and Enter
-alone everywhere (the second `<C-n>` / `<C-p>` still works). `:JumpKeyTest` and
-then Ctrl+M shows `<C-M>` when the key gets through.
+list. `let g:vimide_dirdiff_file_keys = 0` leaves `<C-S-n>`, `<C-S-p>`, `<C-m>`,
+`<C-S-m>` and Enter alone everywhere (the compare windows then have no key for the
+next file - the tree does it). `:JumpKeyTest` and then Ctrl+M shows `<C-M>` when
+the key gets through, Shift+Ctrl+N `<C-S-N>`.
 
 **Ctrl+Shift in tmux.** In iTerm2 nothing has to be turned on: when nvim, or the
 tmux in between, asks for modifyOtherKeys level 2, iTerm2 sends Ctrl+Shift+R as
@@ -2699,6 +2739,9 @@ shows which one you are in - so the new one is used only after that server has b
 ended (save the sessions with tmux-resurrect first, restore them in the new server).
 Until then `1<C-r>` / `1<C-l>` copy the cursor line; inside such a server the first
 whole-block copy of a session says so once, and the `?` help adds a line about it.
+Shift+Ctrl+N / Shift+Ctrl+P (next / previous file that differs) need the same and
+arrive there as `<C-n>` / `<C-p>`; Enter right after the end-of-changes message
+stands in for them (*Shift+Ctrl+N, Ctrl+M and Enter* above).
 `:JumpKeyTest` followed by Ctrl+Shift+R shows `<C-S-R>` when the key gets through.
 
 #### Compare tabs
@@ -3062,8 +3105,8 @@ neo-tree keys) work on the current side - the half the cursor is in, shown as
   row, the row stays highlighted as having a tab, `<CR>` on the row goes to
   that tab (it says the pair is swapped) instead of opening a second one, and
   `o` reads it again still swapped. Swapping again turns it back into the row's
-  ordinary compare tab. Ctrl+M (and `<C-n>` past the last change) still walks
-  the tree's order from there; the next file comes in the tree's orientation.
+  ordinary compare tab. Shift+Ctrl+N and Ctrl+M still walk the tree's order
+  from there; the next file comes in the tree's orientation.
   Two picked files, and the compare tab of two files picked in neo-tree, just
   trade places. With `g:vimide_dirdiff_pair_tab = 0` the two edit windows above
   the tree swap the same way, and `<CR>` on that row keeps them swapped.
@@ -3161,9 +3204,10 @@ Copying in the tree:
   `g:vimide_dirdiff_line_details` (1: the line details, 0: none),
   `g:vimide_dirdiff_plain_text` (1: same text in plain colors, 0: syntax
   colors), `g:vimide_dirdiff_undo_keys` (1: `<C-z>` / `<C-y>` across the pair,
-  0: leave them alone), `g:vimide_dirdiff_file_keys` (1: `<C-m>` / `<C-S-m>` -
-  and Enter right after the end-of-changes message - open the next / previous
-  file that differs, 0: leave them alone), `g:vimide_dirdiff_pick_vimdiff` (0: two files picked
+  0: leave them alone), `g:vimide_dirdiff_file_keys` (1: `<C-S-n>` / `<C-S-p>`
+  and `<C-m>` / `<C-S-m>` - and Enter right after the end-of-changes message
+  where those cannot arrive - open the next / previous file that differs, 0:
+  leave them alone), `g:vimide_dirdiff_pick_vimdiff` (0: two files picked
   with `Tab` / `Tab` open in a compare tab, 1: the plain vimdiff of before),
   `g:vimide_dirdiff_file_ops` (1: the tree's `a` `A` `d` `r`, 0: unmapped),
   `g:vimide_dirdiff_confirm_delete` (1: `d` asks first, 0: deletes at once),
