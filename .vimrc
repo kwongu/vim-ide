@@ -2003,7 +2003,12 @@ let g:vimide_dirdiff_tab = 1
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
 "            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도,
 "            고른 두 파일은 [B] 를 고른 곳으로),
-"            <C-n>/<C-p> = ]c / [c, <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
+"            <C-n>/<C-p> = ]c / [c (마지막·첫 차이에서는 알리고, 곧바로 한 번 더 누르면 다음/이전 차이 파일),
+"            <C-m>/<C-S-m> = 다음/이전 차이 파일 (Beyond Compare 의 Ctrl+M / Shift+Ctrl+M: 트리의 <C-n>/<C-p> 가
+"            갈 짝을 이 탭에 다시 채운다 - 그 짝의 탭이 있으면 그리로, 고친 채면 먼저 묻는다. Ctrl+M 이 Enter 로
+"            오는 터미널(tmux 3.2 미만 서버·extended-keys 를 끈 tmux, Tera Term)에서는 끝 알림 바로 뒤의 Enter 만
+"            그것 - 그 밖의 Enter 는 그대로),
+"            <C-r>/<C-l> = 커서의 차이 덩어리째 오른쪽/왼쪽으로,
 "            <C-S-r>/<C-S-l> = 커서 줄만 (Tera Term, tmux 3.2 미만 서버처럼 Ctrl+Shift 가 안 오면 1<C-r>/1<C-l>.
 "            바뀌지 않은 줄이면 바로 위·아래에 끼인 저쪽 줄 덩어리째), N<C-r> 은 N 줄, 비주얼은
 "            고른 줄 (비교 탭 밖의 <C-r> 되돌리기 취소, <C-l> 창 옮기기는 그대로),
@@ -2022,6 +2027,7 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
+"   let g:vimide_dirdiff_file_keys = 0     " 비교 창의 <C-m>/<C-S-m>(끝 알림 뒤의 Enter)을 가로채지 않기
 "   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 새 탭의 맨 vimdiff 로
 let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
@@ -2051,6 +2057,10 @@ let g:vimide_dirdiff_plain_text = 1
 " 비교 창의 <C-z>/<C-y> 를 짝 전체의 되돌리기/다시 실행으로 (A·B 어느 쪽에서든 두 파일의 마지막 변경): 1 켬,
 " 0 가로채지 않기 (u 와 :redo 는 어느 쪽이든 늘 그 버퍼만이다)
 let g:vimide_dirdiff_undo_keys = 1
+" 비교 창의 <C-m>/<C-S-m> 을 다음/이전 차이 파일로 (Beyond Compare 의 Ctrl+M / Shift+Ctrl+M - Ctrl+M 이 Enter 로 오는
+" 터미널(tmux 3.2 미만 서버·extended-keys 를 끈 tmux, Tera Term)에서는 마지막·첫 차이의 알림 바로 뒤의 Enter 만):
+" 1 켬, 0 가로채지 않기 (<C-n>/<C-p> 한 번 더는 그대로)
+let g:vimide_dirdiff_file_keys = 1
 " Tab/Tab 으로 고른 두 파일을 어디서 견주나: 0 = DirDiff 의 비교 탭 (보통 짝과 같은 색·창 머리·개요 막대·\d·
 " 복사 키·Ctrl+Z·q - 비교 트리에서 [B] 를 골랐으면 그 비교의 탭으로), 1 = 예전처럼 새 탭의 맨 vimdiff
 " (g:vimide_dirdiff_view = 0 이면 이것과 상관없이 맨 vimdiff - 디렉터리 둘도 예전 목록이다)
@@ -4603,6 +4613,11 @@ if has('nvim') && get(g:, 'vimide_marks_double', 1)
         " 명령줄 창에서 Enter 는 그 줄을 실행하는 키다 - 전역 매핑이 가리면 안 된다
         autocmd CmdwinEnter * nnoremap <buffer> <CR> <CR>
     augroup END
+endif
+" DirDiff 비교 창의 <C-m>(다음 차이 파일)과 끝 알림 뒤의 <CR> 은 위 두 매핑을 먼저 기억해 두고 감싼다.
+" .vimrc 를 다시 읽으면 위 nnoremap 이 그것을 덮으므로 다시 가로채게 한다 (dirdiffview.lua - <C-l> 처럼)
+if has('nvim')
+    silent! lua if _G.vimide_dirdiff_take_over then _G.vimide_dirdiff_take_over() end
 endif
 nnoremap <silent> <leader>fS :ProjectFilesSave<CR>
 " 1 (기본) 새로 만든 파일을 저장하면 목록에 넣고 그 파일만 색인한다.

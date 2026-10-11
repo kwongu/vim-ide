@@ -311,6 +311,12 @@ end
 -- vim 이 보는 모양으로 맞춘다 (<C-n> -> <C-N>, <leader>fo -> \fo). 실제 매핑도
 -- 같은 함수(keytrans)를 거치므로 두 쪽이 글자 그대로 맞는다.
 local function canon(lhs)
+  -- <C-m> 은 바이트로 바꾸면 <CR> 로 줄어든다. nvim 은 <C-m> 매핑을 줄이지 않은 <C-M> 으로 두고 (확장 키의
+  -- Ctrl+M 만 그리 온다 - DirDiff 비교 창의 '다음 차이 파일') <CR> 매핑과 따로 센다. 줄였더니 README 의
+  -- '<C-m>' 줄이 Enter 매핑과 묶여 Enter 가 그 일을 하는 것처럼 보였다
+  if lhs:match('^<[Cc]%-[Mm]>$') then
+    return '<C-M>'
+  end
   local ok, raw = pcall(api.nvim_replace_termcodes, lhs, true, true, true)
   if not ok then
     return nil

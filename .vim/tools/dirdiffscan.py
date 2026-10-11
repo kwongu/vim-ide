@@ -732,15 +732,23 @@ def listing(n, rid=None, lift=False):
     return None
 
 
-def path_key(rel):
-    n = find(rel)
-    if n is None:
-        return None
+def path_key(rel, guess=False):
+    # guess: 모형에 없는 경로(지운 파일 - R 로 다시 훑었다)면 있었다면 섰을 자리로 (sort_key 와 같은 꼴, 끝은
+    # 파일·가운데는 디렉터리로 친다). 비교 창의 '다음 차이 파일' 이 그런 짝에서 물으면 맨 앞 것을 돌려주었다
+    n = root
     parts = []
-    while n.parent is not None:
-        parts.append(sort_key(n))
-        n = n.parent
-    return list(reversed(parts))
+    names = rel.split('/') if rel else []
+    for i, name in enumerate(names):
+        c = n.kids.get(name) if n.kids else None
+        if c is None:
+            if not guess:
+                return None
+            for j in range(i, len(names)):
+                parts.append((1 if j == len(names) - 1 else 0, names[j].lower(), names[j]))
+            return parts
+        parts.append(sort_key(c))
+        n = c
+    return parts
 
 
 def items_in_order(n, prefix, bits=None):
@@ -762,7 +770,7 @@ def items_in_order(n, prefix, bits=None):
 
 
 def cmd_next(msg):
-    fk = path_key(msg.get('from') or '') or []
+    fk = path_key(msg.get('from') or '', guess=True)
     step = msg.get('step', 1)
     bits = msg.get('bits')
     best = None

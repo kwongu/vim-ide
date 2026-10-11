@@ -77,7 +77,9 @@
 --               비교 창에서도. 아래 tab_cycle
 -- 비교 창(비교 탭의 두 창, pair_tab = 0 이면 위의 편집 창 둘)에서는 \d 가 보기 고르기, 비교 탭의
 -- q 는 그 탭 닫기 (매크로를 적는 중이면 q 그대로 - 적기 끝),
--- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이), <C-r>/<C-l> 은
+-- <C-n>/<C-p> 가 ]c/[c (다음/앞 차이 - 마지막·첫 차이에서는 알리고, 곧바로 한 번 더 누르면 다음/이전 차이
+-- 파일로: 아래 '다음 / 이전 차이 파일'), <C-m>/<C-S-m> 이 다음/이전 차이 파일 (Beyond Compare 의 Ctrl+M /
+-- Shift+Ctrl+M), <C-r>/<C-l> 은
 -- 커서가 있는 차이 덩어리째 오른쪽(B)/왼쪽(A)으로 (diffput/diffget - 저장은 :w).
 -- <C-S-r>/<C-S-l> 은 커서 줄만 (Ctrl+Shift 가 nvim 까지 따로 올 때 - 아래 TAKE 의 설명: tmux 안이면
 -- tmux '서버'가 3.2 이상이어야 한다), 어디서나 되는 것은 횟수(1<C-r> = 커서 줄, N<C-r> = N 줄)와
@@ -90,6 +92,13 @@
 -- 중 마지막으로 바뀐 것을. 타자, <C-r>/<C-l> 복사, dp/do 모두. 횟수, 비주얼도. 삽입 모드의 <C-z> 는 삽입을 끝내고
 -- 방금 친 것부터, 삽입 모드의 <C-y> 는 그대로 - 아래 '짝 전체의 되돌리기'). 비교 창 밖의 <C-z>(nvim 멈추기)·<C-y>
 -- (화면을 한 줄 위로)는 그대로다.
+-- 다음 / 이전 차이 파일 (Beyond Compare 의 '차이 없음. 다음 차이 파일 (Ctrl+M)'): 트리의 <C-n>/<C-p> 가 그 짝의
+-- 줄에서 갈 곳 (같은 보기, 접힌 디렉터리는 펼치며. 한쪽에만 있는 디렉터리는 건너뛴다). 그 짝의 비교 탭이 이미
+-- 있으면 그 탭으로, 아니면 지금 비교 탭을 그 짝으로 다시 채운다 (탭이 늘지 않는다 - 커서는 첫 차이, 이전이면
+-- 마지막 차이. \d 보기는 그대로). 고친 채인 쪽이 있으면 먼저 묻는다 (저장 / 고친 채 두기 / 취소). pair_tab = 0
+-- 이면 편집 창 둘에. Ctrl+M 이 Enter 와 같은 바이트로 오는 터미널(tmux 3.2 미만 서버·extended-keys 를 끈 tmux,
+-- Tera Term)에서는 끝 알림 바로 뒤의 Enter 만 그 일을 한다 (cmp.fk, cmp.fk_legacy - 그 밖의 Enter 는 그대로).
+-- Tab/Tab 으로 고른 두 파일은 트리 차례가 없다
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
 -- 먼저), 크기가 다르면 바로 '다름', 크기·시각이 같으면 '같음', 나머지만 뒤에서
@@ -112,6 +121,7 @@
 --   let g:vimide_dirdiff_line_details = 0  " 비교 탭 맨 아래의 줄 자세히(두 줄) 없이
 --   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로 (기본 1: 같은 글은 보통 글자색)
 --   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기 (짝 전체 되돌리기 없이)
+--   let g:vimide_dirdiff_file_keys = 0     " 비교 창의 <C-m>/<C-S-m>(끝 알림 뒤의 Enter)을 가로채지 않기
 --   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 맨 vimdiff 로 (dirdiffpick.lua 가 본다)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
@@ -828,6 +838,18 @@ on_event = function(s, ev)
       s.expanded[rel] = true
     end
     local path = nz(ev.path)   -- JSON null 은 vim.NIL (참) 이다
+    -- 비교 창의 '다음 / 이전 차이 파일' 이 물은 것: 트리를 옮기고 알리는 대신 그 짝을 연다 (cmp.fs_found). 그 뒤에
+    -- 다시 물었거나 트리에서 옮겨 밀려난 것(fs_ids 에만 있다)은 버린다 - 트리 커서가 그리 뛰고 '마지막' 을 알렸다
+    if k == 'reveal' and s.fs_ids and s.fs_ids[ev.id] then
+      s.fs_ids[ev.id] = nil
+      if s.fstep and ev.id == s.fstep.id then
+        return cmp.fs_found(s, s.fstep, path)
+      end
+      if next(ev.lists or {}) ~= nil then
+        render(s)
+      end
+      return
+    end
     if k == 'reveal' then
       s.reveal_path = path
       if not path then
@@ -2265,6 +2287,7 @@ local function fill(v, r, jump)
   v.rel = r.rel
   v.ctx_done = nil   -- 지금 'diffopt' 로 새로 접혔다 - 이 탭에 들어올 때 그 탭의 context 로 (dip_sync)
   v.bin = bin   -- 두 창이 알림이다 (편집 창의 <C-r>/<C-l> 이 알린다, 보기는 접을 것이 없다)
+  v.big = big   -- 그 알림이 큰 파일의 것 (끝 알림의 말 - cmp.fk_end)
   v.buf_a, v.buf_b = api.nvim_win_get_buf(v.win_a), api.nvim_win_get_buf(v.win_b)
   -- 창 머리의 수정 일시·크기 (디스크의 것 - :w 하면 다시, BufWritePost)
   v.path = { a = pa, b = pb }
@@ -2279,10 +2302,17 @@ local function fill(v, r, jump)
   -- 알림(바이너리·큰 파일)에는 곁 창이 쓸모없다 (빈 개요 막대, 'A – B –' 뿐인 줄 자세히) - 닫고 두 창을 반반으로
   if bin and (v.ov or v.ld) then
     cmp.detach(v)
+    v.bin_cut = true
     if api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b) then
       local tw = api.nvim_win_get_width(v.win_a) + api.nvim_win_get_width(v.win_b)
       pcall(api.nvim_win_set_width, v.win_a, math.floor(tw / 2))
     end
+  elseif not bin and v.bin_cut and not (v.ov or v.ld) and v.tab == api.nvim_get_current_tabpage() then
+    -- 알림 짝 뒤에 같은 탭에 보통 짝을 실었다 (다음 차이 파일이 탭을 다시 채운다 - cmp.fs_open): 닫았던 곁 창을
+    -- 다시 세운다. 예전에는 한 탭이 한 짝이라 알림이 끝이었는데, 그대로 두었더니 그 탭은 그 뒤로 두 창뿐이었다
+    -- (트리에서 바로 연 탭은 개요 막대·줄 자세히까지 넷). 줄 자세히는 지금 탭의 맨 아래에 서므로 그 탭에서만
+    v.bin_cut = nil
+    cmp.attach(v)
   end
   cmp.own_overview(v)
   -- 탭 이름: airline 의 탭 줄은 탭에 목록 버퍼가 없으면 첫 창의 버퍼 이름을 쓴다 - 두 창이 다 알림이면 그
@@ -2580,6 +2610,9 @@ local function walk_end(s, w, path)
     p = p:match('^(.*)/[^/]+$')
   end
   walk_drop(s, w)
+  if w.fs then
+    return cmp.fs_found(s, w.fs, path)   -- 비교 창의 '다음 / 이전 차이 파일' 이 걸은 것
+  end
   if not path then
     local done = s.prog and s.prog.done
     return say(w.step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)')
@@ -2716,6 +2749,7 @@ local function act_step(s, step)
   local from = r and (r.loading and r.rel:gsub('/$', '') or r.rel) or ''
   s.req = s.req + 1
   s.reveal_step = step
+  s.fstep = nil   -- 비교 창이 묻던 다음 차이 파일은 그만 (트리에서 옮기는 것이 나중이다)
   if s.walk then
     walk_drop(s, s.walk)   -- 아직 목록을 기다리던 앞의 것
     s.walk = nil
@@ -3728,9 +3762,20 @@ local function wrap(mode, lhs, when, desc)
   -- 전역 매핑만 본다. maparg() 는 지금 버퍼의 매핑을 먼저 돌려주어서, 그런 창(neo-tree 등)에서
   -- .vimrc 를 다시 읽으면(:source - 이것을 다시 부른다) 그 버퍼의 q 를 어디서나 돌렸다
   local prev
-  local want = api.nvim_replace_termcodes(
-    lhs:gsub('<[Ll]eader>', ((vim.g.mapleader or '\\'):gsub('%%', '%%%%'))), true, true, true)
-  for _, m in ipairs(api.nvim_get_keymap(mode)) do
+  local text = lhs:gsub('<[Ll]eader>', ((vim.g.mapleader or '\\'):gsub('%%', '%%%%')))
+  local want = api.nvim_replace_termcodes(text, true, true, true)
+  local maps = api.nvim_get_keymap(mode)
+  -- 글자 그대로 같은 것 먼저 (꺾쇠 안만 대문자로 - nvim 이 보이는 꼴): nvim 은 <C-m> 과 <CR> 을 따로 매핑하는데
+  -- (확장 키로 오면 다른 키다) 바꾼 바이트로는 둘 다 \r 이라, <CR> 을 감쌀 때 .vimrc 의 <C-m> 을 감싸기 전의
+  -- 것으로 잡았다 (그 반대도). 그런 것이 없으면 예전처럼 바이트로 (<Leader> 를 다르게 적은 것 등)
+  local norm = text:gsub('%b<>', string.upper)
+  for _, m in ipairs(maps) do
+    if m.lhs:gsub('%b<>', string.upper) == norm then
+      prev = m
+      break
+    end
+  end
+  for _, m in ipairs(prev and {} or maps) do
     if api.nvim_replace_termcodes(m.lhs, true, true, true) == want then
       prev = m
       break
@@ -3845,6 +3890,78 @@ function cmp.take_undo()
   end
 end
 
+-- Ctrl+M / Shift+Ctrl+M 을 비교 창에서만: 다음 / 이전 차이 파일 (Beyond Compare 의 글 비교 창 키 - 아래 '다음 /
+-- 이전 차이 파일', _G.vimide_dirdiff_file_key). nvim 0.12 는 <C-m> 과 <CR> 을 다른 매핑으로 둔다: 터미널이 Ctrl+M 을
+-- 따로 보내면(modifyOtherKeys 의 CSI 27;5;109~, kitty 의 CSI 109;5u - iTerm2, tmux 3.2 이상 서버의 extended-keys on)
+-- <C-m> 매핑이 돈다. Enter 와 같은 0x0D 로 보내면(tmux 3.0a 서버, Tera Term, 보통 터미널) <CR> 매핑이 있으면 그것이,
+-- 없으면 <C-m> 매핑이 돈다 (nvim 은 <C-m> 매핑을 줄인 바이트 0x0D 로도 찾는다 - 실측: 따로·같이 걸고 바이트를
+-- 보냈다). 그래서 <C-m> 을 감쌀 때는 늘 <CR> 도 같이 감싼다 - <CR> 을 빼면 그런 터미널의 Enter 마다 다음 차이
+-- 파일로 갔다. 거기서는 Ctrl+M 이 그냥 Enter 라, 그 자리를 메우려고 <CR> 은 끝 알림('마지막 차이 - 다음 차이 파일:
+-- …') 바로 뒤에만 그 일을 한다 (cmp.fk - 커서가 움직이거나 다른 키를 치면 풀린다): 알림 뒤의 0x0D 는 Ctrl+M 이든
+-- Enter 든 '다음 차이 파일' 이고, 그 밖의 Enter 는 늘 원래 뜻(.vimrc 의 MarksEnter)이다. 옛 터미널은 Shift+Ctrl+M
+-- 도 0x0D 라 알림 뒤의 Enter 는 그 알림의 방향을 따른다 (<C-p> 의 알림 뒤면 이전 파일). Ctrl+M 을 가려 보내는
+-- 터미널이면(cmp.fk_legacy 가 아니다) 알림 뒤의 Enter 도 원래 뜻이다.
+-- <C-m>/<C-S-m> 은 그 창이 아직 제 짝의 버퍼를 보일 때만 (cmp.fk_own): 비교 창에서 :e 로 다른 파일을 열었으면
+-- Ctrl+M 은 원래 뜻 (그 파일이 다음 차이 파일로 바뀌어 버렸다).
+-- <C-S-m> 은 nvim 이 줄인 이름 <S-CR> 로도 건다 (nvim_get_keymap 의 lhsrawalt): 확장 키 터미널의 Shift+Enter 도 여기로
+-- 온다 - 그 키였으면 원래 뜻으로 넘긴다 (on_key 가 받아 둔 키 - cmp.fk_key). g:vimide_dirdiff_file_keys = 0 이면 셋 다
+-- 가로채지 않는다 (<C-n>/<C-p> 의 한 번 더는 그대로)
+function cmp.take_file_keys()
+  wrap('n', '<CR>', function()
+    local fk = cmp.fk
+    if fk and on(vim.g.vimide_dirdiff_file_keys, 1) and cmp.fk_legacy() then
+      local w = api.nvim_get_current_win()
+      if cmp.fk_armed(view_of_win(w), w) then
+        return ('<Cmd>lua _G.vimide_dirdiff_file_key(%d, false)<CR>'):format(fk.dir)
+      end
+    end
+  end, 'DirDiff 비교 창: 끝 알림 바로 뒤에만 다음 / 이전 차이 파일 (Ctrl+M 이 Enter 로 오는 터미널)')
+  for _, spec in ipairs({ { '<C-m>', 1, '다음', 'Ctrl+M' }, { '<C-S-m>', -1, '이전', 'Shift+Ctrl+M' } }) do
+    wrap('n', spec[1], function()
+      local w = api.nvim_get_current_win()
+      local v = on(vim.g.vimide_dirdiff_file_keys, 1) and view_of_win(w)
+      if v and v.rel and cmp.fk_own(v, w) then
+        return ('<Cmd>lua _G.vimide_dirdiff_file_key(%d, true)<CR>'):format(spec[2])
+      end
+    end, ('DirDiff 비교 창: %s 차이 파일 (Beyond Compare 의 %s)'):format(spec[3], spec[4]))
+  end
+end
+
+-- 그 창(w)이 아직 제 짝의 버퍼를 보이는가 (A 창은 v.buf_a, B 창은 v.buf_b - 바이너리·고아의 알림 버퍼도 짝이다)
+function cmp.fk_own(v, w)
+  return api.nvim_win_is_valid(w) and api.nvim_win_get_buf(w) == (w == v.win_a and v.buf_a or v.buf_b)
+end
+
+-- Ctrl+M 이 Enter(0x0D)로 올 터미널인가 - 끝 알림 뒤의 Enter 를 다음 차이 파일로 쓸지 (위). Ctrl+M 이 따로 온 적이
+-- 있으면(cmp.fk_ext) 아니다. tmux 안이면 그 서버로 안다: 3.2 미만(tmux_old)이거나 extended-keys 가 off 면 Enter 로
+-- 온다 (on·always 면 nvim 이 청한 modifyOtherKeys 대로 가려 보낸다). tmux 밖이면 가려 보내는 줄 아는 터미널(iTerm2 -
+-- ssh 너머로는 LC_TERMINAL, kitty, WezTerm, ghostty)만 아니라고 본다 - 모르는 터미널은 Enter 로 온다고 친다 (그쪽이
+-- 틀려도 알림 바로 뒤의 Enter 하나다). 한 번만 묻는다 (cmp.fk_term). 예전에는 첫 Ctrl+M 이 오기 전까지 늘 Enter 로
+-- 쳐서, iTerm2·tmux 3.2 이상에서 알림 뒤의 Enter 가 다음 파일로 갔다
+function cmp.fk_legacy()
+  if cmp.fk_ext then
+    return false
+  end
+  if cmp.fk_term == nil then
+    local env = vim.env
+    if (env.TMUX or '') ~= '' then
+      local val
+      if not tmux_old() and vim.system and vim.fn.executable('tmux') == 1 then
+        local ok, r = pcall(function()
+          return vim.system({ 'tmux', 'show-options', '-sv', 'extended-keys' }, { text = true }):wait(1000)
+        end)
+        val = ok and r.code == 0 and vim.trim(r.stdout or '') or nil
+      end
+      cmp.fk_term = val == nil or val == 'off'   -- 묻지 못했으면 Enter 로 온다고 친다
+    else
+      local tp, term = env.TERM_PROGRAM or '', env.TERM or ''
+      cmp.fk_term = not (tp == 'iTerm.app' or env.LC_TERMINAL == 'iTerm2' or tp == 'WezTerm' or tp == 'ghostty'
+        or term:find('kitty', 1, true) or term:find('ghostty', 1, true) or term:find('wezterm', 1, true))
+    end
+  end
+  return cmp.fk_term
+end
+
 -- .vimrc 를 다시 읽으면(:source) 그 map <C-l> 이 이것을 덮는다 - .vimrc 가 이것을 다시 부른다
 -- ,r / ,e (.vimrc 의 BufCycle 이 먼저 묻는다): DirDiff 탭(트리 탭, 비교 탭, neo-tree 에서 고른 두 파일의
 -- 비교 탭) 안에서는 버퍼가 아니라 탭을 옮긴다 - gt / gT 와 같다 (요청): ,r 은 다음 탭, ,e 는 앞 탭, 끝에서
@@ -3878,6 +3995,9 @@ function _G.vimide_dirdiff_take_over()
   take_over_view_keys()
   if on(vim.g.vimide_dirdiff_undo_keys, 1) then
     cmp.take_undo()
+  end
+  if on(vim.g.vimide_dirdiff_file_keys, 1) then
+    cmp.take_file_keys()
   end
 end
 _G.vimide_dirdiff_take_over()
@@ -4058,7 +4178,11 @@ local HELP_PAIR = {
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
   '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
   '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로)',
-  '  <C-n> <C-p> = ]c [c (다음 / 앞 차이)',
+  '  <C-n> <C-p> = ]c [c (다음 / 앞 차이) - 마지막·첫 차이에서는 알리고, 곧바로 한 번 더 누르면 다음 / 이전 차이 파일',
+  '  <C-m> <C-S-m> 다음 / 이전 차이 파일 (Beyond Compare 의 Ctrl+M / Shift+Ctrl+M): 트리의 <C-n> <C-p> 가 갈 짝을',
+  '              이 탭에 다시 채운다 (그 짝의 탭이 있으면 그리로. 고친 채면 먼저 묻는다). Ctrl+M 이 Enter 로 오는',
+  '              터미널(tmux 3.2 미만 서버·extended-keys off, Tera Term)에서는 끝 알림 바로 뒤의 Enter 가 그것',
+  '              - 그 밖의 Enter 는 그대로',
   '  <C-r> <C-l> 커서가 있는 차이 덩어리째 오른쪽(B) / 왼쪽(A) 으로 (저장은 :w - 트리 판정도 다시)',
   '  <C-S-r> <C-S-l> 커서 줄만 (Ctrl+Shift 가 안 오는 터미널·tmux 3.2 미만 서버에서는 1<C-r> 1<C-l>)',
   '                - 바뀌지 않은 줄이면 바로 위(먼저)·아래에 끼인 저쪽 줄 덩어리째',
@@ -4079,6 +4203,7 @@ local function help_pair()
   return vim.list_extend(vim.list_extend({}, HELP_PAIR), {
     ('  ! 지금 tmux 서버(%s)는 Ctrl+Shift 를 넘기지 못해 <C-S-r> <C-S-l> 이 <C-r> <C-l> 로 온다'):format(old),
     '    - 커서 줄만은 1<C-r> 1<C-l>. tmux 3.2 이상 서버(extended-keys on)에서는 그대로 된다',
+    '    Ctrl+M / Shift+Ctrl+M 도 Enter 로 온다 - 마지막·첫 차이의 알림 바로 뒤에 Enter (또는 <C-n> <C-p> 한 번 더)',
   })
 end
 
@@ -4433,6 +4558,7 @@ local function restart(s)
   local r = cur_row(s)
   s.want_rel = r and r.e and r.rel or nil   -- 커서가 있던 줄로 돌아간다 (그 줄이 다시 생기면)
   s.dirs, s.loading, s.dirty, s.prog, s.walk = {}, {}, {}, nil, nil
+  s.fstep, s.fs_ids = nil, nil   -- 비교 창이 묻던 다음 차이 파일의 답은 새 뒤쪽에서 오지 않는다 (cmp.fs_pending)
   if not start_job(s) then
     return
   end
@@ -6460,7 +6586,8 @@ for _, k in ipairs({ '<LeftMouse>', '<LeftRelease>', '<LeftDrag>', '<RightMouse>
   cmp.MOUSE[#cmp.MOUSE + 1] = api.nvim_replace_termcodes(k, true, true, true)
 end
 cmp.mouse = false
--- key 는 매핑을 푼 뒤, typed 는 친 그대로 (overview.lua 처럼 마우스 키를 매핑으로 감싼 것이 있어 둘 다 본다)
+-- key 는 매핑을 푼 뒤, typed 는 친 그대로 (overview.lua 처럼 마우스 키를 매핑으로 감싼 것이 있어 둘 다 본다).
+-- 친 키는 '다음 / 이전 차이 파일' 의 걸어 둔 것도 본다 (cmp.fk_key - 매핑의 뒤 글자는 typed 가 비어 지나간다)
 vim.on_key(function(key, typed)
   local k = (key or '') .. (typed or '')
   if k == '' then
@@ -6476,6 +6603,9 @@ vim.on_key(function(key, typed)
     end
   end
   cmp.mouse = m
+  if typed and typed ~= '' then
+    cmp.fk_key(typed)
+  end
 end, api.nvim_create_namespace('vimide_dirdiffview_key'))
 
 -- 곁 창에 들어왔다 (WinEnter 뒤, click: 마우스로 들어왔다 - WinEnter 때의 cmp.mouse): 경로 줄이면 트리로
@@ -6551,15 +6681,409 @@ function tr.head_orphan(s)
   end
 end
 
--- 편집 창에서 <C-n>/<C-p> (.vimrc 의 ListStep 이 먼저 묻는다): ]c / [c
+-- ---------------------------------------------------------------------------
+-- 다음 / 이전 차이 파일 (Beyond Compare 의 글 비교 창: '차이 없음. 다음 차이 파일 (Ctrl+M)' /
+-- '이전 차이 파일 (Shift+Ctrl+M)')
+-- ---------------------------------------------------------------------------
+-- 비교 창의 <C-n>/<C-p> 는 ]c/[c 라 마지막·첫 차이에서는 아무 말 없이 멈췄다 - 다음 파일을 보려면 트리로 가서 고르고
+-- Enter 를 쳐야 했다 (요청). 이제 더 갈 차이가 없으면 알리고 걸어 두었다가(cmp.fk), 곧바로 한 번 더 누르면 다음 /
+-- 이전 차이 파일을 연다. Ctrl+M / Shift+Ctrl+M 은 언제든 그것이다 (cmp.take_file_keys). 걸어 둔 것
+-- (cmp.fk = { v, win, dir, line, col, buf, tick, rel })은 그 창·커서·글이 그대로이고 그사이 다른 키를 치지 않았을
+-- 때만 산다 - 친 키는 on_key 가 본다 (cmp.fk_key: <C-n>·<C-p>(그 방향)·Enter·Ctrl+M 밖의 키면 푼다). 횟수가 있어도
+-- (3<C-n>) 같다: 움직이지 않았으면 알린다.
+-- 다음 차이 파일은 그 짝의 줄에서 트리의 <C-n>/<C-p> 가 갈 곳이다: 같은 보기(step_bits), 접힌 디렉터리는 뒤쪽이 목록을
+-- 보내며 펼친다 ('reveal' - 예전 뒤쪽은 walk). 찾아서 열 때까지 s.fstep = { id, v, dir, rel, side, pre, n, more,
+-- found, job, walk } - 'reveal'·walk_end 가 트리를 옮기고 알리는 대신 cmp.fs_found 로 넘긴다. 열 수 없는 것(한쪽에만
+-- 있는 디렉터리, 못 읽은 디렉터리 - 트리의 <C-n> 은 거기 선다)은 그 뒤를 다시 묻고, 그러며 펼친 디렉터리 중 연 짝의
+-- 조상이 아닌 것은 도로 접는다 (pre: 묻기 전에 펼쳐 있던 것 - cmp.fs_restore). 여는 곳은 cmp.fs_open.
+-- 찾는 동안 또 누른 Ctrl+M(키를 누르고 있다)은 more 로 세어 연 뒤에 이어 가고 (cmp.fs_more), <C-n>/<C-p> 는 삼킨다.
+-- 답이 올 수 없게 된 것(R, 뒤쪽이 죽었다)은 cmp.fs_pending 이 치운다.
+
+-- 걸어 둔 채인가: 그 view 의 그 창이고 커서·버퍼·글이 그대로 (d 가 있으면 그 방향만)
+function cmp.fk_armed(v, w, d)
+  local fk = cmp.fk
+  if not (fk and v and fk.v == v and fk.win == w and fk.rel == v.rel and not v.closed) or (d and fk.dir ~= d) then
+    return nil
+  end
+  local pos = api.nvim_win_get_cursor(w)
+  if pos[1] ~= fk.line or pos[2] ~= fk.col or api.nvim_win_get_buf(w) ~= fk.buf
+      or api.nvim_buf_get_changedtick(fk.buf) ~= fk.tick then
+    return nil
+  end
+  return fk
+end
+
+-- 친 키마다 (on_key - 매핑을 푼 뒤, 그 매핑이 돌기 앞): 걸어 둔 것을 이을 키가 아니면 푼다. 마지막 키는
+-- _G.vimide_dirdiff_file_key 가 본다 (확장 키의 Shift+Enter 가 <C-S-m> 매핑으로 온 것을 가린다)
+cmp.FK_KEEP = { ['<C-N>'] = 1, ['<C-P>'] = -1, ['<CR>'] = 0, ['<C-M>'] = 0, ['<C-S-M>'] = 0 }
+function cmp.fk_key(typed)
+  cmp.fk_typed = typed
+  local fk = cmp.fk
+  if fk then
+    local k = cmp.FK_KEEP[vim.fn.keytrans(typed)]
+    if not k or (k ~= 0 and k ~= fk.dir) then
+      cmp.fk = nil
+    end
+  end
+end
+
+-- 더 갈 차이가 없다: 알리고, 트리의 짝이면 걸어 둔다. 짝에 줄 차이가 아예 없으면 '차이 없음' (같은 파일 - Beyond
+-- Compare 의 '차이 없음'), 바이너리·큰 파일이면 그렇다고 (그것도 '차이 없음' 이라 했더니 트리의 ≠ 와 어긋났다).
+-- 80 칸 화면에서도 한 줄에 들게 짧게: showcmd 가 있으면 v:echospace 가 68 이고 fitmsg 는 67 칸을 넘으면 가운데를
+-- 자른다 - 'DirDiff: ' 를 빼면 58 칸 (넘었더니 '다음… 파일' 로 잘렸다). 비교가 멈췄으면(뒤쪽이 죽었다) 걸지 않는다
+-- - 한 번 더 눌러도 찾을 수 없다
+function cmp.fk_end(v, w, d)
+  local short, long
+  if v.bin then
+    short = v.big and '큰 파일' or '바이너리'
+    long = short .. (v.big and '이라' or '라') .. ' 줄 차이를 보이지 않습니다'
+  elseif v.dd and #v.dd.hunks == 0 then
+    short, long = '차이 없음', '차이가 없습니다'
+  else
+    short = d > 0 and '마지막 차이' or '첫 차이'
+    long = short .. '입니다'
+  end
+  local s = v.s
+  if v.pick or s.solo or s.done or not s.job then
+    return say(long)
+  end
+  local pos, b = api.nvim_win_get_cursor(w), api.nvim_win_get_buf(w)
+  cmp.fk = { v = v, win = w, dir = d, line = pos[1], col = pos[2], buf = b,
+    tick = api.nvim_buf_get_changedtick(b), rel = v.rel }
+  local keys = (d > 0 and '<C-n>' or '<C-p>') .. ' 다시'
+  if on(vim.g.vimide_dirdiff_file_keys, 1) then
+    keys = keys .. ' 또는 ' .. (d > 0 and 'Ctrl+M' or 'Shift+Ctrl+M')
+  end
+  say(('%s - %s 차이 파일: %s'):format(short, d > 0 and '다음' or '이전', keys))
+end
+
+-- 편집 창에서 <C-n>/<C-p> (.vimrc 의 ListStep 이 먼저 묻는다): ]c / [c. 더 갈 차이가 없으면 알리고 걸어 두며, 걸어
+-- 둔 채 한 번 더면 다음 / 이전 차이 파일 (위). 바이너리·큰 파일의 알림 창도 짝이다 - 줄 차이가 없는 짝 (예전에는
+-- diff 가 아니라 ListStep 의 quickfix 로 넘어갔다)
 function _G.vimide_dirdiff_step(dir)
   local w = api.nvim_get_current_win()
-  if view_of_win(w) and vim.wo[w].diff then
-    -- dir 의 크기가 횟수다 (.vimrc 가 v:count1 을 넘긴다): 2<C-n> = 2]c
-    pcall(vim.cmd, 'normal! ' .. math.max(1, math.abs(dir)) .. (dir > 0 and ']c' or '[c'))
+  local v = view_of_win(w)
+  if not (v and (vim.wo[w].diff or (v.bin and cmp.fk_own(v, w)))) then
+    return false
+  end
+  -- 다음 차이 파일을 찾는 중이다 (빠르게 거듭 누른 <C-n> - 뒤쪽의 답보다 키가 먼저 온다): 아무것도 하지 않는다.
+  -- 옛 짝에서 ]c 를 하면 또 알리고 걸어, 그다음 키가 '한 번 더' 가 되어 파일을 통째로 건너뛰었다 (more 는 Ctrl+M 만 센다)
+  if cmp.fs_pending(v) then
     return true
   end
-  return false
+  local d = dir > 0 and 1 or -1
+  if cmp.fk_armed(v, w, d) then
+    cmp.fk = nil
+    cmp.fstep(v, d)
+    return true
+  end
+  local l0 = vim.fn.line('.')
+  if not v.bin then
+    -- dir 의 크기가 횟수다 (.vimrc 가 v:count1 을 넘긴다): 2<C-n> = 2]c
+    pcall(vim.cmd, 'normal! ' .. math.max(1, math.abs(dir)) .. (d > 0 and ']c' or '[c'))
+  end
+  if vim.fn.line('.') == l0 then
+    cmp.fk_end(v, w, d)
+  end
+  return true
+end
+
+-- <C-m> / <C-S-m> (own) 과 끝 알림 뒤의 Enter (cmp.take_file_keys)
+function _G.vimide_dirdiff_file_key(dir, own)
+  local t = vim.fn.keytrans(cmp.fk_typed or '')
+  if own and t == '<S-CR>' then
+    -- 확장 키 터미널의 Shift+Enter: nvim 이 <C-S-m> 매핑을 그 줄인 이름으로도 걸어 이리 왔다 - 원래 뜻으로
+    return api.nvim_feedkeys(api.nvim_replace_termcodes('<S-CR>', true, true, true), 'n', false)
+  end
+  if own and (t == '<C-M>' or t == '<C-S-M>') then
+    cmp.fk_ext = true   -- 이 터미널은 Ctrl+M 을 Enter 와 가려 보낸다 - 끝 알림 뒤의 Enter 도 이제 원래 뜻으로
+  end
+  cmp.fk = nil
+  local v = view_of_win(api.nvim_get_current_win())
+  if v then
+    cmp.fstep(v, dir, own and vim.v.count1 - 1 or 0)   -- 3<C-m> 은 세 파일 앞으로
+  end
+end
+
+-- 그 짝(v)의 다음 차이 파일을 찾는 중이면 그 s.fstep (찾았으면 열기 직전까지). 답이 오지 않을 것이면 치우고 nil:
+-- R(restart)·O·X 가 걷기를 버렸거나 뒤쪽이 죽었다 - 옛 뒤쪽의 답은 on_stdout 이 버린다 (fs.job). 그대로 두었더니
+-- 그 짝의 Ctrl+M·한 번 더가 아무 말 없이 '더 갈 수' 만 세었다
+function cmp.fs_pending(v)
+  local s = v.s
+  local fs = s.fstep
+  if not (fs and fs.v == v and fs.rel == v.rel) then
+    return nil
+  end
+  if not s.done and s.job and fs.job == s.job and (fs.found
+      or (fs.walk and s.walk and s.walk.fs == fs) or (not fs.walk and s.fs_ids and s.fs_ids[fs.id])) then
+    return fs
+  end
+  s.fstep = nil
+  return nil
+end
+
+-- 그 짝(v)에서 d 쪽으로 다음 차이 파일을 찾기 시작한다. more: 연 뒤에 더 갈 수 (찾는 동안 또 누른 것)
+function cmp.fstep(v, d, more)
+  local s = v.s
+  local cur = cmp.fs_pending(v)
+  if cur and cur.dir == d then
+    -- 찾는 중에 또 눌렀다 (키를 누르고 있거나 빠르게 두 번 - 뒤쪽의 답보다 키가 먼저 온다): 연 뒤에 그만큼 더 간다.
+    -- 그냥 새로 물었더니 같은 짝에서 물어 같은 곳을 열었다 (두 번 눌러 한 파일)
+    cur.more = cur.more + 1 + (more or 0)
+    return
+  end
+  if v.pick or s.solo then
+    return say('고른 두 파일(Tab/Tab)에는 트리 차례가 없습니다')
+  end
+  if not v.rel then
+    return say('트리에서 파일을 먼저 고르세요')
+  end
+  if s.done or not s.job then
+    return say('비교가 멈춰 차이 파일을 못 찾습니다 (트리에서 R)', vim.log.levels.WARN)
+  end
+  -- 쪽은 누르던 창의 것. 고아 짝에서 빈 쪽 대신 다른 쪽으로 옮겨 두었으면(cmp.fs_cursor) 그 전에 고른 쪽으로 이어
+  -- 간다 - 그대로 두었더니 고아 하나를 지난 뒤로 끝까지 B 쪽이었다
+  local w = api.nvim_get_current_win()
+  local side = w == v.win_b and 'b' or 'a'
+  local fsd = v.fs_side
+  if fsd and fsd.rel == v.rel and fsd.win == w then
+    side = fsd.side
+  end
+  local fs = { v = v, dir = d, rel = v.rel, n = 0, pre = {}, more = more or 0, side = side, job = s.job }
+  for rel in pairs(s.expanded) do
+    fs.pre[rel] = true
+  end
+  s.fstep = fs
+  cmp.fs_send(s, fs, v.rel)
+end
+
+-- from 의 다음(앞) 것을 묻는다: 뒤쪽의 next (트리의 <C-n> 과 같다), 예전 뒤쪽의 보기면 여기서 걷는다 (act_step 처럼).
+-- fs.walk: 걷는 쪽이다 (답은 s.walk.fs 로 - cmp.fs_pending)
+function cmp.fs_send(s, fs, from)
+  s.req = s.req + 1
+  fs.id = s.req
+  local bits = step_bits(s)
+  fs.walk = (s.nomask and bits) and true or false
+  if fs.walk then
+    if s.walk then
+      walk_drop(s, s.walk)
+    end
+    local e = entry_of(s, from)
+    s.walk = { step = fs.dir, bits = bits, fresh = {}, cur = from, fs = fs,
+      down = (fs.dir > 0 and e and walk_into(e, bits)) or false }
+    return walk(s)
+  end
+  s.fs_ids = s.fs_ids or {}
+  s.fs_ids[fs.id] = true
+  send(s, { cmd = 'next', id = fs.id, from = from, step = fs.dir, bits = bits })
+end
+
+-- 묻는 동안 펼친 디렉터리를 도로 접는다 - 묻기 전에 펼쳐 있던 것과 path(연 짝)의 조상은 둔다
+function cmp.fs_restore(s, fs, path)
+  local keep = {}
+  local p = path and path:match('^(.*)/[^/]+$')
+  while p do
+    keep[p] = true
+    p = p:match('^(.*)/[^/]+$')
+  end
+  for rel in pairs(s.expanded) do
+    if rel ~= '' and not fs.pre[rel] and not keep[rel] then
+      s.expanded[rel] = nil
+      send(s, { cmd = 'unlist', dir = rel })
+    end
+  end
+end
+
+-- 찾았다 ('reveal' 의 path, walk_end. nil 이면 없다)
+function cmp.fs_found(s, fs, path)
+  if s.fstep ~= fs then
+    return   -- 트리에서 <C-n> 등으로 밀려났다
+  end
+  local e = path and entry_of(s, path)
+  if e and is_dir(e) and not (e.ka and e.kb and not both_dirs(e)) then
+    -- 열 수 없는 것 (한쪽에만 있는 디렉터리, 못 읽은 디렉터리): 그 뒤의 것을 다시 묻는다
+    fs.n = fs.n + 1
+    if fs.n <= 1000 then
+      return cmp.fs_send(s, fs, path)
+    end
+    path = nil
+  end
+  if not path then
+    s.fstep = nil
+    cmp.fs_restore(s, fs, nil)
+    render(s)
+    if not (s.prog and s.prog.done) then
+      return say(('%s는 아직 차이 파일이 없습니다 (훑는 중)'):format(fs.dir > 0 and '아래로' or '위로'))
+    end
+    return say(('%s%s 차이 파일이 없습니다'):format(step_bits(s) and '이 보기에서 ' or '', fs.dir > 0 and '다음' or '이전'))
+  end
+  cmp.fs_restore(s, fs, path)
+  render(s)
+  -- 뒤쪽의 출력을 읽는 중이다 (on_stdout) - 묻기(confirm)·탭 옮기기는 그 밖에서. 열 때까지 s.fstep 은 그대로 둔다:
+  -- 그사이 또 누른 키도 fs.more 로 센다 (비워 두었더니 옛 짝에서 다시 물어 같은 곳을 열고 버렸다)
+  fs.found = path
+  vim.schedule(function()
+    if s.fstep == fs then
+      s.fstep = nil
+      cmp.fs_open(s, fs, path)
+    end
+  end)
+end
+
+-- 트리의 커서를 그 짝의 줄로 (다른 탭에 있어도)
+function cmp.fs_tree(s, path)
+  local i = s.row_of[path]
+  if i and api.nvim_win_is_valid(s.win_l) then
+    goto_row(s, i)
+    mark_side(s)
+  end
+end
+
+-- 지금 짝에 고친 채인 쪽이 있으면 묻는다: 저장하고 가기 / 고친 채 두고 가기 (버퍼는 숨겨 남는다 - 짝을 바꿀 때의
+-- 규칙: show_file 의 hide, sweep 은 고친 것을 치우지 않는다) / 취소. 모르고 지나가지 않게 (Beyond Compare 도 묻는다).
+-- 단축글자는 ASCII (nvim 0.12 의 confirm() 은 한글을 단축키로 맞추지 못한다), 물음은 한 줄 (줄바꿈이면 한글이 잘렸다)
+function cmp.fs_save(v, d)
+  local dirty, names = {}, {}
+  for _, side in ipairs({ 'a', 'b' }) do
+    local w = v['win_' .. side]
+    local b = api.nvim_win_is_valid(w) and api.nvim_win_get_buf(w)
+    if b and vim.fn.getbufvar(b, '&buftype') == '' and vim.fn.getbufvar(b, '&modified') == 1 then
+      dirty[#dirty + 1] = b
+      names[#names + 1] = side:upper() .. ' ' .. vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':t')
+    end
+  end
+  if #dirty == 0 then
+    return true
+  end
+  local c = vim.fn.confirm(('고친 채 저장하지 않았습니다 (%s) - %s 차이 파일로 가기 전에'):format(
+    table.concat(names, ', '), d > 0 and '다음' or '이전'), '저장하고 가기(&S)\n고친 채 두고 가기(&K)\n취소(&C)', 3)
+  vim.cmd('redraw')
+  if c == 2 then
+    v.fs_kept = names   -- 다 채운 뒤에 알린다
+    return true
+  elseif c ~= 1 then
+    say('그대로 둡니다')
+    return false
+  end
+  for _, b in ipairs(dirty) do
+    local ok, err = pcall(api.nvim_buf_call, b, function()
+      vim.cmd('write')
+    end)
+    if not ok then
+      say('저장하지 못했습니다: ' .. tostring(err):gsub('\nstack traceback:.*$', ''):gsub('^.-(E%d+:)', '%1'),
+        vim.log.levels.WARN)
+      return false
+    end
+  end
+  return true
+end
+
+-- 커서를 새 짝의 첫 차이로 (d < 0 이면 마지막 차이로 - Beyond Compare 의 이전 차이 파일). 쪽은 누르던 쪽, 그쪽이
+-- 파일이 아니면(한쪽에만 있는 파일의 빈 쪽, 디렉터리의 안내) 다른 쪽이 파일일 때 그쪽. 첫 차이가 1줄 위에 끼인
+-- 줄이면 그대로 두고 보이게만 (fill 의 jump 처럼)
+function cmp.fs_cursor(v, side, d)
+  local function file(sd)
+    local x = v['win_' .. sd]
+    return api.nvim_win_is_valid(x) and vim.fn.getbufvar(api.nvim_win_get_buf(x), '&buftype') == ''
+  end
+  local want = side
+  if not file(side) and file(side == 'a' and 'b' or 'a') then
+    side = side == 'a' and 'b' or 'a'
+  end
+  local w = v['win_' .. side]
+  -- 고른 쪽 대신 옮겨 놓았다 - 이 짝에서 다음으로 갈 때는 고른 쪽으로 (cmp.fstep)
+  v.fs_side = want ~= side and { rel = v.rel, side = want, win = w } or nil
+  if not api.nvim_win_is_valid(w) then
+    return
+  end
+  api.nvim_set_current_win(w)
+  pcall(vim.cmd, 'normal! gg')
+  if v.bin or not vim.wo[w].diff then
+    return
+  end
+  if d < 0 then
+    -- 횟수가 남으면 ]c 는 마지막 차이에서 멈춘다
+    pcall(vim.cmd, 'normal! 99999]c')
+  end
+  if vim.fn.line('.') == 1 then
+    if vim.fn.diff_filler(1) > 0 then
+      pcall(vim.fn.winrestview, { topline = 1, topfill = vim.fn.diff_filler(1) })
+    elseif d > 0 and vim.fn.diff_hlID(1, 1) == 0 then
+      pcall(vim.cmd, 'normal! ]c')
+    end
+  end
+end
+
+-- 찾은 짝을 연다: 그 짝의 비교 탭이 이미 있으면 그 탭으로 (트리의 <CR> 처럼 - 고친 것·커서 그대로), 아니면 지금
+-- 비교 탭을 그 짝으로 다시 채운다 (Beyond Compare 가 글 비교 창을 그대로 쓰듯이 - 탭이 늘지 않는다. 앞 짝은 이 탭에서
+-- 내려가 트리의 열린 표시도 옮겨 간다 - fill 의 mark_open, Ctrl+Z 줄은 새 짝의 것으로 - cmp.utrack). pair_tab = 0 이면
+-- 편집 창 둘에. 트리의 커서도 그 줄로 (q 는 새 짝의 줄로 돌아간다 - v.rel)
+function cmp.fs_open(s, fs, path)
+  local v = fs.v
+  if s.done or v.closed or v.rel ~= fs.rel then
+    return   -- 그사이 그 탭을 닫았거나 다른 짝을 실었다
+  end
+  local i = s.row_of[path]
+  local r = i and s.rows[i]
+  if not (r and r.e) then
+    local e = entry_of(s, path)
+    if not e then
+      return say('찾은 차이 파일이 트리에 없습니다: ' .. shown(path), vim.log.levels.WARN)
+    end
+    r = { rel = path, e = e }
+  end
+  -- 앞의 끝 알림('마지막 차이입니다 - …')이 새 파일 아래에 남아 있지 않게 지운다 (창 머리가 새 파일을 말한다)
+  vim.cmd('echo ""')
+  local other = view_of_rel(s, path)
+  if other and other ~= v then
+    cmp.fs_tree(s, path)
+    open_pair(s, r, true)
+    return cmp.fs_more(s, fs, path)
+  end
+  if not cmp.fs_save(v, fs.dir) then
+    cmp.fs_restore(s, fs, nil)
+    return render(s)
+  end
+  if api.nvim_tabpage_is_valid(v.tab) and api.nvim_get_current_tabpage() ~= v.tab then
+    api.nvim_set_current_tabpage(v.tab)
+  end
+  -- 창 하나를 닫아 버렸으면 다시 세운다 (둘 다 없으면 open_pair 가 새 탭을 - 편집 창 둘이면 트리 위에 다시)
+  if v == s.main then
+    if not (api.nvim_win_is_valid(v.win_a) and api.nvim_win_is_valid(v.win_b)) then
+      cmp.fs_tree(s, path)
+      open_pair(s, r, true)
+      return cmp.fs_more(s, fs, path)
+    end
+  else
+    v = repair_view(v)
+    if not v then
+      cmp.fs_tree(s, path)
+      open_pair(s, r, true)
+      return cmp.fs_more(s, fs, path)
+    end
+  end
+  local fm = v.fmode
+  fill(v, r, false)
+  -- \d 로 고른 보기는 이 탭에 남는다 (Beyond Compare 의 다음 파일처럼 - fill 은 다른 짝을 실으면 처음 보기로 돌린다)
+  if v.fmode ~= fm then
+    v.fmode = fm
+    apply_fmode(v)
+  end
+  cmp.fs_tree(s, path)
+  cmp.fs_cursor(v, fs.side, fs.dir)
+  if v.fs_kept then
+    say('고친 채 남겨 둔 버퍼: ' .. table.concat(v.fs_kept, ', '), vim.log.levels.WARN)
+    v.fs_kept = nil
+  end
+  cmp.fs_more(s, fs, path)
+end
+
+-- 찾는 동안 더 누른 만큼 (fs.more) 연 짝에서 이어 간다
+function cmp.fs_more(s, fs, path)
+  local v = fs.more > 0 and (s.main and s.main.rel == path and s.main or view_of_rel(s, path))
+  if v and v.tab == api.nvim_get_current_tabpage() then
+    cmp.fstep(v, fs.dir, fs.more - 1)
+  end
 end
 
 -- 트리 커서 줄이 가리키는 경로 (A 쪽, 없으면 B 쪽). 디렉터리면 끝에 '/' -
