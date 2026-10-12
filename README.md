@@ -1029,7 +1029,8 @@ window of its own: everything runs through telescope pickers.
 ```
 \fo  find an indexed file and open it   (^d / Esc d drop it, <Tab> several)
 \fx  pick entries to drop               (Enter / ^d / Esc d, <Tab> several)
-\fm  choose the preset                  (auto included, ^d deletes mine)
+\fm  choose the preset                  (auto included, ^d deletes mine,
+                                        '+ 새 빈 preset' starts an empty one)
 \fS  save the current entries as a preset
 \fR  reindex now
 \fs  find any symbol in the index      (<F12> or ^g sends it to the relation window)
@@ -1065,7 +1066,12 @@ after the timeout and type the `p` into its command line. The tree's `+` (and
 when you want them: `:ProjectFilesFind`, `:ProjectFilesAdd`, `:ProjectFilesAddDir`,
 `:ProjectFilesRemove`, `:ProjectFilesPreset`, `:ProjectFilesSave`,
 `:ProjectFilesReindex` (each takes an optional argument to skip the picker),
-plus `:ProjectFilesPresetShare` (below).
+plus `:ProjectFilesNew [name]` (an empty preset, below) and
+`:ProjectFilesPresetShare` (below). The add pickers no longer walk the tree
+before they open: the window opens at once and the candidates stream in from a
+background `git ls-files` / `find` (pruned like the list itself: `.git`,
+`.repo`, `out`, ... - `g:projectfiles_prune_dirs`), so they are usable even
+from a directory that holds whole SDKs.
 
 **Saving keeps the index current.** Writing a file the list already knows
 updates the database for that one file (`global --single-update`, a few
@@ -1423,9 +1429,33 @@ Running it twice is a no-op - entries already present are skipped.
 
 ```vim
 let g:projectfiles_absorb = 1        " do it when a project is first opened
+let g:projectfiles_absorb_max = 1000 " ...but only up to this many files
 let g:projectfiles_absorb_hint = 0   " not even the notice
 let g:projectfiles_absorb_whole = 1  " take listless nested trees too
 ```
+
+Both the search for nested `.tags` and the absorb itself run in the
+background. The search is one pruned `find` in a child process (`.git`,
+`.repo`, `out`, ... are skipped - an Android SDK's `.repo` alone is hundreds of
+thousands of directories), shared by everyone who asks at the same time and cut
+off after `g:projectfiles_find_timeout` seconds (600; what was found by then is
+used and remembered as partial). The absorb decides from the paths alone and
+writes the preset once; the list is then expanded in the background. It used
+to call the `+` machinery once per file - six-odd `stat`s each - and then
+expand the whole list with the keyboard held.
+
+**What that did in `~/work1/issue/bosch`.** That directory holds two Android
+SDK checkouts and a few t-sound projects, with `.tags` in the SDK root,
+`maincore`, `subcore`, both kernels and the t-sound trees, and no marker of
+its own - so it is its own root. Picking the light `tsnd2.0_bosch` preset (107
+entries, kernel-relative, so nothing expanded there) and starting nvim again
+made the startup absorb pull in 5,205 nested files, turning the preset into
+5,312 entries, and expand them with the keyboard held: 15.5 s on a synthetic
+copy with 300 µs per `stat`, minutes on the server - "vim 이 먹통". Now an
+automatic absorb takes at most `g:projectfiles_absorb_max` files; above that it
+says how many there are and leaves `:ProjectFilesAbsorb` to you. Starting the
+synthetic copy again now holds the main loop only while nvim reads its
+configuration (about 170 ms there, as before), and the preset stays at 107.
 
 `.vimrc` turns `absorb` on. Fuzzy find at SDK level is slow enough to be
 unusable, so the list gets built in a subdirectory where it is fast - and
@@ -1441,6 +1471,7 @@ One file says what a project does: `<root>/.tags/preset`.
 | `none` | none | nothing, but the project is registered |
 | `auto` | auto | the whole project (`git ls-files` / `find`) |
 | `<name>` | preset | only what that preset lists |
+| `<name>` of a 0-entry preset | empty preset | nothing yet - where to put files is decided, what to index is not |
 
 `<F2>` and `\fm` do the same thing: pick the mode. `:ProjectFilesPreset
 none|auto|<name>` sets it without the picker. Until a mode is picked, opening
@@ -1455,9 +1486,114 @@ touched at all is better than both, and `\fm` was always one key away.
 `:Maketags` still runs what `<F2>` used to (`mktags.sh` over the current
 directory) for the times you want exactly that.
 
-Dropping the last entry of a preset, or deleting the preset you were using,
-now leaves the project in `none` rather than falling back to `auto` - "there
-is nothing in my list" should not turn into "index all 220,000 files".
+Deleting the preset you were using leaves the project in `none` rather than
+falling back to `auto` - "there is nothing in my list" should not turn into
+"index all 220,000 files". Dropping the last entry of a preset of mine keeps
+it as an empty preset (0 entries - nothing indexed, the index is emptied; see
+below), so a wrong first add can be taken back without losing the preset. Only
+for a name vim-ide carries is my copy dropped and the project put in `none`,
+because an empty copy of mine would hide the shared one on this machine.
+
+### Starting from an empty preset
+
+`none` does nothing and has nowhere to put files; a preset from another tree
+mostly does not expand here (kernel-relative paths in a directory of SDKs). The
+picker (`<F2>`, `\fm`, `:ProjectFilesMode`) therefore has a third fixed item
+next to none and auto:
+
+```
+● none  (아무것도 하지 않는다)   ← 기본값 (아직 정하지 않음)
+  auto  (프로젝트 전체 색인)
+  + 새 빈 preset (항목 0개) - 만든 뒤 파일을 담으면 그 preset 에 저장
+  kernel-common  (436 entries)
+  old_one  (0 entries · 빈 preset)
+```
+
+It asks for a name (default: this directory's name, `-2`, `-3` ... when
+taken; only letters, digits and `-_.` - anything else becomes `_`, and a
+leading `.` is dropped, so the name in `.tags/preset` is the file name), saves a
+preset with no entries and uses it here. An existing preset of
+mine is only emptied after a yes (the old one stays in `.backup`, and
+`:ProjectFilesRestore` brings it back); a name vim-ide carries is refused,
+because my empty copy would hide the shared one on this machine.
+`:ProjectFilesNew [name]` does the same without the picker.
+
+The picker's title names the root it applies to (`Preset  →  ~/…/bosch/.tags
+[미설정]`), and choosing writes `<that root>/.tags/preset` at once. Which root
+that is follows the current buffer: with a file of a nested project open (its
+own `.git` or `.tags`), it is that project, unless the cwd is a project itself
+- a marker, an index, or a mode chosen there (`auto` or a preset in
+`<cwd>/.tags/preset`). So in a directory of SDKs such as `bosch` (no marker,
+every child its own project), start nvim there and pick `+ 새 빈 preset` with
+no file open; from then on the tree's `+` on `t-sound-805x/daemon`,
+`:ProjectFilesAdd <absolute path>` and a buffer from a nested project all go
+into `bosch`'s preset. It used to anchor only after the first index had been
+built: until then the `+` went to the nested project - a new preset there, or
+`.` (the whole project) added to its existing one. `none` does not anchor.
+
+A saved preset with 0 entries is *meant* to be empty: its empty
+`.tags/files` is taken at its word, so autoindex neither falls back to the
+whole project nor builds a whole-tree ctags - nothing is indexed. gutentags is
+not attached either, not even to a file of a nested git project below it (it
+used to ctags that whole project, e.g. an SDK's kernel, through `indexfiles.sh`
+-> `git ls-files`), and the startup absorb (`g:projectfiles_absorb = 1`) only
+says what it could pull in - it does not fill an empty preset with the nested
+projects' lists. Then add what
+you work on: the tree's `+`, `:ProjectFilesAdd <path>`, the quickfix / buffer
+list `+`. Every add is written to that preset at once (there is no separate
+save; `\fS` saves a copy under another name and offers the current name first)
+and indexing starts with the first entry. Starting nvim there again finds the
+same preset and its list and index.
+
+### Picking a preset does not hold the keyboard
+
+The list of a preset is expanded in the background: `find` for the directory
+entries runs in a child process (cut off after `g:projectfiles_find_timeout`),
+and the per-file `stat` / binary check runs on the main loop in 8 ms slices.
+While that runs the project is "list pending": autoindex does not index the
+old or missing list, gutentags is not attached, and `\fo` / `F3` opens empty
+(`목록 만드는 중 …`) and fills in when the list is written - it does not show the
+previous preset's list under the new name, nor walk the whole parent with
+`find_files`. When it is done the list is written, the index follows, and one
+line says how many files it came to. A new file saved meanwhile is put in the
+list (and indexed) right after. Picking another mode meanwhile (`auto`, `none`,
+another preset, `+ 새 빈 preset`) drops the background job at once, so the new
+mode is indexed straight away; it used to stay "pending" until the old job
+ended and the new mode's reindex was lost for the session. A `\fR` whose `find`
+hits `g:projectfiles_find_timeout` says so and stops instead of starting the
+same walk again.
+The same goes for the start of a session with no list yet, for `+`/`-` when
+the remembered list is stale, and for `:ProjectFilesImport` / `Save` / `Mode`.
+
+`+` on a directory still updates the list in place, but waits at most
+`g:projectfiles_sync_find_ms` (500 ms) for its `find`; past that the whole list
+is handed to the background. `\fo` in auto mode with no list builds it in the
+background too and fills the open picker when it arrives (it used to run
+`indexfiles.sh` over the whole tree first). With a preset and no list - none of
+its paths here - `\fo` used to do the same, which is what froze the editor
+right after a preset was picked in `bosch`: 5.6-6.0 s on the synthetic copy with
+a 3 s slower `find`, minutes on the server. Now it opens empty and says so
+(`이 트리에 펼쳐진 경로 없음 - 트리의 + 로 담거나 <F2> 의 '+ 새 빈 preset'`): nothing
+is indexed, and streaming every path of a directory of SDKs into the picker is
+minutes on the server too. (`none` and an undecided directory still search the
+whole tree asynchronously, as before.)
+
+Measured on the synthetic `bosch` (two SDK-like trees, 33k directories) with
+300 µs added to every synchronous `stat`/`open`/`read` and 3 s to every `find`,
+as the longest a key would have waited (a request on nvim's socket every 20 ms):
+
+| | before | after |
+|---|---|---|
+| `F2` the 107-entry preset, then `F3` | 5,584 ms | 74 ms |
+| `F2` a 1,126-entry preset at an SDK root | 4,516 ms | 44 ms |
+| start again with that preset (`absorb = 1`) | 15,542 ms | 169 ms (config load) |
+| start with a 5,312-entry preset and no list | 6,704 ms | 164 ms (config load) |
+| `:ProjectFilesAbsorb` (5,205 files) | 15,763 ms | 37 ms |
+| `:ProjectFilesAdd` / `:ProjectFilesAddDir` with no argument | 41,422 ms | 64 ms |
+| `F3` in auto mode with no list | 14,216 ms | 69 ms |
+
+`+` on a directory whose `find` is that slow waits the 500 ms and goes to the
+background (543 ms measured).
 
 ### Which mode, decided once per project
 
@@ -1469,11 +1605,12 @@ asks:
 
 ```
 색인 모드 — ~/work1/_opensource/samsung-kernel
-1: auto — 프로젝트 전체 (git ls-files / find)
-2: preset 'default' — 151 entries
-3: preset 'kernel-audio_d3_under' — 219 entries
-4: 새 preset 만들기 …
-5: 이번에는 색인하지 않기
+1: none — 아무것도 하지 않는다 (자동 색인 없음)
+2: auto — 프로젝트 전체 (git ls-files / find)
+3: + 새 빈 preset (항목 0개) - 만든 뒤 파일을 담으면 그 preset 에 저장
+4: preset 'default' — 151 entries
+5: preset 'kernel-audio_d3_under' — 219 entries
+6: 이번에는 색인하지 않기
 ```
 
 Indexing waits for the answer, and the answer is written down, so a
@@ -1744,7 +1881,7 @@ Measured on a 6,500-file preset:
 | longest freeze in the first seconds | 0.49-0.89 s | 50-60 ms |
 | files opened per start | 6,506 | 6 |
 
-The list is still built before the screen when it is missing (gutentags reads it at the first `BufReadPost`). It is also rebuilt then when it belongs to a different preset (the mode was switched elsewhere). A list built from an older version of the same preset, for example after a `git pull` changed a shared preset, is used and corrected in the background.
+When the list is missing it is started before the screen but built in the background ("Picking a preset does not hold the keyboard" above); gutentags is not attached until it exists, since without a list it would ctags the whole tree. It is also rebuilt when it belongs to a different preset (the mode was switched elsewhere). A list built from an older version of the same preset, for example after a `git pull` changed a shared preset, is used and corrected in the background.
 
 ### Messages: one line per action
 
@@ -1852,7 +1989,7 @@ This also holds with two nvims. When another nvim indexed this nvim's change, th
 
 A listed file that this `find` cannot reach is kept as long as it is still a regular file. That is a file another entry brings in: an entry inside a pruned directory (`drivers/net/out/gen`, `node_modules/x` - the rescan's `find` skips `out/`, the full expansion runs `find` on the entry itself), one reached through a symlinked directory, or a file entry. Only files that are really gone are dropped, so normally only those are `stat`ed. Without that check such files were dropped from the list, GTAGS and ctags while they were still on disk, with `사라진 파일 N개`; `\fR` put them back and the next `+` dropped them again. A file that `find` did return but that the rules now refuse (it became binary or too big) is dropped, the same as a full expansion does.
 
-**`:ProjectFilesPreset <name>` only takes presets that exist.** A name with no preset file now gets one line, `그런 preset 이 없습니다: 'kp1x' (새로 만들려면 \fm 의 '새 preset 만들기')`. `auto`, `none` and the name already in use are always accepted. A typo used to switch to an empty, never-saved preset: the list was written empty, GTAGS went to 0 files, the ctags file to its 24-line header, and the message looked like any other switch. New presets are started from `\fm` / `:ProjectFilesMode` (`새 preset 만들기`) or with `:ProjectFilesSave <name>`. For autoindex, `_G.projectfiles_list_intended_empty(root)` says whether an empty list means "index nothing". It does only for a saved preset with zero entries, not for a name that was never saved.
+**`:ProjectFilesPreset <name>` only takes presets that exist.** A name with no preset file now gets one line, `그런 preset 이 없습니다: 'kp1x' (새로 만들려면 \fm 의 '+ 새 빈 preset' 이나 :ProjectFilesNew)`. `auto`, `none` and the name already in use are always accepted. A typo used to switch to an empty, never-saved preset: the list was written empty, GTAGS went to 0 files, the ctags file to its 24-line header, and the message looked like any other switch. New presets are started from `\fm` / `:ProjectFilesMode` (`+ 새 빈 preset`), with `:ProjectFilesNew [name]`, or with `:ProjectFilesSave <name>`. For autoindex, `_G.projectfiles_list_intended_empty(root)` says whether an empty list means "index nothing". It does only for a saved preset with zero entries, not for a name that was never saved.
 
 **Moving an excluded path keeps it out.** A file or directory taken out with `-` and then renamed or moved (neo-tree `r` / `m`) stays out of the index. Moving it out of the directory entry no longer adds the new place as a file entry.
 

@@ -893,6 +893,19 @@ local function intended_empty(root)
   return ok and yes == true
 end
 
+-- projectfiles 가 그 루트의 목록을 뒤에서 만드는 중인가. 그동안 디스크의
+-- '.tags/files' 는 없거나 바꾸기 전 preset 의 것이다 - 그것으로 색인하거나 ctags
+-- 를 붙이면 안 된다. 다 만들면 projectfiles 가 autoindex_refresh 를 부른다.
+-- (예전에는 projectfiles 가 키를 잡은 채 목록을 폈으므로 이런 때가 없었다 - 그
+-- 동기 펴기가 Android SDK 두 벌을 담은 상위 디렉터리에서 vim 을 먹통으로 만들었다)
+s.list_pending = function(root)
+  if type(_G.projectfiles_list_pending) ~= 'function' then
+    return false
+  end
+  local ok, yes = pcall(_G.projectfiles_list_pending, root)
+  return ok and yes == true
+end
+
 -- 지금 목록으로 ctags 를 다시 만들어도 되는가. gutentags 는 indexfiles.sh 로
 -- 목록을 받는데, 목록 파일이 없으면 그 스크립트가 git ls-files 로 떨어져 트리
 -- 전체를 ctags 한다.
@@ -906,6 +919,9 @@ local function list_ready(root)
   if type(_G.projectfiles_should_index) == 'function'
       and not _G.projectfiles_should_index(root) then
     return false
+  end
+  if s.list_pending(root) then
+    return false -- 목록을 만드는 중: 다 되면 ProjectFilesChanged 로 gt_retry 가 붙인다
   end
   if preset_mode(root) then
     local st = uv.fs_stat(list_file(root))
@@ -1610,6 +1626,12 @@ function build(root, why, opts)
   -- a preset decides which files exist for the indexer: write it out before
   -- the list is generated, or the very first build indexes the whole tree
   materialize(root)
+  if s.list_pending(root) then
+    -- 목록을 뒤에서 만드는 중이다: 다 되면 projectfiles 가 autoindex_refresh 로
+    -- 다시 부른다 (지금 디스크의 목록은 낡았거나 없다)
+    fail(nil)
+    return
+  end
   if preset_mode(root) then
     local snap, why_not = preset_snapshot(root)
     if not snap or #snap.lines == 0 then
@@ -1990,6 +2012,13 @@ function refresh(root, req, force_old)
   -- a preset decides which files exist for the indexer: write it out before
   -- the list is read, or the very first build indexes the whole tree
   materialize(root)
+  if s.list_pending(root) then
+    -- 목록을 뒤에서 만드는 중이다 (build 와 같다): 다 되면 projectfiles 가 이
+    -- 갱신을 다시 부른다. 표지는 남는다 - 그 사이 nvim 을 닫아도 다음 시작이 한다.
+    dbg('refresh: 목록을 만드는 중 - 기다림 ' .. root)
+    done(nil)
+    return
+  end
   if preset_mode(root) then
     local snap, why_not = preset_snapshot(root)
     if not snap then
@@ -2330,6 +2359,11 @@ local function count_files(root, cb)
     if not uv.fs_stat(list_file(root)) then
       materialize(root)
     end
+    if s.list_pending(root) then
+      -- 목록을 뒤에서 만드는 중: 목록이 없을 때와 같이 미뤄 둔다 (아래 'missing')
+      counted[root] = false
+      return
+    end
     -- 쓰는 중으로 보이면(torn) 잠깐 뒤 다시 센다. nil 을 넘기면 '모름 = 큰
     -- 트리' 로 gutentags 에서 떼어 버린다 - 방금 고쳐 쓴 목록 하나에 그 세션
     -- 내내 ctags 가 목록을 따라가지 않았다. 다섯 번(2.5초)이 지나도 그러면
@@ -2453,6 +2487,27 @@ function _G.autoindex_gutentags_ok(path)
   local proot = s.roots[dir] or scan_root(dir) or marker_root(path)
   if proot and preset_mode(proot) and not list_ready(proot) then
     s.gt_wait[proot] = true -- 목록이 생기면 붙인다 (ProjectFilesChanged)
+    return 0
+  end
+  -- 모드를 정하는 것은 projectfiles 의 루트다 (현재 디렉터리 기준 고정 포함). 표시
+  -- 없는 상위 디렉터리(bosch: Android SDK 두 벌, t-sound 프로젝트들)에 preset 을
+  -- 걸면, 그 아래 파일의 가까운 색인/표시(proot)는 하위 프로젝트의 것이고
+  -- gutentags 의 루트도 하위 git 프로젝트다. 그때도 그 preset 이 정한다:
+  --   * 목록이 아직 없다(뒤에서 만드는 중, 하나도 안 펼쳐졌다): 위와 같이 기다린다
+  --   * 항목 0개(빈 preset): 아무것도 색인하지 않는다 - ctags 도. 예전에는 하위
+  --     git 프로젝트(SDK 의 kernel 통째로)를 indexfiles.sh -> git ls-files 로
+  --     ctags 했다
+  local okp, pfr = pcall(function()
+    return _G.projectfiles_root_of and _G.projectfiles_root_of(path)
+  end)
+  if okp and type(pfr) == 'string' and pfr ~= '' and pfr ~= proot
+      and preset_mode(pfr) and not list_ready(pfr) then
+    s.gt_wait[pfr] = true
+    return 0
+  end
+  if okp and type(pfr) == 'string' and pfr ~= '' and preset_mode(pfr)
+      and intended_empty(pfr) then
+    s.gt_wait[pfr] = true -- 담기 시작하면(목록이 바뀌면) 다시 물어 붙인다
     return 0
   end
   local ok, root = pcall(vim.fn['gutentags#get_project_root'], path)
@@ -2771,6 +2826,10 @@ function ctags_build(root, why)
   if preset_mode(root) then
     if not uv.fs_stat(list_file(root)) then
       materialize(root)
+    end
+    if s.list_pending(root) then
+      fail(nil) -- 목록을 뒤에서 만드는 중: 다 되면 갱신이 끝나며 ctags 가 따라간다
+      return
     end
     local snap = preset_snapshot(root)
     if not snap then

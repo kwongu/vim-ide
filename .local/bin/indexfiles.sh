@@ -195,12 +195,30 @@ find_names() {
 # 그건 사람이 고른 것이다. 생성되는 목록(git / cscope.files / find)만 걸른다.
 NESTED_DEPTH=${INDEXFILES_NESTED_DEPTH:-6}
 
+# 가지치기 디렉터리(.git .repo out ...)는 들어가지 않는다 - 하위 '.tags' 가 거기
+# 있을 리 없고, Android SDK 의 .repo 만 해도 디렉터리가 수십만 개다. 예전에는
+# 가지치지 않고 '-mindepth 2' 로 걸었는데, mindepth 아래(깊이 1)에서는 -prune
+# 도 돌지 않아 './.repo' 를 끝까지 걸었다 (projectfiles.lua 의 nested_cmd 와
+# 같은 이유·같은 모양). 루트 자신의 './.tags' 는 sed 뒤 '.' 이 되므로 뺀다.
 nested_prefixes() {
 	[ "$NESTED_DEPTH" -le 0 ] && return 0
-	find . -mindepth 2 -maxdepth $((NESTED_DEPTH + 1)) \
-		-type d -name .tags -prune -print 2>/dev/null |
+	set -f
+	_np=''
+	for d in $PRUNE_DIRS; do
+		case $d in .tags) continue ;; esac
+		[ -z "$_np" ] && _np="-name $d" || _np="$_np -o -name $d"
+	done
+	if [ -n "$_np" ]; then
+		# shellcheck disable=SC2086  # _np 는 술어 목록이라 쪼개져야 한다
+		find . -maxdepth $((NESTED_DEPTH + 1)) \( $_np \) -prune -o \
+			-type d -name .tags -prune -print 2>/dev/null
+	else
+		find . -maxdepth $((NESTED_DEPTH + 1)) \
+			-type d -name .tags -prune -print 2>/dev/null
+	fi |
 		sed -e 's|/\.tags$||' -e 's|^\./||' |
-		grep -v '^$' || true
+		grep -v '^$' | grep -v '^\.$' || true
+	set +f
 }
 
 filter_nested() {

@@ -4470,6 +4470,9 @@ endif
 "     (<leader>fp 추가할 파일 고르기, <leader>fd 추가할 디렉터리 고르기는
 "      느려서 껐다. :ProjectFilesAdd / :ProjectFilesAddDir 로는 그대로 연다)
 "     <leader>fm  preset 선택/전환        (^d 내 사본 삭제, auto 포함)
+"                 '+ 새 빈 preset' = 항목 0개인 preset 을 만들어 건다 - preset 이
+"                 없는 트리의 첫 걸음 (담는 대로 그 preset 에 저장되고 색인된다.
+"                 :ProjectFilesNew [이름] 과 같다)
 "     <leader>fM  preset 가져오기        (새 SDK 로 목록을 옮긴다)
 "                 [vim-ide]=저장소 공용본, [내 사본 ≠ vim-ide]=여기서 고쳐 갈라진 것
 "     <leader>fS  지금 목록을 preset 으로 저장
@@ -4504,6 +4507,21 @@ endif
 "   let g:projectfiles_absorb_hint = 0   " 알림도 끄기
 "   let g:projectfiles_absorb_whole = 1  " 목록이 없는(auto) 하위도 통째로
 let g:projectfiles_absorb = 1
+" 시작할 때 자동으로 가져오는 것은 이만큼(파일 수)까지만. 넘으면 '가져올 수 있다' 고
+" 알리기만 한다 (:ProjectFilesAbsorb 는 다 가져온다). Android SDK 두 벌을 담은 상위
+" 디렉터리(~/work1/issue/bosch)에서는 하위 목록이 5,000개가 넘었고, 가벼운 preset
+" (항목 107개)을 고른 뒤 다시 띄우면 그것이 다 들어와 5,312항목이 됐다 - 사람이
+" 고른 preset 이 아니게 된다. 0 이면 자동으로는 하나도 가져오지 않는다.
+let g:projectfiles_absorb_max = 1000
+" 뒤에서 도는 트리 걷기(preset 목록 펴기, 하위 '.tags' 찾기, auto 모드의 \fo 목록)의
+" 최대 시간(초). 넘으면 끊고 알린다 - '목록을 만드는 중' 이 영영 남지 않게.
+" 0 이면 제한 없음.
+let g:projectfiles_find_timeout = 600
+" 트리의 + / :ProjectFilesAdd 로 디렉터리를 담을 때 그 아래를 찾는 find 를 키를
+" 잡은 채 기다리는 최대 시간(ms). 넘으면 목록 전체를 뒤에서 다시 편다 (담는 것은
+" 그대로 된다 - 목록과 색인이 조금 뒤에 따라온다). stat 이 느린 서버에서 SDK
+" 하나를 통째로 담아도 먹통이 되지 않게.
+let g:projectfiles_sync_find_ms = 500
 " ------------------------------------
 nnoremap <silent> <leader>fo :ProjectFilesFind<CR>
 " F3 도 같은 것을 연다. RelationView 를 F12 로 옮기면서 비었다.
@@ -5889,7 +5907,8 @@ nnoremap <Leader>K :!man <C-R>=expand("<cword>")<CR><CR>
 " <F2> 는 \fm 과 같다: 이 프로젝트의 색인 모드를 고른다
 "   none  아무것도 하지 않는다 (기본 - .tags 가 없는 디렉터리)
 "   auto  프로젝트 전체
-"   <preset 이름>  그 목록만
+"   + 새 빈 preset  항목 0개인 preset 을 만들어 건다 (담는 대로 저장·색인)
+"   <preset 이름>  그 목록만 (목록은 뒤에서 만든다 - 고르는 동안 멎지 않는다)
 " 모드를 고르기 전까지 vim 은 그 디렉터리에서 아무 색인도 시작하지 않는다.
 " 예전 F2(Maketags -> mktags.sh 로 즉시 색인)는 :Maketags 로 남겨 둔다.
 nnoremap <silent> <F2> :ProjectFilesPreset<CR>
