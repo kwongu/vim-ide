@@ -9,7 +9,7 @@
 "
 "   :DirDiff <A> <B>                두 디렉터리 비교 (새 탭) - nvim 에서는 나란한 트리
 "                                   (dirdiffview.lua), 이 목록 방식은 :DirDiffClassic
-"   neo-tree 에서 \d                첫 번째를 고르고, 두 번째에서 \d (dirdiffpick.lua)
+"   neo-tree 에서 Space             첫 번째를 고르고, 두 번째에서 Space (Tab·\d 도. dirdiffpick.lua)
 "   let g:vimide_dirdiff_tab = 0    " 새 탭 없이 지금 창에서 (아래 고침은 그대로)
 "
 " 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록, q 끝내기

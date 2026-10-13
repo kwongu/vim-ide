@@ -1,7 +1,7 @@
 -- dirdiffview.lua - Beyond Compare 처럼: 두 디렉터리를 나란한 트리로, 바로
 --
 --   :DirDiff <A> <B>        새 탭에 비교 트리. 파일을 고르면 비교 탭(A | B, diff)이 따로 열린다
---   neo-tree 에서 \d 두 번  같은 것 (dirdiffpick.lua)
+--   neo-tree 의 Space 두 번 같은 것 (Tab·\d 도. dirdiffpick.lua)
 --   :DirDiffClassic <A> <B> 예전 DirDiff.vim 목록 (dirdifftab.vim)
 --
 -- 트리 창은 왼쪽이 A, 오른쪽이 B 의 트리다 (Beyond Compare 의 폴더 비교처럼). 같은 줄에 같은
@@ -44,14 +44,14 @@
 -- 같은 짝을 다시 고르면 그 탭으로 간다. 비교 탭의 q 는 그 탭을
 -- 닫고 트리의 그 줄로 (:tabclose 도 같다). 트리를 끝내면(q) 그 비교 탭들도 닫힌다.
 -- g:vimide_dirdiff_pair_tab = 0 이면 예전처럼 트리 탭 위쪽의 편집 창 둘에서 본다.
--- 고른 두 파일 (Tab/Tab - 트리에서든 neo-tree 에서든, 이름·디렉터리가 달라도): 보통 짝과 같은 비교 탭이다
+-- 고른 두 파일 (Space/Space - 트리에서든 neo-tree 에서든, 이름·디렉터리가 달라도): 보통 짝과 같은 비교 탭이다
 -- (예전의 맨 vimdiff 에는 색·창 머리·곁·키·q 가 없었다). 창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되
 -- 파일 이름과 그 위 디렉터리 둘은 남기고, 그래도 넘치면 정보(인코딩, 크기, 일시)를 뺀다. [B] 를 이
 -- 트리에서 골랐으면 이 비교의 탭으로 붙는다 - 이 비교의 탭들 뒤에, q·:tabclose 는 [B] 를
 -- 고른 줄로, 트리의 q 로 같이 닫힌다 (이 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 [B] 면
 -- 혼자 선 비교 탭: q 는 [B] 를 고른 창으로. pair_tab = 0 이어도 비교 탭이다.
--- 같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로 (cmp.open_files - 아래 'Tab/Tab
--- 으로 고른 두 파일'). g:vimide_dirdiff_view = 0 이나 g:vimide_dirdiff_pick_vimdiff = 1 이면 예전의 맨 vimdiff.
+-- 같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로 (cmp.open_files - 아래 'Space/Space
+-- 로 고른 두 파일'). g:vimide_dirdiff_view = 0 이나 g:vimide_dirdiff_pick_vimdiff = 1 이면 예전의 맨 vimdiff.
 -- 비교 창의 보기 (\d 로 고른다, Beyond Compare 의 글 비교 보기): 모두 보이기(기본 - 접지
 -- 않는다), 차이 보이기(바뀐 줄만, 나머지는 접는다), 문맥 보이기(바뀐 줄과 위아래 N 줄).
 -- 접기는 foldmethod=diff 그대로라 zR(모두) / zM(접기)도 된다.
@@ -77,13 +77,14 @@
 --               zO / zC 는 같은 것의 다른 이름 (RelationView 의 zO / zC 와 같은 글자)
 --   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...)
 --   F           모두 보이기 <-> 차이 보이기
---   <Tab>       비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 곧바로 새
+--   <Space>     비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Space 의 것을 [B] 로 - 곧바로 새
 --               탭에서 비교 (디렉터리 둘이면 DirDiff, 파일 둘이면 이 비교의 비교 탭 - 아래 '고른 두
---               파일'). [A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A] 다 (dirdiffpick.lua) -
+--               파일'). [A] 줄에서 다시 Space 는 취소. neo-tree 의 Space(Tab 도)와 같은 [A] 다 (dirdiffpick.lua) -
 --               트리가 달라도 된다
---   <S-Tab>     A 쪽 / B 쪽 (커서가 그쪽 이름으로. 마우스로 눌러도 된다)
---   <Space>     지금 쪽의 항목 고르기/풀기 (다음 줄로)       U  고른 것 모두 풀기
---   <C-r>/<C-l> A → B / B → A 로 파일·디렉터리 복사: 원본 쪽(A→B 면 A 트리)에서 고른 것,
+--   <Tab>       A 쪽 / B 쪽 (커서가 그쪽 이름으로. 마우스로 눌러도 된다). <S-Tab> 도 같다 (쪽이 둘뿐이다)
+--   m           지금 쪽의 항목 고르기/풀기 (다음 줄로 - mark. neo-tree 의 m 옮기기는 여기서 r)
+--   U           m 으로 고른 것 모두 풀기
+--   <C-r>/<C-l> A → B / B → A 로 파일·디렉터리 복사: 원본 쪽(A→B 면 A 트리)에서 m 으로 고른 것,
 --               없으면 비주얼 줄, 그것도 없으면 커서 줄. 이름을 보이고 묻고 나서, 뒤쪽이
 --               항목마다 안전하게 한다 (같은 이름은 덮어쓰고 디렉터리는 합친다 - 지우지
 --               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
@@ -91,7 +92,7 @@
 --   a / A       지금 쪽(A/B)에 파일 더하기 (끝이 / 면 디렉터리, x/y/z.c 는 없는 위 디렉터리도) / 디렉터리 더하기
 --               - neo-tree 와 같은 키. 커서 줄이 그쪽의 디렉터리면 그 안, 아니면 그 줄의 부모 디렉터리에 (그쪽에
 --               없는 고아 줄이면 그쪽의 그 부모 - 없으면 만든다). 있는 이름·빈 이름·뿌리 밖(..)은 거절
---   d           지금 쪽의 것 지우기: 그쪽에서 Space 로 고른 것, 없으면 비주얼 줄, 그것도 없으면 커서 줄. 쪽·이름·
+--   d           지금 쪽의 것 지우기: 그쪽에서 m 으로 고른 것, 없으면 비주얼 줄, 그것도 없으면 커서 줄. 쪽·이름·
 --               디렉터리 안의 항목 수를 보이고 묻는다 (기본 아니오). 링크는 링크만, 디렉터리는 안의 것째, 뿌리는 아니
 --   r           지금 쪽의 것 이름 바꾸기·옮기기 (그쪽 뿌리 안의 다른 디렉터리로도 - 끝이 / 면 그 디렉터리 안으로 같은
 --               이름째, mv x dir/ 처럼. 새 이름이 있으면 거절). d r 은 위 디렉터리가 훑은 뒤 링크로 바뀌었으면 거절
@@ -102,7 +103,7 @@
 --               옛 뿌리의 짝을 보이던 비교 탭은 닫는다 (고친 버퍼가 있으면 먼저 묻는다)
 --   S           양측 교환 (Beyond Compare 의 '양측 교환' - 좌, 우측 기본 폴더를 교환하기): A·B 뿌리를 바꾸고 같은
 --               탭에서 다시 비교. 경로 줄 창 가운데(두 반쪽 사이)의 ⇄ 를 한 번 눌러도, :DirDiffSwap 도. 펼친 디렉터리·
---               보기(좌측·우측 최신·고아는 거울 짝으로)·커서 줄(쪽은 뒤집어 같은 파일)·Space 로 고른 것(다른 쪽으로)·
+--               보기(좌측·우측 최신·고아는 거울 짝으로)·커서 줄(쪽은 뒤집어 같은 파일)·m 으로 고른 것(다른 쪽으로)·
 --               고른 [A] 는 그대로, 이 비교의 비교 탭들도 새 방향으로 (버퍼는 창만 바꾼다 - 고친 것·Ctrl+Z 그대로).
 --               복사하는 동안은 하지 않는다. 아래 '양측 교환'
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
@@ -137,7 +138,7 @@
 -- 이면 편집 창 둘에. Shift+Ctrl+N/P 는 Ctrl+Shift 가 nvim 까지 따로 올 때만이다 (<C-S-r> 처럼): 그러지 못하는
 -- 터미널(tmux 3.2 미만 서버·extended-keys 를 끈 tmux, Tera Term)에서는 <C-n>/<C-p> 로 오고 Ctrl+M 도 Enter 와 같은
 -- 바이트라, 거기서는 끝 알림 바로 뒤의 Enter 만 그 일을 한다 (cmp.fk, cmp.fk_legacy - 그 밖의 Enter 는 그대로).
--- Tab/Tab 으로 고른 두 파일은 트리 차례가 없다
+-- Space/Space 로 고른 두 파일은 트리 차례가 없다
 --
 -- 빠른 이유는 뒤쪽 dirdiffscan.py 에 적었다: 찾는 대로 보여 주고(펼쳐 둔 디렉터리
 -- 먼저), 크기가 다르면 바로 '다름'(줄 끝만 다를 수 있는 짝 - 1~2 바이트나 줄 수만큼 - 은 뒤에서 읽어 본다),
@@ -168,7 +169,7 @@
 --   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로 (기본 1: 같은 글은 보통 글자색)
 --   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기 (짝 전체 되돌리기 없이)
 --   let g:vimide_dirdiff_file_keys = 0     " 비교 창의 <C-S-n>/<C-S-p>·<C-m>/<C-S-m>(끝 알림 뒤의 Enter)을 가로채지 않기
---   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 맨 vimdiff 로 (dirdiffpick.lua 가 본다)
+--   let g:vimide_dirdiff_pick_vimdiff = 1  " Space/Space 로 고른 두 파일을 예전처럼 맨 vimdiff 로 (dirdiffpick.lua 가 본다)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
 
 if vim.g.loaded_vimide_dirdiffview then
@@ -360,11 +361,11 @@ local HL = {
   -- 트리의 지금 줄 (창에만 CursorLine 을 이것으로 - tree_opts)
   { 'VimIdeDirDiffSelect', nil, { link = 'CursorLine' }, C(nil, nil, '#d7ffd0', 194), C(nil, nil, '#24402a', 22) },
   { 'VimIdeDirDiffOpened', nil, { link = 'Visual' }, C(nil, nil, '#e8eefc', 189), C(nil, nil, '#2a3346', 237) },
-  { 'VimIdeDirDiffMark', nil, { link = 'Search' } },        -- Space 로 고른 항목
+  { 'VimIdeDirDiffMark', nil, { link = 'Search' } },        -- m 으로 고른 항목
   -- 커서 줄의 지금 쪽(A/B) 반 칸: 고른 줄의 연두 (Beyond Compare 처럼 그쪽만 - mark_side).
   -- neogit·classic 은 VimIdeDirDiffSelect 가 CursorLine 이라 그 색 그대로
   { 'VimIdeDirDiffSide', nil, { link = 'VimIdeDirDiffSelect' } },
-  { 'VimIdeDirDiffPickA', nil, { link = 'Search' } },      -- Tab 으로 고른 [A] (dirdiffpick.lua 와 같은 것)
+  { 'VimIdeDirDiffPickA', nil, { link = 'Search' } },      -- Space 로 고른 [A] (dirdiffpick.lua 와 같은 것)
   { 'VimIdeDirDiffMenuNow', { 'NeogitSectionHeader' }, { link = 'Title' } },  -- 보기 메뉴의 지금 보기
   -- 창 머리·상태줄의 이름표 (Neogit 의 절 머리 - 'Unstaged changes'). neogit·bc 색일 때만 단다
   { 'VimIdeDirDiffHeader', { 'NeogitSectionHeader' }, { link = 'Title' }, BOLD, BOLD },
@@ -1291,7 +1292,7 @@ local function side_text(s, L, r, side)
   local bad = e.rerr and e.rerr:find(side, 1, true) and ' (못 읽음)' or ''
   local name = fit(shown(e.name) .. (k == 'l' and ' @' or '') .. bad, namew)
   local ie = #guide + #icon
-  -- name_vis: 채운 빈칸을 뺀 이름 끝 (Tab 으로 고른 [A] 를 그 뒤에 단다). g_end/i_end: 안내선·아이콘 끝
+  -- name_vis: 채운 빈칸을 뺀 이름 끝 (Space 로 고른 [A] 를 그 뒤에 단다). g_end/i_end: 안내선·아이콘 끝
   return guide .. icon .. name .. tail, { g_end = #guide, i_end = ie, name_start = ie, name_end = ie + #name,
     tail = #tail, name_vis = ie + #(name:gsub(' +$', '')) }
 end
@@ -2329,7 +2330,7 @@ local function set_heads(v)
       local W = api.nvim_win_get_width(w)
       -- 경로는 파일 이름과 맨 앞(~/…/)만큼은 남게 - 정보·보기·키는 그것이 안 들어가면 뺀다
       local need = math.min(sw(h), sw(vim.fn.fnamemodify(h, ':t')) + 4)
-      -- Tab/Tab 으로 고른 두 파일은 디렉터리가 다르다 (트리의 짝은 같은 상대 경로라 트리가 말해 준다): 경로는
+      -- Space/Space 로 고른 두 파일은 디렉터리가 다르다 (트리의 짝은 같은 상대 경로라 트리가 말해 준다): 경로는
       -- 파일 이름과 그 위 디렉터리 둘(맨 앞/…/x/y/이름 - cmp.pick_min)만큼은 남기고 키 안내·정보를 뺀다 (보기
       -- 이름은 보통 짝처럼 - 지금 보기라 안내보다 먼저 남는다). 그만큼 남으면 정보(일시·크기·인코딩)는 보통 짝처럼
       -- 두고 경로를 가운데부터 줄인다. 처음에는 경로를 다 보이려고 정보부터 뺐더니 200 칸 화면(창 98 칸)에서도
@@ -2434,7 +2435,7 @@ local function unview_win(w)
 end
 
 -- 짝을 view 의 두 창에 채운다. jump: 커서를 첫 차이로.
--- 트리의 짝은 뿌리 + r.rel 이고, Tab/Tab 으로 고른 두 파일(cmp.pick_fill)은 r.pick = { a, b } 에 경로를 따로
+-- 트리의 짝은 뿌리 + r.rel 이고, Space/Space 로 고른 두 파일(cmp.pick_fill)은 r.pick = { a, b } 에 경로를 따로
 -- 싣는다 - 이름도 디렉터리도 다를 수 있다 (트리의 줄 r 에는 pa / pb 가 이미 있다 - 안내선 거리). 그때 r.rel 은
 -- 트리의 줄이 아닌 열쇠(NUL 로 시작 - 트리의 상대 경로와 겹치지 않는다), r.label 은 알림·탭 이름에 쓸 이름이다
 local function fill(v, r, jump)
@@ -2465,7 +2466,7 @@ local function fill(v, r, jump)
   local ticks = cmp.uticks(v)
   -- 창 머리(winbar)·winhighlight 도 걷고 나서 버퍼를 바꾼다: nvim 은 창에서 내려가는 버퍼에 그 창의 옵션을
   -- 적어 두었다가(wininfo) 그 버퍼를 새 창에 띄울 때 입힌다 - 그대로 두었더니 앞에 본 파일을 다른 탭에서
-  -- 열면(Tab/Tab 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_heads 가 단다
+  -- 열면(Space/Space 의 vimdiff, :tabnew) 이 비교의 ' A: …' 머리가 따라왔다. 새 머리는 아래 set_heads 가 단다
   -- diff 접기도 같은 까닭으로 걷는다 (undiff_folds)
   for _, w in ipairs({ v.win_a, v.win_b }) do
     unview_win(w)
@@ -3149,7 +3150,7 @@ end
 
 -- zO / zC 가 다룰 디렉터리들: 비주얼 범위(l1..l2)면 그 안의 디렉터리 줄들 (디렉터리 줄이 없으면 줄마다 그 줄이 든
 -- 디렉터리), 아니면 커서 줄 하나. 겹친 것(고른 디렉터리 아래의 디렉터리)은 빼서 한 번만 - 위의 것이 덮는다.
--- Space 로 고른 것은 쓰지 않는다: 그것은 복사·지우기(지금 쪽의 항목)를 위해 쪽마다 남겨 둔 것이라, 남아 있으면 커서
+-- m 으로 고른 것은 쓰지 않는다: 그것은 복사·지우기(지금 쪽의 항목)를 위해 쪽마다 남겨 둔 것이라, 남아 있으면 커서
 -- 줄의 zO 가 엉뚱한 곳을 펼친다
 function tr.sub_roots(s, l1, l2)
   local set = {}
@@ -3397,7 +3398,7 @@ local function act_mark(s)
 end
 
 -- ---------------------------------------------------------------------------
--- 비교할 곳 고르기 (Tab: [A] -> [B], neo-tree 의 Tab 처럼). [A] 는 neo-tree 의 것과 같은 하나다
+-- 비교할 곳 고르기 (Space: [A] -> [B], neo-tree 의 Space 처럼). [A] 는 neo-tree 의 것과 같은 하나다
 -- - dirdiffpick.lua 가 들고 있고 [B] 에서 연다. 그래서 트리가 달라도 된다: 이 트리에서 [A],
 -- 다른 비교 탭의 트리나 neo-tree 에서 [B]
 -- ---------------------------------------------------------------------------
@@ -3417,7 +3418,7 @@ local function act_pick(s)
   end
   if k == nil then
     -- 다른 쪽에만 있는 줄의 빈칸: 고를 것이 없다
-    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 고르세요 (<S-Tab> 쪽 바꾸기)')
+    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 고르세요 (<Tab> 쪽 바꾸기)')
       :format(side:upper(), side == 'a' and 'B' or 'A'))
   end
   if not _G.vimide_dirdiff_pick_path then
@@ -3511,7 +3512,7 @@ local function entry_of(s, rel)
 end
 entry_of_fn = entry_of
 
--- 복사할 것: 원본 쪽(A→B 면 A)에서 Space 로 고른 것 > 비주얼 줄 > 커서 줄.
+-- 복사할 것: 원본 쪽(A→B 면 A)에서 m 으로 고른 것 > 비주얼 줄 > 커서 줄.
 -- 반대쪽에서 고른 것은 쓰지 않는다 (B 에서 고른 것을 A→B 원본으로 써 B 쪽을 덮었다)
 local function picked(s, from, l1, l2)
   local set, by_mark = {}, false
@@ -3775,11 +3776,11 @@ local function on_copied(s, ev)
     s.marks[from] = {}
   end
   schedule_render(s)
-  -- 같은 곳이 든 다른 비교에도 알린다 (:w 의 BufWritePost 처럼) - Tab/Tab 으로 연 안쪽 비교에서
+  -- 같은 곳이 든 다른 비교에도 알린다 (:w 의 BufWritePost 처럼) - Space/Space 로 연 안쪽 비교에서
   -- 복사했더니 바깥 비교 탭은 R 을 누를 때까지 옛 판정(=)·크기·수를 그대로 보였다. 복사한 디렉터리가
   -- 그 비교의 뿌리를 품으면(뿌리째 바뀌었다) 다시 훑는다 (tr.others - 트리의 파일 다루기도 같이 쓴다)
   tr.others(s, to, roots)
-  -- Tab/Tab 으로 고른 두 파일의 비교 탭은 위의 다시 채우기(reopen - 트리의 줄을 따른다)에 들지 않는다: 복사한 곳
+  -- Space/Space 로 고른 두 파일의 비교 탭은 위의 다시 채우기(reopen - 트리의 줄을 따른다)에 들지 않는다: 복사한 곳
   -- 아래의 파일을 보이면 여기서 다시 채운다 (보통 짝의 'refill' 처럼, 어느 세션에 붙었든 혼자 섰든). 버퍼를 다시
   -- 읽고 창 머리만 고쳤더니 같은 이름의 바이너리를 덮어써도 글 diff 그대로였다 (알림·판정·diff 는 fill 이 정한다).
   -- 창 하나를 닫아 버렸으면 머리만 - 다시 세우는 것은 다시 고를 때 (cmp.open_files)
@@ -4159,7 +4160,7 @@ function _G.vimide_dirdiff_copy_lines(dir, one)
   local tb = put and theirs or mine
   -- 양쪽 다 진짜 파일이어야 한다: 빈 쪽(한쪽에만 있는 파일)·안내 쪽에서 가져오면 안내 글이
   -- 파일에 들어가거나 줄이 지워졌다
-  -- 트리의 파일째 복사는 짝(같은 상대 경로)만 된다: Tab/Tab 으로 고른 두 파일(이름·디렉터리가 다를 수 있다,
+  -- 트리의 파일째 복사는 짝(같은 상대 경로)만 된다: Space/Space 로 고른 두 파일(이름·디렉터리가 다를 수 있다,
   -- neo-tree 에서 골랐으면 트리도 없다)에는 그 안내를 붙이지 않는다
   local hint = v.pick and '' or ' - 파일째는 트리에서 <C-r>/<C-l> 로 복사하세요'
   for _, b in ipairs({ mine, theirs }) do
@@ -4738,7 +4739,7 @@ local HELP_PAIR = {
   '  \\d          보기 고르기: 모두 보이기(기본) / 차이 보이기 / 문맥 보이기 (Enter 고르기, 1 2 3)',
   '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
-  '              Tab/Tab 으로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
+  '              Space/Space 로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
   '  창 머리를 두 번 누르기  그쪽 파일 바꾸기 - 새 두 파일을 이 탭에서 견준다 (:DirDiffPath [a|b] [경로] 도.',
   '              한쪽에만 있는 파일의 없는 쪽도 이것으로 정한다. q 는 트리의 그 줄로)',
   '  :DirDiffSwap 이 짝만 양측 교환 - 두 파일이 자리를 바꾼다 (B 창 머리 맨 앞의 ⇄ / <> 를 눌러도. 트리는 그대로,',
@@ -4793,20 +4794,22 @@ local function help()
     '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
     '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로. 비교 창에서도)',
-    '  <Tab>       비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 새 탭에서 비교',
-    '              ([A] 줄에서 다시 Tab 은 취소. neo-tree 의 Tab 과 같은 [A]). 파일 둘이면 이 비교의 비교 탭 -',
+    '  <Space>     비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Space 의 것을 [B] 로 - 새 탭에서 비교',
+    '              ([A] 줄에서 다시 Space 는 취소. neo-tree 와 같은 [A]). 파일 둘이면 이 비교의 비교 탭 -',
     '              이름·디렉터리가 달라도 된다 (q 는 [B] 를 고른 줄로, 트리의 q 로 같이 닫힌다)',
-    '  <S-Tab>     A 쪽 / B 쪽 오가기     <Space> 그쪽 항목 고르기    U 고른 것 모두 풀기',
-    '  <C-r> <C-l> 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
+    '  <Tab>       A 쪽 / B 쪽 오가기 (<S-Tab> 도)',
+    '  m           그쪽 항목 고르기 / 풀기 (다음 줄로. neo-tree 의 m 옮기기는 여기서 r)',
+    '  U           m 으로 고른 것 모두 풀기',
+    '  <C-r> <C-l> m 으로 고른 것(또는 비주얼 줄, 커서 줄)을 A→B / B→A 로 복사 (묻고 나서)',
     '  a A         지금 쪽에 파일 더하기 (끝이 / 면 디렉터리, x/y/z.c 는 위 디렉터리도) / 디렉터리 더하기',
     '              - 커서 줄이 그쪽 디렉터리면 그 안, 아니면 그 줄의 부모 디렉터리에 (neo-tree 와 같은 키)',
-    '  d           지금 쪽의 것 지우기: 그쪽에서 고른 것, 비주얼 줄, 커서 줄 (묻고 나서 - 링크는 링크만)',
+    '  d           지금 쪽의 것 지우기: m 으로 고른 것, 비주얼 줄, 커서 줄 (묻고 나서 - 링크는 링크만)',
     '  r           지금 쪽의 것 이름 바꾸기·옮기기 (그쪽 뿌리 안의 다른 디렉터리로도, 끝이 / 면 그 안으로)',
     '  e           지금 쪽의 경로(뿌리 디렉터리) 바꾸고 다시 비교 - 경로 줄의 그쪽을 두 번 눌러도,',
     '              :DirDiffPath [a|b] [경로] 도 (비교 창에서는 그쪽 파일)',
     ('  S           양측 교환 - A·B 뿌리를 바꾸고 다시 비교 (경로 줄 가운데의 %s 를 눌러도, :DirDiffSwap 도).'):format(
       ascii() and '<>' or '⇄'),
-    '              펼친 것·보기·커서 줄·고른 것·[A] 와 비교 탭들(새 방향, 고친 것 그대로)은 그대로 둔다',
+    '              펼친 것·보기·커서 줄·m 으로 고른 것·[A] 와 비교 탭들(새 방향, 고친 것 그대로)은 그대로 둔다',
     ascii() and '  판정 칸     x 다름  = 같음  ~ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  . 확인 중'
       or '  판정 칸     ≠ 다름  = 같음  ≈ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  · 확인 중',
   }
@@ -5215,12 +5218,14 @@ local function map_list(s)
   m('f', function() open_menu(s) end, '보기 고르기')
   m('F', function() set_mode(s, s.mode == 'all' and 'diff' or 'all') end, '모두 보이기 / 차이 보이기')
   m('R', function() restart(s) end, '다시 훑기')
-  m('<Tab>', function() act_pick(s) end, '비교할 곳 고르기 [A] -> [B]')
-  -- 쪽 바꾸기는 Tab 에서 옮겨 왔다 (Tab 은 neo-tree 처럼 비교할 곳 고르기)
-  m('<S-Tab>', function() act_side(s) end, 'A 쪽 / B 쪽')
-  m('<Space>', function() act_mark(s) end, '고르기')
+  -- 비교할 곳 고르기는 Space (neo-tree 와 같은 키 - 거기서는 Tab 도), 쪽 바꾸기는 Tab (쪽이 둘뿐이라 S-Tab 도
+  -- 같다). 복사·지우기에 쓸 항목 고르기는 Space 에서 m 으로 옮겼다 (mark - 트리에서 m 으로 시작하는 키는 없다)
+  m('<Space>', function() act_pick(s) end, '비교할 곳 고르기 [A] -> [B]')
+  m('<Tab>', function() act_side(s) end, 'A 쪽 / B 쪽')
+  m('<S-Tab>', function() act_side(s) end, 'A 쪽 / B 쪽 (Tab 과 같다)')
+  m('m', function() act_mark(s) end, '항목 고르기 / 풀기 (복사·지우기에 쓸 것)')
   -- <Esc> 로 두었더니 습관처럼 누르는 Esc 에 고른 것이 사라졌다
-  m('U', function() clear_marks(s) end, '고른 것 모두 풀기')
+  m('U', function() clear_marks(s) end, 'm 으로 고른 것 모두 풀기')
   m('<C-r>', function() act_copy(s, 1) end, 'A → B 복사')
   m('<C-l>', function() act_copy(s, -1) end, 'B → A 복사')
   for _, spec in ipairs({ { '<C-r>', 1 }, { '<C-l>', -1 } }) do
@@ -5234,7 +5239,7 @@ local function map_list(s)
   if on(vim.g.vimide_dirdiff_file_ops, 1) then
     m('a', function() tr.add(s, false) end, '지금 쪽에 파일 더하기 (끝이 / 면 디렉터리)')
     m('A', function() tr.add(s, true) end, '지금 쪽에 디렉터리 더하기')
-    m('d', function() tr.delete(s) end, '지금 쪽의 것 지우기 (고른 것, 없으면 커서 줄 - 묻고 나서)')
+    m('d', function() tr.delete(s) end, '지금 쪽의 것 지우기 (m 으로 고른 것, 없으면 커서 줄 - 묻고 나서)')
     m('r', function() tr.rename(s) end, '지금 쪽의 것 이름 바꾸기·옮기기')
     vim.keymap.set('x', 'd', function()
       local l1, l2 = vim.fn.line('v'), vim.fn.line('.')
@@ -6006,7 +6011,7 @@ function tr.rm(p)
   return first, n
 end
 
--- d: 지금 쪽의 것을 지운다 - 그쪽에서 Space 로 고른 것 > 비주얼 줄 > 커서 줄 (복사와 같은 차례, picked). 이름과
+-- d: 지금 쪽의 것을 지운다 - 그쪽에서 m 으로 고른 것 > 비주얼 줄 > 커서 줄 (복사와 같은 차례, picked). 이름과
 -- 디렉터리 안의 항목 수를 보이고 묻는다 (기본 아니오. g:vimide_dirdiff_confirm_delete = 0 이면 묻지 않는다).
 -- 그쪽에 없는 줄, 고친 채인 버퍼가 걸린 것은 건너뛰고 알린다
 function tr.delete(s, l1, l2)
@@ -6101,14 +6106,14 @@ function tr.delete(s, l1, l2)
       tops[#tops + 1] = it.rel   -- 다 못 지웠어도 바뀌었다
       if not uv.fs_lstat(it.full) then
         fulls[#fulls + 1] = it.full
-        -- [A](Tab) 가 지운 것(이나 그 아래)이면 버린다 - 이름 바꾸기가 [A] 를 옮기는 것처럼 (dirdiffpick.lua)
+        -- [A](Space) 가 지운 것(이나 그 아래)이면 버린다 - 이름 바꾸기가 [A] 를 옮기는 것처럼 (dirdiffpick.lua)
         if _G.vimide_dirdiff_pick_moved then
           _G.vimide_dirdiff_pick_moved(it.full, nil)
         end
       end
     end
   end
-  -- 고른 것: Space 로 고른 것을 지웠으면 그쪽 고른 것을 모두 푼다 (복사처럼), 아니면 지운 곳 아래의 것만
+  -- 고른 것: m 으로 고른 것을 지웠으면 그쪽 고른 것을 모두 푼다 (복사처럼), 아니면 지운 곳 아래의 것만
   if by_mark then
     s.marks[side] = {}
   else
@@ -6152,7 +6157,7 @@ function tr.rename(s)
     return
   end
   if not tr.kind(r.e, side) then
-    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 (<S-Tab> 쪽 바꾸기)'):format(S, side == 'a' and 'B' or 'A'))
+    return say(('%s 쪽에 없는 항목입니다 - %s 쪽에서 (<Tab> 쪽 바꾸기)'):format(S, side == 'a' and 'B' or 'A'))
   end
   local old = root .. '/' .. r.rel
   -- 위 디렉터리가 그새 링크로 바뀌었으면 뿌리 밖의 것을 옮기게 된다 (tr.real_parents)
@@ -6293,8 +6298,8 @@ end
 -- 폴더 비교의 한쪽 뿌리를 바꾼다: 같은 탭에서 새 뿌리로 다시 훑는다 (R 의 restart - 경로 줄·상태줄·탭 이름도).
 -- 옛 뿌리의 짝을 보이던 비교 탭(트리의 짝)은 닫는다 - 고친 채인 버퍼가 있으면 먼저 묻는다 (닫아도 버퍼는 저장하지
 -- 않은 채 남고 알린다 - release_view). 고른 두 파일의 탭은 경로가 따로라 그대로 두되, q 로 돌아갈 줄은 옛 트리의
--- 것이라 버린다. Space 로 고른 것도 옛 트리의 것이라 푼다. 펼쳐 둔 디렉터리는 그대로 (같은 꼴의 다른 판과 견줄
--- 때가 많다 - 없는 것은 그냥 안 보인다). [A](Tab) 를 이 트리에서 골랐으면 경로는 두고 고른 곳(옛 줄)만 버린다
+-- 것이라 버린다. m 으로 고른 것도 옛 트리의 것이라 푼다. 펼쳐 둔 디렉터리는 그대로 (같은 꼴의 다른 판과 견줄
+-- 때가 많다 - 없는 것은 그냥 안 보인다). [A](Space) 를 이 트리에서 골랐으면 경로는 두고 고른 곳(옛 줄)만 버린다
 function tr.set_root(s, side, path)
   if s.solo or s.done then
     return
@@ -6583,11 +6588,11 @@ end
 -- 폴더 비교 (tr.swap): A 의 뿌리가 B 로, B 의 것이 A 로 가고 같은 탭에서 다시 견준다. 트리의 S, 경로 줄 가운데의 ⇄ 를
 -- 한 번 누르기, 트리에서 :DirDiffSwap (비교 창에서는 :DirDiffSwap!). 보던 것은 그대로 둔다 - 펼친 디렉터리, 보기(좌측·
 -- 우측을 말하는 보기는 거울 짝으로 - MODES 의 swap), 커서 줄(같은 상대 경로)과 지금 쪽(뒤집어서 같은 파일을 가리킨다),
--- Space 로 고른 것(다른 쪽으로 옮긴다), 이 트리에서 고른 [A](Tab - 경로는 그대로라 고른 쪽만 뒤집는다). 다시 훑는 것은
+-- m 으로 고른 것(다른 쪽으로 옮긴다), 이 트리에서 고른 [A](Space - 경로는 그대로라 고른 쪽만 뒤집는다). 다시 훑는 것은
 -- 경로 바꾸기(tr.set_root)처럼 뒤쪽을 새 뿌리로 다시 띄우는 R 의 길(restart)이다. 그동안 지금 목록을 A·B 를 바꾼 꼴로
 -- (tr.mirror) 그대로 보인다: 같은 줄들이라 트리가 비지 않고 커서·화면 자리가 흔들리지 않는다 (새 목록이 오는 대로 바뀐다).
 -- 이 비교의 비교 탭들도 따른다 (cmp.swap_refill): 트리의 짝은 새 방향으로 (왼쪽이 새 A), 이 비교에 붙은 고른 두
--- 파일(Tab/Tab, 경로 바꾸기)은 두 경로를 바꾼다. 버퍼는 창만 바꾼다 - 다시 읽지 않아 고친 것이 그대로고, 짝 전체의
+-- 파일(Space/Space, 경로 바꾸기)은 두 경로를 바꾼다. 버퍼는 창만 바꾼다 - 다시 읽지 않아 고친 것이 그대로고, 짝 전체의
 -- 되돌리기 줄(Ctrl+Z)도 이어진다 (버퍼마다 적은 것이다). 창 머리·색·개요 막대·줄 자세히·화살표·탭 이름은 채우기
 -- (fill)가 새로 한다. 복사하는 동안은 하지 않는다 (뒤쪽을 바꾸면 그 복사가 끊긴다 - R 과 같은 까닭).
 -- 비교 탭 하나만 (cmp.swap_tab): 그 탭의 두 파일을 바꾼다 - 비교 창에서 :DirDiffSwap, B 창 머리 맨 앞의 ⇄ 누르기.
@@ -6664,7 +6669,7 @@ function tr.realias(s, dir, entries)
   end
 end
 
--- rel 로 적어 둔 것들에서 from (과 그 아래)을 to 로 (tr.realias): 펼친 것·목록·청한 것, Space 로 고른 것, 돌아갈
+-- rel 로 적어 둔 것들에서 from (과 그 아래)을 to 로 (tr.realias): 펼친 것·목록·청한 것, m 으로 고른 것, 돌아갈
 -- 커서 줄, 비교 탭의 짝과 q 로 돌아갈 줄, 이 비교에 붙은 고른 두 파일의 경로 (양측을 바꾼 짝 - cmp.swapped_rel 이 그
 -- 줄을 찾게). 새 열쇠에 이미 있는 것(새 목록)은 덮지 않는다
 function tr.rekey(s, from, to)
@@ -6871,7 +6876,7 @@ function cmp.swap_tab(v)
 end
 
 -- 양측을 바꾼 트리의 짝인가: 그 세션의 B 뿌리 + rel | A 뿌리 + rel 를 견주는 고른 두 파일이면 그 rel (cmp.swap_tab 이
--- 만든 것, Tab/Tab 으로 거꾸로 고른 것도). 트리에는 그 줄의 탭이 있는 것으로 보인다 (mark_open)
+-- 만든 것, Space/Space 로 거꾸로 고른 것도). 트리에는 그 줄의 탭이 있는 것으로 보인다 (mark_open)
 function cmp.swapped_rel(v)
   local s = v.s
   if not v.pick or s.solo then
@@ -6954,7 +6959,7 @@ function tr.swap_cmd(bang)
 end
 
 -- ---------------------------------------------------------------------------
--- Tab/Tab 으로 고른 두 파일 (겹친 비교): DirDiff 의 비교 탭으로
+-- Space/Space 로 고른 두 파일 (겹친 비교): DirDiff 의 비교 탭으로
 -- ---------------------------------------------------------------------------
 -- dirdiffpick.lua 가 [B] 에서 부른다 (_G.vimide_dirdiff_open_files). 예전에는 tabnew + diffsplit 의 맨 vimdiff 라
 -- bc 색·창 머리·개요 막대·줄 자세히·화살표·\d·복사 키·Ctrl+Z / Ctrl+Y·q·,r ,e·'diffopt' 맞추기가 하나도 없었다
@@ -7700,7 +7705,7 @@ function cmp.block_at(d, side, l)
   return best
 end
 
--- 화살표·연보라는 버퍼에 단다 (cmp.scope). 같은 파일을 보이는 비교 탭이 둘이면(Tab/Tab 으로 고른 짝과 그 파일의
+-- 화살표·연보라는 버퍼에 단다 (cmp.scope). 같은 파일을 보이는 비교 탭이 둘이면(Space/Space 로 고른 짝과 그 파일의
 -- 보통 짝, 뿌리를 같이 쓰는 비교 둘) 두 탭의 것이 한 버퍼에 겹쳤다: 고른 짝의 A 창에 화살표·괄호선이 둘, sign 칸이
 -- 늘어 글이 두 칸 밀렸다 (새 view 는 지난번에 단 버퍼가 없어 남의 것을 걷지 않았다). 그래서 다시 그리는 view 는
 -- 지난번 버퍼(t - v.ab / v.mb)와 지금 버퍼의 그 이름 공간을 모두 걷고 새로 단다. 다만 뒤에 있는 탭의 view 는
@@ -9105,7 +9110,7 @@ function cmp.fstep(v, d, more)
     more = -n - 2
   end
   if (v.pick and not cmp.swapped_rel(v)) or s.solo then
-    return say('고른 두 파일(Tab/Tab)에는 트리 차례가 없습니다')
+    return say('고른 두 파일(Space/Space)에는 트리 차례가 없습니다')
   end
   if not v.rel then
     return say('트리에서 파일을 먼저 고르세요')
@@ -9433,7 +9438,7 @@ api.nvim_create_autocmd('TabClosed', {
 })
 -- 'diffopt' 의 context 를 들어온 탭의 보기로 (비교 탭이 아니면 사용자 것으로 되돌린다 - dip_sync).
 -- 비교 탭이면 곁(화살표·연보라·빨강·개요 막대)을 다시 센다: 이것들은 버퍼에 단 것이라 같은 파일을 보이는
--- 다른 비교 탭(겹친 Tab/Tab, 뿌리를 같이 쓰는 비교 둘)이 제 짝으로 덮어 놓았을 수 있다. 터미널 크기가
+-- 다른 비교 탭(겹친 Space/Space, 뿌리를 같이 쓰는 비교 둘)이 제 짝으로 덮어 놓았을 수 있다. 터미널 크기가
 -- 바뀐 뒤 처음이면 두 창을 반반으로 (cmp.rebalance)
 api.nvim_create_autocmd('TabEnter', {
   group = group,
@@ -9485,7 +9490,7 @@ api.nvim_create_autocmd('WinClosed', {
 })
 -- 편집 창에 떠 있는 파일을 다른 창·탭에 띄우면 nvim 은 그 버퍼가 떠 있는 창(편집 창)의 옵션을 새 창에
 -- 입힌다: 비교의 머리(' A: …' winbar)에 diff·scrollbind·cursorbind·foldmethod=diff 까지 따라왔다
--- (:tabnew 파일, :tabnew 뒤 :e, :vsplit 파일, neo-tree 의 Enter, Tab/Tab 의 vimdiff). 버퍼를 바꿀 때 머리를
+-- (:tabnew 파일, :tabnew 뒤 :e, :vsplit 파일, neo-tree 의 Enter, Space/Space 의 vimdiff). 버퍼를 바꿀 때 머리를
 -- 걷는 것(open_pair, finish)은 내려간 버퍼에만 듣는다. 그래서 들어온 쪽에서 걷는다: 두 편집 창이 아닌 창이
 -- 편집 창과 같은 머리를 달고 있으면 거기서 받은 옵션이다 - 머리를 걷고 diff 였으면 :diffoff (그 창만,
 -- 묶기·접기도 diff 전으로). :diffoff 가 남긴 manual 접기와 'foldenable' 은 undiff_folds 가 되돌린다.
@@ -9617,7 +9622,7 @@ api.nvim_create_autocmd('BufWritePost', {
     local rp = real(full)
     -- 어느 이름으로 찾는지는 rels_in 에 (트리 복사의 on_copied 와 같이 쓴다)
     local link = (uv.fs_lstat(full) or {}).type == 'link'
-    -- Tab/Tab 으로 고른 두 파일의 비교 탭에서 저장해도 같다: 그 파일이 든 세션이면 어느 것이든 (붙은 세션이
+    -- Space/Space 로 고른 두 파일의 비교 탭에서 저장해도 같다: 그 파일이 든 세션이면 어느 것이든 (붙은 세션이
     -- 아니어도). 혼자 선 비교(cmp.solo)는 트리가 없다
     for _, s in pairs(sessions) do
       local paths = not s.solo and rels_in(s, full, rp, link) or {}

@@ -2086,12 +2086,12 @@ slots that were empty:
 | `y` | vim's yank, as anywhere else: `yiw`, `y$`, and `y` on a visual or `<C-v>` block selection copy exactly the text selected |
 | `Y` | put the entry into neo-tree's file clipboard (what neo-tree has on `y`), to paste it in the tree with `p` |
 | `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
-| `Tab` | pick two directories (or two files) to compare: `Tab` on the first marks it `[A]`, `Tab` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff). `\d` does the same. neo-tree had `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
+| `Space` / `Tab` | pick two directories (or two files) to compare: `Space` on the first marks it `[A]`, `Space` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff). `Tab` and `\d` do the same (`Space` is also the key in the DirDiff tree). neo-tree had `Space` on "toggle node" - folders open and close with `Enter`, `o` or a double click (`C` closes one, `O` / `X` everything below) - and `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
 
-`o` is the one key that was not free: neo-tree had it on help, and help is
-also on `?`, so nothing was lost. neo-tree's two-key sort maps (`oc` `od` `og`
-`om` `on` `os` `ot`) are dropped - they start with `o`, so `o` used to wait
-`timeoutlen` before it opened anything.
+Besides `y` and `Space` / `Tab` (see their rows), `o` is the one key that was
+not free: neo-tree had it on help, and help is also on `?`, so nothing was lost.
+neo-tree's two-key sort maps (`oc` `od` `og` `om` `on` `os` `ot`) are dropped -
+they start with `o`, so `o` used to wait `timeoutlen` before it opened anything.
 
 The trees **follow the edit window by default** (*live path* mode): they
 expand to every file you move to, with the cursor on it. `\P` switches a tree
@@ -2541,19 +2541,21 @@ let g:vimide_edit_winmove = 0   " vim's own behaviour
 :DirDiff <A> <B>          " compare two directories (tab-completes paths)
 ```
 
-In neo-tree (F9, F11 or the RelationView tree), press `Tab` on the first
-directory - its row gets an `[A]` at the end - and `Tab` on the one to compare
+In neo-tree (F9, F11 or the RelationView tree), press `Space` on the first
+directory - its row gets an `[A]` at the end - and `Space` on the one to compare
 it with: that one becomes `[B]` and the comparison opens straight away. Two
 files instead of two directories open in a DirDiff compare tab - the same
 window as a pair picked in the DirDiff tree, with its colors, window bars,
 overview bar, `\d`, copy and undo keys and `q` (see *Two picked files* under
-*Compare tabs* below); they may have different names and folders. `Tab` again on
+*Compare tabs* below); they may have different names and folders. `Space` again on
 the `[A]` row cancels it, and the two can come from different trees (pick `[A]`
-in the F9 sidebar, `[B]` in the RelationView tree). `\d` is the same key under
-another name.
+in the F9 sidebar, `[B]` in the RelationView tree). In neo-tree `Tab` and `\d`
+do the same. `Space` takes the place of neo-tree's own open / close of a
+folder there; folders open and close with `Enter` or `o`.
 
-The same `Tab` works in the DirDiff tree (below), and it is the same `[A]`:
-pick `[A]` in neo-tree and `[B]` in a comparison tree, or the other way round.
+The same `Space` works in the DirDiff tree (below; `Tab` there switches between
+the A and B sides), and it is the same `[A]`: pick `[A]` in neo-tree and `[B]`
+in a comparison tree, or the other way round.
 
 ### The side-by-side tree (nvim)
 
@@ -2563,7 +2565,7 @@ each other, and each file pair you pick opens in a *compare tab* of its own (A
 on the left, B on the right, in diff mode; see *Compare tabs* below).
 `let g:vimide_dirdiff_pair_tab = 0` keeps the earlier layout instead: two edit
 windows on top of the tree, showing one pair at a time (two files picked with
-`Tab` / `Tab` still open in a compare tab of their own - see *Two picked files*).
+`Space` / `Space` still open in a compare tab of their own - see *Two picked files*).
 
 ```
  A  ~/work/a                                        B  ~/work/b
@@ -2665,7 +2667,7 @@ terminals get the nearest colors):
   keeps per folder (the same one the views use), so it is right for folders
   that were never opened too.
 - On the row under the cursor only the half of the side the cursor is on (A or
-  B) is light green, as Beyond Compare selects only that side; `<S-Tab>` or a
+  B) is light green, as Beyond Compare selects only that side; `<Tab>` or a
   click on the other half moves the selection there.
 - The totals in the status line (`다름`, `A만`, `B만`) pick the light or the
   dark red and blue by the status line's own background, so they stay readable
@@ -2700,16 +2702,16 @@ those two windows): the same file in any other window keeps its colors.
 | `L` / `H` | open everything under the cursor's folder / close that folder and everything under it - `l` / `h` all the way down (in the tree `H` and `L` do not jump to the top and bottom of the window). `zO` / `zC` do the same, as in the relation window. The folder is the row itself when it is a folder on either side - one that exists on one side only, or is a folder on one side and a file on the other, included (its contents are listed) - otherwise the folder the row is in (a top-level file: the whole tree). It follows the view: in *all* every folder, in the others the folders that view shows. In visual mode (`V` / `v`): every folder row in the selection (a selection of files only: the folders they are in), each subtree once. The helper walks in the background - folders not read yet are read first, the editor never waits - and the message says how many folders were opened; `H` leaves the cursor on that folder's row. More than `g:vimide_dirdiff_expand_max` folders (2000) asks first: *All*, *Limit* (the shallowest 2000) or *Cancel*. During a scan, folders whose place in the view is not known yet (still being read or compared) are counted once it is, so a view that ends up showing few folders is not asked about. An `H` or `X` before the answer arrives takes the `L` back |
 | `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below |
 | `F` | switch between *all* and *differences* |
-| `<Tab>` | pick something to compare, as `Tab` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Tab` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: a compare tab of this comparison, names and folders may differ - see *Two picked files* below). `Tab` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
-| `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which |
-| `<Space>` | pick / unpick the entry on the current side and move down; `U` unpicks everything |
-| `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was picked in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; picks on the other side are left alone), without picks the rows of a visual selection, without that the row under the cursor |
+| `<Space>` | pick something to compare, as `Space` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Space` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: a compare tab of this comparison, names and folders may differ - see *Two picked files* below). `Space` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
+| `<Tab>` / `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which. With two sides both keys do the same |
+| `m` | mark / unmark the entry on the current side and move down, for the copy and delete keys below; `U` unmarks everything. Not neo-tree's move - `r` moves here |
+| `<C-r>` / `<C-l>` | copy files and folders from A to B / from B to A: what was marked with `m` in the source tree (the A tree for `<C-r>`, the B tree for `<C-l>`; marks on the other side are left alone), without marks the rows of a visual selection, without that the row under the cursor |
 | `a` | add a file on the current side (A or B), as `a` in neo-tree: a name ending in `/` makes a folder, and `x/y/z.c` makes the missing folders too. It goes into the row's folder when the row is a folder on that side, otherwise next to the row (on the empty half of a one-sided row: into the same folder on that side, made if missing). The prompt shows that folder and completes names from it. See *Adding, deleting and renaming* below |
 | `A` | add a folder on the current side, at the same place as `a` |
-| `d` | delete on the current side: what was picked there with `<Space>`, without picks the rows of a visual selection, without that the row under the cursor - after a question naming the side, the paths and how many entries each folder holds (the default answer is no; `let g:vimide_dirdiff_confirm_delete = 0` skips it). A symlink is removed, not what it points to |
+| `d` | delete on the current side: what was marked there with `m`, without marks the rows of a visual selection, without that the row under the cursor - after a question naming the side, the paths and how many entries each folder holds (the default answer is no; `let g:vimide_dirdiff_confirm_delete = 0` skips it). A symlink is removed, not what it points to |
 | `r` | rename or move the entry on the current side: the prompt holds its path from that side's root, so it can also go into another folder there (missing folders are made); a name ending in `/` moves it into that folder under the same name, as `mv x dir/`; a name that exists is refused |
 | `e` | change the current side's root folder and compare again in the same tab, as editing a path field in Beyond Compare (a double click on that half of the path line does the same); see *Changing the paths* below |
-| `S` | swap the sides - A's root becomes B's and B's becomes A's, compared again in the same tab, as Beyond Compare's *양측 교환* (*좌, 우측 기본 폴더를 교환하기*). A click on the `⇄` between the halves of the path line and `:DirDiffSwap` do the same. Open folders, the view (*left newer* becomes *right newer* and so on), the cursor row (on the other side, so it stays on the same file), `<Space>` picks (moved to the other side), a pending `[A]` and the compare tabs (now the other way round, edits kept) stay; see *Swapping sides* below |
+| `S` | swap the sides - A's root becomes B's and B's becomes A's, compared again in the same tab, as Beyond Compare's *양측 교환* (*좌, 우측 기본 폴더를 교환하기*). A click on the `⇄` between the halves of the path line and `:DirDiffSwap` do the same. Open folders, the view (*left newer* becomes *right newer* and so on), the cursor row (on the other side, so it stays on the same file), `m` marks (moved to the other side), a pending `[A]` and the compare tabs (now the other way round, edits kept) stay; see *Swapping sides* below |
 | `<2-LeftMouse>` | double click: on a row, the same as `<CR>`; on a half of the path line above the tree, change that side's root folder as `e` does (a single click there only switches to that side; a single click on the `⇄` between the halves swaps the sides, as `S` does) |
 | `R` | compare again (while a tree copy runs it waits for the copy, as `q` does) |
 | `q` | finish: closes the tab and its compare tabs, goes back, removes the buffers it opened (an edited one is kept, and named) |
@@ -2820,7 +2822,7 @@ the plugin loads or `~/.vimrc` is sourced again).
   (`R`, `O` / `X`, the scanner died) is dropped, so the keys never go silent.
 - The side: the one you were on. When a file exists on one side only the cursor
   goes to the other side for that file, and the next step goes back to yours.
-- Two files picked with `Tab` / `Tab` have no place in the tree's order: the end
+- Two files picked with `Space` / `Space` have no place in the tree's order: the end
   message names no keys, and Shift+Ctrl+N / Ctrl+M say so.
 
 **Shift+Ctrl+N, Ctrl+M and Enter.** A terminal sends Shift+Ctrl+N as the same
@@ -3021,14 +3023,14 @@ Outside DirDiff `,r` / `,e` still cycle the buffers (`3,r` three buffers on).
   `<C-r>` / `<C-l>` copies with counts and visual selections, `:w` updating
   the tree's verdict (and the bar's time and size), a tree copy reloading an
   open pair (in whichever compare tab shows it, without moving you there),
-  nested `Tab` / `Tab` comparisons and several comparisons at once (each has
+  nested `Space` / `Space` comparisons and several comparisons at once (each has
   its own compare tabs). With `g:vimide_dirdiff_pair_tab = 0` the two edit
   windows get the bars, colors, arrows and lavender lines, but no overview bar
   or line details.
 - vim-ide's sidebar guard leaves a compare tab alone (`t:vimide_dirdiff_pair`),
   as it does the DirDiff tab.
 
-**Two picked files.** `Tab` / `Tab` on two files - in neo-tree, in a DirDiff
+**Two picked files.** `Space` / `Space` on two files - in neo-tree, in a DirDiff
 tree, or one in each - opens them in a compare tab like any pair from the tree.
 It used to be a plain vimdiff in a new tab: the default diff colors whatever
 `g:vimide_dirdiff_colors` said, no window bars or overview bar, and no `q`,
@@ -3176,8 +3178,8 @@ neo-tree keys) work on the current side - the half the cursor is in, shown as
 - Compare tabs of the files involved follow: after a delete the missing side
   shows `(없음)` and the tab closes when both sides are gone; after a rename
   the tab keeps comparing the same two files under the new name (a one-sided
-  file just moves to its new row). `[A]` picked with `Tab` follows a rename
-  too. Marks made with `<Space>` follow a rename and are dropped by a delete.
+  file just moves to its new row). `[A]` picked with `Space` follows a rename
+  too. Marks made with `m` follow a rename and are dropped by a delete.
 - `let g:vimide_dirdiff_file_ops = 0` leaves `a` `A` `d` `r` unmapped.
   `let g:vimide_dirdiff_confirm_delete = 0` deletes without the question - the
   files do not go to a trash folder, so a slipped `d` deletes a whole folder
@@ -3199,7 +3201,7 @@ neo-tree keys) work on the current side - the half the cursor is in, shown as
   compare tabs of the old pairs close - when one of their buffers has unsaved
   changes it asks first, and such a buffer is kept (and named) as on `q`. Two
   picked files keep their tab (their paths do not depend on the roots), and
-  `<Space>` marks are dropped; an `[A]` picked in this tree keeps its path.
+  `m` marks are dropped; an `[A]` picked in this tree keeps its path.
 - In a compare window, a double click on a window bar or `:DirDiffPath [a|b]
   [file]` (file completion) puts another file on that side - the missing side
   of a one-sided pair included - and the tab shows the new pair with its own
@@ -3235,17 +3237,17 @@ neo-tree keys) work on the current side - the half the cursor is in, shown as
   view stays, and one that names a side takes the mirrored one (*좌측 최신*
   becomes *우측 최신*, *좌측 고아* becomes *우측 고아* - the same files stay
   listed); the cursor stays on its row and moves to the other half, so it is
-  still on the same file (`[A 쪽]` becomes `[B 쪽]`); `<Space>` picks move to
-  the other side with their entries; an `[A]` picked with `Tab` keeps its file
+  still on the same file (`[A 쪽]` becomes `[B 쪽]`); `m` marks move to
+  the other side with their entries; an `[A]` picked with `Space` keeps its file
   (now on the other side) and `q` from a picked pair still lands on the row
   where `[B]` was picked, on that file's side. The path line, the status line,
   the tab name and the tree's buffer name follow. Doing it again gives back
   the original comparison. On macOS a name that differs between the sides
   only in case or Unicode normalization (`Foo.c` / `foo.c`, NFC / NFD) is one
   row under A's spelling, so after the swap that row takes the other spelling;
-  open folders, picks, the cursor and its compare tab follow it.
+  open folders, marks, the cursor and its compare tab follow it.
 - The comparison's compare tabs follow at once: a pair from the tree shows the
-  new orientation (left is the new A), and two picked files (`Tab` / `Tab`, or
+  new orientation (left is the new A), and two picked files (`Space` / `Space`, or
   a pair whose path was changed) swap their two paths. Only the windows change
   buffers - nothing is read again, so unsaved edits stay, `<C-z>` / `<C-y>` go
   on with the same timeline (it follows the buffers), and the cursor and scroll
@@ -3295,7 +3297,7 @@ Copying in the tree:
 - Only what was copied is compared again (from the highest folder that did
   not exist on the target side), not the whole tree, and a pair shown in the
   edit windows is reopened with the new file once its new verdict is in.
-  Other comparison tabs that contain the copied paths (a nested `Tab` / `Tab`
+  Other comparison tabs that contain the copied paths (a nested `Space` / `Space`
   comparison and the tab it was opened from) are updated the same way, as on
   `:w`, and keep their cursor where it was (still in the tree after `gT` or
   `q`); one whose compared folder lies inside a copied folder is compared
@@ -3340,11 +3342,11 @@ Copying in the tree:
   waits for the other.
 - The excludes are the same `g:DirDiffExcludes` as below.
 - `:DirDiff A B` again for a pair already open goes to its tab; another pair
-  opens its own (so does `Tab` / `Tab` on two folders in a tree). Any number of
+  opens its own (so does `Space` / `Space` on two folders in a tree). Any number of
   comparisons can be open side by side, each tab with its own tree, helper and
   buffers; `q` or `:tabclose` on one leaves the others working.
 - `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again
-  (and `Tab` / `Tab` on two files a plain vimdiff, as before);
+  (and `Space` / `Space` on two files a plain vimdiff, as before);
   `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
   starts with only the differences, `let g:vimide_dirdiff_filter = '<id>'`
   with any view from *Views* (it wins over `only_diff`), and
@@ -3367,7 +3369,7 @@ Copying in the tree:
   and `<C-m>` / `<C-S-m>` - and Enter right after the end-of-changes message
   where those cannot arrive - open the next / previous file that differs, 0:
   leave them alone), `g:vimide_dirdiff_pick_vimdiff` (0: two files picked
-  with `Tab` / `Tab` open in a compare tab, 1: the plain vimdiff of before),
+  with `Space` / `Space` open in a compare tab, 1: the plain vimdiff of before),
   `g:vimide_dirdiff_file_ops` (1: the tree's `a` `A` `d` `r`, 0: unmapped),
   `g:vimide_dirdiff_confirm_delete` (1: `d` asks first, 0: deletes at once),
   `g:vimide_dirdiff_path_edit` (1: double clicks and `e` change the paths, 0:
@@ -3968,10 +3970,11 @@ XButton2::SendInput("^i")
 
 The mouse vendor's own utility can do the same binding with no AutoHotkey at
 all. The one cost is that `Ctrl+I` is `Tab`, so the forward button inserts a
-tab if you press it in insert mode, and in a neo-tree window (F9, the
-RelationView tree) it picks the row for a comparison (`[A]`, then `[B]` - see
-[Comparing directories](#comparing-directories-dirdiff)); the escape-sequence
-route has no such overlap. If Tera Term runs elevated and AutoHotkey does not, Windows blocks
+tab if you press it in insert mode, picks the row for a comparison in a
+neo-tree window (F9, the RelationView tree - `[A]`, then `[B]`, see
+[Comparing directories](#comparing-directories-dirdiff)) and switches between
+the A and B sides in a DirDiff tree; the escape-sequence route has no such
+overlap. If Tera Term runs elevated and AutoHotkey does not, Windows blocks
 the synthetic input - run both the same way.
 
 **`:JumpKeyTest`** says where the chain breaks. Run it, press the button

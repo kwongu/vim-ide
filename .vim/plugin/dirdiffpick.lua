@@ -1,22 +1,24 @@
--- dirdiffpick.lua - neo-tree 에서 두 곳을 골라 비교한다 (Tab 두 번, \d 도 같다)
+-- dirdiffpick.lua - neo-tree 에서 두 곳을 골라 비교한다 (Space 두 번, Tab·\d 도 같다)
 --
--- 트리에서 비교할 첫 번째 디렉터리(또는 파일) 위에서 Tab 을 누르면 그 줄 끝에 [A] 가
--- 붙고, 두 번째 위에서 Tab 을 누르면 [B] 로 삼아 곧바로 비교 창을 띄운다: 디렉터리
+-- 트리에서 비교할 첫 번째 디렉터리(또는 파일) 위에서 Space 를 누르면 그 줄 끝에 [A] 가
+-- 붙고, 두 번째 위에서 Space 를 누르면 [B] 로 삼아 곧바로 비교 창을 띄운다: 디렉터리
 -- 둘이면 DirDiff(나란한 트리, dirdiffview.lua), 파일 둘이면 DirDiff 의 비교 탭(보통 짝과 같은
 -- 창 - 색·창 머리·개요 막대·\d·복사 키·Ctrl+Z·q 모두. 이름·디렉터리가 달라도 된다 -
--- dirdiffview.lua 의 cmp.open_files). [A] 를 고른 뒤 같은 줄에서 다시 Tab 은 취소. 트리가 달라도
+-- dirdiffview.lua 의 cmp.open_files). [A] 를 고른 뒤 같은 줄에서 다시 Space 는 취소. 트리가 달라도
 -- 된다(F9 트리에서 고르고 RelationView 트리에서 비교).
 -- 파일 둘의 비교 탭이 어디에 붙나는 [B] 를 누른 곳이 정한다: DirDiff 의 비교 트리면 그 세션의 탭으로
 -- (q 는 그 트리의 줄로), neo-tree 면 혼자 선 비교 탭 (q 는 [B] 를 누른 창으로).
 -- 예전의 맨 vimdiff(새 탭에서 diffsplit)는 g:vimide_dirdiff_pick_vimdiff = 1 이면 (g:vimide_dirdiff_view = 0 -
 -- 디렉터리 둘도 DirDiff.vim 의 목록일 때, dirdiffview.lua 가 없을 때도 그것).
 --
--- Tab 은 neo-tree 기본의 select(여러 줄 골라 두기)였다 - vim-ide 는 그것을 쓰지 않고,
--- 여러 줄은 V 로 골라도 된다. '=' 가 아닌 것은 트리의 = 가 이미 색인 목록
--- 정보(projectfiles_neotree.lua)라서다. neo-tree 매핑은 .vimrc 의 neo-tree
--- window.mappings ['<Tab>'] / ['<leader>d'] 에 있다.
+-- Space 는 neo-tree 기본의 toggle_node(폴더 펼치기/접기)였다 - 폴더는 Enter·o·더블클릭으로 펼치고
+-- 접는다 (C 는 접기, O / X 는 아래 모두). Tab 은 select(여러 줄 골라 두기)였다 - vim-ide 는 그것을
+-- 쓰지 않고, 여러 줄은 V 로 골라도 된다. Tab 도 그대로 고른다 (예전 손버릇). '=' 가 아닌 것은 트리의 =
+-- 가 이미 색인 목록 정보(projectfiles_neotree.lua)라서다. neo-tree 매핑은 .vimrc 의 neo-tree
+-- window.mappings ['<space>'] / ['<Tab>'] / ['<leader>d'] 에 있다.
 --
--- DirDiff 의 비교 트리(dirdiffview.lua)의 Tab 도 같은 [A] 를 쓴다 (_G.vimide_dirdiff_pick_path):
+-- DirDiff 의 비교 트리(dirdiffview.lua)의 Space 도 같은 [A] 를 쓴다 (_G.vimide_dirdiff_pick_path - 거기서 Tab 은
+-- A 쪽 / B 쪽 바꾸기라 Space 만):
 -- 비교 트리에서 [A], 다른 비교 탭이나 neo-tree 에서 [B] 도 된다. [A] 는 하나다. 비교 트리는 고른
 -- 곳(세션·줄·쪽 - ctx)도 넘긴다: [A] 의 것은 여기 들고 있다가 [B] 때 같이 돌려준다.
 
@@ -122,7 +124,7 @@ local function short(p)
 end
 
 local function key()
-  return 'Tab'
+  return 'Space'
 end
 
 local function kind_name(kind)
@@ -247,7 +249,7 @@ function _G.vimide_dirdiff_pick_moved(old, new)
   mark_all()
 end
 
--- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Tab 과 DirDiff 비교 트리의 Tab 이 같이 쓴다.
+-- path 를 [A] 로, 또는 [A] 와 비교 ([B]). neo-tree 의 Space·Tab 과 DirDiff 비교 트리의 Space 가 같이 쓴다.
 -- ctx: 비교 트리에서 골랐으면 { tab = 세션의 탭, rel = 줄, side = 'a' | 'b' } (neo-tree 는 nil)
 function _G.vimide_dirdiff_pick_path(path, kind, ctx)
   -- [A] 줄에서 다시 누르면 취소. 디스크에서 없어졌어도 - 파일 감시를 꺼 두어
@@ -303,7 +305,7 @@ function _G.vimide_dirdiff_pick_path(path, kind, ctx)
     tab_from_edit({ cmd = 'tabnew', args = { a }, magic = { file = false } })
     vim.cmd.diffsplit({ args = { path }, magic = { file = false }, mods = { split = 'belowright', vertical = true } })
     -- 창 머리(winbar)는 걷는다: nvim 은 버퍼를 새 창에 띄울 때 그 버퍼가 떠 있는(떠 있던) 창의 옵션을
-    -- 입힌다 - DirDiff 의 비교 트리에서 Tab/Tab 으로 연 vimdiff 는 DirDiff 편집 창의 머리(' B: …')를
+    -- 입힌다 - DirDiff 의 비교 트리에서 Space/Space 로 연 vimdiff 는 DirDiff 편집 창의 머리(' B: …')를
     -- 받아 [A]/[B] 와 거꾸로 보였다. diffsplit 의 창도 따로 받으므로 새 탭의 창 모두에서
     for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
       pcall(api.nvim_win_call, w, function()

@@ -266,8 +266,8 @@ Plug 'ludovicchabant/vim-gutentags'
 Plug 'stevearc/aerial.nvim'
 Plug 'MunifTanjim/nui.nvim'
 Plug 'nvim-neo-tree/neo-tree.nvim', { 'branch': 'v3.x' }
-" 디렉터리 비교 - :DirDiff <A> <B> 가 새 탭에서(dirdifftab.vim), neo-tree 에서 Tab 두 번
-" ([A] -> [B], \d 도 같다. dirdiffpick.lua). 옵션은 아래 'DirDiff' 절
+" 디렉터리 비교 - :DirDiff <A> <B> 가 새 탭에서(dirdifftab.vim), neo-tree 에서 Space 두 번
+" ([A] -> [B], Tab·\d 도 같다. dirdiffpick.lua). 옵션은 아래 'DirDiff' 절
 Plug 'will133/vim-dirdiff'
 
 " supertab 이 로드되기 전에 nvim 의 기본 <S-Tab> 삽입 맵핑을 치운다.
@@ -1109,19 +1109,20 @@ _G.rv_setup('neo-tree', {
   --
   -- 파일 조작은 neo-tree 것을 그대로 둔다(a 생성, A 디렉터리, d 삭제,
   -- r 이름변경, c 복사, m 이동, x/p 클립보드, u 실행취소). 그래서
-  -- 비어 있는 키에만 NERDTree 쪽을 넣었다. 'o' 만 예외인데, neo-tree 에서
+  -- 비어 있는 키에만 NERDTree 쪽을 넣었다. 'o' 는 예외인데, neo-tree 에서
   -- 그건 도움말이고 도움말은 '?' 로도 열리기 때문에 잃는 것이 없다.
   -- 'y' 도 예외: neo-tree 는 y 를 '파일을 트리 클립보드에'(copy_to_clipboard)로
   -- 써서 yy·비주얼 y·<C-v> 블록 y 로 복사한 글자가 레지스터에 들어가지 않았다 -
   -- EDIT 창에서 p 하면 예전 내용이 나왔다. y 는 vim 의 복사로 돌려주고
   -- (yiw, y$, 비주얼 y 는 고른 글자 그대로), yy 는 항목 이름을 줄 단위로
   -- (3yy, "ayy 도 - neotree_nerd.lua), 트리 클립보드는 Y 로 옮겼다.
+  -- Space·Tab 도 예외: neo-tree 기본의 toggle_node·select 자리다 (아래 window.mappings 의 설명).
   --
   --   o  열기            O  이 아래를 전부 펼치기
   --   X  이 아래를 접기   I  숨김 파일 토글 (neo-tree 의 H 도 그대로)
   --   K  형제 중 처음     J  형제 중 마지막
   --   yy 이름 복사        Y  트리 클립보드에 (neo-tree 의 원래 y, p 로 붙이기)
-  --   Tab 비교할 두 곳을 고르기 ([A] 에서 Tab, [B] 에서 Tab -> DirDiff. \d 도 같다)
+  --   Space 비교할 두 곳을 고르기 ([A] 에서 Space, [B] 에서 Space -> DirDiff. Tab·\d 도 같다)
   --
   -- NERDTree 의 x(부모 접기) p(부모로) C(루트 변경) P(루트로) u(상위
   -- 디렉터리) 는 neo-tree 가 이미 다른 뜻으로 쓰고 있어 넣지 않았다.
@@ -1157,10 +1158,14 @@ _G.rv_setup('neo-tree', {
       -- \d 두 번으로 두 곳을 비교한다: 첫 번째 위에서 \d , 두 번째 위에서 \d
       -- (디렉터리 둘이면 DirDiff, 파일 둘이면 DirDiff 의 비교 탭 - dirdiffpick.lua).
       -- = 는 이미 색인 목록 정보다 (projectfiles_neotree.lua)
-      -- Tab 두 번: [A] 를 고르고(줄 끝에 [A]), 비교할 곳에서 Tab 이면 [B] - 곧바로 비교 창.
-      -- neo-tree 기본의 Tab(select, 여러 줄 골라 두기)을 넘겨받는다 (여러 줄은 V 로).
-      -- 키 글자는 기본값과 같게 '<Tab>' - 다르게 쓰면 다른 항목으로 하나 더 생긴다
-      ['<Tab>'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교할 곳 고르기 [A] -> [B]' },
+      -- Space 두 번: [A] 를 고르고(줄 끝에 [A]), 비교할 곳에서 Space 면 [B] - 곧바로 비교 창.
+      -- DirDiff 비교 트리의 Space 와 같은 키다 (거기서 Tab 은 A 쪽 / B 쪽). Tab 도 그대로 고른다.
+      -- neo-tree 기본의 Space(toggle_node, 폴더 펼치기/접기)와 Tab(select, 여러 줄 골라 두기)을
+      -- 넘겨받는다: 폴더는 Enter·o·더블클릭으로 펼치고 접는다 (C 접기, O / X 아래 모두), 여러 줄은 V 로.
+      -- 키 글자는 기본값과 같게 '<space>'(소문자)·'<Tab>' - 다르게 쓰면 다른 항목으로 하나 더 생긴다.
+      -- 기본의 <space> 에 있던 nowait = false 가 표째 합쳐져 따라오므로 nowait 를 다시 켠다
+      ['<space>'] = { function(state) _G.vimide_dirdiff_pick(state) end, nowait = true, desc = '비교할 곳 고르기 [A] -> [B]' },
+      ['<Tab>'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교할 곳 고르기 [A] -> [B] (Space 와 같다)' },
       ['<leader>d'] = { function(state) _G.vimide_dirdiff_pick(state) end, desc = '비교 (DirDiff)' },
       -- 커서 자리 이하에서 찾는다. 디렉터리 줄이면 그 디렉터리, 파일 줄이면
       -- 그 파일이 든 디렉터리, 빈 줄이면 트리 루트 (treesearch.lua).
@@ -1951,10 +1956,10 @@ filetype plugin indent on     " required!
 " DirDiff: 두 디렉터리 비교 (will133/vim-dirdiff)
 "   :DirDiff <A> <B>   새 탭에서 비교 (~/.vim/plugin/dirdifftab.vim). 끝내면 탭도 닫힌다
 "                      nvim 은 아래의 나란한 트리, vim 과 :DirDiffClassic 은 플러그인의 목록
-"   neo-tree 에서 Tab  비교할 첫 번째 위에서 Tab (줄 끝에 [A]), 비교할 곳에서 Tab ([B])
-"                      이면 곧바로 비교 창 (dirdiffpick.lua). \d 도 같다. 파일 둘이면
+"   neo-tree 의 Space  비교할 첫 번째 위에서 Space (줄 끝에 [A]), 비교할 곳에서 Space ([B])
+"                      면 곧바로 비교 창 (dirdiffpick.lua). Tab·\d 도 같다. 파일 둘이면
 "                      DirDiff 의 비교 탭 (이름·디렉터리가 달라도 된다 - 아래 '고른 두 파일').
-"                      같은 줄에서 다시 Tab 은 취소
+"                      같은 줄에서 다시 Space 는 취소. 폴더 펼치기/접기는 Enter·o
 "   (플러그인의) 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
@@ -1998,7 +2003,7 @@ let g:vimide_dirdiff_tab = 1
 "         비주얼의 O/X 도 이것. g:vimide_dirdiff_expand_max 개를 넘으면 먼저 묻는다),
 "         R 다시, q 끝(비교 탭들도), ? 도움말
 "         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
-"         <Tab> 비교할 곳 고르기 ([A] 에서 Tab, [B] 에서 Tab -> 새 탭에서 비교. neo-tree 와 같은 [A])
+"         <Space> 비교할 곳 고르기 ([A] 에서 Space, [B] 에서 Space -> 새 탭에서 비교. neo-tree 와 같은 [A])
 "         고른 두 파일: 보통 짝과 같은 비교 탭 (색·창 머리·개요 막대·\d·복사 키·Ctrl+Z 모두, pair_tab = 0 이어도.
 "           창 머리는 그 파일의 경로 - 좁으면 가운데부터 줄이되 파일 이름과 그 위 디렉터리 둘은 남기고, 그다음
 "           정보를 뺀다. 이름·디렉터리가 다를 수 있다). [B] 를 DirDiff 트리에서 골랐으면 그 비교의 탭으로 붙는다
@@ -2006,7 +2011,7 @@ let g:vimide_dirdiff_tab = 1
 "           그 비교가 이미 견주는 짝이면 그 짝의 비교 탭). neo-tree 에서 골랐으면 혼자 선 비교 탭
 "           (q 는 [B] 를 고른 창으로).
 "           같은 두 파일을 같은 곳(그 비교, 또는 neo-tree)에서 다시 고르면 그 탭으로
-"         <S-Tab> A/B 쪽, <Space> 고르기, U 모두 풀기, <C-r>/<C-l> 고른 파일·디렉터리를
+"         <Tab> A/B 쪽(<S-Tab> 도), m 고르기, U 모두 풀기, <C-r>/<C-l> m 으로 고른 파일·디렉터리를
 "         A→B / B→A 로 복사 (묻고 나서, 덮어쓰기·디렉터리는 합치기)
 "         지금 쪽(A/B)의 파일 다루기 - neo-tree 와 같은 키: a 더하기(끝이 / 면 디렉터리, x/y/z.c 는 위 디렉터리도),
 "         A 디렉터리 더하기, d 지우기(그쪽에서 고른 것·비주얼 줄·커서 줄 - 묻고 나서, 링크는 링크만), r 이름 바꾸기·
@@ -2033,7 +2038,7 @@ let g:vimide_dirdiff_tab = 1
 "            <C-z>/<C-y> = 짝 전체의 되돌리기/다시 실행 (커서가 A·B 어느 쪽에 있든 두 파일의 마지막 변경 -
 "            Beyond Compare 처럼. 횟수·비주얼도, 삽입 모드의 <C-z> 는 삽입을 끝내고 방금 친 것부터 되돌린다.
 "            삽입 모드의 <C-y>, 비교 탭 밖의 <C-z>·<C-y> 는 그대로)
-"   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로 (Tab/Tab 의 파일 둘도 맨 vimdiff)
+"   let g:vimide_dirdiff_view = 0          " :DirDiff 를 예전 목록(DirDiff.vim)으로 (Space/Space 의 파일 둘도 맨 vimdiff)
 "   let g:vimide_dirdiff_only_diff = 1     " 처음부터 차이만 보기
 "   let g:vimide_dirdiff_filter = 'right-newer'  " 처음 보기 (all diff no-orphans diff-no-orphans orphans
 "                                          "  left-newer right-newer left-newer-orphans right-newer-orphans
@@ -2053,7 +2058,7 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
 "   let g:vimide_dirdiff_file_keys = 0     " 비교 창의 <C-S-n>/<C-S-p>·<C-m>/<C-S-m>(끝 알림 뒤의 Enter)을 가로채지 않기
-"   let g:vimide_dirdiff_pick_vimdiff = 1  " Tab/Tab 으로 고른 두 파일을 예전처럼 새 탭의 맨 vimdiff 로
+"   let g:vimide_dirdiff_pick_vimdiff = 1  " Space/Space 로 고른 두 파일을 예전처럼 새 탭의 맨 vimdiff 로
 let g:vimide_dirdiff_view = 1
 let g:vimide_dirdiff_only_diff = 0
 let g:vimide_dirdiff_filter = ''
@@ -2109,7 +2114,7 @@ let g:vimide_dirdiff_undo_keys = 1
 " 다음/이전 차이 파일로 - Ctrl+Shift 가 안 오는 터미널(tmux 3.2 미만 서버·extended-keys 를 끈 tmux, Tera Term)에서는
 " 마지막·첫 차이의 알림 바로 뒤의 Enter 만: 1 켬, 0 가로채지 않기 (비교 창에서 다음 차이 파일로 가는 키가 없다)
 let g:vimide_dirdiff_file_keys = 1
-" Tab/Tab 으로 고른 두 파일을 어디서 견주나: 0 = DirDiff 의 비교 탭 (보통 짝과 같은 색·창 머리·개요 막대·\d·
+" Space/Space 로 고른 두 파일을 어디서 견주나: 0 = DirDiff 의 비교 탭 (보통 짝과 같은 색·창 머리·개요 막대·\d·
 " 복사 키·Ctrl+Z·q - 비교 트리에서 [B] 를 골랐으면 그 비교의 탭으로), 1 = 예전처럼 새 탭의 맨 vimdiff
 " (g:vimide_dirdiff_view = 0 이면 이것과 상관없이 맨 vimdiff - 디렉터리 둘도 예전 목록이다)
 let g:vimide_dirdiff_pick_vimdiff = 0
