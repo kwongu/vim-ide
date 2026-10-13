@@ -591,20 +591,39 @@ panel, the trees, telescope) and the command-line window are untouched. The
 price is that pressing Enter rapidly to walk down now opens the list on the
 second press - use `j`, or `let g:vimide_marks_double = 0`.
 
-Ctrl+h (or `,ch`): Find and replace the symbol under the cursor in this file.
-`Ctrl+h` puts up a float, `,ch` asks on the command line - both fill `Old`
-with the word under the cursor and let you edit it, and on blank space `Old`
-starts empty and the cursor starts there, so you can type what to look for.
-Then Enter offers **ALL**, one by one (`Yes`/`No`), or cancel.
-Nothing in the edit window changes while you type: nvim previews `:s` live
-(`inccommand`) by default, which hides the very text you are replacing, so
-this turns it off for the duration and puts it back
-(`g:vimide_replace_preview = 1` keeps the preview). One-by-one hands over to vim's own `:s///gc`
-prompt - `y` replaces, `n` skips, `a` takes the rest, `q` stops - and the
-whole thing is a single `:s`, so one `u` undoes it. `Esc` cancels anywhere.
-Word boundaries are on (`g:vimide_replace_word`), so renaming `old_name`
-leaves `old_names` alone. `Ctrl+h` used to be "go to the window on the left";
-`<C-w>h` still is, and `g:vimide_replace_ctrl_h = 0` gives the old key back
+Ctrl+h (or `,ch`): Find and replace in this file - the same text by default, in the whole file or from the cursor to the end, at once or one by one.
+`Ctrl+h` puts up a float (in vim it asks on the command line, like
+`:VimIdeReplaceCmd`), `,ch` just puts `:.,$s/<word>/` on the command line.
+The float fills `Old` with the word under the cursor and lets you edit it, and
+on blank space `Old` starts empty and the cursor starts there, so you can type
+what to look for. Then Enter opens a chooser whose rows show how many places
+the current rules hit, live: `a` the whole file at once, `o` the whole file one
+by one, `e` from the cursor to the end at once, `E` from the cursor to the end
+one by one, `w` whole words only on/off, `i` ignore case on/off, `q` cancel
+(Enter or a double click on a row does the same; vim's `confirm()` ignores
+case, so there the cursor-to-end one by one is `N`).
+By default it matches the same text - `Old` literally (`.` `*` `[` `\` `/`
+`&` `~` are plain characters), inside longer names too, with the exact case,
+whatever 'ignorecase' and 'smartcase' say. Renaming `tsnd` now renames
+`tsnd_init` and `g_tsnd_data` too and leaves `TSND` alone; it used to match
+whole words only and follow 'ignorecase', so only the local variables called
+`tsnd` changed (`g:vimide_replace_word = 1` and `g:vimide_replace_ignorecase = 1`
+start with those toggles on). The cursor means where it was when you pressed
+the key - on that line only the places that start at the cursor or later count
+(if the cursor sits inside one, from that one), and every line below counts.
+One by one hands over to vim's own `:s///gc` prompt - `y` replaces, `n` skips,
+`a` takes the rest, `q` stops - and whatever you choose is a single `:s`, so
+one `u` undoes it; at once leaves the cursor where it was. The message tells
+how many places changed and how many hits of `Old` are left in the whole file.
+`Esc` cancels anywhere, and the float closes itself as soon as you leave it (a
+click in another window, `<C-w>w`, a window another plugin opens, an error);
+pressing the key again first closes the one that is open instead of stacking a
+second one in the middle of the screen. Nothing in the edit window changes
+while you type: nvim previews `:s` live (`inccommand`) by default, which hides
+the very text you are replacing, so this turns it off for the duration and
+puts it back (`g:vimide_replace_preview = 1` keeps the preview). `Ctrl+h` used
+to be "go to the window on the left"; `<C-w>h` still is, and
+`g:vimide_replace_ctrl_h = 0` gives the old key back
 (`,ch` keeps working either way)
 \C: Turn the automatic colouring on and off (`:VimIdeAutoColor`, `g:vimide_auto_color`). This covers only what a shortcut paints by itself - the jump colour of `<C-]>`/`<C-t>`, the colour `\\c` and `<C-/>` (`:LookupReferences`) put on what they searched for, and the shading of the symbol under the cursor. What you paint by hand, `<F4>` and `<F8>`, is never touched: switching the automatic colouring off strips only the colours it put there itself
 F6: Toggle MiniBufExplorer, source file explorer on the top side

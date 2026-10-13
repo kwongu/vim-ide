@@ -3671,33 +3671,54 @@ endfunc
 nnoremap <silent> <C-^> :<C-u>call <SID>AltBuf()<CR>
 
 " 다음 / 이전 / 지금 버퍼 닫기
-" 찾아 바꾸기 - 커서 밑 심볼을 이 파일 안에서 바꾼다
+" 찾아 바꾸기 - 이 파일 안에서 바꾼다 (Old 는 커서 밑 심볼)
 "
 "   <C-h>   떠 있는 창 (nvim). Old 를 보여주고 New 를 받는다.
+"           (vim 에서는 아래 명령행 길 - :VimIdeReplaceCmd 와 같다)
 "   ,ch     예전 그대로 :.,$s/<낱말>/ 을 명령줄에 띄운다 (아래 참고).
 "           묻는 방식이 필요하면 :VimIdeReplaceCmd
 "
 " 둘 다 커서 밑 심볼을 Old 에 채워 두되 고칠 수 있다. 빈 곳에서 불렀으면
 " Old 가 비어 있고 찾을 말부터 직접 치면 된다.
 "
-" 그 다음 '한 번에 모두 / 하나씩 Yes,No / 취소' 를 고른다. 하나씩은 vim 의
-" :s///gc 그대로다 - y 바꾼다, n 건너뛴다, a 여기서부터 전부, q 그만둔다.
-" 어디서든 <Esc>(또는 <C-c>) 는 취소. 바꾸기는 한 번의 :s 라서 u 한 번이면
-" 통째로 되돌아온다.
+" 그 다음 어디를, 어떻게 바꿀지 고른다. 줄마다 몇 곳이 걸리는지 보인다.
+"   a  파일 전체 모두          o  파일 전체 하나씩 (y/n/a/q)
+"   e  커서부터 끝까지 모두    E  커서부터 끝까지 하나씩
+"   w  낱말만 켜고 끄기        i  대소문자 무시 켜고 끄기       q  취소
+" (vim 의 confirm() 은 대소문자를 가리지 않아서 거기서는 '커서부터 하나씩' 이 N 이다)
+" 하나씩은 vim 의 :s///gc 그대로다 - y 바꾼다, n 건너뛴다, a 여기서부터 전부,
+" q 그만둔다. 어디서든 <Esc>(또는 <C-c>) 는 취소. 바꾸기는 한 번의 :s 라서
+" u 한 번이면 통째로 되돌아온다. 끝나면 바꾼 수와 파일에 남은 수를 알린다.
+"
+" 찾는 규칙 - 기본은 '같은 글자'다: Old 를 글자 그대로(. * [ ] \ / & ~ 도 글자),
+" 낱말 가운데 든 것까지, 대소문자를 가려서 찾는다 ('ignorecase'/'smartcase' 와
+" 상관없다). 예전 기본은 낱말만(\<old\>) + 'ignorecase' 따름이었다 - 'tsnd' 를
+" 바꾸면 함수 안의 지역 변수 tsnd 만 바뀌고 tsnd_init, g_tsnd_data ... 는 그대로였고
+" (tsnd_main.c 실측: 같은 글자 314곳 중 172곳), 대문자 TSND 까지 걸렸다.
+"
+" 커서부터 끝까지는 <C-h> 를 누른 때의 커서 자리부터다. 커서 줄에서는 커서 뒤에서
+" 시작하는 것만 - 커서가 걸린 낱말 가운데 있으면 그 낱말부터 - 그 아래 줄은 전부.
+"
+" 떠 있는 창은 떠나면(다른 창 누르기, <C-w>w ...) 취소로 닫히고, <C-h> 를 다시
+" 누르면 떠 있던 것부터 닫는다 (findreplace.lua 머리 참고).
 "
 " 치는 동안 EDIT 창이 실시간으로 바뀌지 않는다. nvim 의 inccommand 는 기본이
 " nosplit 이라 :s 를 치는 사이 화면을 미리 바꿔 버리는데, 그러면 원래 내용이
 " 뭐였는지 알 수가 없다. 이 기능이 도는 동안만 꺼 두었다가 되돌린다
 " (평소의 :s 미리보기는 그대로 둔다).
 "
-"   let g:vimide_replace_word = 0     " 낱말 경계로 찾지 않는다
-"                                     " (1 이면 struct 가 structure 에 안 걸린다)
-"   let g:vimide_replace_ctrl_h = 0   " <C-h> 를 예전처럼 창 왼쪽 이동으로
-"                                     " (그래도 ,ch 는 그대로 쓴다)
-"   let g:vimide_replace_preview = 1  " 치는 동안 미리보기를 끄지 않는다
-"   :VimIdeReplace [찾을말]           " 명령으로도 (떠 있는 창)
-"   :VimIdeReplaceCmd [찾을말]        " 명령으로도 (명령행)
-let g:vimide_replace_word = 1
+"   let g:vimide_replace_word = 1        " 처음부터 낱말만 (struct 가 structure 에
+"                                        " 안 걸린다. 기본 0 - 예전 기본은 1 이었다)
+"   let g:vimide_replace_ignorecase = 1  " 처음부터 대소문자 무시 (기본 0)
+"   let g:vimide_replace_ctrl_h = 0      " <C-h> 를 예전처럼 창 왼쪽 이동으로
+"                                        " (그래도 ,ch 는 그대로 쓴다)
+"   let g:vimide_replace_preview = 1     " 치는 동안 미리보기를 끄지 않는다
+"   :VimIdeReplace [찾을말]              " 명령으로도 (떠 있는 창)
+"   :VimIdeReplaceCmd [찾을말]           " 명령으로도 (명령행)
+" 0 (기본) 같은 글자면 낱말 가운데 든 것도 바꾼다. 1 이면 낱말만 (고르는 창의 w 로 그때그때)
+let g:vimide_replace_word = 0
+" 0 (기본) 대소문자를 가린다. 1 이면 무시한다 (고르는 창의 i 로 그때그때)
+let g:vimide_replace_ignorecase = 0
 let g:vimide_replace_ctrl_h = 1
 " 1 (기본) :s 미리보기(nvim 의 inccommand)를 그대로 둔다.
 "          0 이면 시작할 때 아예 꺼서 ,ch 로 바꾸는 동안 원래 내용이
@@ -3719,13 +3740,115 @@ func! s:ReplacePreviewBack(save) abort
 	endif
 endfunc
 
-" 명령행 쪽 (,ch). vim 8.1 에서도 이 길을 쓴다 - 거기엔 떠 있는 창이 없다.
+" 명령행 쪽의 도우미들. vim 8.1 이 읽는 길이라 그 문법만 쓴다 (람다·메서드 없음).
+"
+" 찾을 말 -> :s 의 패턴. \V 라서 Old 의 . * [ ] ~ 는 글자다 - 남는 특수 글자는 \ 와
+" 구분자 / 뿐. \C / \c 는 'ignorecase' 와 'smartcase' 를 이긴다. 낱말만이면 Old 의
+" 앞뒤 글자가 낱말 글자('iskeyword')일 때만 경계를 건다 ('a.b' -> \<a.b\>).
+" a:1 = [줄, 열] 이면 그 줄은 열(0 부터 센 바이트) 뒤에서 시작하는 것만, 아랫줄은
+" 전부 (커서부터 끝까지). 줄이 0 이면 문자열 하나에 쓰는 꼴 (문자열엔 줄 번호가 없다)
+func! s:ReplacePat(old, word, icase, ...) abort
+	let l:body = escape(a:old, '\/')
+	if a:word
+		if matchstr(a:old, '^.') =~# '\k'
+			let l:body = '\<' . l:body
+		endif
+		if matchstr(a:old, '.$') =~# '\k'
+			let l:body = l:body . '\>'
+		endif
+	endif
+	let l:p = (a:icase ? '\c' : '\C') . '\V'
+	if a:0 > 0 && a:1[1] > 0
+		if a:1[0] > 0
+			let l:p .= printf('\%%(\%%>%dl\|\%%>%dc\)', a:1[0], a:1[1])
+		else
+			let l:p .= printf('\%%>%dc', a:1[1])
+		endif
+	endif
+	return l:p . l:body
+endfunc
+
+" 몇 곳인지 센다 (:s///gn 의 알림 'N matches on M lines' 의 첫 수).
+" 'lazyredraw' 가 켜져 있고 키가 미리 쌓여 있으면 그 알림이 아예 안 나와 0 으로
+" 셌다 - 세는 동안만 끈다. 커서와 '[ '] 표시는 그대로 둔다.
+func! s:ReplaceCount(range, pat) abort
+	let l:lz = &lazyredraw
+	let l:view = winsaveview()
+	set nolazyredraw
+	try
+		let l:out = execute('lockmarks keeppatterns ' . a:range . 's/' . a:pat . '//'
+					\ . (&gdefault ? '' : 'g') . 'n')
+		return str2nr(matchstr(l:out, '\d\+'))
+	catch
+		return 0
+	finally
+		let &lazyredraw = l:lz
+		call winrestview(l:view)
+	endtry
+endfunc
+
+" 한 줄에서 a:pat 이 걸리는 자리들 [[시작, 끝], ...] (0 부터 센 바이트). :s 처럼
+" 앞 자리의 끝에서 다음을 찾는다. matchstrpos 에 {count}(1)를 같이 준다 - 시작 자리만
+" 주면 줄을 거기서 잘라 놓고 찾아서 \< 와 \%>c 가 어긋났다 (findreplace.lua 참고)
+func! s:ReplaceSpans(line, pat) abort
+	let l:out = []
+	let l:start = 0
+	while l:start <= strlen(a:line)
+		let l:m = matchstrpos(a:line, a:pat, l:start, 1)
+		if l:m[1] < 0
+			break
+		endif
+		call add(l:out, [l:m[1], l:m[2]])
+		let l:start = l:m[2] > l:m[1] ? l:m[2] : l:m[2] + 1
+	endwhile
+	return l:out
+endfunc
+
+" 커서 줄에서 셀 첫 바이트: 커서가 걸린 자리 가운데 있으면 그 자리의 머리, 아니면 커서
+func! s:ReplaceFrom(row, col, pat) abort
+	for l:s in s:ReplaceSpans(getline(a:row), a:pat)
+		if l:s[0] <= a:col && a:col < l:s[1]
+			return l:s[0]
+		endif
+	endfor
+	return a:col
+endfunc
+
+" 파일 크기 (바이트). 바꾼 뒤와 견주어 몇 곳이 바뀌었는지 센다
+func! s:ReplaceBytes() abort
+	let l:n = line2byte(line('$') + 1)
+	if l:n < 0
+		let l:n = 0
+		for l:l in getline(1, '$')
+			let l:n += strlen(l:l) + 1
+		endfor
+	endif
+	return l:n
+endfunc
+
+" 알림이 한 줄에 들게 Old / New 를 a:n 칸까지로 자른다 (넘치면 Press ENTER)
+func! s:ReplaceShort(s, n) abort
+	if strdisplaywidth(a:s) <= a:n
+		return a:s
+	endif
+	let l:k = strchars(a:s)
+	while l:k > 0 && strdisplaywidth(strcharpart(a:s, 0, l:k)) > a:n - 1
+		let l:k -= 1
+	endwhile
+	return strcharpart(a:s, 0, l:k) . '…'
+endfunc
+
+" 명령행 쪽 (:VimIdeReplaceCmd, vim 의 <C-h>). vim 8.1 에서도 이 길을 쓴다 - 거기엔
+" 떠 있는 창이 없다. 찾는 규칙과 고를 것은 떠 있는 창과 같다 (confirm() 하나에).
 func! s:ReplaceCmd(...) abort
 	if &buftype !=# '' || !&modifiable || &readonly
 		echohl WarningMsg | echo '여기서는 바꿀 수 없습니다' | echohl None
 		return
 	endif
 	let l:seed = a:0 > 0 && !empty(a:1) ? a:1 : expand('<cword>')
+	" '커서부터 끝까지' 의 기준 - 묻기 전에 잡아 둔다
+	let l:row = line('.')
+	let l:col = col('.') - 1
 	let l:save = s:ReplaceNoPreview()
 	try
 		let l:old = ''
@@ -3746,35 +3869,107 @@ func! s:ReplaceCmd(...) abort
 		if empty(l:new) || l:new ==# l:old
 			return
 		endif
-		let l:pat = '\V' . escape(l:old, '\/')
-		if get(g:, 'vimide_replace_word', 1) && l:old =~# '^\w\+$'
-			let l:pat = '\<' . l:pat . '\>'
-		endif
-		let l:rep = escape(l:new, '\/&~')
-		" 몇 곳인지 먼저 세어 보여준다. 없으면 묻지 않는다.
-		let l:n = 0
-		try
-			let l:out = execute('keeppatterns %s/' . l:pat . '//gn')
-			let l:n = str2nr(matchstr(l:out, '\d\+'))
-		catch
-		endtry
-		if l:n == 0
+		" 가장 넓은 규칙(대소문자 무시, 낱말 아님)으로도 없으면 묻지 않는다
+		if s:ReplaceCount('%', s:ReplacePat(l:old, 0, 1)) == 0
 			redraw
 			echohl WarningMsg | echo printf("'%s' 를 이 파일에서 찾지 못했습니다", l:old) | echohl None
 			return
 		endif
-		redraw
-		let l:c = confirm(printf("'%s' -> '%s'   (%d곳)", l:old, l:new, l:n),
-					\ "한 번에 모두(&A)\n하나씩 Yes,No(&O)\n취소(&C)", 1)
-		if l:c == 1
-			execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/g'
-			echo printf("'%s' -> '%s'  %d곳 바꿈", l:old, l:new, l:n)
-		elseif l:c == 2
-			echohl Question
-			echo '바꿀까요?  y 예  n 아니오  a 여기서부터 전부  q 그만'
-			echohl None
-			execute 'keeppatterns %s/' . l:pat . '/' . l:rep . '/gc'
+		let l:word = get(g:, 'vimide_replace_word', 0) ? 1 : 0
+		let l:icase = get(g:, 'vimide_replace_ignorecase', 0) ? 1 : 0
+		" 고르기. W / I 는 규칙을 바꾸고 다시 묻는다 (숫자도 다시 센다)
+		while 1
+			let l:pat = s:ReplacePat(l:old, l:word, l:icase)
+			let l:all = s:ReplaceCount('%', l:pat)
+			let l:from = s:ReplaceFrom(l:row, l:col, l:pat)
+			let l:tpat = s:ReplacePat(l:old, l:word, l:icase, [l:row, l:from])
+			let l:tail = s:ReplaceCount(l:row . ',$', l:tpat)
+			redraw
+			let l:c = confirm(printf("'%s' -> '%s'   [%s · %s]\n파일 전체 %d곳 · 커서부터 끝까지 %d곳",
+						\ l:old, l:new, l:word ? '낱말만' : '부분 일치',
+						\ l:icase ? '대소문자 무시' : '대소문자 구분', l:all, l:tail),
+						\ "&A 파일 전체 모두\n&O 파일 전체 하나씩\n&E 커서부터 끝까지 모두\n"
+						\ . "&N 커서부터 하나씩\n&W 낱말만 " . (l:word ? '끄기' : '켜기') . "\n"
+						\ . '&I 대소문자 무시 ' . (l:icase ? '끄기' : '켜기') . "\n&C 취소", 1)
+			if l:c == 5
+				let l:word = !l:word
+			elseif l:c == 6
+				let l:icase = !l:icase
+			elseif l:c >= 1 && l:c <= 4 && (l:c <= 2 ? l:all : l:tail) == 0
+				redraw
+				echohl WarningMsg | echo '지금 규칙으로는 바꿀 곳이 없습니다' | echohl None
+				sleep 700m
+			else
+				break
+			endif
+		endwhile
+		if l:c < 1 || l:c > 4
+			return
 		endif
+		let l:totail = l:c >= 3
+		let l:ask = l:c == 2 || l:c == 4
+		let l:want = l:totail ? l:tail : l:all
+		let l:p = l:totail ? l:tpat : l:pat
+		let l:range = l:totail ? l:row . ',$' : '%'
+		" 하나씩이면 :s 가 몇 곳을 바꿨는지 알려주지 않는다. 길이가 다르면 파일 크기의
+		" 차이로, 같으면 바꾸기 전 자리마다 New 가 들어섰는지로 센다
+		let l:spans = {}
+		if strlen(l:new) == strlen(l:old)
+			let l:lnum = l:totail ? l:row : 1
+			for l:line in getline(l:lnum, '$')
+				let l:lp = (l:totail && l:lnum == l:row) ? s:ReplacePat(l:old, l:word, l:icase, [0, l:from]) : l:pat
+				if l:line =~ l:lp
+					let l:spans[l:lnum] = s:ReplaceSpans(l:line, l:lp)
+				endif
+				let l:lnum += 1
+			endfor
+		endif
+		let l:size = s:ReplaceBytes()
+		let l:view = winsaveview()
+		let l:report = &report
+		let l:cmd = 'keeppatterns ' . l:range . 's/' . l:p . '/' . escape(l:new, '\/&~') . '/'
+					\ . (&gdefault ? '' : 'g') . (l:ask ? 'c' : '')
+		try
+			if l:ask
+				" :s 가 끝에 내는 'N substitutions on M lines' 를 재운다 (뒤의 알림과 겹친다)
+				set report=99999999
+				echohl Question
+				echo '바꿀까요?  y 예  n 아니오  a 여기서부터 전부  q 그만'
+				echohl None
+				execute l:cmd
+			else
+				execute 'silent ' . l:cmd
+				" 모두 바꾸기는 커서를 그 자리에 둔다
+				call winrestview(l:view)
+			endif
+		catch /^Vim:Interrupt$/
+		catch
+			echohl ErrorMsg | echo v:exception | echohl None
+		finally
+			let &report = l:report
+		endtry
+		if strlen(l:new) != strlen(l:old)
+			let l:done = (s:ReplaceBytes() - l:size) / (strlen(l:new) - strlen(l:old))
+		else
+			let l:done = 0
+			for [l:k, l:v] in items(l:spans)
+				let l:t = getline(str2nr(l:k))
+				for l:s in l:v
+					if strpart(l:t, l:s[0], l:s[1] - l:s[0]) ==# l:new
+						let l:done += 1
+					endif
+				endfor
+			endfor
+		endif
+		let l:done = max([0, min([l:done, l:want])])
+		" 남은 것 = 원래 있던 것 - 바꾼 것 (New 가 Old 를 품어도 바꾼 자리를 다시 세지 않게)
+		let l:left = l:all - l:done
+		let l:what = (l:done > 0 ? (l:totail ? '커서부터 ' : '') . l:done . '곳 바꿈' : '바꾼 곳 없음')
+					\ . (l:left > 0 ? printf(' · 파일에 %d곳 남음', l:left) : '')
+		" 화면 폭에서 12 칸(showcmd·ruler 자리)을 뺀 데까지 한 줄에
+		let l:cap = max([6, (&columns - 12 - strdisplaywidth(l:what) - 10) / 2])
+		redraw
+		echo printf("'%s' -> '%s'  ", s:ReplaceShort(l:old, l:cap), s:ReplaceShort(l:new, l:cap)) . l:what
 	finally
 		call s:ReplacePreviewBack(l:save)
 	endtry
@@ -3791,8 +3986,10 @@ func! s:ReplaceFloat(...) abort
 	let l:save = s:ReplaceNoPreview()
 	" 떠 있는 창은 비동기라 여기서 바로 되돌리면 안 된다. 창이 닫힐 때
 	" 되돌리도록 한 박자 뒤로 미룬다 - 바꾸기까지 끝나고 나서다.
+	" 블록으로 고른 글자만 넘긴다. <cword> 는 Lua 쪽이 읽는다 - 찾아 바꾸기 창 안에서
+	" 다시 누른 <C-h> 면 그 창을 먼저 닫고 돌아간 편집 창의 낱말이어야 한다
 	call luaeval('_G.vimide_replace ~= nil and (function() _G.vimide_replace(_A) return 1 end)() or 0',
-				\ empty(l:seed) ? expand('<cword>') : l:seed)
+				\ l:seed)
 	if !empty(l:save)
 		call timer_start(50, {-> s:ReplacePreviewBack(l:save)})
 	endif
@@ -3802,7 +3999,8 @@ endfunc
 "
 "   ,ch  ->  :.,$s/<커서 밑 낱말>/      여기서 바꿀 말과 플래그를 직접 친다
 "
-" 물어보는 방식(찾을 말 -> 바꿀 말 -> 한 번에/하나씩)은 <C-h> 에 있다.
+" 물어보는 방식(찾을 말 -> 바꿀 말 -> 파일 전체/커서부터 끝까지, 한 번에/하나씩)은
+" <C-h> 에 있다.
 " 명령으로도 부를 수 있다: :VimIdeReplaceCmd
 "
 " 치는 동안 화면이 실시간으로 바뀌는 것(nvim 의 inccommand)에 대하여
@@ -3845,8 +4043,8 @@ map ,0 :call <SID>BufCycle('b!0')<CR>
 
 "===== text change
 nmap ,H :%s/<C-R>=expand("<cword>")<CR>/
-" ,ch 는 위쪽 s:ReplaceCmd() 가 쓴다 - 찾을 말과 바꿀 말을 차례로 묻고
-" '한 번에 모두 / 하나씩 / 취소' 를 고르게 한다. 예전 매핑은 남겨 둔다:
+" ,ch 는 위쪽 '찾아 바꾸기' 절의 :.,$s 매핑이다 (예전 그대로). 찾을 말과 바꿀 말을
+" 차례로 묻는 쪽은 <C-h> 와 :VimIdeReplaceCmd (s:ReplaceCmd). 예전 매핑은 남겨 둔다:
 "nmap ,ch :.,$s/<C-R>=expand("<cword>")<CR>/
 
 "===== make bootloader
