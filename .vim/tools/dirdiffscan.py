@@ -49,6 +49,15 @@
 #                                            bits 가 있으면 표시(mask)가 그 비트에 걸리는 항목 (보기)
 #   {"cmd":"expand","id":N,"dir":"rel"[,"bits":B]}  아래의 '차이 있는'(bits: 그 비트에 걸리는)
 #                                            디렉터리 목록을 한꺼번에
+#   {"cmd":"expand","id":N,"deep":1,"dirs":["rel",...][,"bits":B][,"both":1][,"max":M][,"cap":1]}
+#                                            깊은 펼치기 (트리의 zO): dirs 아래의 디렉터리 모두 - 한쪽에만 있는
+#                                            것·디렉터리 vs 파일의 디렉터리 쪽도, 훑지 않은 것은 훑고 나서 (그래서
+#                                            답이 늦을 수 있다 - cmd_deep). bits: 그 보기가 보이는 디렉터리만 (both:
+#                                            양쪽에 있는 디렉터리는 늘). max 개를 넘으면 cap 이 없으면 목록 없이
+#                                            over 로 답하고, 있으면 얕은 것부터 max 개만 ("dir" 은 예전 뒤쪽용).
+#                                            보이는 것이 아직 정해지지 않은 것(UNK·PEND)이 끼어 넘칠지 모르면 정해질
+#                                            때까지 기다린다 (deep_finish)
+#   {"cmd":"stopdeep","ids":[N,...]}         그 깊은 펼치기를 그만둔다 (답하지 않는다 - zC·X 가 그 답을 버렸다)
 #   {"cmd":"refresh","paths":["rel",...]}    그 항목만 다시 본다. 목록을 받아 간 부모는 'list' 로
 #                                            다시 보낸다
 #   {"cmd":"copy","id":N,"from":"a"|"b","paths":["rel",...]}
@@ -60,6 +69,9 @@
 #   {"ev":"u","d":dir,"n":name,"s":st,"e":[...같은 항목...]}   목록을 받아 간 디렉터리 안
 #   {"ev":"reveal","id":N,"path":rel|null,"lists":{dir:[entries]}}
 #   {"ev":"lists","id":N,"lists":{dir:[entries]}}
+#   {"ev":"lists","id":N,"deep":1,"lists":{...}[,"capped":M][,"over":n,"more":bool]}   깊은 펼치기의 답 (over:
+#                                            max 를 넘었다 - 보이는 것이 정해진 폴더 수, more 면 적어도 그만큼(훑지
+#                                            않았거나 아직 모르는 것이 더 있다). 목록은 없다)
 #   {"ev":"progress", ...}                    again: 끝난 뒤 복사·저장으로 다시 보는 중
 #                                            cats: {표시: 항목 수} (보기 메뉴의 수)
 #   {"ev":"copied","id":N,"files":n,"dirs":n,"skipped":[[rel,why]],"failed":[[rel,why]],
@@ -860,6 +872,8 @@ def on_scan(n, la, lb, err, fa=False, fb=False):
         for rid in n.waiters:
             emit({'ev': 'list', 'id': rid, 'dir': rel, 'entries': [entry(c) for c in children(n)]}, now=True)
         n.waiters = None
+    if n in deep_wait:
+        deep_resume(n)   # 이 디렉터리를 기다리던 깊은 펼치기(zO)를 잇는다
 
 
 def on_stat(n, kind, ra, rb, same_link):
@@ -1011,6 +1025,270 @@ def cmd_expand(msg):
     emit({'ev': 'lists', 'id': msg.get('id'), 'lists': lists}, now=True)
 
 
+# ---------------------------------------------------------------------------
+# 깊은 펼치기 (nvim 트리의 zO, 비주얼의 zO / O): 고른 디렉터리 아래의 디렉터리를 모두.
+#
+# cmd_expand(O)는 이미 훑은 '양쪽 디렉터리' 만 그 자리에서 따라간다. 한쪽에만 있는 디렉터리와 디렉터리 vs 파일의
+# 디렉터리 쪽은 목록을 청하기 전에는 훑지 않으므로(on_scan 의 todo 는 판정이 남은 것만) 그 아래로 내려가지 못했고,
+# 훑는 중이면 아직 안 훑은 디렉터리에서 멈췄다. 여기서는 훑지 않은 디렉터리를 앞세워 훑게 하고(SCAN, 급수 0) 그
+# 훑기가 끝나면 이어 걷는다 (on_scan -> deep_resume). 편집기는 기다리지 않는다 - 다 걸은 뒤에 'lists' 하나로 답한다.
+# 얕은 것부터(BFS): max 에서 자르면(cap) 위 층부터 펼쳐진다. 걷는 동안은 listing 하지 않는다 - listing 은 sub 를
+# 켜고 항목마다 날짜(INFO stat)를 청하니, max 를 넘어 묻고 그만두면 헛일이다. 보기는 nvim 의 visible() 과 같은
+# 셈으로 (deep_want): 아직 안 훑은 아래가 있는 디렉터리(UNK)는 일단 들어가 훑고, 끝낼 때 다시 거른다 - 다 훑고 보니
+# 그 보기에서 빠지는 디렉터리는 펼치지 않는다. max 는 보이는 것이 정해진 것(deep_sure)으로 센다 - 훑는 중에는 거의
+# 모든 디렉터리가 UNK 라, 그것까지 세면 차이 보기의 zO 가 훑지 않은 폴더 수로 '너무 많다' 고 물었다 (wide: 2,221 개
+# 라고 묻고, 다 훑고 보니 506 개). 모르는 것이 끼어 있으면 더 걸어 보고, 다 걸은 뒤에 다시 세어 정한다
+# ---------------------------------------------------------------------------
+
+class Walk:
+    __slots__ = ('id', 'bits', 'both', 'max', 'cap', 'paths', 'roots', 'todo', 'found', 'seen',
+                 'wres', 'wwalk', 'more', 'dead', 'chk', 'park')
+
+    def __init__(self, rid, bits, both, mx, cap, paths):
+        self.id, self.bits, self.both, self.max, self.cap = rid, bits, both, mx, cap
+        self.paths = paths        # 아직 노드를 못 찾은 뿌리 (위 디렉터리를 훑는 중 - 양측 교환 바로 뒤 등)
+        self.roots = set()        # 고른 디렉터리 (보기와 상관없이 펼친다)
+        self.todo = collections.deque()
+        self.found = []           # 펼칠 디렉터리 (훑은 것, 찾은 차례)
+        self.seen = set()
+        self.wres = set()         # 뿌리를 찾으려고 기다리는 위 디렉터리
+        self.wwalk = set()        # 걷다가 기다리는 디렉터리 (훑기가 끝나면 todo 로)
+        self.more = False         # max 에 닿았다 (그 뒤가 더 있다)
+        self.dead = False
+        self.chk = mx             # found 가 이만큼이 되면 정해진 것을 센다 (deep_nsure - 매번 세면 O(n²))
+        self.park = False         # 다 걸었는데 넘칠지 몰라 기다린다 (deep_finish - 그 아래 일은 한 번만 앞세운다)
+
+
+deep_wait = {}            # 훑기를 기다리는 노드 -> 그것을 기다리는 걷기들
+deep_live = {}            # 답하지 않은 걷기 id -> 걷기 (stopdeep 이 그만두게 한다)
+deep_park = []            # 다 걸었는데 넘칠지 아직 모르는 걷기 (견주는 중인 것이 끼어 있다 - deep_unpark)
+deep_kick = []            # refresh 로 떼어 낸 노드를 기다리던 걷기 (cmd_refresh 끝에서 잇는다)
+
+
+def deep_want(n, bits, both):
+    # 그 보기에 이 디렉터리가 보이는가 - nvim 의 visible() 과 같은 셈 (bits None = 모두 보이기)
+    if bits is None:
+        return True
+    m = n.mask
+    if m & (bits | UNK):
+        return True
+    if not n.both_dirs():
+        return False
+    if both or (bits & SAME and n.status == 'same'):
+        return True
+    return bool(m & PEND) and bool(bits & (SAME | NA | NB | DX))
+
+
+def deep_sure(n, bits, both):
+    # deep_want 에서 '아직 모른다'(UNK: 아래를 다 훑지 않았다, PEND: 아래에 견주는 중인 것)를 뺀 것 - 그 보기에 보이는
+    # 것이 정해진 디렉터리. 펼칠 수가 max 를 넘는지는 이것으로 센다 (모르는 것은 다 훑고 보면 빠질 수 있다)
+    if bits is None or n.mask & bits:
+        return True
+    return n.both_dirs() and (both or bool(bits & SAME and n.status == 'same'))
+
+
+def deep_new(n):
+    # 새로 펼칠 디렉터리인가 - 뿌리 '' 와 nvim 이 이미 목록을 받아 간(펼쳐 둔, sub) 것은 max 에 세지 않는다. 세면
+    # Limit 로 2,000 개를 펼친 뒤의 zO 가 또 2,731 개라며 같은 것을 물었다 (그 줄들은 이미 그려져 있다)
+    return n is not root and not n.sub
+
+
+def deep_nsure(x):
+    # found 가운데 새로 펼칠, 보이는 것이 정해진 디렉터리 수
+    return sum(1 for n in x.found if deep_new(n) and not n.dead
+               and (n in x.roots or deep_sure(n, x.bits, x.both)))
+
+
+def deep_hold(x, n, walking):
+    # n 이 훑기를 마칠 때까지 x 를 세운다 (급수 0 으로 앞세운다 - 이미 꺼내 갔으면 결과를 기다리기만)
+    (x.wwalk if walking else x.wres).add(n)
+    w = deep_wait.setdefault(n, [])
+    if x not in w:
+        w.append(x)
+    submit(SCAN, n, True)
+
+
+def deep_resume(n):
+    for x in deep_wait.pop(n, None) or ():
+        x.wres.discard(n)
+        if n in x.wwalk:
+            x.wwalk.discard(n)
+            x.todo.append(n)
+        deep_step(x)
+
+
+def deep_resolve(x):
+    # 뿌리 이름을 노드로. 위 디렉터리를 아직 안 훑었으면(양측 교환 바로 뒤 - nvim 은 옛 목록의 줄을 보인다) 그것을
+    # 훑고 나서 다시 찾는다. 없는 이름(그사이 지웠다)은 버린다
+    left = []
+    for rel in x.paths:
+        n = root
+        names = rel.split('/') if rel else []
+        i = 0
+        while i < len(names) and n is not None and n.scanned:
+            n = n.kids.get(names[i])
+            i += 1
+        if n is None or not n.isdir():
+            continue
+        if i < len(names):
+            deep_hold(x, n, False)
+            left.append(rel)
+        else:
+            x.roots.add(n)
+            x.todo.append(n)      # 아직 안 훑었으면 걷기가 기다린다
+    x.paths = left
+
+
+def deep_count(x, more, n):
+    # max 를 넘었다: 지금 아는 것(훑은 것)만 더 세어 묻는 말에 보인다. 훑지 않은 곳은 기다리지 않고(그 폴더 하나로 세고
+    # 그 아래는 모른다 - unknown), 너무 많으면 그만 센다 (수십만 노드를 다 돌면 주 줄기가 멎는다). 보이는 것이 아직
+    # 정해지지 않은 것(deep_sure 가 아닌 것)은 세지 않고 unknown 으로 - 묻는 말은 '적어도 n 개'. n: found 가운데
+    # 정해진 수 (deep_nsure). 돌려주는 것: 수, 그보다 많을 수 있는가
+    q = list(more) + list(x.todo) + list(x.wwalk)
+    limit = 50 * max(x.max, 1000)
+    unknown = bool(x.paths)
+    while q and n < limit:
+        d = q.pop()
+        if d.dead or d in x.seen or (d not in x.roots and not deep_want(d, x.bits, x.both)):
+            continue
+        x.seen.add(d)
+        if deep_new(d):
+            if d in x.roots or deep_sure(d, x.bits, x.both):
+                n += 1
+            else:
+                unknown = True
+        if not d.scanned:
+            unknown = True
+            continue
+        for c in d.kids.values():
+            if c.isdir():
+                q.append(c)
+    return n, unknown or bool(q)
+
+
+def deep_step(x):
+    if x.dead:
+        return
+    if x.paths:
+        deep_resolve(x)
+    while x.todo:
+        n = x.todo.popleft()
+        if n.dead or n in x.seen:
+            continue
+        if n not in x.roots and not deep_want(n, x.bits, x.both):
+            continue
+        if not n.scanned:
+            deep_hold(x, n, True)
+            continue
+        if x.max and len(x.found) - (root in x.seen) >= x.chk:   # 뿌리('')는 세지 않는다 (deep_count 처럼)
+            sure = deep_nsure(x)
+            if sure >= x.max:
+                x.more = True
+                if not x.cap:
+                    x.dead = True
+                    deep_live.pop(x.id, None)
+                    total, more = deep_count(x, [n], sure)
+                    emit({'ev': 'lists', 'id': x.id, 'deep': 1, 'lists': {}, 'over': total, 'more': more}, now=True)
+                    return
+                break
+            # 모르는 것(UNK·PEND)이 끼어 있다 - 더 걷는다 (훑고 보면 빠질 수 있다). 다시 세는 것은 모자란 만큼 더
+            # 찾은 뒤: 그사이 정해지는 것은 거기서나 끝에서 센다
+            x.chk = len(x.found) - (root in x.seen) + x.max - sure
+        x.seen.add(n)
+        x.found.append(n)
+        for c in children(n):
+            if c.isdir():
+                x.todo.append(c)
+    if not x.more and (x.wres or x.wwalk or x.paths):
+        return
+    x.dead = True
+    deep_finish(x)
+
+
+def deep_finish(x):
+    # 다 걸었다 (cap 이면 max 에서 멈췄다): 다시 거르고 답한다. 걷는 사이에 아래를 다 훑고 보니 그 보기에서 빠지는 것
+    # (UNK 로 들어갔던 같은 디렉터리)은 펼치지 않는다
+    keep = [n for n in x.found if not n.dead and (n in x.roots or deep_want(n, x.bits, x.both))]
+    nk = sum(1 for n in keep if deep_new(n))
+    if x.max and nk > x.max:
+        sure = sum(1 for n in keep if deep_new(n) and (n in x.roots or deep_sure(n, x.bits, x.both)))
+        unsure = sure < nk and not complete[0]
+        if unsure and (sure < x.max if x.cap else sure <= x.max):
+            # 넘칠지는 아직 모른다: 남은 것은 아래에 견주는 중인 것(PEND)이 있는 디렉터리라 다 견주면 빠질 수 있다
+            # (훑는 중의 차이 보기 - 같은 파일뿐인 디렉터리). 그 일을 앞세우고 기다린다 (deep_unpark 가 다시 본다).
+            # 묻지 않고 펼치면 수천 줄이 한꺼번에 생기고, 지금 물으면 다 보고 나서는 없을 수를 묻는다
+            if not x.park:
+                x.park = True
+                for n in keep:
+                    if n.kids and not deep_sure(n, x.bits, x.both):
+                        for c in n.kids.values():
+                            if c.status == 'pend':
+                                submit_pending(c, True)
+            deep_park.append(x)
+            return
+        if not x.cap:
+            # 정해진 것만으로 넘치면 '적어도 그만큼' (more), 다 정해졌으면 정확한 수
+            deep_live.pop(x.id, None)
+            emit({'ev': 'lists', 'id': x.id, 'deep': 1, 'lists': {}, 'over': sure if unsure else nk,
+                  'more': unsure}, now=True)
+            return
+        if unsure:
+            # 얕은 것부터 max 개를 정해진 것에서 고른다 - 모르는 것을 넣으면 다 보고 나서 빠져 max 보다 적게 남는다
+            keep = [n for n in keep if n is root or n in x.roots or deep_sure(n, x.bits, x.both)]
+        x.more = True
+        cut, k = [], 0
+        for n in keep:            # 찾은 차례 = 얕은 것부터. 이미 펼쳐 둔 것은 세지 않고 둔다
+            if deep_new(n):
+                if k >= x.max:
+                    continue
+                k += 1
+            cut.append(n)
+        keep = cut
+    deep_live.pop(x.id, None)
+    lists = {}
+    for n in keep:
+        lists[n.rel()] = listing(n, lift=n in x.roots) or []
+    res = {'ev': 'lists', 'id': x.id, 'deep': 1, 'lists': lists}
+    if x.more:
+        res['capped'] = x.max
+    emit(res, now=True)
+
+
+def cmd_deep(msg):
+    bits = msg.get('bits')
+    if not (isinstance(bits, int) and bits):
+        bits = None
+    try:
+        mx = max(0, int(msg.get('max') or 0))
+    except (TypeError, ValueError):
+        mx = 0
+    dirs = msg.get('dirs')
+    if not isinstance(dirs, list):
+        dirs = [msg.get('dir') or '']
+    paths = [d for d in dirs if isinstance(d, str)]
+    x = Walk(msg.get('id'), bits, bool(msg.get('both')), mx, bool(msg.get('cap')), paths)
+    deep_live[x.id] = x
+    deep_step(x)
+
+
+def deep_unpark():
+    # 기다리던 걷기를 다시 본다 (주 줄기에서 progress 와 함께 - 0.25초마다, 다 끝났을 때). 그사이 그만둔 것은 버린다
+    xs = deep_park[:]
+    del deep_park[:]
+    for x in xs:
+        if deep_live.get(x.id) is x:
+            deep_finish(x)
+
+
+def cmd_stopdeep(msg):
+    # nvim 이 답을 받지 않기로 한 깊은 펼치기 (zC 가 그 뿌리를 모두 접었다, X): 더 걷지도, 그 아래 일을 앞세워 기다리지도
+    # 않는다. 그 전에 답을 냈으면 nvim 이 받아 간 목록을 도로 내려 둔다 (tr.deep_done)
+    for i in msg.get('ids') or ():
+        x = deep_live.pop(i, None) if isinstance(i, int) else None
+        if x is not None:
+            x.dead = True
+
+
 finished = [None]
 last_snap = [None]
 complete = [False]
@@ -1065,6 +1343,13 @@ def detach(n):
         if x.scanned:
             counts['dirs'] -= 1
         x.dead = True
+        if x in deep_wait:
+            # 이것의 훑기를 기다리던 깊은 펼치기: 떼어 낸 노드의 결과는 오지 않는다 (on_scan 이 불리지 않는다) -
+            # 그대로 두면 그 zO 가 끝내 답하지 않았다. refresh 를 다 한 뒤에 잇는다 (cmd_refresh)
+            for w in deep_wait.pop(x):
+                w.wres.discard(x)
+                w.wwalk.discard(x)
+                deep_kick.append(w)
         if x.kids:
             stack.extend(x.kids.values())
     del p.kids[n.name]
@@ -1157,6 +1442,10 @@ def cmd_refresh(msg):
         again[0] = True
     for rel, p in parents.items():
         emit({'ev': 'list', 'id': None, 'dir': rel, 'entries': [entry(c) for c in children(p)]}, now=True)
+    # 떼어 낸 노드를 기다리던 깊은 펼치기 (detach): 새 모형으로 이어 걷는다 - 뿌리였으면 이름으로 다시 찾지는 않고
+    # 나머지만 (그 뿌리는 복사·지우기로 바뀌었다)
+    while deep_kick:
+        deep_step(deep_kick.pop())
 
 
 # ---------------------------------------------------------------------------
@@ -1378,7 +1667,12 @@ def handle(msg):
     elif c == 'next':
         cmd_next(msg)
     elif c == 'expand':
-        cmd_expand(msg)
+        if msg.get('deep'):
+            cmd_deep(msg)
+        else:
+            cmd_expand(msg)
+    elif c == 'stopdeep':
+        cmd_stopdeep(msg)
     elif c == 'refresh':
         cmd_refresh(msg)
     elif c == 'copy':
@@ -1475,6 +1769,8 @@ def main():
             dbg('progress', done, counts['pend'], outstanding[0])
             progress(done)
             last_prog = now
+            if deep_park:
+                deep_unpark()     # 넘칠지 몰라 기다리던 zO (deep_finish)
         announced = done
         if now - last_flush[0] > 0.05 or done:
             flush()

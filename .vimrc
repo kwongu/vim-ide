@@ -1992,6 +1992,10 @@ let g:vimide_dirdiff_tab = 1
 "   트리: <CR> 비교 탭 열고 그 탭으로(열려 있으면 그 탭으로, 디렉터리는 펼치기), o 비교 탭을
 "         뒤에서 열기(열려 있으면 다시 읽기, 트리에 그대로), <C-n>/<C-p> 다음/앞
 "         차이 파일(모두·차이 밖의 보기는 그 보기의 것), l/h 펼치기/접기, O/X 모두 펼치기/접기,
+"         L/H 커서의 디렉터리(파일 줄이면 그것이 든 디렉터리) 아래 모두 펼치기 / 그것과 그 아래 모두 접기
+"         (zO/zC 도 같다)
+"         (보기를 따른다, 한쪽에만 있는 디렉터리·디렉터리 vs 파일도. 비주얼 V v 는 고른 줄의 디렉터리마다 -
+"         비주얼의 O/X 도 이것. g:vimide_dirdiff_expand_max 개를 넘으면 먼저 묻는다),
 "         R 다시, q 끝(비교 탭들도), ? 도움말
 "         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
 "         <Tab> 비교할 곳 고르기 ([A] 에서 Tab, [B] 에서 Tab -> 새 탭에서 비교. neo-tree 와 같은 [A])
@@ -2038,6 +2042,7 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_ignore_eol = 0    " 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일도 다름(≠)으로 (예전처럼 바이트 그대로)
 "   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (MB)
 "   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때, 기본: 화면의 40%)
+"   let g:vimide_dirdiff_expand_max = 5000 " L 이 묻지 않고 펼칠 폴더 수 (0 이면 묻지 않고 모두)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
 "   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
@@ -2059,6 +2064,9 @@ let g:vimide_dirdiff_trust_mtime = 1
 let g:vimide_dirdiff_ignore_eol = 1
 " 줄 끝만 다른지 읽어 볼 파일 크기 한도(MB). 이보다 큰 파일은 크기가 다르면 읽지 않고 그대로 다름
 let g:vimide_dirdiff_eol_max_mb = 4
+" 트리의 L(zO, 커서·고른 줄의 디렉터리 아래 모두 펼치기)가 묻지 않고 펼칠 폴더 수. 넘으면 모두 / 얕은 것부터 이만큼 /
+" 그만두기를 묻는다 - 수천 개를 한꺼번에 펼치면 줄이 수만이 되어 그리는 동안 편집기가 멎는다. 0 = 묻지 않고 모두
+let g:vimide_dirdiff_expand_max = 2000
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
 " 트리의 파일 다루기 (지금 쪽에서 neo-tree 처럼 a 더하기 - 끝이 / 면 디렉터리, A 디렉터리 더하기, d 지우기,

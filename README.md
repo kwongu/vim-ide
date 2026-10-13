@@ -2696,7 +2696,8 @@ those two windows): the same file in any other window keeps its colors.
 | `o` | open the pair's compare tab in the background and stay in the tree, so several pairs can be opened and then visited with `gt`; on a pair that already has one, read it again (unsaved edits are kept). With `g:vimide_dirdiff_pair_tab = 0`: show the pair in the edit windows, stay in the tree |
 | `<C-n>` / `<C-p>` | next / previous file that differs (or exists on one side only), opening folders on the way. In a view other than *all* and *differences*: the next entry that view is about |
 | `l` / `h` | open a folder / close it (or go to the parent) |
-| `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree) |
+| `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree). In visual mode (`V` / `v`) they do what `L` / `H` do, for the selected rows |
+| `L` / `H` | open everything under the cursor's folder / close that folder and everything under it - `l` / `h` all the way down (in the tree `H` and `L` do not jump to the top and bottom of the window). `zO` / `zC` do the same, as in the relation window. The folder is the row itself when it is a folder on either side - one that exists on one side only, or is a folder on one side and a file on the other, included (its contents are listed) - otherwise the folder the row is in (a top-level file: the whole tree). It follows the view: in *all* every folder, in the others the folders that view shows. In visual mode (`V` / `v`): every folder row in the selection (a selection of files only: the folders they are in), each subtree once. The helper walks in the background - folders not read yet are read first, the editor never waits - and the message says how many folders were opened; `H` leaves the cursor on that folder's row. More than `g:vimide_dirdiff_expand_max` folders (2000) asks first: *All*, *Limit* (the shallowest 2000) or *Cancel*. During a scan, folders whose place in the view is not known yet (still being read or compared) are counted once it is, so a view that ends up showing few folders is not asked about. An `H` or `X` before the answer arrives takes the `L` back |
 | `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below |
 | `F` | switch between *all* and *differences* |
 | `<Tab>` | pick something to compare, as `Tab` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Tab` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: a compare tab of this comparison, names and folders may differ - see *Two picked files* below). `Tab` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
@@ -3350,8 +3351,10 @@ Copying in the tree:
   `g:vimide_dirdiff_list_height` sets the tree height with
   `g:vimide_dirdiff_pair_tab = 0` (default 40% of the screen).
   `g:vimide_dirdiff_ignore_eol` (1: a file that differs only in line endings
-  is identical, `≈`; 0: bytes exactly) and `g:vimide_dirdiff_eol_max_mb` (4:
-  the largest file read for that check) belong to the tree.
+  is identical, `≈`; 0: bytes exactly), `g:vimide_dirdiff_eol_max_mb` (4:
+  the largest file read for that check) and `g:vimide_dirdiff_expand_max`
+  (2000: the most folders `L` opens without asking; 0: never ask) belong to
+  the tree.
 - Options of the compare side: `g:vimide_dirdiff_colors` (`'bc'` /
   `'neogit'` / `'classic'`), `g:vimide_dirdiff_pair_tab` (1: compare tabs, 0:
   edit windows above the tree), `g:vimide_dirdiff_file_view` (`'all'` /

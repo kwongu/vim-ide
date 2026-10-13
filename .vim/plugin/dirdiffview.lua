@@ -65,7 +65,16 @@
 --               보기가 보이는 것으로 (좌측 최신이면 A 가 최신인 파일, 동일이면 같은 파일)
 --   l / h       펼치기 / 접기(접혀 있으면 부모로)
 --   O / X       차이 있는 디렉터리를 모두 펼치기 / 모두 접기 (트리 전체). 모두·차이 밖의 보기에서는
---               그 보기가 보이는 것이 아래에 있는 디렉터리를
+--               그 보기가 보이는 것이 아래에 있는 디렉터리를. 비주얼에서는 L / H 와 같다 (고른 줄)
+--   L / H       커서 줄의 디렉터리(디렉터리 줄이면 그것, 파일 줄이면 그것이 든 디렉터리 - 맨 위 층이면 트리 전체)
+--               아래를 모두 펼치기 / 그것과 그 아래를 모두 접기 (커서는 그 디렉터리 줄로). 보기를 따른다: 모두
+--               보이기는 모든 디렉터리, 다른 보기는 그 보기가 보이는 디렉터리. 한쪽에만 있는 디렉터리·디렉터리
+--               vs 파일도 그 아래를 연다. 비주얼(V v)이면 고른 줄의 디렉터리마다 (겹친 것은 한 번). 뒤쪽이 걷고
+--               (훑는 중이면 아래를 먼저 훑는다 - 편집기는 기다리지 않는다) 새로 펼친 수를 알린다.
+--               g:vimide_dirdiff_expand_max(2000) 개를 넘으면 묻는다 (모두 / 얕은 것부터 그만큼 / 그만두기) - 보기에
+--               남을지 아직 모르는 것(훑는 중·견주는 중)은 정해진 뒤에 센다. 답이 오기 전의 H·X 는 그 L 을 거둔다.
+--               l / h 의 '끝까지' 판이라 대문자 (트리에서는 H·L 이 화면 맨 위·맨 아래로 가지 않는다).
+--               zO / zC 는 같은 것의 다른 이름 (RelationView 의 zO / zC 와 같은 글자)
 --   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...)
 --   F           모두 보이기 <-> 차이 보이기
 --   <Tab>       비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Tab 의 것을 [B] 로 - 곧바로 새
@@ -141,6 +150,7 @@
 --   let g:vimide_dirdiff_ignore_eol = 0    " 줄 끝(CRLF/LF, 파일 끝 줄바꿈)만 다른 파일도 다름으로 (기본 1: 같음 ≈)
 --   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (기본 4, 넘으면 크기가 다르면 다름)
 --   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때만, 기본: 화면의 40%)
+--   let g:vimide_dirdiff_expand_max = 5000 " L 이 묻지 않고 펼칠 폴더 수 (기본 2000, 0 이면 묻지 않고 모두)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
 --   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
@@ -928,6 +938,8 @@ on_event = function(s, ev)
     end
     tr.want_kids(s, ev.dir)
     schedule_render(s)
+  elseif k == 'lists' and (ev.deep or (s.deep and s.deep[ev.id])) then
+    tr.deep_done(s, ev)   -- zO 의 답: 그사이 접은 것은 거르고, 넘치면 묻고, 나머지는 아래 'lists' 로 다시 온다
   elseif k == 'lists' or k == 'reveal' then
     -- 부모부터 (이름 차례면 부모가 제 아래 것보다 앞이다): 양측 교환 뒤 부모의 새 목록이 철자만 다른 짝의 이름을
     -- 옮겨야(tr.realias) 그 아래의 새 목록이 제 열쇠에 앉는다
@@ -3068,7 +3080,8 @@ local function act_h(s)
 end
 
 -- O / X 는 트리 전체 (Beyond Compare 의 Expand All / Collapse All). 처음에는 커서의
--- 디렉터리 아래만 했더니 맨 윗줄(한쪽에만 있는 디렉터리)에서 O 가 아무것도 펼치지 않았다
+-- 디렉터리 아래만 했더니 맨 윗줄(한쪽에만 있는 디렉터리)에서 O 가 아무것도 펼치지 않았다.
+-- 커서(비주얼이면 고른 줄)의 디렉터리 아래만은 L / H (zO / zC) 다 (tr.expand_under - 뒤쪽이 한쪽에만 있는 디렉터리도 훑어 가며 걷는다)
 local function act_expand_all(s)
   s.req = s.req + 1
   if s.walk then
@@ -3096,11 +3109,242 @@ local function act_collapse_all(s)
       send(s, { cmd = 'unlist', dir = k })
     end
   end
+  tr.deep_cancel(s)   -- 오는 중인 zO 의 답은 받지 않는다 (그래도 오면 tr.deep_done 이 도로 내려 둔다)
   render(s)
   -- 커서는 있던 줄의 맨 위 조상에
   if top and s.row_of[top] then
     goto_row(s, s.row_of[top])
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- L / H (zO / zC): 커서 줄(비주얼이면 고른 줄들)의 디렉터리 아래를 모두 펼치기 / 접기 (zO / zC 는 RelationView 와
+-- 같은 글자. 비주얼에서는 O / X 도 이것 - 보통 모드의 O / X 는 트리 전체 그대로)
+-- ---------------------------------------------------------------------------
+
+-- 줄 r 이 다루는 디렉터리: (어느 쪽에서든) 디렉터리인 줄이면 그 줄, 아니면 그 줄이 든 디렉터리 (맨 위 층의 파일이면
+-- 뿌리 '' - 트리 전체). 읽는 중 줄('x/' 의 '…')은 그 디렉터리. 줄이 없으면(빈 트리) 뿌리
+function tr.sub_dir(r)
+  if not r then
+    return ''
+  end
+  if r.loading then
+    return (r.rel:gsub('/$', ''))
+  end
+  if is_dir(r.e) then
+    return r.rel
+  end
+  return r.dir or ''
+end
+
+-- rel 이 roots 중 하나이거나 그 아래인가 (뿌리 '' 는 모두를 덮는다)
+function tr.in_any(rel, roots)
+  for _, p in ipairs(roots or {}) do
+    if p == '' or rel == p or rel:sub(1, #p + 1) == p .. '/' then
+      return true
+    end
+  end
+  return false
+end
+
+-- zO / zC 가 다룰 디렉터리들: 비주얼 범위(l1..l2)면 그 안의 디렉터리 줄들 (디렉터리 줄이 없으면 줄마다 그 줄이 든
+-- 디렉터리), 아니면 커서 줄 하나. 겹친 것(고른 디렉터리 아래의 디렉터리)은 빼서 한 번만 - 위의 것이 덮는다.
+-- Space 로 고른 것은 쓰지 않는다: 그것은 복사·지우기(지금 쪽의 항목)를 위해 쪽마다 남겨 둔 것이라, 남아 있으면 커서
+-- 줄의 zO 가 엉뚱한 곳을 펼친다
+function tr.sub_roots(s, l1, l2)
+  local set = {}
+  if l1 then
+    local lo, hi = math.min(l1, l2), math.max(l1, l2)
+    for pass = 1, 2 do
+      for i = lo, hi do
+        local r = s.rows[i]
+        if r and (pass == 2 or r.loading or is_dir(r.e)) then
+          set[tr.sub_dir(r)] = true
+        end
+      end
+      if next(set) then
+        break
+      end
+    end
+  end
+  if not next(set) then
+    set[tr.sub_dir(cur_row(s))] = true
+  end
+  local list = vim.tbl_keys(set)
+  table.sort(list)   -- 조상이 먼저 (제 아래의 것보다 짧은 앞 토막)
+  local out = {}
+  for _, rel in ipairs(list) do
+    if not tr.in_any(rel, out) then
+      out[#out + 1] = rel
+    end
+  end
+  return out
+end
+
+-- 뒤쪽에 깊은 펼치기를 청한다 (dirdiffscan.py 의 cmd_deep). mx: 이보다 많으면 묻는다(0 은 끝없이), cap: 묻지 않고 얕은
+-- 것부터 mx 개만. 보기를 따른다 - 모두 보이기는 모든 디렉터리, 다른 보기는 그 보기가 보이는 디렉터리 (visible 과 같은
+-- 셈). 답이 늦으면(훑는 중 - 아래를 먼저 훑는다) 그렇다고 알린다: 말없이 기다리면 눌리지 않은 줄 알았다.
+-- drop: 받지 않을 것 (물음 뒤에 다시 청할 때 - 그 앞에 zC 로 접은 아래)
+function tr.deep_send(s, roots, mx, cap, drop)
+  s.req = s.req + 1
+  local id = s.req
+  s.deep = s.deep or {}
+  s.deep[id] = { roots = roots, max = mx, drop = drop or {}, t0 = uv.hrtime() }
+  local md = MODE[s.mode]
+  send(s, { cmd = 'expand', id = id, deep = 1, dir = roots[1], dirs = roots, bits = md.bits,
+    both = md.both and 1 or nil, max = mx, cap = cap and 1 or nil })
+  vim.defer_fn(function()
+    if s.deep and s.deep[id] and not s.done then
+      say('펼칠 폴더를 찾는 중입니다 - 아직 훑지 않은(견주는 중인) 아래를 먼저 봅니다')
+    end
+  end, 400)
+end
+
+function tr.expand_under(s, l1, l2)
+  if s.walk then
+    walk_drop(s, s.walk)   -- 예전 뒤쪽에서 걷던 O·<C-n> (act_expand_all 처럼)
+    s.walk = nil
+  end
+  tr.deep_send(s, tr.sub_roots(s, l1, l2), math.max(0, math.floor(tonumber(vim.g.vimide_dirdiff_expand_max) or 2000)))
+end
+
+-- zC: 그 디렉터리와 그 아래를 모두 접는다 (X 처럼 unlist - 목록은 남는다). 커서는 그 디렉터리 줄에 (여럿이면 맨 위의
+-- 것). 오는 중인 zO 가 그 아래를 도로 펼치지 않게 한다 (tr.deep_cancel)
+function tr.collapse_under(s, l1, l2)
+  local roots = tr.sub_roots(s, l1, l2)
+  if s.walk then
+    walk_drop(s, s.walk)
+    s.walk = nil
+  end
+  tr.deep_cancel(s, roots)
+  for k in pairs(s.expanded) do
+    if k ~= '' and tr.in_any(k, roots) then
+      s.expanded[k] = nil
+      send(s, { cmd = 'unlist', dir = k })
+    end
+  end
+  render(s)
+  local best
+  for _, rel in ipairs(roots) do
+    local i = rel ~= '' and s.row_of[rel]
+    if i and (not best or i < best) then
+      best = i
+    end
+  end
+  if best then
+    goto_row(s, best)
+    mark_side(s)
+  end
+end
+
+-- 오는 중인 zO 를 roots(nil 이면 모두 - X) 만큼 거둔다. 뿌리를 다 덮었으면 그 zO 를 그만둔다: s.deep 에서 지워 답을 받지
+-- 않고('찾는 중' 알림도, 넘칠 때의 물음도 없다 - 접은 뒤에 물음이 떠서 고르면 방금 접은 것이 도로 펼쳐졌고, 답이 오면
+-- '펼칠 폴더가 없습니다' 라고 했다), 뒤쪽도 더 걷지 않게 한다 (stopdeep - 예전 뒤쪽은 모르는 명령이라 버린다. 그래도 오는
+-- 답은 tr.deep_done 이 도로 내려 둔다). 일부만 덮었으면 덮은 뿌리를 빼고 그 아래를 답에서 뺀다 (q.drop - 물음 뒤에
+-- 다시 청할 때도)
+function tr.deep_cancel(s, roots)
+  local stop = {}
+  for id, q in pairs(s.deep or {}) do
+    local left = {}
+    for _, r in ipairs(roots and q.roots or {}) do
+      if not tr.in_any(r, roots) then
+        left[#left + 1] = r
+      end
+    end
+    if #left == 0 then
+      s.deep[id] = nil
+      stop[#stop + 1] = id
+    else
+      q.roots = left
+      vim.list_extend(q.drop, roots)
+    end
+  end
+  if #stop > 0 then
+    send(s, { cmd = 'stopdeep', ids = stop })
+  end
+end
+
+-- rel 을 펼칠 다른 zO 가 오는 중인가: 그 답이 먼저 와 뒤쪽이 목록을 내준 뒤에 이 답 때문에 unlist 하면, 펼쳐진
+-- 디렉터리의 바뀜을 뒤쪽이 알려 오지 않는다 (zO zC zO 를 빨리)
+function tr.deep_wants(s, rel)
+  for _, q in pairs(s.deep or {}) do
+    if tr.in_any(rel, q.roots) and not tr.in_any(rel, q.drop) then
+      return true
+    end
+  end
+  return false
+end
+
+-- zO 의 답 ('lists' 에 deep). 그사이 접은 것(zC 의 q.drop)·그만둔 것(zC·X 의 tr.deep_cancel, R)은 받지 않고 도로 내려
+-- 둔다 (unlist - 뒤쪽은 답하며 그 목록을 받아 간 것으로 적었다). 넘쳤으면(over) 묻고, 나머지는 O 의 'lists' 그대로
+-- 받는다 (on_event 에 다시). 몇 개를 펼쳤는지 알린다
+function tr.deep_done(s, ev)
+  local q = s.deep and s.deep[ev.id]
+  if q then
+    s.deep[ev.id] = nil
+  end
+  -- n: 새로 펼친 것, had: 이미 펼쳐져 있던 것 (그것까지 '펼쳤습니다' 로 세면 수가 맞지 않는다)
+  local keep, n, had = {}, 0, 0
+  for rel, list in pairs(ev.lists or {}) do
+    if q and not tr.in_any(rel, q.drop) then
+      keep[rel] = list
+      if rel ~= '' and s.expanded[rel] then
+        had = had + 1
+      elseif rel ~= '' then
+        n = n + 1
+      end
+    elseif not s.expanded[rel] and not tr.deep_wants(s, rel) then
+      send(s, { cmd = 'unlist', dir = rel })
+    end
+  end
+  if not q then
+    return
+  end
+  if ev.over then
+    return tr.deep_ask(s, q, ev)
+  end
+  on_event(s, { ev = 'lists', id = ev.id, lists = keep })
+  local msg = n > 0 and ('폴더 %s 개를 펼쳤습니다'):format(commas(n))
+    or had > 0 and ('이미 모두 펼쳐져 있습니다 (폴더 %s 개)'):format(commas(had)) or '펼칠 폴더가 없습니다'
+  if n > 0 and had > 0 then
+    msg = msg .. (' (이미 펼쳐져 있던 %s 개 말고)'):format(commas(had))
+  end
+  if ev.capped then
+    msg = msg .. (' - 얕은 것부터 %s 개까지 (g:vimide_dirdiff_expand_max)'):format(commas(ev.capped))
+  end
+  local ms = (uv.hrtime() - q.t0) / 1e6
+  if ms >= 1000 then
+    msg = msg .. (' (%.1f초)'):format(ms / 1000)
+  end
+  say(msg)
+end
+
+-- 펼칠 폴더가 g:vimide_dirdiff_expand_max 를 넘는다: 묻는다 - 모두 / 얕은 것부터 그만큼 / 그만두기. 수천 개를 한 번에
+-- 펼치면 줄이 수만이 되어 그리는 동안 편집기가 멎는다 (O 는 2000 개에서 말없이 잘랐다). 트리에 없으면(다른 창·탭으로
+-- 갔다) 묻지 않고 알리기만 - 엉뚱한 곳에서 물음이 뜬다. ev.more: 아직 훑지 않은(견주는 중인) 아래가 있어 다 세지
+-- 못했다 - 그 수는 '적어도' 다 (한쪽에만 있는 큰 디렉터리는 훑기 전에는 하나로 센다)
+function tr.deep_ask(s, q, ev)
+  local total = (ev.more and '적어도 ' or '') .. commas(ev.over)
+  if api.nvim_get_current_win() ~= s.win_l then
+    return say(('펼칠 폴더가 %s 개라 펼치지 않았습니다 (g:vimide_dirdiff_expand_max = %s 보다 많다)')
+      :format(total, commas(q.max)), vim.log.levels.WARN)
+  end
+  vim.schedule(function()
+    if s.done or not (s.job and s.job > 0) then
+      return
+    end
+    local ok, c = pcall(vim.fn.confirm, ('DirDiff: 펼칠 폴더가 %s 개입니다 - g:vimide_dirdiff_expand_max(%s) 보다 많습니다%s.\n'
+      .. '모두 펼치면 그리는 동안 편집기가 잠시 멈출 수 있습니다'):format(total, commas(q.max),
+      ev.more and ' (아직 훑지 않았거나 견주는 중인 아래는 세지 않았습니다)' or ''),
+      ('&All 모두\n&Limit 얕은 것부터 %s 개\n&Cancel 그만두기'):format(commas(q.max)), 3)
+    vim.cmd('redraw')
+    -- 다시 청한다 - 그 앞에 zC 로 접은 아래(q.drop)는 그대로 빼고
+    if ok and c == 1 then
+      tr.deep_send(s, q.roots, 0, nil, q.drop)
+    elseif ok and c == 2 then
+      tr.deep_send(s, q.roots, q.max, true, q.drop)
+    end
+  end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -4540,6 +4784,11 @@ local function help()
     '  <C-n> <C-p> 다음 / 앞 차이 파일 (모두·차이 밖의 보기: 그 보기가 보이는 것 - 동일이면 같은 파일)',
     '  l h         펼치기 / 접기(부모로)',
     '  O X         차이 있는 디렉터리 모두 펼치기 (다른 보기: 그 보기가 보이는 것이 있는 디렉터리) / 모두 접기',
+    '              - 트리 전체. 비주얼(V v)에서는 L H 와 같다',
+    '  L H         커서의 디렉터리(파일 줄이면 그것이 든 디렉터리) 아래 모두 펼치기 / 그 아래까지 모두 접기',
+    '              (모두 보이기: 모든 디렉터리, 다른 보기: 그 보기가 보이는 디렉터리 - 한쪽에만 있는 것도).',
+    '              비주얼이면 고른 줄의 디렉터리마다. 많으면(g:vimide_dirdiff_expand_max) 먼저 묻는다.',
+    '              답이 오기 전의 H X 는 그 L 을 거둔다. zO zC 도 같다 (RelationView 와 같은 글자)',
     '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
     '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
@@ -4907,6 +5156,7 @@ local function restart(s, keep)
   end
   s.loading, s.dirty, s.prog, s.walk = {}, {}, nil, nil
   s.chain = nil   -- 옛 뒤쪽에 청하던 차례 (tr.chain)
+  s.deep = nil    -- 옛 뒤쪽이 걷던 zO (그 답은 오지 않는다 - on_stdout 이 버린다)
   s.fstep, s.fs_ids = nil, nil   -- 비교 창이 묻던 다음 차이 파일의 답은 새 뒤쪽에서 오지 않는다 (cmp.fs_pending)
   if not start_job(s) then
     return
@@ -4941,6 +5191,27 @@ local function map_list(s)
   m('h', function() act_h(s) end, '접기 / 부모로')
   m('O', function() act_expand_all(s) end, '차이 있는 디렉터리 모두 펼치기 (보기에 따라)')
   m('X', function() act_collapse_all(s) end, '모두 접기')
+  -- 커서의 디렉터리 아래만: L / H (l / h 의 '끝까지' 판. 트리에서는 H·L 이 화면 맨 위·맨 아래로 가지 않는다). zO / zC 는
+  -- 같은 것의 다른 이름 (RelationView 의 zO / zC 와 같은 글자). 비주얼은 고른 줄의 디렉터리마다 - O / X 도 비주얼에서는
+  -- 이것 (트리 전체는 보통 모드의 O / X 그대로. 비주얼의 O·X 는 vim 에서 모서리 옮기기·줄 지우기라 트리에서 쓸 데가 없다)
+  for _, k in ipairs({ 'L', 'zO' }) do
+    m(k, function() tr.expand_under(s) end, '커서의 디렉터리 아래 모두 펼치기 (보기에 따라, 한쪽에만 있는 것도)')
+  end
+  for _, k in ipairs({ 'H', 'zC' }) do
+    m(k, function() tr.collapse_under(s) end, '커서의 디렉터리와 그 아래 모두 접기')
+  end
+  for _, spec in ipairs({ { 'L', true }, { 'zO', true }, { 'O', true }, { 'H', false }, { 'zC', false }, { 'X', false } }) do
+    vim.keymap.set('x', spec[1], function()
+      local l1, l2 = vim.fn.line('v'), vim.fn.line('.')
+      vim.cmd('normal! \27')
+      if spec[2] then
+        tr.expand_under(s, l1, l2)
+      else
+        tr.collapse_under(s, l1, l2)
+      end
+    end, { buffer = b, nowait = true, silent = true,
+      desc = spec[2] and '고른 줄의 디렉터리 아래 모두 펼치기 (보기에 따라)' or '고른 줄의 디렉터리와 그 아래 모두 접기' })
+  end
   m('f', function() open_menu(s) end, '보기 고르기')
   m('F', function() set_mode(s, s.mode == 'all' and 'diff' or 'all') end, '모두 보이기 / 차이 보이기')
   m('R', function() restart(s) end, '다시 훑기')
