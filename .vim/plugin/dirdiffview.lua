@@ -75,7 +75,8 @@
 --               남을지 아직 모르는 것(훑는 중·견주는 중)은 정해진 뒤에 센다. 답이 오기 전의 H·X 는 그 L 을 거둔다.
 --               l / h 의 '끝까지' 판이라 대문자 (트리에서는 H·L 이 화면 맨 위·맨 아래로 가지 않는다).
 --               zO / zC 는 같은 것의 다른 이름 (RelationView 의 zO / zC 와 같은 글자)
---   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...)
+--   f           보기 고르기 (Beyond Compare 의 보기: 모두 / 차이 / 고아 없음 / 좌측 최신 ...). 메뉴 맨 아래 줄(가름줄
+--               다음)은 제외 목록 끄기 / 켜기 - 아래 '제외 목록'
 --   F           모두 보이기 <-> 차이 보이기
 --   <Space>     비교할 곳 고르기: 지금 쪽의 항목을 [A] 로, 다음 Space 의 것을 [B] 로 - 곧바로 새
 --               탭에서 비교 (디렉터리 둘이면 DirDiff, 파일 둘이면 이 비교의 비교 탭 - 아래 '고른 두
@@ -87,7 +88,8 @@
 --   <C-r>/<C-l> A → B / B → A 로 파일·디렉터리 복사: 원본 쪽(A→B 면 A 트리)에서 m 으로 고른 것,
 --               없으면 비주얼 줄, 그것도 없으면 커서 줄. 이름을 보이고 묻고 나서, 뒤쪽이
 --               항목마다 안전하게 한다 (같은 이름은 덮어쓰고 디렉터리는 합친다 - 지우지
---               않는다, 제외 목록은 건드리지 않는다, 대상 쪽 링크를 따라가 쓰지 않는다).
+--               않는다, 디렉터리 안의 제외 목록(.git 등)은 목록을 꺼도 건드리지 않는다, 대상 쪽
+--               링크를 따라가 쓰지 않는다).
 --               복사한 곳만 다시 본다 (그곳이 든 다른 비교 탭도)
 --   a / A       지금 쪽(A/B)에 파일 더하기 (끝이 / 면 디렉터리, x/y/z.c 는 없는 위 디렉터리도) / 디렉터리 더하기
 --               - neo-tree 와 같은 키. 커서 줄이 그쪽의 디렉터리면 그 안, 아니면 그 줄의 부모 디렉터리에 (그쪽에
@@ -171,6 +173,16 @@
 --   let g:vimide_dirdiff_file_keys = 0     " 비교 창의 <C-S-n>/<C-S-p>·<C-m>/<C-S-m>(끝 알림 뒤의 Enter)을 가로채지 않기
 --   let g:vimide_dirdiff_pick_vimdiff = 1  " Space/Space 로 고른 두 파일을 예전처럼 맨 vimdiff 로 (dirdiffpick.lua 가 본다)
 --   (제외 목록은 DirDiff.vim 과 같은 g:DirDiffExcludes)
+--
+-- 제외 목록 (g:DirDiffExcludes, .vimrc - 기본 .git .svn .hg .repo .tags GTAGS GRTAGS GPATH: VCS 와 gtags 색인뿐):
+-- 걸린 이름은 뒤쪽이 읽지도 않아 어느 보기(모두 보이기도)에도 없다. 예전 기본은 *.o *.ko *.a *.so *.pyc *.swp
+-- __pycache__ 까지 빼서, 고객에게 주는 .so 가 모두 보이기에도 없었다 (사용자 보고) - 이제 빌드 산출물은 보인다.
+-- 뺀 이름 수는 상태줄의 '제외 n' (0 이면 없다 - 뒤쪽 progress 의 excl, 훑은 디렉터리마다 A·B 를 합쳐 한 번. 한쪽에만
+-- 있는 디렉터리는 펼칠 때 읽으니 그때 는다). f 메뉴 맨 아래 줄이나 :DirDiffExcludes off 로 이 비교만 목록 없이
+-- 다시 훑는다 (R 처럼 보기·펼친 것·커서 줄은 그대로, 세션의 s.noexcl - 다른 비교와 다음 :DirDiff 는 그대로).
+-- on 으로 되돌린다, toggle, 인자 없으면 목록과 이 비교의 상태. 끄는 것은 보기만이다: 복사(<C-r>/<C-l>)는 디렉터리
+-- 안의 .git 등을 그래도 건너뛰고 알린다 (--copy-exclude - 부모를 복사했더니 대상의 .git/config·HEAD 를 덮었다).
+-- 그 줄을 직접 고르면 복사한다
 
 if vim.g.loaded_vimide_dirdiffview then
   return
@@ -755,8 +767,15 @@ local render, render_rows, schedule_render, on_event, open_pair_fn, goto_row, ma
 local menu_fill, step_bits, restart_fn, walk_fn
 
 local function start_job(s)
-  local excl = vim.g.DirDiffExcludes or ''
-  local cmd = { 'python3', '-X', 'utf8', script_path(), s.a, s.b, '--exclude', excl,
+  -- 제외 목록: g:DirDiffExcludes, 이 비교에서 껐으면(s.noexcl - f 메뉴·:DirDiffExcludes off) 없이. 뒤쪽에 준 것을 s.excl 에
+  -- 적어 둔다 (tr.excluded - 파일 다루기의 '트리에 안 보인다' 알림, 메뉴·:DirDiffExcludes 가 뒤쪽과 같은 목록을 보게).
+  -- 복사(--copy-exclude, s.cexcl)는 꺼도 목록 그대로: 디렉터리 안의 .git 등을 덮지 않는다 (껐더니 부모 복사가 대상의
+  -- .git/config·HEAD 를 덮었다 - 검토). 끄는 것은 보기만이다
+  local list = vim.g.DirDiffExcludes
+  list = type(list) == 'string' and list or ''
+  local excl = s.noexcl and '' or list
+  s.excl, s.cexcl = excl, list
+  local cmd = { 'python3', '-X', 'utf8', script_path(), s.a, s.b, '--exclude', excl, '--copy-exclude', list,
     '--trust-mtime', (tonumber(vim.g.vimide_dirdiff_trust_mtime) or 1) ~= 0 and '1' or '0',
     '--ignore-eol', on(vim.g.vimide_dirdiff_ignore_eol, 1) and '1' or '0',
     '--eol-max-mb', tostring(tonumber(vim.g.vimide_dirdiff_eol_max_mb) or 4) }
@@ -1530,6 +1549,8 @@ end
 local function status_text(s)
   local p = s.prog or {}
   local parts = {}
+  local wide = (s.win_l and api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_width(s.win_l) or vim.o.columns) >= 100
+  local nx = tonumber(p.excl) or 0
   local function esc(t)
     return (t:gsub('%%', '%%%%'))
   end
@@ -1537,7 +1558,12 @@ local function status_text(s)
     -- 뒤쪽이 죽었다 (뿌리가 없어졌다 등 - start_job 의 on_exit). 그대로 두면 '훑는 중 0초' 로 남았다
     parts[#parts + 1] = '멈춤 - R 로 다시 훑기'
   elseif p.done then
-    parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
+    -- 좁은 창(100 칸 아래)에서는 '끝 N초' 를 뺀다 (앞의 'DirDiff' 도 빼고 뒤는 '(?)' - 아래 return): 80 칸에서는 앞이
+    -- 이미 잘렸는데('<0.0초 · 파일 N') '제외 n' 까지 더하니 '파일 N' 까지 먹혔다 (검토). 끝났는지는 '훑는 중'·
+    -- '확인 중' 이 없는 것으로, 무슨 탭인지는 탭 줄(DirDiff A <> B)과 경로 줄로 안다
+    if wide then
+      parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
+    end
   elseif p.again then
     parts[#parts + 1] = '바뀐 곳을 다시 보는 중'   -- 복사한 곳, :w 로 저장한 파일
   else
@@ -1547,7 +1573,11 @@ local function status_text(s)
   parts[#parts + 1] = hl_part('VimIdeDirDiffStChanged', ('다름 %s'):format(commas(p.diff or 0)))
   parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyA', ('A만 %s'):format(commas(p.onlyA or 0)))
   parts[#parts + 1] = hl_part('VimIdeDirDiffStOnlyB', ('B만 %s'):format(commas(p.onlyB or 0)))
-  local wide = (s.win_l and api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_width(s.win_l) or vim.o.columns) >= 100
+  if nx > 0 then
+    -- 제외 목록(g:DirDiffExcludes)에 걸려 훑지 않은 이름 수 (뒤쪽의 excl): 모두 보이기에도 없는 것이 있다는 말 -
+    -- 기본 목록에 *.so 가 있었을 때 고객에게 줄 .so 가 트리 어디에도 없는데 말이 없었다 (사용자 보고). f 메뉴로 끈다
+    parts[#parts + 1] = ('제외 %s'):format(commas(nx))
+  end
   if (tonumber(p.eol) or 0) > 0 and wide then
     -- 줄 끝만 다른 같은 파일 (판정 칸의 ≈ - 다름에는 들지 않는다). 좁은 창(100 칸 아래)에서는 뺀다: 80 칸에서는
     -- 상태줄이 이미 넘쳐 앞('DirDiff 끝 N초')이 잘리는데 이 토막이 더 밀어냈다 - 같음의 일부라 빠져도 수는 맞다
@@ -1563,9 +1593,10 @@ local function status_text(s)
   if na + nb > 0 then
     parts[#parts + 1] = ('고름 A %d / B %d'):format(na, nb)
   end
-  return ' ' .. hl_part('VimIdeDirDiffHeader', 'DirDiff') .. '  ' .. table.concat(parts, ' · ')
+  return ' ' .. (wide and hl_part('VimIdeDirDiffHeader', 'DirDiff') .. '  ' or '') .. table.concat(parts, ' · ')
     .. '   ' .. hl_part('VimIdeDirDiffHeader', '[' .. esc(MODE[s.mode].label) .. ']')
-    .. '   [' .. (s.side == 'b' and 'B' or 'A') .. ' 쪽]   ' .. hl_part('VimIdeDirDiffPending', '(? 도움말)')
+    .. '   [' .. (s.side == 'b' and 'B' or 'A') .. ' 쪽]   '
+    .. hl_part('VimIdeDirDiffPending', wide and '(? 도움말)' or '(?)')
 end
 
 -- 보이는 줄이 하나도 없을 때
@@ -3577,6 +3608,7 @@ end
 local WHY = {
   ['source missing'] = '원본에 없음', kind = '종류가 다름 (디렉터리 / 파일)',
   special = '특수 파일 (FIFO 등)', ['bad path'] = '경로가 이상함',
+  excluded = '제외 목록(g:DirDiffExcludes) - 디렉터리 안의 것은 끈 동안에도 복사하지 않는다 (그 줄을 골라야)',
 }
 local function why_text(to, w)
   local parent = w:match('^parent:(.*)$')
@@ -3657,6 +3689,11 @@ local function act_copy(s, dir, l1, l2)
     local msg = ('%s → %s: %s  (%s%s)\n%s 쪽의 같은 이름은 덮어씁니다. 디렉터리는 합칩니다 (지우지 않음).%s')
       :format(from:upper(), to:upper(), table.concat(what, ', '), table.concat(shown_names, ', '), more,
         to:upper(), #skipped > 0 and ('\n건너뜀 %d개: %s'):format(#skipped, tr.few(skipped, 4)) or '')
+    if ndir > 0 and s.noexcl and (s.cexcl or '') ~= '' then
+      -- 제외 목록을 끈 것은 보기만이다: 트리에 보이는 .git 등도 디렉터리 안에서는 복사하지 않는다 (start_job 의 s.cexcl)
+      msg = msg .. '\n제외 목록을 꺼 두었어도 디렉터리 안의 제외 이름(.git 등 - g:DirDiffExcludes)은 복사하지 않습니다'
+        .. ' (그 줄을 골라야)'
+    end
     -- tr.confirm: Ctrl+C 도 아니오 (그대로 두면 E5108). 물음이 차지한 줄도 치운다 - 그대로 두면 다음 알림이
     -- Press ENTER 를 띄우고, 그동안은 vim.schedule 이 돌지 않아 복사가 키를 누를 때까지 멈춰 있었다
     local yes = tr.confirm(msg)
@@ -4626,12 +4663,21 @@ menu_fill = function(s)
     lw = math.max(lw, vim.fn.strdisplaywidth(md.label))
     cw = math.max(cw, #cnt[i])
   end
+  -- 보기들 아래 가름줄, 그 아래 한 줄: 제외 목록 끄기 / 켜기 (tr.excl_item - 수 칸은 지금 뺀 이름 수)
+  local xi = #MODES + 2
+  local xl, xc = tr.excl_item(s)
+  lw = math.max(lw, vim.fn.strdisplaywidth(xl))
+  cw = math.max(cw, #xc)
   local dot = ascii() and '*' or '●'
   local lines, width = {}, 0
   for i, md in ipairs(MODES) do
     lines[i] = (' %s %s  %s '):format(md.id == s.mode and dot or ' ', fit(md.label, lw), rjust(cnt[i], cw))
     width = math.max(width, vim.fn.strdisplaywidth(lines[i]))
   end
+  lines[xi] = ('   %s  %s '):format(fit(xl, lw), rjust(xc, cw))
+  width = math.max(width, vim.fn.strdisplaywidth(lines[xi]))
+  local sep = ascii() and '-' or '─'
+  lines[xi - 1] = string.rep(sep, math.floor(width / math.max(1, vim.fn.strdisplaywidth(sep))))
   vim.bo[mu.buf].modifiable = true
   api.nvim_buf_set_lines(mu.buf, 0, -1, false, lines)
   vim.bo[mu.buf].modifiable = false
@@ -4646,6 +4692,11 @@ menu_fill = function(s)
     if md.id == s.mode then
       pcall(api.nvim_buf_set_extmark, mu.buf, ns, i - 1, 1, { end_col = c1 - #cnt[i], hl_group = 'VimIdeDirDiffMenuNow' })
     end
+  end
+  pcall(api.nvim_buf_set_extmark, mu.buf, ns, xi - 2, 0, { end_col = #lines[xi - 1], hl_group = 'Comment' })
+  if xc ~= '' then
+    local c1 = #lines[xi] - 1
+    pcall(api.nvim_buf_set_extmark, mu.buf, ns, xi - 1, c1 - #xc, { end_col = c1, hl_group = 'VimIdeDirDiffSize' })
   end
   local pend = s.prog and tonumber(s.prog.pend) or 0
   local title = pend > 0 and (' 보기 · 확인 중 %s '):format(commas(pend)) or ' 보기 '
@@ -4663,7 +4714,7 @@ local function open_menu(s)
   vim.bo[buf].filetype = 'vimidedirdiffmenu'
   pcall(api.nvim_buf_set_name, buf, 'DirDiff 보기 #' .. buf)
   local footer = ' Enter 고르기 · q 닫기 '
-  local h = #MODES
+  local h = #MODES + 2   -- 보기들, 가름줄, 제외 목록 끄기 / 켜기 (menu_fill)
   local border = ascii() and { '+', '-', '+', '|', '+', '-', '+', '|' } or 'rounded'
   local win = api.nvim_open_win(buf, true, {
     relative = 'editor', row = 0, col = 0, width = 30, height = h, style = 'minimal', border = border,
@@ -4693,10 +4744,16 @@ local function open_menu(s)
     end
   end
   local function choose()
-    local md = MODES[api.nvim_win_get_cursor(win)[1]]
+    local i = api.nvim_win_get_cursor(win)[1]
+    local md = MODES[i]
+    if not md and i ~= #MODES + 2 then
+      return   -- 가름줄
+    end
     close(true)
     if md then
       set_mode(s, md.id)
+    else
+      tr.set_noexcl(s, not s.noexcl)   -- 맨 아래 줄: 제외 목록 끄기 / 켜기 (이 비교만 다시 훑는다)
     end
   end
   -- desc 가 없으면 단축키 도움말(F1)에 '(Lua 함수)' 로만 보였다
@@ -4790,7 +4847,8 @@ local function help()
     '              (모두 보이기: 모든 디렉터리, 다른 보기: 그 보기가 보이는 디렉터리 - 한쪽에만 있는 것도).',
     '              비주얼이면 고른 줄의 디렉터리마다. 많으면(g:vimide_dirdiff_expand_max) 먼저 묻는다.',
     '              답이 오기 전의 H X 는 그 L 을 거둔다. zO zC 도 같다 (RelationView 와 같은 글자)',
-    '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...)',
+    '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...). 맨 아래 줄은',
+    '              제외 목록 끄기 / 켜기 - 이 비교만 다시 훑는다 (:DirDiffExcludes [on|off|toggle] 도)',
     '  F           모두 보이기 <-> 차이 보이기',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
     '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로. 비교 창에서도)',
@@ -4812,6 +4870,8 @@ local function help()
     '              펼친 것·보기·커서 줄·m 으로 고른 것·[A] 와 비교 탭들(새 방향, 고친 것 그대로)은 그대로 둔다',
     ascii() and '  판정 칸     x 다름  = 같음  ~ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  . 확인 중'
       or '  판정 칸     ≠ 다름  = 같음  ≈ 줄 끝(CRLF/LF, 끝 줄바꿈)만 다름 - 같음으로 친다  · 확인 중',
+    '  제외 n      상태줄: 제외 목록(g:DirDiffExcludes - 기본은 VCS·gtags 색인)에 걸려 훑지 않은 이름 수 -',
+    '              모두 보이기에도 없다. f 의 맨 아래 줄(제외 목록 끄기)로 보인다 (복사는 그래도 건너뛴다)',
   }
   vim.list_extend(lines, help_pair())
   vim.notify(table.concat(lines, '\n'))
@@ -5169,6 +5229,89 @@ local function restart(s, keep)
   render(s)
 end
 restart_fn = restart
+
+-- 제외 목록 (g:DirDiffExcludes) 끄기 / 켜기 - 이 비교만 (s.noexcl). 기본 목록은 VCS·gtags 색인뿐이지만(.git GTAGS ...)
+-- 그것까지 보려거나 사용자가 넓힌 목록(*.o 등)을 잠깐 풀 때: 뒤쪽을 --exclude '' (또는 목록)로 다시 띄운다 - R 의
+-- restart 라 보기·펼친 디렉터리·커서 줄은 그대로. 다른 비교와 다음 :DirDiff 는 g:DirDiffExcludes 그대로다
+
+-- f 메뉴 맨 아래 줄의 글과 수 칸 (menu_fill)
+function tr.excl_item(s)
+  if s.noexcl then
+    return '제외 목록 켜기 (g:DirDiffExcludes)', ''
+  end
+  -- 뒤쪽이 받은 목록(s.excl)을 본다 - 그새 :let 으로 바꾼 g:DirDiffExcludes 는 R 해야 든다
+  if (s.excl or '') == '' then
+    return '제외 목록 없음 (g:DirDiffExcludes 가 비었다)', ''
+  end
+  local n = s.prog and tonumber(s.prog.excl) or 0
+  return '제외 목록 끄기 (모든 파일 - .git 등도)', n > 0 and commas(n) or ''
+end
+
+function tr.set_noexcl(s, off)
+  off = off and true or false
+  -- 켜져 있는지·비었는지는 이 비교의 뒤쪽이 받은 것으로 (s.excl - start_job). 지금 g:DirDiffExcludes 로 보았더니
+  -- :let 으로 비운 뒤 '비어 있어 이미 모든 파일' 이라며 거절했는데 뒤쪽은 옛 목록으로 빼고 있었다 (검토)
+  local cur = s.excl or ''
+  if (s.noexcl or false) == off or (off and cur == '') then
+    if off and not s.noexcl then
+      return say('이 비교는 제외 목록 없이 훑었습니다 (g:DirDiffExcludes 가 비었다) - 이미 모든 파일을 봅니다')
+    end
+    return say(off and '제외 목록은 이미 꺼져 있습니다 (모든 파일)'
+      or cur == '' and '제외 목록이 비어 있습니다 (g:DirDiffExcludes) - 이미 모든 파일을 봅니다'
+      or ('제외 목록은 이미 켜져 있습니다: %s'):format(cur))
+  end
+  -- restart 처럼 복사가 끝나기를 기다린다 (먼저 보아야 - 거절된 뒤에 s.noexcl 만 바뀌어 있지 않게)
+  if s.copying then
+    return say('복사하는 중입니다 - 끝난 뒤에 제외 목록을 바꿉니다', vim.log.levels.WARN)
+  end
+  s.noexcl = off or nil
+  restart(s)
+  -- 켰으면 지금 g:DirDiffExcludes 로 다시 띄웠다 (start_job 이 s.excl 에 적는다)
+  say(off and '제외 목록을 껐습니다 - 모든 파일(.git 등도)로 다시 훑습니다 (켜기: f 메뉴, :DirDiffExcludes on)'
+    or (s.excl or '') == '' and '제외 목록을 켰습니다 - g:DirDiffExcludes 가 비어 모든 파일 그대로입니다'
+    or ('제외 목록을 켰습니다 - %s 를 빼고 다시 훑습니다'):format(s.excl))
+end
+
+-- :DirDiffExcludes [on|off|toggle] - 트리 탭이나 그 비교의 비교 창에서. 인자가 없으면 목록과 이 비교의 상태만 알린다
+function tr.excl_cmd(arg)
+  local tab = api.nvim_get_current_tabpage()
+  local s = sessions[tab]
+  if not (s and not s.solo) then
+    local v = view_of_win(api.nvim_get_current_win()) or view_of_tab(tab)
+    s = v and v.s
+  end
+  if s and s.solo then
+    s = nil   -- Space/Space 로 고른 두 파일 (트리가 없다)
+  end
+  arg = vim.trim(arg or '')
+  if arg == '' then
+    local list = vim.g.DirDiffExcludes
+    list = type(list) == 'string' and list or ''
+    local msg = ("g:DirDiffExcludes = '%s'"):format(list)
+    if s then
+      local n = s.prog and tonumber(s.prog.excl) or 0
+      local cur = s.excl or ''
+      if s.noexcl then
+        msg = msg .. ' - 이 비교: 끔 (모든 파일)'
+      elseif cur == '' then
+        msg = msg .. ' - 이 비교: 목록 없음 (모든 파일)'
+      else
+        msg = msg .. (' - 이 비교: 켬%s'):format(n > 0 and (' (제외 %s)'):format(commas(n)) or '')
+      end
+      if not s.noexcl and cur ~= list then
+        msg = msg .. (" - 이 비교는 '%s' 로 훑었다 (R 이면 지금 목록)"):format(cur)
+      end
+    end
+    return say(msg)
+  end
+  if arg ~= 'on' and arg ~= 'off' and arg ~= 'toggle' then
+    return say(':DirDiffExcludes [on|off|toggle] - 모르는 인자: ' .. arg, vim.log.levels.WARN)
+  end
+  if not s then
+    return say('DirDiff 트리나 비교 창에서 쓰세요 (인자 없이는 목록만 봅니다)', vim.log.levels.WARN)
+  end
+  tr.set_noexcl(s, arg == 'off' or (arg == 'toggle' and not s.noexcl))
+end
 
 local function map_list(s)
   local b = s.buf_l
@@ -5632,9 +5775,14 @@ function tr.parents(root, rel)
   return top, nil
 end
 
--- 이름 하나라도 제외 목록(g:DirDiffExcludes - 뒤쪽은 이름마다 fnmatch)에 걸리는가: 만들어도 트리에 안 보인다
-function tr.excluded(rel)
-  for pat in (vim.g.DirDiffExcludes or ''):gmatch('[^,]+') do
+-- 이름 하나라도 제외 목록(g:DirDiffExcludes - 뒤쪽은 이름마다 fnmatch)에 걸리는가: 만들어도 트리에 안 보인다.
+-- 목록은 이 비교의 뒤쪽에 준 것 (s.excl - start_job. 제외 목록을 껐으면(s.noexcl) 빈 것이라 늘 아니다)
+function tr.excluded(s, rel)
+  local list = s.excl
+  if list == nil then
+    list = s.noexcl and '' or vim.g.DirDiffExcludes
+  end
+  for pat in (type(list) == 'string' and list or ''):gmatch('[^,]+') do
     local re = '\\C' .. vim.fn.glob2regpat(pat)
     for part in rel:gmatch('[^/]+') do
       if vim.fn.match(part, re) >= 0 then
@@ -5935,7 +6083,7 @@ function tr.add(s, dir_only)
     return say(('%s 쪽에 %s 를 만들지 못했습니다: %s'):format(S, shown(rel), tr.errmsg(cerr)), vim.log.levels.WARN)
   end
   -- 제외 목록에 걸린 이름은 트리에 오지 않는다 - 커서를 옮기지 않는다 (기다릴 목록이 없다)
-  local ex = tr.excluded(rel)
+  local ex = tr.excluded(s, rel)
   tr.changed(s, side, { top or rel }, not ex and rel or nil)
   say(('%s 쪽에 %s%s 를 더했습니다%s%s'):format(S, shown(rel), want_dir and '/' or '',
     top and (' (없던 위 디렉터리 %s/ 도 만들었습니다)'):format(shown(top)) or '',
@@ -6242,10 +6390,10 @@ function tr.rename(s)
     tr.others(s, side, { r.rel })
   else
     -- 제외 목록(g:DirDiffExcludes)에 걸린 새 이름은 트리에 오지 않는다 - 커서는 기다리지 않는다 (tr.add 처럼)
-    tr.changed(s, side, case_only and { r.dir } or { r.rel, top or rel }, not tr.excluded(rel) and rel or nil)
+    tr.changed(s, side, case_only and { r.dir } or { r.rel, top or rel }, not tr.excluded(s, rel) and rel or nil)
   end
   say(('%s 쪽 %s → %s%s'):format(S, shown(r.rel), shown(rel),
-    tr.excluded(rel) and ' - 제외 목록(g:DirDiffExcludes)에 걸려 트리에는 보이지 않습니다' or ''))
+    tr.excluded(s, rel) and ' - 제외 목록(g:DirDiffExcludes)에 걸려 트리에는 보이지 않습니다' or ''))
 end
 
 -- ---------------------------------------------------------------------------
@@ -9805,6 +9953,15 @@ end, desc = 'DirDiff: A / B 쪽 경로 바꾸기 (트리는 디렉터리, 비교
 api.nvim_create_user_command('DirDiffSwap', function(o)
   tr.swap_cmd(o.bang)
 end, { nargs = 0, bang = true, desc = 'DirDiff: 양측 교환 (트리는 A·B 뿌리째, 비교 창은 그 탭만, ! 는 비교 전체)' })
+-- :DirDiffExcludes [on|off|toggle] - 이 비교의 제외 목록(g:DirDiffExcludes) 켜기 / 끄기 (f 메뉴 맨 아래 줄과 같다 -
+-- tr.excl_cmd). 인자가 없으면 목록과 이 비교의 상태만 알린다
+api.nvim_create_user_command('DirDiffExcludes', function(o)
+  tr.excl_cmd(o.args)
+end, { nargs = '?', complete = function(lead)
+  return vim.tbl_filter(function(x)
+    return x:find(lead, 1, true) == 1
+  end, { 'on', 'off', 'toggle' })
+end, desc = 'DirDiff: 이 비교의 제외 목록 켜기 / 끄기 (인자 없으면 목록과 상태)' })
 
 if vim.fn.exists(':DirDiff') ~= 2 and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
   api.nvim_create_user_command('DirDiff', function(o)

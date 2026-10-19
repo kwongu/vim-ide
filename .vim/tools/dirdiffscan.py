@@ -3,7 +3,9 @@
 #
 #   python3 -X utf8 dirdiffscan.py <A> <B> [--exclude 'pat,pat'] [--trust-mtime 1]
 #                                          [--ignore-eol 1] [--eol-max-mb 4]
-#                                          [--workers 16] [--debug]
+#                                          [--copy-exclude 'pat,pat'] [--workers 16] [--debug]
+#   --copy-exclude: 디렉터리를 복사할 때 그 안에서 건너뛸 이름 (없으면 --exclude 와 같다). nvim 이 제외 목록을
+#   끈 비교(--exclude '')에도 g:DirDiffExcludes 를 준다 - 보기만 바뀌고 .git 등은 여전히 덮지 않는다 (아래 '복사')
 #
 # nvim(dirdiffview.lua)이 stdin 으로 명령을, 이 프로그램이 stdout 으로 사건을 한 줄에
 # JSON 하나씩 주고받는다. 모형(트리)은 여기에만 있고 nvim 은 펼친 디렉터리만 받아 간다
@@ -74,6 +76,11 @@
 #                                            않았거나 아직 모르는 것이 더 있다). 목록은 없다)
 #   {"ev":"progress", ...}                    again: 끝난 뒤 복사·저장으로 다시 보는 중
 #                                            cats: {표시: 항목 수} (보기 메뉴의 수)
+#                                            excl: --exclude 에 걸려 훑지 않은 이름 수 (훑은 디렉터리마다 A·B
+#                                            를 합쳐 한 번 - .git 이 양쪽에 있어도 1. 그 아래는 읽지 않으니 세지
+#                                            않는다. 한쪽에만 있는 디렉터리는 펼칠 때 읽으니 그때 는다. refresh 로
+#                                            걸린 이름이 생기면 그 디렉터리를 다시 센다). nvim 상태줄의 '제외 n'
+#                                            (모두 보이기에도 없는 것이 있다는 표시)
 #   {"ev":"copied","id":N,"files":n,"dirs":n,"skipped":[[rel,why]],"failed":[[rel,why]],
 #    "roots":[rel,...]}                      roots: 다시 본 곳 (그 아래 목록은 새로 받는다)
 # 상태: same diff onlyA onlyB pend   종류: d f l o (없으면 null)
@@ -124,6 +131,9 @@ EXCLUDES = [p for p in opt('--exclude', '').split(',') if p]
 # 무늬 여럿을 정규식 하나로 - 항목마다 fnmatch 를 무늬 수만큼 부르면 그것만으로 CPU 를 먹는다
 EXCLUDE_RE = re.compile('|'.join('(?:%s)' % fnmatch.translate(p) for p in EXCLUDES)).match \
     if EXCLUDES else None
+CEXCLUDES = [p for p in opt('--copy-exclude', ','.join(EXCLUDES)).split(',') if p]
+CEXCLUDE_RE = re.compile('|'.join('(?:%s)' % fnmatch.translate(p) for p in CEXCLUDES)).match \
+    if CEXCLUDES else None
 TRUST_MTIME = opt('--trust-mtime', '1') == '1'
 IGNORE_EOL = opt('--ignore-eol', '1') == '1'
 try:
@@ -147,10 +157,14 @@ def excluded(name):
     return EXCLUDE_RE is not None and EXCLUDE_RE(name) is not None
 
 
+def copy_excluded(name):
+    return CEXCLUDE_RE is not None and CEXCLUDE_RE(name) is not None
+
+
 class Node:
     __slots__ = ('name', 'parent', 'ka', 'kb', 'sa', 'sb', 'ma', 'mb', 'status', 'kids',
                  'scanned', 'pend', 'bad', 'sub', 'depth', 'done', 'waiters', 'group',
-                 'queued', 'rerr', 'dead', 'mask', 'agg', 'eol')
+                 'queued', 'rerr', 'dead', 'mask', 'agg', 'eol', 'excl')
 
     def __init__(self, name, parent):
         self.name = name
@@ -173,6 +187,7 @@ class Node:
         self.mask = 0             # 표시 (SAME ... UNK)
         self.agg = None           # 훑은 '양쪽 디렉터리': 자식들의 표시 비트마다 그 비트를 가진 자식 수
         self.eol = 0              # 같음인데 줄 끝만 다르다 (쪽마다 3 비트 - 맨 위의 eol)
+        self.excl = 0             # 훑을 때 제외 목록에 걸려 뺀 이름 수 (A·B 합쳐서 - counts['excl'])
 
     def rel(self):
         parts = []
@@ -216,7 +231,8 @@ def flush():
 
 
 counts = {'pend': 0, 'diff': 0, 'onlyA': 0, 'onlyB': 0, 'same': 0, 'dirs': 0, 'err': 0,
-          'eol': 0}       # eol: same 가운데 줄 끝만 다른 것 (따로 더하지 않는다)
+          'eol': 0,       # eol: same 가운데 줄 끝만 다른 것 (따로 더하지 않는다)
+          'excl': 0}      # excl: 제외 목록에 걸려 뺀 이름 (Node.excl 의 합 - 항목 수에는 들지 않는다)
 masks = {}                # 표시 -> 항목 수 (counts 처럼 한쪽에만 있는 디렉터리 안은 세지 않는다)
 masks_ver = [0]
 root = Node('', None)
@@ -443,17 +459,24 @@ def dir_status(n):
 # ---------------------------------------------------------------------------
 
 def listdir(side, rel):
+    # (이름 -> 종류, 못 읽은 항목 수, 디렉터리를 못 읽었나, 제외 목록에 걸려 뺀 이름들)
     base = ROOT[side]
     path = os.path.join(base, rel) if rel else base
     res = {}
     err = 0
+    ex = []
     try:
         with os.scandir(path) as it:
             for e in it:
                 # 이 뒤쪽이 복사하며 쓰고 있는 임시 파일(copy_file)은 보지 않는다: 아직 훑지 않은 디렉터리에 복사하면
                 # (양측 교환 바로 뒤 - 트리에는 옛 목록이 보여 누를 수 있다) 훑기가 그것을 'B 에만' 으로 담았고,
                 # 복사가 끝나 이름을 바꾼 뒤에도 R 전까지 그 줄이 남았다. 다른 뒤쪽이 남긴 것은 그대로 보인다
-                if excluded(e.name) or e.name.startswith(TMP_MINE):
+                if e.name.startswith(TMP_MINE):
+                    continue
+                # 제외 목록에 걸린 것은 빼되 센다 (progress 의 excl): 기본 목록에 *.so 가 있어 고객에게 줄 .so 가
+                # 모두 보이기에도 없었는데 트리 어디에도 뺐다는 말이 없었다 (사용자 보고)
+                if excluded(e.name):
+                    ex.append(e.name)
                     continue
                 try:
                     # d_type 으로 - stat 하지 않는다 (d_type 을 모르는 파일 시스템이면 파이썬이 lstat)
@@ -470,8 +493,8 @@ def listdir(side, rel):
                     continue
                 res[e.name] = k
     except OSError:
-        return {}, err + 1, True
-    return res, err, False
+        return {}, err + 1, True, ex
+    return res, err, False, ex
 
 
 def alias(rel, la, lb):
@@ -717,11 +740,13 @@ def worker(role):
         for n in todo:
             rel = n.rel()
             if kind == SCAN:
-                la, ea, fa = listdir('a', rel) if n.ka == 'd' else ({}, 0, False)
-                lb, eb, fb = listdir('b', rel) if n.kb == 'd' else ({}, 0, False)
+                la, ea, fa, xa = listdir('a', rel) if n.ka == 'd' else ({}, 0, False, ())
+                lb, eb, fb, xb = listdir('b', rel) if n.kb == 'd' else ({}, 0, False, ())
                 if la and lb:
                     alias(rel, la, lb)
-                res.append((n, la, lb, ea + eb, fa, fb))
+                # 뺀 이름은 양쪽을 합쳐 하나로 (.git 이 A·B 에 다 있어도 1)
+                nx = len(set(xa) | set(xb)) if xa and xb else len(xa) + len(xb)
+                res.append((n, la, lb, ea + eb, fa, fb, nx))
             elif kind == STAT or kind == INFO:
                 ra = lstat('a', rel) if n.ka else None
                 rb = lstat('b', rel) if n.kb else None
@@ -809,11 +834,14 @@ def judge(n, c, unsure=False):
     return 'pend'
 
 
-def on_scan(n, la, lb, err, fa=False, fb=False):
+def on_scan(n, la, lb, err, fa=False, fb=False, nx=0):
     if n.scanned:
         return
     counts['err'] += err
     counts['dirs'] += 1
+    # 한 디렉터리는 한 번만 훑는다 (n.scanned) - 다시 보면(refresh) 새 노드라 detach 가 옛 것을 뺀다
+    n.excl = nx
+    counts['excl'] += nx
     n.kids = {}
     pend = bad = 0
     orphan = not n.both_dirs()
@@ -1302,7 +1330,7 @@ def progress(done):
     with job_lock:
         waiting = len(jobs[0]) + len(jobs[1])
     snap = (done, counts['dirs'], counts['pend'], counts['diff'], counts['onlyA'],
-            counts['onlyB'], counts['same'], counts['err'], counts['eol'], masks_ver[0])
+            counts['onlyB'], counts['same'], counts['err'], counts['eol'], counts['excl'], masks_ver[0])
     if done and snap == last_snap[0]:
         return
     last_snap[0] = snap
@@ -1310,6 +1338,7 @@ def progress(done):
           'files': counts['pend'] + counts['diff'] + counts['onlyA'] + counts['onlyB'] + counts['same'],
           'pend': counts['pend'], 'diff': counts['diff'], 'onlyA': counts['onlyA'],
           'onlyB': counts['onlyB'], 'same': counts['same'], 'err': counts['err'], 'eol': counts['eol'],
+          'excl': counts['excl'],
           'ops': list(ops), 'backlog': len(inbox), 'again': again[0] and not done,
           'cats': {str(k): v for k, v in masks.items() if v > 0},
           'sec': finished[0] if done else round(time.monotonic() - started, 1)})
@@ -1342,6 +1371,7 @@ def detach(n):
             tally(x.mask, -1)
         if x.scanned:
             counts['dirs'] -= 1
+            counts['excl'] -= x.excl
         x.dead = True
         if x in deep_wait:
             # 이것의 훑기를 기다리던 깊은 펼치기: 떼어 낸 노드의 결과는 오지 않는다 (on_scan 이 불리지 않는다) -
@@ -1383,7 +1413,19 @@ def refresh_one(rel):
         return None
     parent_rel, _, name = rel.rpartition('/')
     p = find(parent_rel)
-    if p is None or not p.scanned or p.dead or excluded(name):
+    if p is None or not p.scanned or p.dead:
+        return None
+    if excluded(name):
+        # 제외 목록에 걸린 이름은 트리에 오지 않는다 - 'a'·'r' 로 그 이름이 생겼거나 없어졌으면 제외 수(excl)만
+        # 다시 센다: 그 디렉터리를 다시 읽어 (이름은 적어 두지 않는다 - 디렉터리 하나라 싸다). 그대로 두면 '그 이름은
+        # 트리에 보이지 않습니다' 라고 하고 상태줄의 '제외 n' 은 R 까지 그대로였다
+        xs = set()
+        if p.ka == 'd':
+            xs.update(listdir('a', parent_rel)[3])
+        if p.kb == 'd':
+            xs.update(listdir('b', parent_rel)[3])
+        counts['excl'] += len(xs) - p.excl
+        p.excl = len(xs)
         return None
     old = p.kids.get(name)
     if old is None:
@@ -1458,8 +1500,11 @@ def cmd_refresh(msg):
 #     대상이 그대로 남고(먼저 지웠더니 실패할 때 대상이 사라졌다), 대상이 링크여도 그
 #     링크를 바꿀 뿐 따라가 쓰지 않는다
 #   * 디렉터리는 합친다 - 항목마다 같은 규칙으로. 대상에만 있는 것은 두고, 제외 목록
-#     (.git, GTAGS, *.o ...)은 원본에서도 대상에서도 건드리지 않는다 (cp -R 은 .git 의
-#     HEAD·index 까지 덮었다). 특수 파일(FIFO 등)은 건너뛴다 (cp 가 멈춰 섰다)
+#     (.git, GTAGS ... - --copy-exclude)은 디렉터리 안에서는 원본에서도 대상에서도 건드리지
+#     않는다 (cp -R 은 .git 의 HEAD·index 까지 덮었다). nvim 에서 제외 목록을 꺼(--exclude '')
+#     .git 이 트리에 보여도 그렇다 - 부모를 복사했더니 대상의 .git/config·HEAD·index 를 덮었다
+#     (검토). 그때 건너뛴 것은 skipped 로 알린다 (트리에 보이는데 복사되지 않았다). 그 줄을 직접
+#     고른 것(paths 의 rel 자체)은 복사한다. 특수 파일(FIFO 등)은 건너뛴다 (cp 가 멈춰 섰다)
 # ---------------------------------------------------------------------------
 
 copy_q = collections.deque()
@@ -1554,8 +1599,10 @@ def copy_entry(src, dst, rel, rep):
             rep['failed'].append([rel, why(e)])
             return
         for name in names:
-            if not excluded(name):
+            if not copy_excluded(name):
                 copy_entry(os.path.join(src, name), os.path.join(dst, name), rel + '/' + name, rep)
+            elif not excluded(name):
+                rep['skipped'].append([rel + '/' + name, 'excluded'])   # 트리에는 보인다 (제외 목록을 껐다)
         try:
             shutil.copystat(src, dst)
         except OSError:

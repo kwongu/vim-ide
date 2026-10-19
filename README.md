@@ -2609,7 +2609,11 @@ Compare; `·` marks a file not checked yet (`x = .` with
 only in line endings - CRLF against LF, or a missing newline at the end of the
 file - and counts as identical everywhere (see *Line endings* below). The
 status line shows the progress and the totals (`≈ N` when there are such
-files and the window is at least 100 columns wide; they are not in `다름`).
+files and the window is at least 100 columns wide; they are not in `다름`),
+and `제외 N` when the exclude list left N names out - see *Excluded names*
+below. In a window narrower than 100 columns the status line drops the
+`DirDiff` label and the finished time (`끝 N초`) and shortens the help hint to
+`(?)`, so the totals are not cut off.
 
 **Line endings.** The compare tab's line diff does not see line endings, so a
 pair like `tsnd_alsa.h` - 2,008 bytes in A, 2,009 in B, A only lacking the
@@ -2700,7 +2704,7 @@ those two windows): the same file in any other window keeps its colors.
 | `l` / `h` | open a folder / close it (or go to the parent) |
 | `O` / `X` | open every folder that has a difference (in such a view: something the view shows) / close all (the whole tree). In visual mode (`V` / `v`) they do what `L` / `H` do, for the selected rows |
 | `L` / `H` | open everything under the cursor's folder / close that folder and everything under it - `l` / `h` all the way down (in the tree `H` and `L` do not jump to the top and bottom of the window). `zO` / `zC` do the same, as in the relation window. The folder is the row itself when it is a folder on either side - one that exists on one side only, or is a folder on one side and a file on the other, included (its contents are listed) - otherwise the folder the row is in (a top-level file: the whole tree). It follows the view: in *all* every folder, in the others the folders that view shows. In visual mode (`V` / `v`): every folder row in the selection (a selection of files only: the folders they are in), each subtree once. The helper walks in the background - folders not read yet are read first, the editor never waits - and the message says how many folders were opened; `H` leaves the cursor on that folder's row. More than `g:vimide_dirdiff_expand_max` folders (2000) asks first: *All*, *Limit* (the shallowest 2000) or *Cancel*. During a scan, folders whose place in the view is not known yet (still being read or compared) are counted once it is, so a view that ends up showing few folders is not asked about. An `H` or `X` before the answer arrives takes the `L` back |
-| `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below |
+| `f` | choose the view - a small menu, like Beyond Compare's view filter, with the number of entries in each; see *Views* below. Its last row, under a rule, turns the exclude list off (or back on) for this comparison - see *Excluded names* below |
 | `F` | switch between *all* and *differences* |
 | `<Space>` | pick something to compare, as `Space` in neo-tree: the entry on the current side becomes `[A]` (marked after its name), and `Space` on a second entry of the same kind - folder and folder or file and file, on either side, in this tree, another comparison tab or neo-tree - makes it `[B]` and opens the comparison in a new tab straight away (two folders: a new DirDiff tab; two files: a compare tab of this comparison, names and folders may differ - see *Two picked files* below). `Space` on the `[A]` entry again cancels; an entry of the other kind is refused and `[A]` kept; the empty half of a one-sided row cannot be picked |
 | `<Tab>` / `<S-Tab>` | switch between the A side and the B side (the cursor goes to that side's name; a mouse click on a side, or moving the cursor there, works too). The status line says which. With two sides both keys do the same |
@@ -3149,6 +3153,35 @@ the current one in brackets.
   from the table). `let g:vimide_dirdiff_only_diff = 1` still starts in
   *differences*.
 
+**Excluded names.** Names in `g:DirDiffExcludes` are not read at all, so they
+are in no view, *모두 보이기* included. The default list is version control
+and the gtags index only - `.git .svn .hg .repo .tags GTAGS GRTAGS GPATH`.
+Build outputs (`*.o *.ko *.a *.so *.pyc *.swp __pycache__`) used to be on it
+too, and a customer deliverable (a `.so` library) was then
+nowhere in the tree, with nothing saying so; they are shown now. Put them back
+with `let g:DirDiffExcludes = '...'` before `.vimrc` reaches its default.
+
+- The status line shows `제외 N`: how many names the list left out (each name
+  once per folder, even when it is on both sides; what is inside an excluded
+  folder is not read, so not counted). It is not there when nothing was left
+  out. A folder that exists on one side only is read when you open it (or
+  with `L`), so N can grow as you browse; adding or renaming an entry to an
+  excluded name (`a` / `r`) counts it at once.
+- The last row of the `f` menu, *제외 목록 끄기* (with the same count), compares
+  this tab again with no exclude list - `.git` and the rest show up and
+  `제외 N` goes away; on that row *제외 목록 켜기* brings the list back. It is a
+  rescan as with `R`: the view, the open folders and the cursor row stay.
+  Other comparisons and the next `:DirDiff` keep `g:DirDiffExcludes`.
+- `:DirDiffExcludes off` / `on` / `toggle` does the same from the tree or one
+  of its compare tabs; `:DirDiffExcludes` alone shows the list and, there,
+  whether it is on for this comparison.
+- Turning the list off changes only what is shown. A tree copy (`<C-r>` /
+  `<C-l>`) of a folder still skips those names inside it - `.git` is never
+  merged into the other side's repository - and, since they are now visible,
+  lists them as skipped; the confirm prompt says so too. Pick such a row
+  itself to copy it. Adding or renaming an entry to such a name no longer
+  says it will not show.
+
 **Adding, deleting and renaming** in the tree (`a` / `A` / `d` / `r`, the
 neo-tree keys) work on the current side - the half the cursor is in, shown as
 `[A 쪽]` / `[B 쪽]` in the status line:
@@ -3287,8 +3320,9 @@ Copying in the tree:
   over the old one only when it is complete (a failed copy leaves the old file
   as it was); a symlink on the target side is replaced, never written through;
   nothing is written below a target folder that is really a symlink or a
-  file; names in `g:DirDiffExcludes` (`.git`, `GTAGS`, `*.o` ...) are neither
-  copied nor touched on the other side; special files (FIFOs, devices) are
+  file; inside a folder, names in `g:DirDiffExcludes` (`.git`, `GTAGS` ...)
+  are neither copied nor touched on the other side, even while the list is
+  turned off for the view (*Excluded names*); special files (FIFOs, devices) are
   skipped. Symlinks are copied as links. One copy runs at a time, and `q`
   waits for it.
 - It skips, and says why, an entry that does not exist on the source side, a
@@ -3340,7 +3374,8 @@ Copying in the tree:
   the rest is read. The folder you open is checked first, the rest in screen
   order, with the listing and the reading done by separate workers so neither
   waits for the other.
-- The excludes are the same `g:DirDiffExcludes` as below.
+- The excludes are the same `g:DirDiffExcludes` as below; see *Excluded
+  names* above for the count in the status line and turning them off.
 - `:DirDiff A B` again for a pair already open goes to its tab; another pair
   opens its own (so does `Space` / `Space` on two folders in a tree). Any number of
   comparisons can be open side by side, each tab with its own tree, helper and
@@ -3426,10 +3461,12 @@ What vim-ide adds around the plugin:
   one ended some other way, its state is cleared before the next starts.
 - **Excludes.** `diff -r` holds the editor until it is done, and `.git` alone
   is often bigger than the source it tracks. `.git .svn .hg .repo .tags
-  GTAGS GRTAGS GPATH *.o *.ko *.a *.so *.pyc *.swp __pycache__` are left out
+  GTAGS GRTAGS GPATH` - version control and the gtags index - are left out
   (`g:DirDiffExcludes`; set your own before `.vimrc` reaches it, or change it
-  from the list with `x`). A name has to match exactly, so leaving out `.git`
-  still compares `.gitignore`.
+  from the list with `x`). Build outputs (`*.o *.ko *.a *.so *.pyc *.swp
+  __pycache__`) are compared: a customer deliverable is often a `.so`. A
+  name has to match exactly, so leaving out `.git` still compares
+  `.gitignore`.
 - **Paths under a `tmp` directory.** The plugin resolves its arguments with
   `expand()`, which returns an empty string for anything `'wildignore'`
   matches, and `.vimrc` has `*/tmp/*` there. Every Yocto tree lives under

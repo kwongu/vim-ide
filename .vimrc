@@ -1964,13 +1964,20 @@ filetype plugin indent on     " required!
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
 " 'diff -r' 는 끝날 때까지 편집기를 기다리게 한다. .git 하나가 소스 전체보다 큰
-" 경우가 흔하므로 색인·빌드 산출물과 함께 뺀다. -x 는 이름이 딱 맞는 것만 뺀다
-" (.git 을 빼도 .gitignore 는 비교된다).
+" 경우가 흔하므로 VCS(.git .svn .hg .repo)와 gtags 색인(.tags GTAGS GRTAGS GPATH)만
+" 뺀다 - 사용자가 만든 파일이 아니다. 빌드 산출물(*.o *.ko *.a *.so *.pyc *.swp
+" __pycache__)은 빼지 않는다: 고객에게 주는 것이 .so 같은 바이너리라 비교에 보여야
+" 한다 (예전 기본은 그것까지 빼서 그런 .so 가 모두 보이기에도 없었다 - 사용자
+" 보고). -x 는 이름이 딱 맞는 것만 뺀다 (.git 을 빼도 .gitignore 는 비교된다). nvim
+" 트리는 뺀 수를 상태줄에 '제외 n' 으로 보이고, f 메뉴 맨 아래 줄이나
+" :DirDiffExcludes off 로 그 비교만 목록 없이 다시 훑는다 (보기만 - 복사는 디렉터리
+" 안의 .git 등을 그래도 건너뛴다).
 "   let g:DirDiffExcludes = '...'   " 바꾸려면 여기보다 먼저(또는 목록 창에서 x)
+"                                   " 예전처럼 산출물도 빼려면 끝에 ,*.o,*.ko,*.a,*.so,*.pyc,*.swp,__pycache__
 "   let g:vimide_dirdiff_tab = 0    " :DirDiff 를 플러그인 그대로(지금 창에서)
 " ------------------------------------
 if !exists('g:DirDiffExcludes')
-    let g:DirDiffExcludes = '.git,.svn,.hg,.repo,.tags,GTAGS,GRTAGS,GPATH,*.o,*.ko,*.a,*.so,*.pyc,*.swp,__pycache__'
+    let g:DirDiffExcludes = '.git,.svn,.hg,.repo,.tags,GTAGS,GRTAGS,GPATH'
 endif
 let g:vimide_dirdiff_tab = 1
 " nvim 의 :DirDiff 는 Beyond Compare 식 나란한 트리다 (~/.vim/plugin/dirdiffview.lua).
