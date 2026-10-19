@@ -340,15 +340,7 @@ local function vimstr(s)
   return "'" .. tostring(s):gsub("'", "''") .. "'"
 end
 
-function M.save(opts)
-  opts = opts or {}
-  -- 복원 도중의 종료가 멀쩡한 세션을 덮어쓰지 못하게.
-  if restoring then
-    return false
-  end
-  if not opts.force and (tonumber(vim.g.vimide_session_save) or 1) == 0 then
-    return false
-  end
+local function save_now(opts)
   local root, spath, xpath = paths()
   local ok, panels = pcall(M.capture)
   if not ok or type(panels) ~= 'table' then
@@ -409,7 +401,38 @@ function M.save(opts)
     'endtry',
     'if exists("*VimIdeSessionQueuePanels") | call VimIdeSessionQueuePanels() | endif',
   })
-  return true
+  return true, spath
+end
+
+-- 저장했으면 true 와 세션 파일 (VimIdeSessionSave 가 알린다 - 저장 뒤의 지금 창으로 다시 셈하면 다른 곳이 나왔다)
+function M.save(opts)
+  opts = opts or {}
+  -- 복원 도중의 종료가 멀쩡한 세션을 덮어쓰지 못하게.
+  if restoring then
+    return false
+  end
+  if not opts.force and (tonumber(vim.g.vimide_session_save) or 1) == 0 then
+    return false
+  end
+  -- DirDiff 선택 탭(dirdifflaunch.lua)은 담지 않는다 - 저장하는 동안 닫았다가 그대로 되살린다. 경로 칸·트리뿐이라
+  -- :mksession 이 빈 탭으로 적었고, 지금 탭이면 위의 패널 세기·닫기가 그 탭의 트리를 F9 트리로 세고 경로 칸을
+  -- 닫았다 (탭째 닫혔다). 선택 탭뿐이면 저장할 것이 없다. 나가는 길에는 그쪽 VimLeavePre 가 먼저 닫아 둔다
+  local unstash
+  if type(_G.vimide_dirdiff_launch_stash) == 'function' then
+    local okst, f = pcall(_G.vimide_dirdiff_launch_stash)
+    if okst and f == false then
+      return false
+    end
+    unstash = okst and f or nil
+  end
+  local ok, saved, spath = pcall(save_now, opts)
+  if unstash then
+    pcall(unstash)
+  end
+  if not ok then
+    error(saved, 0)
+  end
+  return saved, spath
 end
 
 -- ---------------------------------------------------------------------------
@@ -666,9 +689,9 @@ api.nvim_create_user_command('VimIdeRestore', function() M.restore() end,
 api.nvim_create_user_command('Restore', function() M.restore() end,
   { desc = ':VimIdeRestore 의 짧은 이름' })
 api.nvim_create_user_command('VimIdeSessionSave', function()
-  if M.save({ force = true }) then
-    local _, spath = paths()
-    print('vim-ide: 세션 저장 - ' .. spath)
+  local saved, spath = M.save({ force = true })
+  if saved then
+    print('vim-ide: 세션 저장 - ' .. (spath or select(2, paths())))
   end
 end, { desc = '지금 배치를 이 프로젝트의 세션으로 저장한다' })
 api.nvim_create_user_command('VimIdeSessionWhere', function()

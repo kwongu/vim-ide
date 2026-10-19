@@ -1321,6 +1321,7 @@ end
 local WIN_NAME = {
   vimidedirdiffmenu = 'DirDiff 보기 메뉴',
   vimidedirdifffile = 'DirDiff 비교 보기 메뉴',   -- 비교 창의 \d
+  vimidedirdifflaunch = 'DirDiff 선택 경로 칸',     -- \D (dirdifflaunch.lua)
 }
 
 -- '이 창 · <이름>' 의 이름: filetype(WIN_NAME), 없으면 버퍼 이름, 그것도 없으면
@@ -1361,6 +1362,7 @@ local WIN_SECTION = {
   vimidedirdiff = { 'side-by-side tree' },
   vimidedirdiffmenu = { 'views' },
   vimidedirdifffile = { 'view modes' },
+  vimidedirdifflaunch = { 'dirdiff launcher' },
   nerdtree = { 'nerdtree' },
   TelescopePrompt = { 'keys in a telescope list' },
 }

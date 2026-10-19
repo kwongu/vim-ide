@@ -425,6 +425,8 @@ local FOREIGN_FT = {
   dirdiff = true,
   -- 나란한 트리 DirDiff(dirdiffview.lua)의 탭도 같다
   vimidedirdiff = true,
+  -- DirDiff 선택 탭(dirdifflaunch.lua): 경로 칸 둘 + 트리 둘을 제가 세우고 지킨다
+  vimidedirdifflaunch = true,
 }
 
 local function foreign_tab()
@@ -954,10 +956,11 @@ end
 -- EDIT 창은 아니지만 살아 있으면 끝내지 않는 창: DirDiff 의 비교 트리. 그 탭 하나만
 -- 남았을 때 비교 창 둘을 닫거나 트리에서 :only 하면 nvim 이 꺼졌다 (트리는 nofile 이라
 -- EDIT 으로 세지 않는다) - 비교 창은 트리에서 파일을 고르면 다시 생긴다
+local KEEPER_FT = { vimidedirdiff = true, vimidedirdifflaunch = true }   -- DirDiff 선택 탭의 경로 칸도
 local function has_keeper(dying)
   for _, w in ipairs(api.nvim_list_wins()) do
     if w ~= dying and api.nvim_win_is_valid(w)
-        and vim.bo[api.nvim_win_get_buf(w)].filetype == 'vimidedirdiff' then
+        and KEEPER_FT[vim.bo[api.nvim_win_get_buf(w)].filetype] then
       return true
     end
   end

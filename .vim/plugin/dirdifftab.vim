@@ -9,6 +9,8 @@
 "
 "   :DirDiff <A> <B>                두 디렉터리 비교 (새 탭) - nvim 에서는 나란한 트리
 "                                   (dirdiffview.lua), 이 목록 방식은 :DirDiffClassic
+"   :DirDiff                        (인자 없이, nvim) 'DirDiff 선택' 탭 - 비교할 두 곳을 경로 칸과
+"                                   트리로 고른다 (\D, :DirDiffPick 과 같다. dirdifflaunch.lua)
 "   neo-tree 에서 Space             첫 번째를 고르고, 두 번째에서 Space (Tab·\d 도. dirdiffpick.lua)
 "   let g:vimide_dirdiff_tab = 0    " 새 탭 없이 지금 창에서 (아래 고침은 그대로)
 "
@@ -494,9 +496,30 @@ function! VimIdeDirDiff(...) abort
   execute s:list_win() . 'wincmd w'
 endfunction
 
+" 인자 없는 :DirDiff 는 'DirDiff 선택' 탭 (nvim 의 dirdifflaunch.lua - 경로 칸과 트리로 두 곳을 고른다).
+" 진짜 vim 에는 없다 - 예전처럼 '두 개를 주세요'
+function! s:can_launch() abort
+  return has('nvim') && luaeval('_G.vimide_dirdiff_launch ~= nil')
+endfunction
+
+function! s:launch() abort
+  call luaeval('(_G.vimide_dirdiff_launch() and nil)')
+endfunction
+
+" g:vimide_dirdiff_view = 0 일 때의 :DirDiff (목록 방식) - 인자가 없으면 선택 탭
+function! VimIdeDirDiffCmd(...) abort
+  if a:0 == 0 && s:can_launch()
+    return s:launch()
+  endif
+  call call('VimIdeDirDiff', a:000)
+endfunction
+
 " nvim 에서는 :DirDiff 가 Beyond Compare 식 나란한 트리(dirdiffview.lua)다. 이 파일의
 " 목록 방식은 :DirDiffClassic 으로 남는다. 진짜 vim 은 여기 목록 방식 그대로.
 function! VimIdeDirDiffView(...) abort
+  if a:0 == 0 && s:can_launch()
+    return s:launch()
+  endif
   if a:0 != 2
     return s:warn('디렉터리 두 개를 주세요 - :DirDiff <A> <B>')
   endif
@@ -514,7 +537,7 @@ function! s:install() abort
     if s:use_view()
       command! -nargs=* -complete=dir DirDiff call VimIdeDirDiffView(<f-args>)
     else
-      command! -nargs=* -complete=dir DirDiff call VimIdeDirDiff(<f-args>)
+      command! -nargs=* -complete=dir DirDiff call VimIdeDirDiffCmd(<f-args>)
     endif
     command! -nargs=0 DirDiffUpdate call VimIdeDirDiffUpdate()
     command! -nargs=0 DirDiffOpen call VimIdeDirDiffOpen()

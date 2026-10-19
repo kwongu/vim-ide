@@ -2904,6 +2904,10 @@ local function install_open_hook()
         return
       end
       local from = args.state.winid
+      -- DirDiff 선택 탭의 트리(dirdifflaunch.lua)는 파일을 열지 않고 그 칸의 선택으로 삼는다
+      if _G.vimide_dirdiff_launch_open and _G.vimide_dirdiff_launch_open(args) then
+        return { handled = true }
+      end
       if not (s.tree_win and from == s.tree_win) then
         -- 왼쪽 neo-tree(파일 탐색기)도 같은 길로 보낸다.
         --

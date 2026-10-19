@@ -207,6 +207,8 @@ Plug 'vim-scripts/AutoComplPop'
 let g:acp_behavior = get(g:, 'acp_behavior', {})
 let g:acp_behavior['TelescopePrompt'] = []
 let g:acp_behavior['neo-tree-popup'] = []
+" DirDiff 선택 탭의 경로 칸 (dirdifflaunch.lua - Tab 이 경로 완성이다)
+let g:acp_behavior['vimidedirdifflaunch'] = []
 "Plug 'vim-scripts/The-NERD-tree'
 "Plug 'vim-scripts/Tagbar'
 "Plug 'ryanoasis/vim-devicons'
@@ -1160,6 +1162,7 @@ _G.rv_setup('neo-tree', {
       -- = 는 이미 색인 목록 정보다 (projectfiles_neotree.lua)
       -- Space 두 번: [A] 를 고르고(줄 끝에 [A]), 비교할 곳에서 Space 면 [B] - 곧바로 비교 창.
       -- DirDiff 비교 트리의 Space 와 같은 키다 (거기서 Tab 은 A 쪽 / B 쪽). Tab 도 그대로 고른다.
+      -- DirDiff 선택 탭(\D, dirdifflaunch.lua)의 트리에서는 그 칸([A] 칸 / [B] 칸)의 선택이다.
       -- neo-tree 기본의 Space(toggle_node, 폴더 펼치기/접기)와 Tab(select, 여러 줄 골라 두기)을
       -- 넘겨받는다: 폴더는 Enter·o·더블클릭으로 펼치고 접는다 (C 접기, O / X 아래 모두), 여러 줄은 V 로.
       -- 키 글자는 기본값과 같게 '<space>'(소문자)·'<Tab>' - 다르게 쓰면 다른 항목으로 하나 더 생긴다.
@@ -1960,6 +1963,7 @@ filetype plugin indent on     " required!
 "                      면 곧바로 비교 창 (dirdiffpick.lua). Tab·\d 도 같다. 파일 둘이면
 "                      DirDiff 의 비교 탭 (이름·디렉터리가 달라도 된다 - 아래 '고른 두 파일').
 "                      같은 줄에서 다시 Space 는 취소. 폴더 펼치기/접기는 Enter·o
+"   \D / :DirDiffPick  'DirDiff 선택' 탭 - 경로 칸과 트리로 [A] | [B] 를 골라 비교 (아래 DirDiff 선택)
 "   (플러그인의) 목록 창: <CR>/o 열기, s 맞추기(sync), u 다시 비교, x 제외 목록 바꾸기, q 끝내기
 "   비교 창: ]c [c 다음/앞 차이, do dp 가져오기/보내기, :DirDiffNext :DirDiffPrev
 "
@@ -2135,6 +2139,16 @@ let g:vimide_dirdiff_file_keys = 1
 " 복사 키·Ctrl+Z·q - 비교 트리에서 [B] 를 골랐으면 그 비교의 탭으로), 1 = 예전처럼 새 탭의 맨 vimdiff
 " (g:vimide_dirdiff_view = 0 이면 이것과 상관없이 맨 vimdiff - 디렉터리 둘도 예전 목록이다)
 let g:vimide_dirdiff_pick_vimdiff = 0
+" DirDiff 선택 (nvim, ~/.vim/plugin/dirdifflaunch.lua): \D·인자 없는 :DirDiff·:DirDiffPick [A] [B] 가 새 탭에
+" 텔레스코프 같은 두 칸 [A] | [B] 를 연다 - 칸마다 위에 경로 칸(치는 대로 트리가 따라가고 Enter 로 고른다,
+" Tab 경로 완성), 아래에 neo-tree. 트리에서 Space/Tab 이 그 칸의 선택(다시 누르면 취소, 파일의 Enter 도 고르기).
+" 두 칸 다 고르고 종류가 같으면 곧바로 새 탭에 비교 (디렉터리 둘 = DirDiff 탭, 파일 둘 = 비교 탭) - 선택 탭은
+" 남아 gT·,e 로 돌아와 또 고른다 (비교 탭의 q 는 이리로). \x A↔B 교환, q 닫기, Ctrl+h/l A↔B 칸, Ctrl+j/k
+" 트리↔경로 칸, ,r ,e 탭 옮기기. 여러 개를 띄워도 된다. F9·RelationView 트리의 Space/Tab 은 그대로 [A] -> [B]
+" 여는 키 ('' 이면 걸지 않는다 - :DirDiffPick 과 인자 없는 :DirDiff 는 그대로)
+let g:vimide_dirdiff_launch_key = '<leader>D'
+" 경로 칸에 친 디렉터리를 트리가 따라가기까지 쉬는 ms (0 이면 따라가지 않고 Enter 때만 옮긴다)
+let g:vimide_dirdiff_launch_follow_ms = 150
 
 " Ease my eyes
 "colorscheme solarized

@@ -750,6 +750,7 @@ Ctrl+l, Ctrl+k, Ctrl+j:  Move to the split window on the right / above / below.
 <leader>ht: toggle the blame of the current line (off by default - it runs git blame on every cursor rest)
 ]h / [h: next / previous hunk (]c and [c stay vim's own diff-mode motions)
 <leader>v: Diffview - side by side diff of the working tree of the repo of the file / tree node under the cursor (in a diffview tab: close it)
+<leader>D: DirDiff launcher - a new tab with two columns, [A] | [B], each a path prompt over a neo-tree: pick a directory or a file on each side (Space / Tab in a tree, Enter in a prompt) and the comparison opens in a new tab (nvim; also `:DirDiffPick` and `:DirDiff` with no arguments). See "The DirDiff launcher" below
 w (Diffview file panel): widen the panel a step at a time, then back to its normal width; in the :DiffviewFileHistory panel at the bottom, its height (each diffview tab keeps its own). Only the diff windows give way; your own splits in that tab keep their size
 Ctrl+n / Ctrl+p (Neogit commit view, staged diff while committing): next / previous hunk header across files, stays put at the ends
 <leader>o: Toggle the aerial symbol outline of the current file
@@ -2086,7 +2087,7 @@ slots that were empty:
 | `y` | vim's yank, as anywhere else: `yiw`, `y$`, and `y` on a visual or `<C-v>` block selection copy exactly the text selected |
 | `Y` | put the entry into neo-tree's file clipboard (what neo-tree has on `y`), to paste it in the tree with `p` |
 | `/` | search the tree, as anywhere else in vim (`n` / `N` to step) |
-| `Space` / `Tab` | pick two directories (or two files) to compare: `Space` on the first marks it `[A]`, `Space` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff). `Tab` and `\d` do the same (`Space` is also the key in the DirDiff tree). neo-tree had `Space` on "toggle node" - folders open and close with `Enter`, `o` or a double click (`C` closes one, `O` / `X` everything below) - and `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
+| `Space` / `Tab` | pick two directories (or two files) to compare: `Space` on the first marks it `[A]`, `Space` on the second opens the comparison - see [Comparing directories](#comparing-directories-dirdiff) (in the trees of the DirDiff launcher, `\D`, they choose for that tree's column instead). `Tab` and `\d` do the same (`Space` is also the key in the DirDiff tree). neo-tree had `Space` on "toggle node" - folders open and close with `Enter`, `o` or a double click (`C` closes one, `O` / `X` everything below) - and `Tab` on "select" (mark rows for a later action), which vim-ide never used; select rows with `V` instead |
 
 Besides `y` and `Space` / `Tab` (see their rows), `o` is the one key that was
 not free: neo-tree had it on help, and help is also on `?`, so nothing was lost.
@@ -2556,6 +2557,94 @@ folder there; folders open and close with `Enter` or `o`.
 The same `Space` works in the DirDiff tree (below; `Tab` there switches between
 the A and B sides), and it is the same `[A]`: pick `[A]` in neo-tree and `[B]`
 in a comparison tree, or the other way round.
+
+To choose both sides in one place - typing paths or browsing - use the DirDiff
+launcher, `\D` (below).
+
+### The DirDiff launcher (nvim)
+
+```vim
+:DirDiffPick [A] [B]      " also \D, and :DirDiff with no arguments
+```
+
+`\D` opens a new tab, *DirDiff 선택*, laid out like a telescope picker in two
+columns: `[A]` on the left, `[B]` on the right. Each column is a one-line path
+prompt with a neo-tree under it, rooted where the prompt points. Choose one thing
+on each side - a directory or a file - and as soon as both sides hold the same
+kind, the comparison opens in a new tab: two directories as a DirDiff tab
+(`:DirDiff A B`), two files as a DirDiff compare tab - the same tabs `Space` /
+`Space` in neo-tree opens. A directory against a file is refused with a message.
+`[A]` starts at the directory of the file you were editing (or the current
+directory), `[B]` at the current directory; `:DirDiffPick A B` starts them
+elsewhere (a file: its directory, with the cursor on it).
+
+The launcher stays, choices included. Come back with `gT` / `,e` - or close the
+comparison: its `q` returns to the launcher, to the window you chose from -
+change one side, and the next comparison opens straight away. Each `\D` opens
+another launcher with its own `[A]` and `[B]`.
+
+- **Prompts.** Type a path; relative paths are taken from the current
+  directory, `~` and `$VAR` work. When the text is an existing directory, the
+  tree below follows it 150 ms after you stop typing
+  (`g:vimide_dirdiff_launch_follow_ms`; `0` moves it on `Enter` only). `Tab`
+  completes like the command line: a single match is filled in, several are
+  completed to their common part and then listed (`Tab` / `S-Tab` walk the
+  list, the tree follows the highlighted directory, `Enter` takes it). `Enter`
+  makes the path this side's choice: a directory also becomes the tree's root,
+  a file roots the tree at its directory with the cursor on it. A path that
+  does not exist is reported in the prompt's window bar, where the messages of
+  the prompt go (the message line is covered by `-- INSERT --`), and nothing
+  changes. A pasted path that ends in a newline is kept as one line. `Esc`
+  leaves insert mode; it does not close anything.
+- **Trees.** `Space` or `Tab` chooses the row for this column - `[A]` in the left
+  tree, `[B]` in the right - and marks it `[A]` / `[B]` after its name (the
+  other side's choice is marked too when it is in view). `Space` again on the
+  chosen row drops it. `Enter` (or `o`, a double click, `s` `S` `t`) on a file
+  chooses it as well - nothing is opened in the launcher; on a folder `Enter`
+  opens and closes it as everywhere in neo-tree, and the rest is neo-tree too
+  (`<BS>` up, `.` set root, `H` hidden files). In the F9 / F11 / RelationView
+  trees and the DirDiff tree, `Space` / `Tab` still pick `[A]` then `[B]`.
+- The choice shows in the prompt's window bar (`선택:`) and in the prompt; each
+  tree's status line shows its root, also after neo-tree's own `<BS>` / `.`
+  (with nothing chosen on that side, the prompt follows the new root). Paths are shown with directory links
+  resolved, as neo-tree roots them (macOS: `/tmp/x` reads `/private/tmp/x`).
+
+| in the launcher | |
+|---|---|
+| `Enter` | in a prompt (insert or normal mode): make the typed path this side's choice. In a tree: open / close a folder, choose a file |
+| `Space` / `Tab` | in a tree: choose the row for this side; on the chosen row, drop it |
+| `Tab` / `S-Tab` | in a prompt, insert mode: complete the path / walk the completion list |
+| `\x` | swap A and B: prompts, choices, tree roots and cursor rows (the same key swaps a compare tab's two files) |
+| `q` | close the launcher (in a prompt's normal mode, or a tree). Closing any of its four windows - `:q`, `Ctrl+w o` - closes the whole tab; as the last tab it leaves an empty window |
+| `Ctrl+h` / `Ctrl+l` | the A / B column, same row. In a prompt's insert mode only `Ctrl+l`: `Ctrl+h` stays backspace there (Tera Term sends it for Backspace) - `Ctrl+w h` works |
+| `Ctrl+j` / `Ctrl+k` | this column's tree / prompt (`Ctrl+j` from insert mode too). Going from one prompt to the other in insert mode stays in insert mode; coming back to a prompt left in insert mode resumes it |
+| `,r` / `,e` | next / previous tab, as `gt` / `gT` |
+
+```vim
+let g:vimide_dirdiff_launch_key = '<leader>D'   " '' leaves the key unmapped (:DirDiffPick stays)
+let g:vimide_dirdiff_launch_follow_ms = 150     " 0: the tree moves on Enter only
+```
+
+How it is put together (`.vim/plugin/dirdifflaunch.lua`): each tree is neo-tree
+drawn in its own window with `position = 'current'`, as the RelationView
+column does, so every tree keeps its own state. Roots are changed through
+neo-tree's internal navigate inside the tree window, not its public one, which
+batches the calls of all trees for 100 ms and ran the deferred one in whatever
+window was current (neo-tree `:lcd`s the window whose root it changes). Those
+`:lcd`s stay on the tree windows - without them a `:cd` anywhere would move
+the trees - and are taken off the windows of a comparison opened from a tree,
+which inherit them. neo-tree's `Space` / `Tab` call `_G.vimide_dirdiff_pick`,
+which asks the launcher first, and a file opened in a launcher tree is caught
+by the same `file_open_requested` hook that keeps RelationView's tree from
+opening files in itself. The window guard (`vimidewin.lua`) leaves the launcher
+tab alone, like a DirDiff tab, and a launcher left as the only tab keeps nvim
+open the way a DirDiff tree does. The prompt windows are `'winfixbuf'` and all
+four windows start with an empty jump list, so `Ctrl+O`, `Ctrl+^` or `:e` cannot
+put another buffer in a prompt's or a tree's place. Sessions never hold a
+launcher (it would come back as a blank tab): `:qa` closes the launchers before
+the session is written, and `:VimIdeSessionSave` closes them while it writes
+and then puts them back where they were - prompts, choices, roots and cursor
+rows included.
 
 ### The side-by-side tree (nvim)
 

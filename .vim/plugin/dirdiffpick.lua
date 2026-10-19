@@ -21,6 +21,9 @@
 -- A 쪽 / B 쪽 바꾸기라 Space 만):
 -- 비교 트리에서 [A], 다른 비교 탭이나 neo-tree 에서 [B] 도 된다. [A] 는 하나다. 비교 트리는 고른
 -- 곳(세션·줄·쪽 - ctx)도 넘긴다: [A] 의 것은 여기 들고 있다가 [B] 때 같이 돌려준다.
+--
+-- DirDiff 선택 탭(\D, dirdifflaunch.lua)의 트리에서는 Space/Tab 이 그 칸([A] 칸 / [B] 칸)의 선택이다 - 아래
+-- _G.vimide_dirdiff_pick 이 먼저 묻는다. 두 곳을 비교 창에 여는 것은 그 탭도 _G.vimide_dirdiff_compare 로 같이 쓴다.
 
 if vim.g.loaded_vimide_dirdiffpick then
   return
@@ -79,7 +82,8 @@ end
 
 api.nvim_set_decoration_provider(ns, {
   on_win = function(_, win, buf, top, bot)
-    if not first or vim.bo[buf].filetype ~= 'neo-tree' then
+    -- DirDiff 선택 탭의 트리(dirdifflaunch.lua)는 제 [A]/[B] 를 단다 - 이 [A] 와 섞이지 않게
+    if not first or vim.bo[buf].filetype ~= 'neo-tree' or vim.w[win].vimide_dirdiff_launch then
       return false
     end
     pcall(function()
@@ -282,6 +286,14 @@ function _G.vimide_dirdiff_pick_path(path, kind, ctx)
   local a, actx = first.path, first.ctx
   first = nil
   mark_all()
+  _G.vimide_dirdiff_compare(a, path, kind, { a = actx, b = ctx })
+end
+
+-- 같은 종류의 두 곳을 비교 창에 (a = [A], b = [B]): 디렉터리 둘이면 DirDiff 탭, 파일 둘이면 DirDiff 의 비교 탭
+-- (옵션에 따라 예전 목록·맨 vimdiff). ctx = { a = [A] 의 곳, b = [B] 의 곳 } (비교 트리에서 골랐을 때, 없어도 된다).
+-- 위의 [B] 와 DirDiff 선택 탭(dirdifflaunch.lua)이 같이 쓴다
+function _G.vimide_dirdiff_compare(a, path, kind, ctx)
+  ctx = ctx or {}
   if kind == 'dir' then
     -- :DirDiff 를 거치지 않고 바로 부른다 (VimIdeDirDiff 가 EDIT 창에서 새 탭을 연다)
     if _G.vimide_dirdiff_open and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
@@ -296,7 +308,7 @@ function _G.vimide_dirdiff_pick_path(path, kind, ctx)
     -- 파일 둘: DirDiff 의 비교 탭 (dirdiffview.lua). 맨 vimdiff 는 비교 탭이 아니라 bc 색·창 머리·\d·
     -- 복사 키·q·,r ,e 가 없었다 (사용자 보고). g:vimide_dirdiff_view = 0 (나란한 트리 대신 DirDiff.vim 의
     -- 목록)이면 위의 디렉터리 둘처럼 이것도 예전 것으로 - 디렉터리는 예전 목록인데 파일만 새 비교 탭이면 어긋난다
-    _G.vimide_dirdiff_open_files(a, path, { a = actx, b = ctx })
+    _G.vimide_dirdiff_open_files(a, path, { a = ctx.a, b = ctx.b })
   else
     -- 예전 그대로의 vimdiff (g:vimide_dirdiff_pick_vimdiff = 1, g:vimide_dirdiff_view = 0, dirdiffview.lua 가
     -- 없을 때).
@@ -316,6 +328,10 @@ function _G.vimide_dirdiff_pick_path(path, kind, ctx)
 end
 
 function _G.vimide_dirdiff_pick(state)
+  -- DirDiff 선택 탭의 트리면 그 칸([A] 칸 / [B] 칸)의 선택으로 (dirdifflaunch.lua). 다른 트리는 그대로
+  if _G.vimide_dirdiff_launch_pick and _G.vimide_dirdiff_launch_pick(state) then
+    return
+  end
   local ok, node = pcall(function()
     return state.tree:get_node()
   end)
