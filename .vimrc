@@ -2009,6 +2009,9 @@ let g:vimide_dirdiff_tab = 1
 "         (보기를 따른다, 한쪽에만 있는 디렉터리·디렉터리 vs 파일도. 비주얼 V v 는 고른 줄의 디렉터리마다 -
 "         비주얼의 O/X 도 이것. g:vimide_dirdiff_expand_max 개를 넘으면 먼저 묻는다),
 "         R 다시, q 끝(비교 탭들도), ? 도움말
+"         c 고른 것만 지금 견주기 (비주얼 V v 로 고른 줄, 아니면 커서 줄 - 파일은 내용까지, 디렉터리는 그 아래 모두.
+"         다른 일보다 먼저, 중지했어도), <C-c> 비교 중지 / 잇기 (Beyond Compare 의 중지 - 큰 SDK 두 벌 등. 중지하면
+"         여는 디렉터리는 목록·크기만, 내용은 c 로 고른 것만. 상태줄 '중지됨 · 남은 N', :DirDiffStop / :DirDiffResume 도)
 "         f 보기 고르기(모두/차이/고아 없음/좌측 최신/우측 고아/동일 ... 12가지), F 모두<->차이
 "         <Space> 비교할 곳 고르기 ([A] 에서 Space, [B] 에서 Space -> 새 탭에서 비교. neo-tree 와 같은 [A])
 "         고른 두 파일: 보통 짝과 같은 비교 탭 (색·창 머리·개요 막대·\d·복사 키·Ctrl+Z 모두, pair_tab = 0 이어도.
@@ -2029,6 +2032,8 @@ let g:vimide_dirdiff_tab = 1
 "         ⇄ 를 눌러도, :DirDiffSwap 도). 펼친 디렉터리·보기(좌측/우측은 거울 짝)·커서 줄·고른 것·[A] 는 그대로,
 "         비교 탭들도 새 방향으로 (버퍼는 창만 바꾼다 - 고친 것·Ctrl+Z 그대로). 비교 창에서는 :DirDiffSwap 이나 B 창
 "         머리 맨 앞의 ⇄ 로 그 탭만 (:DirDiffSwap! 는 비교 전체)
+"         비교 창의 \x 는 그 탭만 양측 교환(:DirDiffSwap), \E 는 이 창 쪽 파일 바꾸기(창 머리를 두 번 누르기와 같다).
+"         \d 메뉴의 가름줄 아래에도 있다
 "   비교 창(비교 탭의 두 창, pair_tab = 0 이면 편집 창 둘): \d 보기 고르기(모두 보이기 - 기본 /
 "            차이 보이기 / 문맥 보이기, zR·zM 도 된다), q 비교 탭 닫고 트리의 그 줄로(:tabclose 도,
 "            고른 두 파일은 [B] 를 고른 곳으로),
@@ -2055,12 +2060,13 @@ let g:vimide_dirdiff_tab = 1
 "   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (MB)
 "   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때, 기본: 화면의 40%)
 "   let g:vimide_dirdiff_expand_max = 5000 " L 이 묻지 않고 펼칠 폴더 수 (0 이면 묻지 않고 모두)
+"   let g:vimide_dirdiff_autocompare = 0   " 중지한 채로 열기 (여는 디렉터리의 목록·크기만, 내용은 c 로 고른 것만 - <C-c> 로 잇기)
 "   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 "   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 복사를 묻지 않고
 "   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
 "   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (되돌릴 수 없다 - 아래 설명)
-"   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기·트리의 e 를 걸지 않기 (:DirDiffPath 는 그대로)
-"   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄·B 창 머리)를 걸지 않기 (:DirDiffSwap 은 그대로)
+"   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기·트리의 e·비교 창의 \E 를 걸지 않기 (:DirDiffPath 는 그대로)
+"   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄·B 창 머리)·비교 창의 \x 를 걸지 않기 (:DirDiffSwap 은 그대로)
 "   let g:vimide_dirdiff_copy_keys = 0     " 편집 창의 <C-r>/<C-l>/<C-S-r>/<C-S-l> 을 가로채지 않기
 "   let g:vimide_dirdiff_plain_text = 0    " 비교 창에서도 구문 색 그대로
 "   let g:vimide_dirdiff_undo_keys = 0     " 비교 창의 <C-z>/<C-y> 를 가로채지 않기
@@ -2079,6 +2085,10 @@ let g:vimide_dirdiff_eol_max_mb = 4
 " 트리의 L(zO, 커서·고른 줄의 디렉터리 아래 모두 펼치기)가 묻지 않고 펼칠 폴더 수. 넘으면 모두 / 얕은 것부터 이만큼 /
 " 그만두기를 묻는다 - 수천 개를 한꺼번에 펼치면 줄이 수만이 되어 그리는 동안 편집기가 멎는다. 0 = 묻지 않고 모두
 let g:vimide_dirdiff_expand_max = 2000
+" 뒤에서 하는 비교를 처음부터 할지: 1 = 연 뒤 곧바로 모두 견준다 (트리의 <C-c> 로 중지 / 잇기), 0 = 중지한 채로 연다 -
+" 여는 디렉터리만 목록·크기·날짜를 보고(크기가 다르면 다름), 내용은 트리의 c 로 고른 것만 견준다. Android SDK 두 벌처럼
+" 아주 큰 비교에서 볼 곳만 볼 때. R(다시 훑기)도 이것을 따른다
+let g:vimide_dirdiff_autocompare = 1
 let g:vimide_dirdiff_confirm_copy = 1
 let g:vimide_dirdiff_copy_keys = 1
 " 트리의 파일 다루기 (지금 쪽에서 neo-tree 처럼 a 더하기 - 끝이 / 면 디렉터리, A 디렉터리 더하기, d 지우기,
@@ -2087,12 +2097,12 @@ let g:vimide_dirdiff_file_ops = 1
 " 트리의 d 가 지우기 전에 묻기 (쪽·이름·디렉터리 안의 항목 수를 보이고, 기본은 아니오): 1 묻기, 0 묻지 않고 바로
 " 지우기 - 휴지통이 아니라 디스크에서 바로 지워져 되돌릴 수 없고, 손이 미끄러진 d 한 번에 디렉터리째 사라진다
 let g:vimide_dirdiff_confirm_delete = 1
-" 경로 바꾸기: 트리 위 경로 줄의 A/B 반쪽이나 비교 창의 창 머리를 두 번 누르면(트리에서는 e 로도) 그쪽 경로(폴더
-" 비교는 뿌리 디렉터리, 비교 탭은 파일)를 고쳐 같은 탭에서 다시 비교: 1 켬, 0 두 번 누르기와 e 를 걸지 않기
+" 경로 바꾸기: 트리 위 경로 줄의 A/B 반쪽이나 비교 창의 창 머리를 두 번 누르면(트리에서는 e, 비교 창에서는 \E 로도) 그쪽
+" 경로(폴더 비교는 뿌리 디렉터리, 비교 탭은 파일)를 고쳐 같은 탭에서 다시 비교: 1 켬, 0 두 번 누르기와 e·\E 를 걸지 않기
 " (한 번 누르기는 늘 예전대로, :DirDiffPath [a|b] [경로] 는 늘 된다)
 let g:vimide_dirdiff_path_edit = 1
 " 양측 교환 (Beyond Compare 의 '양측 교환' 단추): 트리의 S, 트리 위 경로 줄 가운데의 ⇄ 한 번 누르기(A·B 뿌리째 - 같은
-" 탭에서 다시 비교), 비교 창 B 의 창 머리 맨 앞 ⇄ 누르기(그 탭의 두 파일만): 1 켬, 0 그 키와 단추를 걸지 않기
+" 탭에서 다시 비교), 비교 창 B 의 창 머리 맨 앞 ⇄ 누르기와 비교 창의 \x(그 탭의 두 파일만): 1 켬, 0 그 키와 단추를 걸지 않기
 " (:DirDiffSwap[!] 는 늘 된다)
 let g:vimide_dirdiff_swap_keys = 1
 " DirDiff 색: 'bc' = Beyond Compare 의 색 (background 가 dark 면 어두운 짝),

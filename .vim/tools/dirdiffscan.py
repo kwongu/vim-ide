@@ -3,9 +3,10 @@
 #
 #   python3 -X utf8 dirdiffscan.py <A> <B> [--exclude 'pat,pat'] [--trust-mtime 1]
 #                                          [--ignore-eol 1] [--eol-max-mb 4]
-#                                          [--copy-exclude 'pat,pat'] [--workers 16] [--debug]
+#                                          [--copy-exclude 'pat,pat'] [--workers 16] [--paused 1] [--debug]
 #   --copy-exclude: 디렉터리를 복사할 때 그 안에서 건너뛸 이름 (없으면 --exclude 와 같다). nvim 이 제외 목록을
 #   끈 비교(--exclude '')에도 g:DirDiffExcludes 를 준다 - 보기만 바뀌고 .git 등은 여전히 덮지 않는다 (아래 '복사')
+#   --paused 1: 중지한 채로 시작한다 (g:vimide_dirdiff_autocompare = 0 - 아래 '중지')
 #
 # nvim(dirdiffview.lua)이 stdin 으로 명령을, 이 프로그램이 stdout 으로 사건을 한 줄에
 # JSON 하나씩 주고받는다. 모형(트리)은 여기에만 있고 nvim 은 펼친 디렉터리만 받아 간다
@@ -65,6 +66,11 @@
 #   {"cmd":"copy","id":N,"from":"a"|"b","paths":["rel",...]}
 #                                            파일·디렉터리를 반대쪽으로 복사하고 (copier) 그곳만
 #                                            다시 본다. 끝나면 'copied' 를 먼저, 그다음 부모 'list'
+#   {"cmd":"pause"} / {"cmd":"resume"}      중지 / 잇기 (Beyond Compare 의 중지 - 아래 '중지')
+#   {"cmd":"compare","id":N,"paths":["rel",...]}
+#                                            그 항목만 지금 견준다 (트리의 블록 비교 c): 파일은 내용까지, 디렉터리는
+#                                            그 아래를 모두 훑고 견준다. 중지했어도 하고, 줄의 다른 일보다 먼저.
+#                                            다 정해지면 'compared'
 #   {"cmd":"quit"}
 # 사건 (여기 -> nvim)
 #   {"ev":"list","id":N,"dir":rel,"entries":[[name,ka,kb,sa,sb,ma,mb,st,rerr,mask,eol],...]}
@@ -83,12 +89,25 @@
 #                                            (모두 보이기에도 없는 것이 있다는 표시)
 #   {"ev":"copied","id":N,"files":n,"dirs":n,"skipped":[[rel,why]],"failed":[[rel,why]],
 #    "roots":[rel,...]}                      roots: 다시 본 곳 (그 아래 목록은 새로 받는다)
+#   {"ev":"compared","id":N,"files":n,"dirs":n,"one":n,"under":n,"diff":n}
+#                                            'compare' 가 끝났다: 고른 파일·디렉터리 수 (겹친 것은 한 번 - dirs 는
+#                                            양쪽에 있는 디렉터리, one 은 한쪽에만 있는 디렉터리·한쪽은 파일인 것),
+#                                            고른 디렉터리 아래의 항목 수, 그 모두 가운데 다른 것 (고아 포함)
+#   progress 의 paused: 중지했나, held: 중지해서 미뤄 둔 일 수, unread: 양쪽에 있는데 아직 안 훑은 디렉터리 수
+#   (pend 는 파일만 센다 - 그 안은 아직 모른다). sec 은 중지한 동안을 뺀 시간
 # 상태: same diff onlyA onlyB pend   종류: d f l o (없으면 null)
 # 표시(mask): 보기(Beyond Compare 의 보기 거르기 - 좌측 최신, 고아 ...)에 쓴다. 아래 SAME ... UNK
 # eol: 0, 또는 '같음' 인데 줄 끝만 다른 짝 - 쪽마다 3 비트 (A 는 아래 3 비트, B 는 그 위 3 비트):
 #   1 CRLF 줄이 있다   2 LF 만인 줄이 있다   4 파일 끝 줄바꿈이 없다. 상태는 'same', 표시는 SAME 그대로라
 #   보기·<C-n>/<C-p>·폴더의 판정·수(same)는 같은 파일로 다룬다 - nvim 은 이것으로 판정 칸에 ≈ 를 단다.
 #   progress 의 eol 은 그런 짝의 수 (same 에 들어 있다)
+#
+# 중지 (pause / resume, nvim 트리의 <C-c> - Beyond Compare 의 중지): Android SDK 두 벌처럼 큰 비교를 멈춘다. 중지한
+# 동안 일꾼은 새 일을 줄에서 꺼내 가지 않는다 - 줄에 넣는 일을 held 에 미뤄 두고(push_staged, cmd_pause), 하던 일은
+# 마저 한다. 그래도 하는 일 (runnable): 사용자가 연 디렉터리의 목록과 그 항목의 크기·날짜(급수 0 의 훑기·stat - 크기가
+# 다르면 그 자리에서 다름, 내용은 읽지 않는다), 깊은 펼치기(zO)의 훑기, 그리고 청한 것(Node.want): 'compare' 로 고른
+# 것과 그 아래, refresh 로 다시 보는 것(복사·저장·파일 다루기 뒤). 정하지 못한 것은 'pend' 그대로 남는다. resume 이
+# 미룬 일을 줄에 되돌린다
 
 import collections
 import fnmatch
@@ -142,6 +161,7 @@ except (ValueError, OverflowError):
     # 'inf'·'1e400' 은 OverflowError (nvim 에서 1.0/0 을 넘기면 tostring 이 'inf' 다) - 시작부터 죽었다
     EOL_MAX = 4 << 20
 WORKERS = max(1, int(opt('--workers', '16')))
+PAUSED = opt('--paused', '0') == '1'
 DEBUG = '--debug' in sys.argv
 
 SCAN, STAT, INFO, CMP = 0, 1, 2, 3
@@ -164,7 +184,7 @@ def copy_excluded(name):
 class Node:
     __slots__ = ('name', 'parent', 'ka', 'kb', 'sa', 'sb', 'ma', 'mb', 'status', 'kids',
                  'scanned', 'pend', 'bad', 'sub', 'depth', 'done', 'waiters', 'group',
-                 'queued', 'rerr', 'dead', 'mask', 'agg', 'eol', 'excl')
+                 'queued', 'rerr', 'dead', 'mask', 'agg', 'eol', 'excl', 'want')
 
     def __init__(self, name, parent):
         self.name = name
@@ -188,6 +208,8 @@ class Node:
         self.agg = None           # 훑은 '양쪽 디렉터리': 자식들의 표시 비트마다 그 비트를 가진 자식 수
         self.eol = 0              # 같음인데 줄 끝만 다르다 (쪽마다 3 비트 - 맨 위의 eol)
         self.excl = 0             # 훑을 때 제외 목록에 걸려 뺀 이름 수 (A·B 합쳐서 - counts['excl'])
+        # 사용자가 청한 것 ('compare' 로 고른 것과 그 아래, refresh): 중지해도 하고 급수 0 으로 먼저. 아래로 물려준다
+        self.want = parent is not None and parent.want
 
     def rel(self):
         parts = []
@@ -232,7 +254,8 @@ def flush():
 
 counts = {'pend': 0, 'diff': 0, 'onlyA': 0, 'onlyB': 0, 'same': 0, 'dirs': 0, 'err': 0,
           'eol': 0,       # eol: same 가운데 줄 끝만 다른 것 (따로 더하지 않는다)
-          'excl': 0}      # excl: 제외 목록에 걸려 뺀 이름 (Node.excl 의 합 - 항목 수에는 들지 않는다)
+          'excl': 0,      # excl: 제외 목록에 걸려 뺀 이름 (Node.excl 의 합 - 항목 수에는 들지 않는다)
+          'unk': 1}       # unk: 양쪽에 있는데 아직 안 훑은 디렉터리 (맨 위 포함 - progress 의 unread. pend 는 파일만 센다)
 masks = {}                # 표시 -> 항목 수 (counts 처럼 한쪽에만 있는 디렉터리 안은 세지 않는다)
 masks_ver = [0]
 root = Node('', None)
@@ -254,6 +277,9 @@ ops = [0, 0, 0, 0]        # 한 일 (SCAN STAT INFO CMP) - 진행 상황에 낸�
 inbox = collections.deque()
 wake = threading.Event()
 main_idle = [False]
+paused = [PAUSED]         # 중지 (cmd_pause) - 주 줄기에서만 본다
+held = []                 # 중지한 동안 미룬 일 (줄의 꼴 그대로 - 주 줄기에서만 만진다. outstanding 에는 들어 있다)
+pause_t = [time.monotonic() if PAUSED else None, 0.0]   # 중지한 때, 앞서 중지했던 시간의 합 (elapsed)
 
 
 def post(item):
@@ -369,8 +395,8 @@ def remask(n):
 
 
 def tier(n, force_vis):
-    # 0 펼쳐 둔 디렉터리의 항목, 1 펼쳐 둔 디렉터리 아래 (맨 위는 빼고), 2 나머지
-    if force_vis or visible(n):
+    # 0 펼쳐 둔 디렉터리의 항목·청한 것(want), 1 펼쳐 둔 디렉터리 아래 (맨 위는 빼고), 2 나머지
+    if force_vis or n.want or visible(n):
         return 0
     p = n.parent
     while p is not None and p.parent is not None:
@@ -405,14 +431,83 @@ def job_tier(job):
     return job[0] >> 62
 
 
+def runnable(job):
+    # 중지한 동안에도 하는 일: 청한 것(want), 급수 0(연 디렉터리의 항목·zO)의 훑기·크기 - 내용 읽기는 아니다
+    return job[1].want or (job_tier(job) == 0 and job_kind(job) != CMP)
+
+
 def push_staged():
     if not staged:
         return
-    with job_cond:
-        for job in staged:
-            heapq.heappush(jobs[job_kind(job) == CMP], job)
-        job_cond.notify(len(staged))
+    run = staged
+    if paused[0]:
+        run = [job for job in staged if runnable(job)]
+        if len(run) < len(staged):
+            held.extend(job for job in staged if not runnable(job))
+    if run:
+        with job_cond:
+            for job in run:
+                heapq.heappush(jobs[job_kind(job) == CMP], job)
+            job_cond.notify(len(run))
     del staged[:]
+
+
+def release(pred=None):
+    # 미룬 일을 줄로 (pred 가 없으면 모두 - resume). 많으면(수십만) heappush 대신 붙이고 heapify
+    if not held:
+        return
+    if pred is None:
+        move = held[:]
+        del held[:]
+    else:
+        move, keep = [], []
+        for job in held:
+            (move if pred(job) else keep).append(job)
+        if not move:
+            return
+        held[:] = keep
+    with job_cond:
+        for role in (0, 1):
+            add = [job for job in move if (job_kind(job) == CMP) == (role == 1)]
+            if add:
+                jobs[role].extend(add)
+                heapq.heapify(jobs[role])
+        job_cond.notify_all()
+
+
+def cmd_pause(msg):
+    if paused[0]:
+        return
+    paused[0] = True
+    pause_t[0] = time.monotonic()
+    # 줄에 있는 것도 미룬다 (일꾼이 이미 꺼내 간 것은 마저 한다). jobs 의 목록은 일꾼이 붙들고 있다 - 그 자리에서 바꾼다
+    with job_lock:
+        for h in jobs:
+            keep = []
+            for job in h:
+                (keep if runnable(job) else held).append(job)
+            if len(keep) < len(h):
+                h[:] = keep
+                heapq.heapify(h)
+    progress(complete[0])
+
+
+def cmd_resume(msg):
+    if not paused[0]:
+        return
+    paused[0] = False
+    pause_t[1] += time.monotonic() - pause_t[0]
+    pause_t[0] = None
+    release()
+    progress(complete[0])
+
+
+def elapsed():
+    # 시작한 뒤의 시간에서 중지한 동안을 뺀다 (상태줄의 '훑는 중 N초'·'끝 N초')
+    t = time.monotonic() - started - pause_t[1]
+    if pause_t[0] is not None:
+        t -= time.monotonic() - pause_t[0]
+    return t
 
 
 def notify_parent(n):
@@ -839,6 +934,8 @@ def on_scan(n, la, lb, err, fa=False, fb=False, nx=0):
         return
     counts['err'] += err
     counts['dirs'] += 1
+    if n.both_dirs():
+        counts['unk'] -= 1
     # 한 디렉터리는 한 번만 훑는다 (n.scanned) - 다시 보면(refresh) 새 노드라 detach 가 옛 것을 뺀다
     n.excl = nx
     counts['excl'] += nx
@@ -863,6 +960,7 @@ def on_scan(n, la, lb, err, fa=False, fb=False, nx=0):
         count(c, st, 1)
         if c.both_dirs():
             c.mask = UNK
+            counts['unk'] += 1
         else:
             c.mask = item_mask(c)
             if agg is not None:
@@ -1240,7 +1338,10 @@ def deep_finish(x):
     nk = sum(1 for n in keep if deep_new(n))
     if x.max and nk > x.max:
         sure = sum(1 for n in keep if deep_new(n) and (n in x.roots or deep_sure(n, x.bits, x.both)))
-        unsure = sure < nk and not complete[0]
+        # 중지한 동안은 기다리지 않는다 - 그 아래 내용 읽기를 하지 않으니 끝내 정해지지 않는다. 지금 보기에 보이는 대로
+        # (견주는 중인 것이 아래에 있는 디렉터리도 보인다 - deep_want) 센다: 정해진 것만 세어 답했더니 '펼칠 폴더가 적어도
+        # 6 개입니다 - expand_max(30) 보다 많습니다' 라고 물었다
+        unsure = sure < nk and not complete[0] and not paused[0]
         if unsure and (sure < x.max if x.cap else sure <= x.max):
             # 넘칠지는 아직 모른다: 남은 것은 아래에 견주는 중인 것(PEND)이 있는 디렉터리라 다 견주면 빠질 수 있다
             # (훑는 중의 차이 보기 - 같은 파일뿐인 디렉터리). 그 일을 앞세우고 기다린다 (deep_unpark 가 다시 본다).
@@ -1323,15 +1424,17 @@ complete = [False]
 again = [False]           # 끝난 뒤에 refresh 로 새 일이 생겼다
 
 
-def progress(done):
+def progress(done, quiet=False):
     # 끝난 뒤에는 끝난 때의 시각을 둔다 (계속 늘어나는 '경과 시간' 이 아니라)
     if done and finished[0] is None:
-        finished[0] = round(time.monotonic() - started, 2)
+        finished[0] = round(elapsed(), 2)
     with job_lock:
         waiting = len(jobs[0]) + len(jobs[1])
     snap = (done, counts['dirs'], counts['pend'], counts['diff'], counts['onlyA'],
-            counts['onlyB'], counts['same'], counts['err'], counts['eol'], counts['excl'], masks_ver[0])
-    if done and snap == last_snap[0]:
+            counts['onlyB'], counts['same'], counts['err'], counts['eol'], counts['excl'], masks_ver[0],
+            paused[0], len(held), counts['unk'])
+    # quiet: 중지한 채 할 일이 없다 (주 줄기가 잔다) - 끝난 뒤처럼 같은 수면 내지 않는다
+    if (done or quiet) and snap == last_snap[0]:
         return
     last_snap[0] = snap
     emit({'ev': 'progress', 'done': done, 'dirs': counts['dirs'], 'queued': waiting,
@@ -1340,8 +1443,9 @@ def progress(done):
           'onlyB': counts['onlyB'], 'same': counts['same'], 'err': counts['err'], 'eol': counts['eol'],
           'excl': counts['excl'],
           'ops': list(ops), 'backlog': len(inbox), 'again': again[0] and not done,
+          'paused': paused[0], 'held': len(held), 'unread': counts['unk'],
           'cats': {str(k): v for k, v in masks.items() if v > 0},
-          'sec': finished[0] if done else round(time.monotonic() - started, 1)})
+          'sec': finished[0] if done else round(elapsed(), 1)})
 
 
 def kind_of(side, rel):
@@ -1372,6 +1476,8 @@ def detach(n):
         if x.scanned:
             counts['dirs'] -= 1
             counts['excl'] -= x.excl
+        elif x.both_dirs():
+            counts['unk'] -= 1
         x.dead = True
         if x in deep_wait:
             # 이것의 훑기를 기다리던 깊은 펼치기: 떼어 낸 노드의 결과는 오지 않는다 (on_scan 이 불리지 않는다) -
@@ -1444,11 +1550,14 @@ def refresh_one(rel):
         return p
     c = Node(name, p)
     c.group = group
+    c.want = True   # 사용자가 바꾼 곳이다 - 중지해도 다시 본다 (디렉터리면 그 아래도 - on_scan 이 물려준다)
     c.ka, c.kb = ka, kb
     st = judge(p, c, bool(p.rerr) and p.both_dirs())
     c.status = st
     count(c, st, 1)
     c.mask = UNK if c.both_dirs() else item_mask(c)
+    if c.both_dirs():
+        counts['unk'] += 1
     p.kids[name] = c
     if p.agg is not None:
         if not c.both_dirs():
@@ -1696,6 +1805,139 @@ def on_copied(rid, rep):
     cmd_refresh({'paths': rep['roots']})
 
 
+# ---------------------------------------------------------------------------
+# 고른 것만 견주기 (nvim 트리의 c - 비주얼로 고른 줄, 커서 줄). 중지했어도 그것만은 한다
+#
+# 고른 항목과 그 아래(이미 훑은 것)에 want 를 달고 남은 일을 급수 0 으로 넣는다 (want_mark). 훑지 않은 디렉터리는
+# 훑으면 on_scan 이 아이들에게 want 를 물려준다. 중지해서 미뤄 둔 그 일(held)은 줄로 되돌린다 (release). 다
+# 정해졌는지는 표시로 본다: 양쪽에 있는 디렉터리의 표시는 그 아래 모두를 합한 것이라 PEND(견주는 중)·UNK(안 훑은
+# 디렉터리)가 없으면 그 아래가 다 정해졌다 - 걷지 않고 안다 (creq_check, 0.25초마다와 잘 때)
+# ---------------------------------------------------------------------------
+
+class CReq:
+    __slots__ = ('id', 'paths', 'nodes')
+
+    def __init__(self, rid, paths):
+        self.id = rid
+        self.paths = paths        # 아직 노드를 못 찾은 것 (위 디렉터리를 훑는 중 - 양측 교환 바로 뒤 등)
+        self.nodes = []           # (rel, 노드)
+
+
+creqs = []
+
+
+def want_mark(n):
+    stack = [n]
+    while stack:
+        x = stack.pop()
+        x.want = True
+        if x.both_dirs():
+            if not x.scanned:
+                submit(SCAN, x, True)
+            elif x.kids and x.mask & (PEND | UNK):
+                stack.extend(x.kids.values())
+        elif x.status == 'pend':
+            submit_pending(x, True)
+
+
+def creq_resolve(r):
+    left = []
+    marked = False
+    for rel in r.paths:
+        n = root
+        names = rel.split('/') if rel else []
+        i = 0
+        while n is not None and i < len(names) and n.scanned:
+            n = n.kids.get(names[i]) if n.kids else None
+            i += 1
+        if n is None:
+            continue              # 없는 이름 (그사이 지웠다)
+        if i < len(names):
+            if n.isdir():
+                submit(SCAN, n, True)
+                left.append(rel)
+            continue
+        want_mark(n)
+        marked = True
+        r.nodes.append((rel, n))
+    r.paths = left
+    if marked and paused[0]:
+        # 미뤄 둔 그 일(이미 줄에 넣은 것은 submit 이 또 넣지 않는다)을 줄로. held 를 다 보니 새로 단 때만
+        release(lambda job: job[1].want)
+
+
+def creq_settled(n):
+    if n.both_dirs():
+        return n.scanned and not n.mask & (PEND | UNK)
+    return n.status != 'pend'
+
+
+def creq_count(r):
+    roots = []
+    for rel, n in r.nodes:
+        if n.dead:
+            n = find(rel)         # refresh 로 새 노드가 되었다
+        if n is not None and not n.dead:
+            roots.append(n)
+    ids = set(id(n) for n in roots)
+    nf = nd = no = under = diff = 0
+    for n in roots:
+        p = n.parent
+        while p is not None and id(p) not in ids:
+            p = p.parent
+        if p is not None:
+            continue              # 고른 디렉터리 안의 것 - 이미 센다
+        if n.both_dirs():
+            nd += 1
+        elif n.isdir():
+            no += 1               # 한쪽에만 있는 디렉터리 (다른 쪽은 없거나 파일) - 안에 견줄 것이 없다. 그 하나로 센다
+        else:
+            nf += 1
+        stack = [n]
+        while stack:
+            x = stack.pop()
+            if x.both_dirs():
+                if x.kids:
+                    stack.extend(x.kids.values())
+                if x.rerr:
+                    diff += 1
+                continue
+            if x is not n:
+                under += 1
+            if is_item(x):
+                diff += 1
+    return nf, nd, no, under, diff
+
+
+def creq_check():
+    for r in creqs[:]:
+        if r.paths:
+            creq_resolve(r)       # 위 디렉터리를 다 훑었으면 이어서
+            if r.paths:
+                continue
+        busy = False
+        for rel, n in r.nodes:
+            if n.dead:
+                n = find(rel)
+            if n is not None and not creq_settled(n):
+                busy = True
+                break
+        if busy:
+            continue
+        creqs.remove(r)
+        nf, nd, no, under, diff = creq_count(r)
+        emit({'ev': 'compared', 'id': r.id, 'files': nf, 'dirs': nd, 'one': no, 'under': under, 'diff': diff},
+             now=True)
+
+
+def cmd_compare(msg):
+    paths = [x for x in (msg.get('paths') or []) if isinstance(x, str)]
+    r = CReq(msg.get('id'), paths)
+    creqs.append(r)
+    creq_resolve(r)
+    creq_check()                  # 이미 다 정해졌으면 곧바로 답한다
+
+
 def handle(msg):
     c = msg.get('cmd')
     if c == 'list':
@@ -1724,6 +1966,12 @@ def handle(msg):
         cmd_refresh(msg)
     elif c == 'copy':
         cmd_copy(msg)
+    elif c == 'pause':
+        cmd_pause(msg)
+    elif c == 'resume':
+        cmd_resume(msg)
+    elif c == 'compare':
+        cmd_compare(msg)
     elif c == 'quit':
         flush()
         bail(0)
@@ -1772,16 +2020,26 @@ def main():
     while True:
         push_staged()
         if not inbox:
-            if announced:
+            # 중지한 채 하던 일도 다 했다 (남은 것은 미룬 일뿐) - 끝난 것처럼 다음 명령까지 잔다
+            idle = announced or (paused[0] and outstanding[0] == len(held))
+            if idle:
+                if creqs:
+                    creq_check()
+                if deep_park:
+                    # 중지 전에 넘칠지 몰라 기다리던 zO (deep_finish): 0.25초 틱 전에 하던 일이 다 끝나면 아래에서
+                    # 다음 명령까지 자서 답하지 않았다 - 지금 답한다 (중지했으면 정해진 것으로)
+                    deep_unpark()
+                if staged:
+                    continue          # 고른 것의 위 디렉터리를 다 훑었다 - 이어서 넣은 일부터
                 # 자기 전에 마지막 상황을 낸다 (끝난 뒤의 refresh 로 수가 바뀌었을 수 있다 -
                 # 같은 수면 progress 가 내지 않는다)
-                progress(True)
+                progress(announced, quiet=True)
                 flush()
             # 다 끝났으면 다음 명령까지 잔다 (post 가 깨운다)
             main_idle[0] = True
             wake.clear()
             if not inbox:
-                wake.wait(None if announced else 0.1)
+                wake.wait(None if idle else 0.1)
             main_idle[0] = False
         handled = 0
         while inbox and handled < 5000:
@@ -1808,7 +2066,11 @@ def main():
         # 한 번 끝나면 끝이다 - 그 뒤의 일(펼친 디렉터리의 날짜, 한쪽에만 있는 디렉터리
         # 훑기)은 보여 주기용이라 판정이 바뀌지 않는다. 처음에는 그 일이 생길 때마다 '끝' 을
         # 풀었다가 다시 매겨 끝난 시각이 3.5초에서 12.8초로 바뀌었다 (실측)
-        if not complete[0] and outstanding[0] == 0 and counts['pend'] == 0 and root.scanned:
+        # 미룬 일(held)만 남았어도 다 정해졌으면 끝이다 (중지한 채 고른 것으로 모두 견주었다 - 남은 것은 날짜 등).
+        # 다 정해졌는지는 맨 위의 표시로 본다 (creq_settled 처럼 - PEND·UNK 가 없다): pend 는 파일만 세서, 미룬 일이
+        # 안 훑은 디렉터리면 pend 0 으로 '끝' 이 되었다 (SDK 처럼 위 두 층이 디렉터리뿐 - 검토)
+        if not complete[0] and outstanding[0] == len(held) and counts['pend'] == 0 and root.scanned \
+                and (not held or not root.mask & (PEND | UNK)):
             complete[0] = True
             again[0] = False
         done = complete[0]
@@ -1818,6 +2080,8 @@ def main():
             last_prog = now
             if deep_park:
                 deep_unpark()     # 넘칠지 몰라 기다리던 zO (deep_finish)
+            if creqs:
+                creq_check()      # 고른 것만 견주기가 끝났나 (cmd_compare)
         announced = done
         if now - last_flush[0] > 0.05 or done:
             flush()

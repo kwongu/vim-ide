@@ -108,6 +108,18 @@
 --               보기(좌측·우측 최신·고아는 거울 짝으로)·커서 줄(쪽은 뒤집어 같은 파일)·m 으로 고른 것(다른 쪽으로)·
 --               고른 [A] 는 그대로, 이 비교의 비교 탭들도 새 방향으로 (버퍼는 창만 바꾼다 - 고친 것·Ctrl+Z 그대로).
 --               복사하는 동안은 하지 않는다. 아래 '양측 교환'
+--   c           고른 것만 지금 견주기: 비주얼(V v)로 고른 줄, 아니면 커서 줄. 파일은 내용까지, 디렉터리는 그 아래를
+--               모두 훑고 견준다 (뒤쪽의 compare - 줄의 다른 일보다 먼저, 중지했어도 그것만은 한다). 맡긴 것을 알리고
+--               다 정해지면 '비교 끝: 파일 n · 디렉터리 n 아래 n - 다름 n' (한쪽에만 있는 디렉터리는 안에 견줄 것이
+--               없어 '한쪽에만 있는 디렉터리 n' 으로 따로 센다. 트리에서 비어 있던 글자 - 고칠 수 없는 트리에서 vim 의
+--               c 바꾸기는 쓸 데가 없다)
+--   <C-c>       비교 중지 / 잇기 (Beyond Compare 의 중지 - Android SDK 두 벌처럼 큰 비교). 중지하면 뒤쪽이 줄의 새 일을
+--               꺼내 가지 않는다 (하던 것은 마저): 여는 디렉터리는 목록·크기·날짜만 (크기가 다르면 그 자리에서 다름),
+--               내용은 c 로 고른 것만 견준다. 정하지 못한 것은 · (확인 중) 그대로, 상태줄은 '중지됨 · 남은 N' (정하지
+--               못한 파일 + 아직 안 훑은 디렉터리 - 그 안은 아직 몰라 하나로 센다. 적어도 그만큼).
+--               :DirDiffStop / :DirDiffResume 도 같다 (트리 탭이나 그 비교 창에서). 깊은 펼치기(L zO)·복사·저장 뒤의
+--               다시 보기는 중지해도 한다. R 은 처음부터 (g:vimide_dirdiff_autocompare 대로), S·e·제외 목록 끄기는
+--               중지한 채 다시 훑는다
 --   R           다시 훑기        q  끝내기(탭을 닫는다, 비교 탭들도)       ?  도움말
 --   ,r / ,e     다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3gt 처럼 3번 탭으로, 3,e 는 세 탭 앞으로).
 --               비교 창에서도. 아래 tab_cycle
@@ -129,6 +141,9 @@
 -- 쪽도 이것으로 정한다.
 -- 비교 창의 :DirDiffSwap(또는 B 창 머리 맨 앞의 ⇄ 누르기)은 그 탭만 양측 교환 - 두 파일이 자리를 바꾼다 (트리의 짝이면
 -- 경로를 따로 실은 탭이 되고, 트리의 방향은 그대로. 한 번 더 하면 원래대로). :DirDiffSwap! 는 그 비교 전체 (트리의 S).
+-- 비교 창의 \x 는 :DirDiffSwap 과 같다 (그 탭만 양측 교환 - exchange), \E 는 지금 창 쪽 파일의 경로 바꾸기 (창 머리를 두 번
+-- 누르기·경로 없는 :DirDiffPath 와 같다 - 지금 경로를 채워 묻는다. 트리의 e 처럼. 리더 p 는 vim-ide 의 quickr 미리보기,
+-- e 는 egrep 이라 대문자 E). \d 메뉴에도 둘 다 있다. swap_keys = 0 이면 \x, path_edit = 0 이면 \E 를 쓰지 않는다
 -- 비교 창의 <C-z>/<C-y> 는 짝 전체의 되돌리기/다시 실행 (Beyond Compare 처럼 - 커서가 A·B 어느 쪽에 있든 두 파일
 -- 중 마지막으로 바뀐 것을. 타자, <C-r>/<C-l> 복사, dp/do 모두. 횟수, 비주얼도. 삽입 모드의 <C-z> 는 삽입을 끝내고
 -- 방금 친 것부터, 삽입 모드의 <C-y> 는 그대로 - 아래 '짝 전체의 되돌리기'). 비교 창 밖의 <C-z>(nvim 멈추기)·<C-y>
@@ -154,12 +169,13 @@
 --   let g:vimide_dirdiff_eol_max_mb = 16   " 줄 끝만 다른지 읽어 볼 파일 크기 한도 (기본 4, 넘으면 크기가 다르면 다름)
 --   let g:vimide_dirdiff_list_height = 16  " 트리 창 높이 (pair_tab = 0 일 때만, 기본: 화면의 40%)
 --   let g:vimide_dirdiff_expand_max = 5000 " L 이 묻지 않고 펼칠 폴더 수 (기본 2000, 0 이면 묻지 않고 모두)
+--   let g:vimide_dirdiff_autocompare = 0   " 중지한 채로 열기 - 여는 디렉터리의 목록·크기만, 내용은 c 로 고른 것만 (<C-c> 로 잇기)
 --   let g:vimide_dirdiff_max_mb = 20       " 이보다 큰 파일은 열지 않고 알림만
 --   let g:vimide_dirdiff_confirm_copy = 0  " 트리의 <C-r>/<C-l> 복사를 묻지 않고
 --   let g:vimide_dirdiff_file_ops = 0      " 트리의 a A d r (파일 다루기) 를 걸지 않기
 --   let g:vimide_dirdiff_confirm_delete = 0  " 트리의 d 를 묻지 않고 바로 지우기 (휴지통 없이 디스크에서 - 되돌릴 수 없다)
---   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기(경로 줄·창 머리)와 트리의 e 를 걸지 않기
---   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄 가운데·B 창 머리)를 걸지 않기
+--   let g:vimide_dirdiff_path_edit = 0     " 경로 바꾸기의 두 번 누르기(경로 줄·창 머리)와 트리의 e, 비교 창의 \E 를 걸지 않기
+--   let g:vimide_dirdiff_swap_keys = 0     " 양측 교환의 트리 S 와 ⇄ 누르기(경로 줄 가운데·B 창 머리), 비교 창의 \x 를 걸지 않기
 --   let g:vimide_dirdiff_copy_keys = 0     " <C-r>/<C-l>(<C-S-r>/<C-S-l>) 을 가로채지 않기 (편집 창)
 --   let g:vimide_dirdiff_colors = 'neogit' " Neogit 상태 화면의 색 ('classic' 예전 색, 기본 'bc': Beyond Compare)
 --   let g:vimide_dirdiff_pair_tab = 0      " 파일 짝을 비교 탭 대신 트리 위의 편집 창 둘에서
@@ -778,7 +794,10 @@ local function start_job(s)
   local cmd = { 'python3', '-X', 'utf8', script_path(), s.a, s.b, '--exclude', excl, '--copy-exclude', list,
     '--trust-mtime', (tonumber(vim.g.vimide_dirdiff_trust_mtime) or 1) ~= 0 and '1' or '0',
     '--ignore-eol', on(vim.g.vimide_dirdiff_ignore_eol, 1) and '1' or '0',
-    '--eol-max-mb', tostring(tonumber(vim.g.vimide_dirdiff_eol_max_mb) or 4) }
+    '--eol-max-mb', tostring(tonumber(vim.g.vimide_dirdiff_eol_max_mb) or 4),
+    -- 중지한 채로 (<C-c> - tr.pause, g:vimide_dirdiff_autocompare = 0). 다시 띄워도(S·e·제외 목록) 그대로
+    '--paused', s.paused and '1' or '0' }
+  s.creq = nil   -- 앞 뒤쪽에 맡긴 블록 비교(c)의 답은 오지 않는다
   if (tonumber(vim.g.vimide_dirdiff_debug) or 0) ~= 0 then
     cmd[#cmd + 1] = '--debug'
   end
@@ -931,6 +950,9 @@ on_event = function(s, ev)
     copied_fn(s, ev)
     return
   end
+  if k == 'compared' then
+    return tr.compared(s, ev)
+  end
   if k == 'list' then
     store_list(s, ev.dir, ev.entries or {})
     for _, ro in pairs(s.reopen or {}) do
@@ -994,12 +1016,13 @@ on_event = function(s, ev)
       s.reveal_path = path
       if not path then
         local done = s.prog and s.prog.done
+        local busy = tr.busy(s)
         if step_bits(s) then
-          say(s.reveal_step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)')
-            or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)'))
+          say(s.reveal_step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다' .. busy)
+            or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다' .. busy))
         else
-          say(s.reveal_step > 0 and (done and '마지막 차이입니다' or '아래로는 아직 찾은 차이가 없습니다 (훑는 중)')
-            or (done and '첫 차이입니다' or '위로는 아직 찾은 차이가 없습니다 (훑는 중)'))
+          say(s.reveal_step > 0 and (done and '마지막 차이입니다' or '아래로는 아직 찾은 차이가 없습니다' .. busy)
+            or (done and '첫 차이입니다' or '위로는 아직 찾은 차이가 없습니다' .. busy))
         end
       end
     end
@@ -1564,6 +1587,14 @@ local function status_text(s)
     if wide then
       parts[#parts + 1] = ('끝 %.1f초'):format(p.sec or 0)
     end
+  elseif s.paused then
+    -- 중지 (<C-c> - tr.pause): 남은 것 = 아직 정하지 못한 파일(pend)과 아직 안 훑은 디렉터리(unread - 그 안은 아직
+    -- 모른다, 그 하나로 센다. 그래서 적어도 그만큼). pend 만 보였더니 위 두 층이 디렉터리뿐인 SDK 에서 '남은 0' 이었다
+    -- (검토). 고른 것(c)을 견주는 중이면 그렇다고
+    parts[#parts + 1] = hl_part('VimIdeDirDiffHeader', '중지됨')
+      .. ((s.creq and next(s.creq)) and ' - 고른 것 견주는 중' or (wide and ' (<C-c> 잇기)' or ''))
+    parts[#parts + 1] = hl_part('VimIdeDirDiffPending',
+      ('남은 %s'):format(commas((tonumber(p.pend) or 0) + (tonumber(p.unread) or 0))))
   elseif p.again then
     parts[#parts + 1] = '바뀐 곳을 다시 보는 중'   -- 복사한 곳, :w 로 저장한 파일
   else
@@ -1583,7 +1614,7 @@ local function status_text(s)
     -- 상태줄이 이미 넘쳐 앞('DirDiff 끝 N초')이 잘리는데 이 토막이 더 밀어냈다 - 같음의 일부라 빠져도 수는 맞다
     parts[#parts + 1] = ('%s %s'):format(ascii() and '~' or '≈', commas(p.eol))
   end
-  if (p.pend or 0) > 0 then
+  if (p.pend or 0) > 0 and not (s.paused and not p.done) then   -- 중지한 동안은 앞의 '남은 N'
     parts[#parts + 1] = hl_part('VimIdeDirDiffPending', ('확인 중 %s'):format(commas(p.pend)))
   end
   if (p.err or 0) > 0 then
@@ -1605,7 +1636,7 @@ local function empty_text(s)
     return '  (비교가 멈췄습니다 - R 로 다시 훑기)'
   end
   if not (s.prog and s.prog.done) then
-    return '  (훑는 중…)'
+    return s.paused and '  (중지됨 - <C-c> 로 잇기)' or '  (훑는 중…)'
   end
   if s.mode == 'all' or s.mode == 'diff' then
     return '  (차이가 없습니다)'
@@ -2949,8 +2980,8 @@ local function walk_end(s, w, path)
   end
   if not path then
     local done = s.prog and s.prog.done
-    return say(w.step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)')
-      or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다 (훑는 중)'))
+    return say(w.step > 0 and (done and '이 보기에서 마지막입니다' or '아래로는 아직 이 보기에 맞는 것이 없습니다' .. tr.busy(s))
+      or (done and '이 보기에서 처음입니다' or '위로는 아직 이 보기에 맞는 것이 없습니다' .. tr.busy(s)))
   end
   render(s)
   if s.row_of[path] and api.nvim_win_is_valid(s.win_l) then
@@ -4434,6 +4465,20 @@ local function take_over_view_keys()
       return '<Cmd>lua _G.vimide_dirdiff_pair_quit()<CR>'
     end
   end, 'DirDiff 비교 창: 비교 탭 닫기 (트리의 그 줄로)')
+  -- \x: 이 짝만 양측 교환 - :DirDiffSwap 그대로 (exchange. B 창 머리의 ⇄ 누르기와 같다). \E: 이 창 쪽 파일 바꾸기 - 경로
+  -- 없는 :DirDiffPath 그대로 (지금 경로를 채워 묻는다 - 창 머리를 두 번 누르기와 같다, 트리의 e 처럼). 리더 x·E 는
+  -- 비어 있다 - 리더 p 는 .vimrc 의 quickr 미리보기, e 는 egrep (vim-ide 의 리더 키). 비교 창 밖이나 swap_keys /
+  -- path_edit 이 0 이면 감싸기 전의 것으로 넘긴다
+  wrap('n', '<leader>x', function()
+    if on(vim.g.vimide_dirdiff_swap_keys, 1) and view_of_win(api.nvim_get_current_win()) then
+      return '<Cmd>DirDiffSwap<CR>'
+    end
+  end, 'DirDiff 비교 창: 이 짝만 양측 교환 - 두 파일의 자리를 바꾼다 (:DirDiffSwap)')
+  wrap('n', '<leader>E', function()
+    if on(vim.g.vimide_dirdiff_path_edit, 1) and view_of_win(api.nvim_get_current_win()) then
+      return '<Cmd>DirDiffPath<CR>'
+    end
+  end, 'DirDiff 비교 창: 이 창 쪽 파일 바꾸기 - 지금 경로를 채워 묻는다 (:DirDiffPath)')
   -- 비교 창의 창 머리를 두 번 누르기: 그쪽 파일 바꾸기 (_G.vimide_dirdiff_bar_click). 창 머리의 %@ 누르기 처리는 첫
   -- 누르기만 받는다 - 둘째(<2-LeftMouse>)는 매핑이 먼저라, vim-ide 의 두 번 누르기(.vimrc 의 RvMouseJump - 정의로
   -- 가기)가 커서 낱말로 뛰었다. 창 머리는 getmousepos 의 line 0, winrow 1 이다. 글 위에서는 원래대로
@@ -4794,13 +4839,16 @@ local HELP_PAIR = {
   '  개요 막대(맨 왼쪽)를 누르면 그 자리로. 맨 아래 두 줄은 커서 줄과 맞은편 줄 (빈칸 · 탭 → 줄 끝 ¶)',
   '  <C-w>w <C-w>W 다음 / 앞 창 (개요 막대·줄 자세히는 건너뛴다 - A·B 를 오간다)',
   '  \\d          보기 고르기: 모두 보이기(기본) / 차이 보이기 / 문맥 보이기 (Enter 고르기, 1 2 3)',
-  '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이',
+  '               - 접기는 diff 의 것이라 zR 모두 열기, zM 모두 접기, zo zc 도 두 창에 같이.',
+  '               가름줄 아래는 x 양측 교환, a / b 그쪽 파일 바꾸기 (바이너리·큰 파일은 이것만)',
   '  q           비교 탭 닫기 - 트리의 그 줄로 (:tabclose 도 같다. 편집 창 둘에서는 예전대로 매크로)',
   '              Space/Space 로 고른 두 파일은 [B] 를 고른 줄로 (neo-tree 에서 골랐으면 그 창으로)',
   '  창 머리를 두 번 누르기  그쪽 파일 바꾸기 - 새 두 파일을 이 탭에서 견준다 (:DirDiffPath [a|b] [경로] 도.',
   '              한쪽에만 있는 파일의 없는 쪽도 이것으로 정한다. q 는 트리의 그 줄로)',
   '  :DirDiffSwap 이 짝만 양측 교환 - 두 파일이 자리를 바꾼다 (B 창 머리 맨 앞의 ⇄ / <> 를 눌러도. 트리는 그대로,',
   '              한 번 더 하면 원래대로). :DirDiffSwap! 는 비교 전체 (트리의 S)',
+  '  \\x          :DirDiffSwap 과 같다 - 이 짝만 양측 교환 (exchange)',
+  '  \\E          이 창 쪽 파일 바꾸기 - 지금 경로를 채워 묻는다 (창 머리를 두 번 누르기, :DirDiffPath 와 같다)',
   '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로)',
   '  <C-n> <C-p> = ]c [c (다음 / 앞 차이) - 마지막·첫 차이에서는 그렇다고 알리기만 한다 (파일은 그대로)',
   '  <C-S-n> <C-S-p> 다음 / 이전 차이 파일 (Shift+Ctrl+N / Shift+Ctrl+P, 언제든 - 3<C-S-n> 은 세 파일 앞으로): 트리의',
@@ -4850,6 +4898,11 @@ local function help()
     '  f           보기 고르기 (모두 / 차이 / 고아 없음 / 좌측 최신 / 우측 고아 / 동일 ...). 맨 아래 줄은',
     '              제외 목록 끄기 / 켜기 - 이 비교만 다시 훑는다 (:DirDiffExcludes [on|off|toggle] 도)',
     '  F           모두 보이기 <-> 차이 보이기',
+    '  c           고른 것만 지금 견주기: 비주얼(V v)로 고른 줄, 아니면 커서 줄 - 파일은 내용까지, 디렉터리는 그',
+    '              아래 모두. 다른 일보다 먼저, 중지했어도 한다. 끝나면 아래 항목 수·다름 수를 알린다',
+    '  <C-c>       비교 중지 / 잇기 (Beyond Compare 의 중지 - 큰 SDK 두 벌 등): 중지하면 여는 디렉터리는 목록·크기만,',
+    "              내용은 c 로 고른 것만 견준다. 상태줄 '중지됨 · 남은 N'. :DirDiffStop / :DirDiffResume 도",
+    '              (R 은 처음부터 - g:vimide_dirdiff_autocompare = 0 이면 중지한 채로 연다)',
     '  R           다시 훑기      q  끝내기 (비교 탭들도 닫는다)',
     '  ,r ,e       다음 / 앞 탭 - gt / gT 와 같다 (3,r 은 3번 탭으로. 비교 창에서도)',
     '  <Space>     비교할 곳 고르기: 지금 쪽 항목을 [A] 로, 다음 Space 의 것을 [B] 로 - 새 탭에서 비교',
@@ -4956,10 +5009,24 @@ function _G.vimide_dirdiff_pair_quit()
 end
 
 -- 비교 창의 보기 메뉴 (\d): 트리의 f 메뉴처럼 작은 창 - 지금 보기에 ●, Enter·더블클릭·Space 로 고르기,
--- 1 2 3 은 바로, q·Esc·\d 닫기, ? 도움말. 그 비교 창 가운데에 뜬다
+-- 1 2 3 은 바로, q·Esc·\d 닫기, ? 도움말. 그 비교 창 가운데에 뜬다. 가름줄 아래는 이 짝에 하는 일 (cmp.fm_acts):
+-- x 양측 교환(\x), a / b 그쪽 파일 바꾸기(지금 창 쪽은 \E) - 바이너리·큰 파일은 보기 없이 이것만
 local function set_fmode(v, id)
   v.fmode = id   -- 이 짝만. 다음에 여는 짝은 처음 보기(s.fmode)로 시작한다
   apply_fmode(v)
+end
+
+-- \d 메뉴의 일 줄: { 글자, 이름, 단축키, 할 일 } - 단축키는 걸려 있을 때만 (swap_keys·path_edit). 할 일은 'swap' 이나 쪽
+function cmp.fm_acts(v, from)
+  local here = from == v.win_b and 'b' or 'a'
+  local function key(opt, k)
+    return on(opt, 1) and ((type(vim.g.mapleader) == 'string' and vim.g.mapleader or '\\') .. k) or ''
+  end
+  return {
+    { 'x', '양측 교환 - 두 파일 자리 바꾸기', key(vim.g.vimide_dirdiff_swap_keys, 'x'), 'swap' },
+    { 'a', 'A 쪽 파일 바꾸기 (경로)', here == 'a' and key(vim.g.vimide_dirdiff_path_edit, 'E') or '', 'a' },
+    { 'b', 'B 쪽 파일 바꾸기 (경로)', here == 'b' and key(vim.g.vimide_dirdiff_path_edit, 'E') or '', 'b' },
+  }
 end
 
 local function open_fmenu(v)
@@ -4969,9 +5036,6 @@ local function open_fmenu(v)
   if not v.rel then
     return say('트리에서 파일을 먼저 고르세요')
   end
-  if v.bin then
-    return say('바이너리·큰 파일은 줄로 비교하지 않아 보기가 없습니다')
-  end
   local from = api.nvim_get_current_win()
   local buf = api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = 'wipe'
@@ -4979,18 +5043,46 @@ local function open_fmenu(v)
   vim.bo[buf].filetype = 'vimidedirdifffile'
   pcall(api.nvim_buf_set_name, buf, 'DirDiff 비교 보기 #' .. buf)
   local dot = ascii() and '*' or '●'
-  local lines, width = {}, 0
-  for i, md in ipairs(FMODES) do
-    lines[i] = (' %s %d  %s '):format(md.id == v.fmode and dot or ' ', i, fmode_label(md.id))
-    width = math.max(width, vim.fn.strdisplaywidth(lines[i]))
+  -- 줄마다 { 보기 } 또는 { 일 } (가름줄은 false). 바이너리·큰 파일은 보기가 없다 - 일만
+  local items, lines, width = {}, {}, 0
+  if not v.bin then
+    for i, md in ipairs(FMODES) do
+      items[#items + 1] = { md = md }
+      lines[#lines + 1] = (' %s %d  %s '):format(md.id == v.fmode and dot or ' ', i, fmode_label(md.id))
+    end
+    items[#items + 1] = false
+    lines[#lines + 1] = ''
+  end
+  local acts = cmp.fm_acts(v, from)
+  local lw = 0
+  for _, a in ipairs(acts) do
+    lw = math.max(lw, vim.fn.strdisplaywidth(a[2]))
+  end
+  for _, a in ipairs(acts) do
+    items[#items + 1] = { act = a }
+    lines[#lines + 1] = ('   %s  %s  %s '):format(a[1], fit(a[2], lw), a[3])
+  end
+  for _, l in ipairs(lines) do
+    width = math.max(width, vim.fn.strdisplaywidth(l))
   end
   local footer = ' Enter 고르기 · q 닫기 · ? 도움말 '
   width = math.max(width, vim.fn.strdisplaywidth(footer) + 2)
+  local sep = ascii() and '-' or '─'
+  for i, it in ipairs(items) do
+    if it == false then
+      lines[i] = string.rep(sep, width)
+    end
+  end
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
-  for i, md in ipairs(FMODES) do
-    if md.id == v.fmode then
+  for i, it in ipairs(items) do
+    if it == false then
+      pcall(api.nvim_buf_set_extmark, buf, ns, i - 1, 0, { end_col = #lines[i], hl_group = 'Comment' })
+    elseif it.md and it.md.id == v.fmode then
       pcall(api.nvim_buf_set_extmark, buf, ns, i - 1, 1, { end_col = #lines[i] - 1, hl_group = 'VimIdeDirDiffMenuNow' })
+    elseif it.act and it.act[3] ~= '' then
+      local l = lines[i]
+      pcall(api.nvim_buf_set_extmark, buf, ns, i - 1, #l - 1 - #it.act[3], { end_col = #l - 1, hl_group = 'Comment' })
     end
   end
   local h = #lines
@@ -5003,7 +5095,7 @@ local function open_fmenu(v)
   })
   vim.wo[win].cursorline = true
   v.menu = { buf = buf, win = win }
-  pcall(api.nvim_win_set_cursor, win, { FMODE[v.fmode].i, 1 })
+  pcall(api.nvim_win_set_cursor, win, { v.bin and 1 or FMODE[v.fmode].i, 1 })
   local function close(back)
     if not (v.menu and v.menu.buf == buf) then
       return
@@ -5017,10 +5109,35 @@ local function open_fmenu(v)
     end
   end
   local function choose(i)
-    local md = FMODES[i or api.nvim_win_get_cursor(win)[1]]
+    local it = items[i or api.nvim_win_get_cursor(win)[1]]
+    if not it then
+      return   -- 가름줄
+    end
     close(true)
-    if md and not v.closed then
-      set_fmode(v, md.id)
+    if v.closed then
+      return
+    end
+    if it.md then
+      return set_fmode(v, it.md.id)
+    end
+    -- 일: 비교 창(from)으로 돌아온 뒤에 - :DirDiffSwap·창 머리 두 번 누르기와 같은 길 (묻는 줄은 메뉴 밖에서)
+    local what = it.act[4]
+    vim.schedule(function()
+      if v.closed then
+        return
+      end
+      if what == 'swap' then
+        cmp.swap_tab(v)
+      else
+        cmp.edit_path(v, what)
+      end
+    end)
+  end
+  local function act(k)
+    for i, it in ipairs(items) do
+      if it and it.act and it.act[1] == k then
+        return choose(i)
+      end
     end
   end
   local function o(desc)
@@ -5031,10 +5148,15 @@ local function open_fmenu(v)
       choose()
     end, o('이 보기로 (비교 보기 메뉴)'))
   end
-  for i in ipairs(FMODES) do
+  for i in ipairs(v.bin and {} or FMODES) do
     vim.keymap.set('n', tostring(i), function()
       choose(i)
     end, o(fmode_label(FMODES[i].id) .. ' (비교 보기 메뉴)'))
+  end
+  for _, a in ipairs(acts) do
+    vim.keymap.set('n', a[1], function()
+      act(a[1])
+    end, o(a[2] .. ' (비교 보기 메뉴)'))
   end
   for _, k in ipairs({ 'q', '<Esc>', '<leader>d' }) do
     vim.keymap.set('n', k, function()
@@ -5313,6 +5435,156 @@ function tr.excl_cmd(arg)
   tr.set_noexcl(s, arg == 'off' or (arg == 'toggle' and not s.noexcl))
 end
 
+-- ---------------------------------------------------------------------------
+-- 중지 / 잇기 (<C-c>, :DirDiffStop / :DirDiffResume) - Beyond Compare 의 중지, 고른 것만 견주기 (c)
+-- ---------------------------------------------------------------------------
+-- Android SDK 두 벌처럼 큰 비교는 뒤에서 오래 돈다. 중지하면 뒤쪽(dirdiffscan.py 의 pause)이 줄의 새 일을 꺼내 가지 않는다
+-- - 하던 것은 마저 한다. 그래도 하는 것: 여는 디렉터리의 목록과 그 항목의 크기·날짜 (크기가 다르면 그 자리에서 다름 -
+-- 내용은 읽지 않는다), 깊은 펼치기(L zO), 복사·저장·파일 다루기 뒤의 다시 보기, 그리고 c 로 고른 것. 정하지 못한 것은
+-- 확인 중(·) 그대로다. s.paused 가 이 비교의 상태다: 뒤쪽을 다시 띄워도(S·e·제외 목록) 그대로 주고(start_job 의 --paused),
+-- R 만 g:vimide_dirdiff_autocompare 대로 처음부터 (tr.rescan). 고른 것만 견주기(c): 비주얼로 고른 줄(아니면 커서 줄)을
+-- 뒤쪽의 compare 로 - 파일은 내용까지, 디렉터리는 그 아래를 모두 훑고 견준다. 줄의 다른 일보다 먼저고 중지했어도 한다.
+-- 맡긴 것은 s.creq[id] (상태줄의 '고른 것 견주는 중'), 다 정해지면 'compared' 가 온다 (tr.compared)
+
+-- 판정이 아직 없다는 알림 끝에 붙일 까닭 ('(훑는 중)' / '(중지됨 …)')
+function tr.busy(s)
+  return s.paused and ' (중지됨 - <C-c> 로 잇기)' or ' (훑는 중)'
+end
+
+-- 트리 탭이나 그 비교 창의 세션 (Space/Space 로 고른 두 파일은 트리가 없다)
+function tr.here()
+  local tab = api.nvim_get_current_tabpage()
+  local s = sessions[tab]
+  if not (s and not s.solo) then
+    local v = view_of_win(api.nvim_get_current_win()) or view_of_tab(tab)
+    s = v and v.s
+  end
+  if s and not s.solo then
+    return s
+  end
+end
+
+-- stop: true 중지, false 잇기
+function tr.pause(s, stop)
+  if not (s.job and s.job > 0) then
+    return say('비교가 멈췄습니다 - R 로 다시 훑기', vim.log.levels.WARN)
+  end
+  local done = s.prog and s.prog.done
+  if stop and done and not s.paused then
+    return say('비교가 끝났습니다 - 중지할 것이 없습니다 (다시 훑기는 R)')
+  end
+  if (s.paused or false) == stop then
+    return say(stop and '이미 중지했습니다 - <C-c> 로 잇기 (고른 것만 견주기는 c)'
+      or (done and '중지하지 않았습니다 (비교는 끝났습니다)' or '중지하지 않았습니다 - 견주는 중'))
+  end
+  s.paused = stop or nil
+  send(s, { cmd = stop and 'pause' or 'resume' })
+  s.prog_dirty = true
+  schedule_render(s)
+  if stop then
+    say('비교를 중지했습니다 - 여는 디렉터리는 목록·크기만, 내용은 c 로 고른 것만 견줍니다 (<C-c> 로 잇기)')
+  else
+    say(done and '중지를 풀었습니다 (비교는 이미 끝났습니다)' or '비교를 다시 잇습니다')
+  end
+end
+
+-- R: 처음부터 다시 훑기 - 중지는 g:vimide_dirdiff_autocompare 대로 (복사 중이면 restart 가 거절한다 - 그대로 둔다)
+function tr.rescan(s)
+  if not s.copying then
+    s.paused = not on(vim.g.vimide_dirdiff_autocompare, 1) or nil
+  end
+  restart(s)
+end
+
+-- c: 고른 줄(l1..l2, 없으면 커서 줄)만 지금 견주기. 고른 디렉터리 안의 줄은 그 디렉터리로 (한 번)
+function tr.compare(s, l1, l2)
+  if not (s.job and s.job > 0) then
+    return say('비교가 멈췄습니다 - R 로 다시 훑은 뒤', vim.log.levels.WARN)
+  end
+  local set = {}
+  if l1 then
+    for i = math.min(l1, l2), math.max(l1, l2) do
+      local r = s.rows[i]
+      if r and r.e then
+        set[r.rel] = r.e
+      end
+    end
+  else
+    local r = cur_row(s)
+    if r and r.e then
+      set[r.rel] = r.e
+    end
+  end
+  local list = vim.tbl_keys(set)
+  table.sort(list)
+  local paths, nf, nd, no = {}, 0, 0, 0
+  for _, rel in ipairs(list) do
+    local inside = false
+    for _, o in ipairs(paths) do
+      if rel:sub(1, #o + 1) == o .. '/' then
+        inside = true
+        break
+      end
+    end
+    if not inside then
+      paths[#paths + 1] = rel
+      if both_dirs(set[rel]) then
+        nd = nd + 1
+      elseif is_dir(set[rel]) then
+        no = no + 1   -- 한쪽에만 있는 디렉터리 (다른 쪽은 없거나 파일) - 안에 견줄 것이 없다
+      else
+        nf = nf + 1
+      end
+    end
+  end
+  if #paths == 0 then
+    return say('견줄 줄이 없습니다')
+  end
+  s.req = s.req + 1
+  s.creq = s.creq or {}
+  s.creq[s.req] = { n = #paths, first = paths[1] }
+  send(s, { cmd = 'compare', id = s.req, paths = paths })
+  s.prog_dirty = true
+  schedule_render(s)
+  local what = {}
+  if nf > 0 then
+    what[#what + 1] = ('파일 %s'):format(commas(nf))
+  end
+  if nd > 0 then
+    what[#what + 1] = ('디렉터리 %s'):format(commas(nd))
+  end
+  if no > 0 then
+    what[#what + 1] = ('한쪽에만 있는 디렉터리 %s'):format(commas(no))
+  end
+  say(('비교: %s%s 지금 견줍니다%s'):format(table.concat(what, ' · '),
+    #paths == 1 and (' (' .. shown(paths[1]) .. ')') or '', s.paused and ' - 중지한 채 고른 것만' or ''))
+end
+
+-- 뒤쪽의 'compared': 고른 것을 다 견주었다
+function tr.compared(s, ev)
+  local r = s.creq and s.creq[ev.id]
+  if not r then
+    return
+  end
+  s.creq[ev.id] = nil
+  local what = {}
+  if (tonumber(ev.files) or 0) > 0 then
+    what[#what + 1] = ('파일 %s'):format(commas(ev.files))
+  end
+  if (tonumber(ev.dirs) or 0) > 0 then
+    what[#what + 1] = ('디렉터리 %s 아래 %s'):format(commas(ev.dirs), commas(tonumber(ev.under) or 0))
+  end
+  if (tonumber(ev.one) or 0) > 0 then
+    -- 한쪽에만 있는 디렉터리 (다른 쪽은 없거나 파일): 그 하나로 센다 - '디렉터리 1 아래 0' 이라 했더니 빈 폴더 같았다
+    what[#what + 1] = ('한쪽에만 있는 디렉터리 %s'):format(commas(ev.one))
+  end
+  local one = r.n == 1 and (' (' .. shown(r.first) .. ')') or ''
+  say(('비교 끝: %s%s - 다름 %s'):format(#what > 0 and table.concat(what, ' · ') or '없어진 항목', one,
+    commas(tonumber(ev.diff) or 0)))
+  s.prog_dirty = true
+  schedule_render(s)
+end
+
 local function map_list(s)
   local b = s.buf_l
   local function m(lhs, fn, desc)
@@ -5360,7 +5632,17 @@ local function map_list(s)
   end
   m('f', function() open_menu(s) end, '보기 고르기')
   m('F', function() set_mode(s, s.mode == 'all' and 'diff' or 'all') end, '모두 보이기 / 차이 보이기')
-  m('R', function() restart(s) end, '다시 훑기')
+  m('R', function() tr.rescan(s) end, '다시 훑기 (중지는 g:vimide_dirdiff_autocompare 대로)')
+  -- 중지 / 잇기: <C-c> (Beyond Compare 의 중지). vim-ide 의 전역 <C-c>(.vimrc 의 RvUnpin - RelationView 고정 풀기,
+  -- 아니면 커서 낱말의 CheckSymbol)는 트리 줄에서 쓸 데가 없어 이 버퍼에서만 가린다
+  m('<C-c>', function() tr.pause(s, not s.paused) end, '비교 중지 / 잇기 (중지하면 여는 것의 목록·크기와 c 로 고른 것만)')
+  -- 고른 것만 견주기: c (트리에서 비어 있던 글자 - 고칠 수 없는 트리에서 vim 의 c 바꾸기는 쓸 데가 없다). 비주얼은 고른 줄
+  m('c', function() tr.compare(s) end, '커서 줄만 지금 견주기 (디렉터리는 그 아래 모두 - 중지했어도)')
+  vim.keymap.set('x', 'c', function()
+    local l1, l2 = vim.fn.line('v'), vim.fn.line('.')
+    vim.cmd('normal! \27')
+    tr.compare(s, l1, l2)
+  end, { buffer = b, nowait = true, silent = true, desc = '고른 줄만 지금 견주기 (디렉터리는 그 아래 모두 - 중지했어도)' })
   -- 비교할 곳 고르기는 Space (neo-tree 와 같은 키 - 거기서는 Tab 도), 쪽 바꾸기는 Tab (쪽이 둘뿐이라 S-Tab 도
   -- 같다). 복사·지우기에 쓸 항목 고르기는 Space 에서 m 으로 옮겼다 (mark - 트리에서 m 으로 시작하는 키는 없다)
   m('<Space>', function() act_pick(s) end, '비교할 곳 고르기 [A] -> [B]')
@@ -5497,6 +5779,8 @@ function M.open(a, b)
     origin = api.nvim_get_current_tabpage(),
     -- 짝을 보일 곳: 비교 탭들(views) 또는 위의 편집 창 둘(main). 비교 중에 옵션을 바꿔도 이 비교는 그대로
     views = {}, pair_tab = pair_tab_on(), fmode = start_fmode(),
+    -- 중지한 채로 열기 (g:vimide_dirdiff_autocompare = 0): 여는 것의 목록·크기와 c 로 고른 것만 (tr.pause)
+    paused = not on(vim.g.vimide_dirdiff_autocompare, 1) or nil,
   }
   -- 곁창에서 :tabnew 하면 그 창 옵션을 물려받고 neo-tree 가 가져간다 - EDIT 창에서
   local back = api.nvim_get_current_win()
@@ -9345,7 +9629,7 @@ function cmp.fs_found(s, fs, path)
     cmp.fs_restore(s, fs, nil)
     render(s)
     if not (s.prog and s.prog.done) then
-      return say(('%s는 아직 차이 파일이 없습니다 (훑는 중)'):format(fs.dir > 0 and '아래로' or '위로'))
+      return say(('%s는 아직 차이 파일이 없습니다%s'):format(fs.dir > 0 and '아래로' or '위로', tr.busy(s)))
     end
     return say(('%s%s 차이 파일이 없습니다'):format(step_bits(s) and '이 보기에서 ' or '', fs.dir > 0 and '다음' or '이전'))
   end
@@ -9962,6 +10246,16 @@ end, { nargs = '?', complete = function(lead)
     return x:find(lead, 1, true) == 1
   end, { 'on', 'off', 'toggle' })
 end, desc = 'DirDiff: 이 비교의 제외 목록 켜기 / 끄기 (인자 없으면 목록과 상태)' })
+-- :DirDiffStop / :DirDiffResume - 이 비교의 중지 / 잇기 (트리의 <C-c> - tr.pause). 트리 탭이나 그 비교 창에서
+for _, spec in ipairs({ { 'DirDiffStop', true, '중지 (여는 것의 목록·크기와 c 로 고른 것만)' }, { 'DirDiffResume', false, '잇기' } }) do
+  api.nvim_create_user_command(spec[1], function()
+    local s = tr.here()
+    if not s then
+      return say('DirDiff 트리나 그 비교 창에서 쓰세요', vim.log.levels.WARN)
+    end
+    tr.pause(s, spec[2])
+  end, { nargs = 0, desc = 'DirDiff: 이 비교 ' .. spec[3] })
+end
 
 if vim.fn.exists(':DirDiff') ~= 2 and (tonumber(vim.g.vimide_dirdiff_view) or 1) ~= 0 then
   api.nvim_create_user_command('DirDiff', function(o)
