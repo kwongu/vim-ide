@@ -758,6 +758,7 @@ Ctrl+n / Ctrl+p (Neogit commit view, staged diff while committing): next / previ
 <leader>fs: Search every symbol in the project through the ctags index
 :GtagsIndex / :GtagsIndexUpdate / :GtagsIndexStatus: GTAGS index by hand
 :GutentagsUpdate!: rebuild the ctags index of this project by hand
+:VimIdePerf: what this nvim costs right now - ms to draw the tabline and the status line, open buffers, leftover processes and timers, memory (nvim, read-only; see "Long sessions")
 
 Ctrl+g: Grep. In nvim a floating "찾기 (grep)" box opens with two fields:
         the text to find, filled with the word under the cursor (or, in visual
@@ -3705,6 +3706,108 @@ than on the laptop was not the box. It was measured, not guessed:
 | The pickers | `\fo` re-generated the whole 44,466-file list every press (239 ms -> 116 ms); `\fs` asked gtags for every indexed path before parsing a row, again on every prefix change (95 ms -> 8 ms) |
 | Not the cause | gtags queries are *faster* on the server than on the Mac (4 ms vs 19 ms). SSH round-trip is 12 ms and cannot be reduced; compression made it worse. Plugin sourcing is 35 ms total, so lazy-loading buys nothing |
 
+### Long sessions
+
+nvims left open on the server for 13 hours to almost 7 days had become slow
+to switch buffers, and the cost grew with the session, not with the machine.
+Measured on those instances (read-only), then reproduced in an isolated nvim
+on a Mac with 60 and 150 open buffers (many `main.c`/`init.c`/`util.c` in
+different directories) and a 6,000-line C file:
+
+| | before | after |
+|---|---|---|
+| Buffer line (tabline), one draw | 65-100 ms with 55 buffers (server); 29 / 77 ms with 60 / 150 buffers (sandbox) - it grew with every buffer opened | 0.2-0.35 ms, the same for 60 or 150 buffers |
+| First buffer-line draw after switching buffers | 64 / 163 ms with 60 / 150 buffers | 4 / 5 ms - airline rebuilding its own buffer list; the names are not recomputed |
+| `:bn` + redraw | 73 / 176 ms with 60 / 150 buffers | 7-7.5 ms for both |
+| Status line, one draw | 4-5 ms (server); 0.3-0.5 ms, 2.0 ms with `hlsearch` on (sandbox) | 0.17-0.3 ms, 0.17-0.22 ms with `hlsearch` on (sandbox) |
+| Finished git processes still held open | 39-59 per nvim (server); in a scripted session (F9 tree and RelationView open, then 5 rounds of 10 `:bn`, a telescope pick, F11, `C-]`/`C-t`, DirDiff open/close) 7 at the start, +23 per round, 122 at the end | 0 throughout |
+| Timers | 5-15 one-shots re-armed every 0.5 s (server); 78 running at the end of that session, 1,560 timer starts and 0.11 s CPU per 10 s idle | none running, 0 starts and 0.001 s CPU per 10 s idle |
+
+What it was:
+
+- **The buffer line looked up every name against every buffer.** airline's
+  `unique_tail` formatter puts one `%{get_buffer_name(N)}` per visible name
+  into the tabline, and each one walks *all* listed buffers to find out which
+  file names occur twice. One draw is (names shown) x (buffers open), and
+  nvim draws it twice or three times per `:bn` and again at the first change
+  to a buffer. `vimide_unique_tail` builds the same table once and answers
+  from it. It builds it again only when a listed buffer is renamed or deleted,
+  the current directory (or the window's `:lcd`) changes, or the buffer list
+  itself changes. airline makes a new list object on every buffer switch, so
+  the list is compared by contents, together with the directory and the buffer
+  names (0.07 ms for 150 buffers) - a switch costs no rebuild. Buffers outside
+  the list (floats, pickers, trees) coming and going do not count. The names are
+  the same to the character (checked against `unique_tail` after every step
+  of a scripted run in nvim and in vim: renames, `:saveas`, `:w` of a
+  `[No Name]`, `:cd`, `:lcd`, `:tcd`, terminals, help, deletes, wipes, modified
+  markers, 60 and 150 buffers, and the DirDiff and launcher tab titles). One
+  exception: a directory or name changed with autocommands off
+  (`noautocmd cd`, `noautocmd file`) shows up at the next buffer switch rather
+  than at once. `let g:vimide_tabline_cache = 0` goes back to airline's.
+  Counted with a wrapper: moving the cursor, scrolling and typing never
+  redraw the tabline (0 for 30 `j` and 10 `C-d`); `:bn` does 2-3 times, the
+  first edit of a buffer 3-4, `C-]` 1 and `C-t` 2. So the cost landed on
+  exactly the moves that should be instant.
+- **The status line recounted every search match on every keystroke.**
+  airline's search count calls `searchcount()` without a limit each time the
+  status line is drawn - every cursor move while `hlsearch` is on, which after
+  a search is most of the day, and more on a bigger file. It is off. The count
+  now shows at the right of the command line at the moment you search, until
+  the next message or command:
+  - `n`, `N`, a typed `/` or `?`, `g*`: counted by nvim/vim itself
+    (`'shortmess'` without `S` - nvim's default; `.vimrc` takes it out for
+    vim, whose default has it). They stop counting at 999 (`[5/>999]`); vim at 99.
+  - `*` and `#`: these are vim-mark's keys, and its fallback to the built-in
+    search runs inside `:normal` under `'lazyredraw'`, which prints no count.
+    vim-ide counts once after the jump and prints it the same way, without a
+    limit (`[2/3428]`). It stays quiet when vim-mark jumped to a mark (its own
+    message stays) or when the search failed (`E384`/`E385` stays).
+
+  `let g:airline#extensions#searchcount#enabled = 1` brings the status line
+  one back.
+- The branch and hunk parts of the status line are kept for 2 seconds per
+  buffer, and asked again on entering a buffer, saving, a shell command,
+  focus, `:cd`, leaving or closing a terminal, and fugitive changes. The dirty
+  mark that airline's background `git status` reports appears as soon as it
+  arrives. A branch switched outside nvim (another shell) can show up to 2
+  seconds late. The branch part `stat`ed `.git/HEAD` and checked the file on
+  every keystroke (0.83 ms on the server).
+  `let g:vimide_airline_cache_sec = 0` asks every time again.
+- **neo-tree started one more resize watcher every time it drew a tree.**
+  Each redraw starts a 0.5 s polling loop that looks for width changes, and
+  the "already running" check reads a variable nothing ever sets. So every
+  redraw - every `:bn` while the tree follows the current file - added a loop,
+  and each kept going for as long as any neo-tree window was on screen (F9,
+  the RelationView tree): 13 loops after 12 buffer switches. The poller is off
+  (`resize_timer_interval = -1`). A tree is redrawn when its window is resized
+  (`WinResized`) or its number/sign/fold column changes (`OptionSet`) - at
+  once instead of up to 0.5 s later - and nothing runs while you are idle.
+- **neo-tree never closed its finished git processes.** Its job runner closes
+  the pipes but not the process handle, so every `git status`, `ls-files` and
+  `rev-parse` stayed in nvim's event loop until exit - 25 of them in the first
+  seconds after a session restore. The wrapper vim-ide already puts around
+  that runner now closes them.
+- telescope kept one timer per picker it opened (`debounce.throttle_leading`);
+  it is closed when the picker's prompt goes away.
+
+`:VimIdePerf` prints the same numbers for the nvim you are in, and changes
+nothing:
+
+```
+VimIdePerf  띄운 지 0h00m  RSS 65 MB  Lua 24.7 MB
+  tabline       0.23 ms   열린 버퍼 60개
+  statusline    0.21 ms   이 창
+  uv process  0개 - 끝났는데 안 닫힌 것 0
+  uv timer    3개 - 도는 것 0, 멈춘 채 남은 것 3
+  uv 그 밖     fs_event 3
+```
+
+The tabline figure should stay flat as buffers pile up, and the unclosed
+processes and running timers should not grow while nvim sits idle (right
+after a burst of commands a few debounce timers run for a moment). A few
+stopped timers are normal: RelationView and the reference highlight each
+reuse one.
+
 ### neo-tree's git marks on a big repo
 
 Finding or filtering in neo-tree makes it rescan, and every scan asked git
@@ -3791,8 +3894,9 @@ The size is now taken back after the reset, from the attached UI when
 there is one (that is the authoritative value) and from the saved value
 otherwise, so `--embed` still gets its size when the UI attaches.
 
-`:VimIdeColorCheck` for colour problems. For indexing, `:GtagsIndexStatus`
-says what is running and which database is in use, and
+`:VimIdeColorCheck` for colour problems, `:VimIdePerf` for an nvim that got
+slower the longer it ran (see "Long sessions"). For indexing,
+`:GtagsIndexStatus` says what is running and which database is in use, and
 `let g:autoindex_debug = 1` writes a line per index action to
 `stdpath('cache')/autoindex.log`.
 

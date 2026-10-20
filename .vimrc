@@ -1102,6 +1102,14 @@ _G.rv_setup('neo-tree', {
     nt_handler('file_deleted', 'vimide_wipe_bufs_under_deleted_dir'),
   },
   close_if_last_window = true,
+  -- 창 폭 감시(0.5초마다 도는 타이머)는 끈다 - 아래 WinResized 가 대신한다.
+  -- neo-tree 는 트리를 그릴 때마다(show_nodes) 감시를 '시작'하는데, 이미 돌고
+  -- 있는지 보는 변수(resize_monitor_timer)에 아무것도 넣지 않아서 그릴 때마다
+  -- 감시 사슬이 하나씩 더 생긴다. 사슬은 neo-tree 창이 하나라도 보이는 동안
+  -- (F9, RelationView 열의 트리) 스스로 다시 걸며 끝나지 않는다 - :bn 12번에
+  -- 13개, 가만히 있어도 10초에 타이머 380번 (샌드박스 실측). 개발서버에서 같은
+  -- 시각에 몰려 걸린 one-shot 타이머 5-15개가 이것이었다.
+  resize_timer_interval = -1,
   enable_git_status = true,
   enable_diagnostics = false,
   git_status_async = true,
@@ -1305,6 +1313,57 @@ _G.rv_setup('neo-tree', {
     },
   },
 })
+
+-- neo-tree 창의 폭이 바뀌면 다시 그린다 (위 resize_timer_interval = -1 대신).
+-- 오른쪽에 붙는 칸(크기·날짜·git)과 흐린 글자는 창 폭에 맞춰 그려 두므로, 폭이
+-- 바뀐 뒤에 그대로 두면 칸이 어긋난다. neo-tree 의 감시가 0.5초마다 하던 비교
+-- (안쪽 폭이 그린 때와 다르면 그 트리만 다시 그리기)를 폭이 바뀐 때 한 번만 한다.
+-- 쉬는 동안에는 아무것도 돌지 않는다.
+do
+  local function redraw_resized()
+    local okm, manager = pcall(require, 'neo-tree.sources.manager')
+    local okr, renderer = pcall(require, 'neo-tree.ui.renderer')
+    local oku, nutils = pcall(require, 'neo-tree.utils')
+    if not (okm and okr and oku) then
+      return
+    end
+    pcall(manager._for_each_state, nil, function(state)
+      if state.win_width and renderer.tree_is_visible(state) then
+        local w = nutils.get_inner_win_width(state.winid)
+        if w ~= state.win_width then
+          state.win_width = w
+          renderer.redraw(state)
+        end
+      end
+    end)
+  end
+  local grp = vim.api.nvim_create_augroup('VimIdeNeotreeResize', { clear = true })
+  vim.api.nvim_create_autocmd('WinResized', {
+    group = grp,
+    callback = function()
+      -- neo-tree 를 한 번도 안 열었거나, 바뀐 창에 트리가 없으면 할 일이 없다
+      if not package.loaded['neo-tree.sources.manager'] then
+        return
+      end
+      for _, w in ipairs((vim.v.event or {}).windows or {}) do
+        local okb, b = pcall(vim.api.nvim_win_get_buf, w)
+        if okb and vim.bo[b].filetype == 'neo-tree' then
+          return redraw_resized()
+        end
+      end
+    end,
+  })
+  -- 창 크기는 그대로인데 안쪽 폭이 바뀌는 때 (트리 창에서 :setlocal number 등)
+  vim.api.nvim_create_autocmd('OptionSet', {
+    group = grp,
+    pattern = { 'number', 'relativenumber', 'numberwidth', 'signcolumn', 'foldcolumn', 'statuscolumn' },
+    callback = function()
+      if package.loaded['neo-tree.sources.manager'] and vim.bo.filetype == 'neo-tree' then
+        vim.schedule(redraw_resized)
+      end
+    end,
+  })
+end
 
 -- 느린 repo 에서 neo-tree 의 git 표시를 끈다.
 --
@@ -1522,6 +1581,25 @@ do
     end
     local orig = nu.job
     nu._vimide_orig_job = orig
+    -- neo-tree 의 utils.job 은 끝난 프로세스의 uv 핸들을 닫지 않는다 (파이프만
+    -- 닫는다). 닫지 않은 핸들은 nvim 이 끝날 때까지 루프에 남는다 - git 명령
+    -- 하나마다 하나씩: 닷새 띄운 nvim 에 59개, 13시간 된 것에 49개 (개발서버
+    -- uv.walk 실측, 그중 25개가 시작 몇 초 안의 것). 모든 neo-tree 명령을 이리로
+    -- 띄워, 끝나면(프로세스도 파이프도 다 끝난 뒤 on_exit 직전) 닫는다.
+    local function run(cmd, opts, on_exit)
+      local box = {}
+      local job, err = orig(cmd, opts, function(...)
+        local h = box.job and box.job.handle
+        if h and not h:is_closing() then
+          pcall(h.close, h)
+        end
+        if on_exit then
+          return on_exit(...)
+        end
+      end)
+      box.job = job
+      return job, err
+    end
     local start
     -- status 는 한 repo 에 하나씩(queue), status·ls-files 는 둘 다 시간을 잰다
     start = function(root, sub, cmd, opts, on_exit)
@@ -1530,7 +1608,7 @@ do
         running[root] = (running[root] or 0) + 1
       end
       local rec = { killed = false }
-      local job, err = orig(cmd, opts, function(code, out, errs)
+      local job, err = run(cmd, opts, function(code, out, errs)
         if rec.timer then
           rec.timer:stop()
           rec.timer:close()
@@ -1578,7 +1656,7 @@ do
     nu.job = function(cmd, opts, on_exit)
       local root, sub = git_job(cmd)
       if not root or (sub ~= 'status' and sub ~= 'ls-files') then
-        return orig(cmd, opts, on_exit)
+        return run(cmd, opts, on_exit)
       end
       refresh_cfg()
       if is_off(root) then
@@ -2166,7 +2244,92 @@ let g:airline_theme='hybrid'
 "let g:airline_theme='dark'
 "let g:airline_solarized_bg='dark'
 let g:airline#extensions#tabline#enabled = 1
-let g:airline#extensions#tabline#formatter = 'unique_tail'
+" 버퍼 줄(tabline)의 이름은 airline 의 unique_tail 과 같다. 다만 unique_tail 은
+" 보이는 이름 하나마다 열린 버퍼 전체를 다시 훑어서, 버퍼가 쌓인 긴 세션에서는
+" 줄 한 번 그리기가 (보이는 수) x (열린 수) 였다 - 버퍼 55개에서 65-100ms, :bn
+" 한 번에 두세 번 (개발서버 실측). vimide_unique_tail 은 같은 이름표를 버퍼 목록이
+" 바뀔 때만 한 번 만들어 두고 꺼낸다 (~/.vim/autoload/airline/extensions/tabline/
+" formatters/vimide_unique_tail.vim).
+"   let g:vimide_tabline_cache = 0   " airline 의 unique_tail 을 그대로 (예전)
+let g:vimide_tabline_cache = 1
+let g:airline#extensions#tabline#formatter = g:vimide_tabline_cache ? 'vimide_unique_tail' : 'unique_tail'
+" 상태줄 오른쪽의 검색 수 /낱말[5/600] 은 끈다. airline 의 searchcount 는 상태줄을
+" 그릴 때마다(커서가 한 칸 움직일 때마다) searchcount(recompute, maxcount=-1) 로
+" 버퍼 전체를 처음부터 다시 센다 - 6000줄 파일에서 한 번 0.5ms (맥), 개발서버
+" 1.35ms, 파일이 크면 그만큼 더. hlsearch 는 검색 뒤 몇 시간이고 켜져 있다.
+" 대신 찾는 그 순간에 명령줄 오른쪽에 [5/600] 이 뜬다 (다음 알림이나 :명령까지):
+"   n N / ? g* - 'shortmess' 에 S 가 없으면 nvim·vim 이 스스로 센다. nvim 은 기본값에
+"                S 가 없고, vim 은 있어서(filnxtToOS) 여기서 뺀다 (S 가 없는 8.1.1270
+"                이전 vim 에서는 빼도 그만). 세는 상한이 있다 - nvim [5/>999], vim >99
+"   * #        - vim-mark 가 가져간 키라 아래 s:VimIdeSearchCount 가 센다 (상한 없음)
+"   let g:airline#extensions#searchcount#enabled = 1   " 되살리기 (상태줄에 늘)
+let g:airline#extensions#searchcount#enabled = 0
+set shortmess-=S
+" * 와 # 의 검색 수.
+" vim-mark 의 * # (<Plug>MarkSearchNext/Prev)는 커서가 마크 위가 아니면
+" ':normal! *zv' 로 넘긴다. 'lazyredraw' 가 켜져 있고 뒤에 zv 가 남아 있으면 그
+" 검색은 알림을 내지 않는다 - [n/m] 이 명령줄에도(위 searchcount 를 끈 뒤로는)
+" 상태줄에도 없었다. * # 가 끝나면 한 번 세어 nvim 의 n 과 같은 모양으로 보인다.
+" 마크를 찾아간 경우(커서가 마크 위)는 vim-mark 의 알림을, 못 찾은 경우는 그 오류를
+" 그대로 둔다 - 앞에서 커서 자리를 적고 v:errmsg 를 비워 두었다가(<expr> 라 앞에 친
+" 수 3* 는 그대로 넘어간다), 커서가 움직이지 않았거나(낱말이 없다) E384/E385 가
+" 났으면('nowrapscan' 이라 끝에서 멈춘다 - 낱말 가운데서 치면 낱말 첫 글자로는
+" 옮겨 간다) 보이지 않는다. 다른 오류는 보지 않는다 (vim-mark 이 처음 읽힐 때
+" silent! 로 없는 함수를 불러 보며 E117 을 남긴다). 한 번만 세므로 상한은 두지
+" 않는다 (100ms 를 넘기면 [?/??]). vim-mark 가 * # 를 걸어 두었을 때만 덧붙인다
+" (VimEnter - vim-mark 은 .vimrc 뒤에 읽힌다).
+" searchcount() 와 <Cmd> 가 없는 vim(8.2.1978 이전)은 그대로다.
+if exists('*searchcount') && (has('nvim') || has('patch-8.2.1978'))
+    let s:search_pos = []
+    function! s:VimIdeSearchCountPre() abort
+        let s:search_pos = getpos('.')
+        let v:errmsg = ''
+        return ''
+    endfunction
+    function! s:VimIdeSearchCount() abort
+        if &shortmess =~# 'S' || empty(@/) || getpos('.') == s:search_pos
+                    \ || v:errmsg =~# '^E38[45]:'
+            return
+        endif
+        if exists('*mark#CurrentMark') && !empty(mark#CurrentMark()[0])
+            return
+        endif
+        try
+            let l:r = searchcount({'recompute': 1, 'maxcount': 0, 'timeout': 100})
+        catch
+            return
+        endtry
+        if empty(l:r) || (l:r.total == 0 && l:r.incomplete != 1)
+            return
+        endif
+        let l:cnt = l:r.incomplete == 1 ? '[?/??]' : printf('[%d/%d]', l:r.current, l:r.total)
+        let l:msg = (v:searchforward ? '/' : '?') . @/
+        " 한 줄을 넘기면 hit-enter 가 뜬다 - v:echospace 안에, n 의 알림과 같은 칸에 맞춘다
+        let l:room = (exists('v:echospace') ? v:echospace : &columns - 12) - strwidth(l:cnt) - 2
+        if l:room < 1
+            echo l:cnt
+            return
+        endif
+        let l:msg = strcharpart(l:msg, 0, l:room)
+        while strwidth(l:msg) > l:room
+            let l:msg = strcharpart(l:msg, 0, strchars(l:msg) - 1)
+        endwhile
+        echo l:msg . repeat(' ', l:room - strwidth(l:msg) + 1) . l:cnt
+    endfunction
+    function! s:VimIdeSearchCountMaps() abort
+        for [l:key, l:plug] in [['*', '<Plug>MarkSearchNext'], ['#', '<Plug>MarkSearchPrev']]
+            if maparg(l:key, 'n') ==# l:plug
+                execute 'nmap' l:key '<Plug>(VimIdeSearchCountPre)' . l:plug . '<Plug>(VimIdeSearchCount)'
+            endif
+        endfor
+    endfunction
+    nnoremap <expr> <Plug>(VimIdeSearchCountPre) <SID>VimIdeSearchCountPre()
+    nnoremap <silent> <Plug>(VimIdeSearchCount) <Cmd>call <SID>VimIdeSearchCount()<CR>
+    augroup VimIdeSearchCount
+        autocmd!
+        autocmd VimEnter * call s:VimIdeSearchCountMaps()
+    augroup END
+endif
 let g:airline#extensions#tagbar#enabled = 1
 " airline 의 xkblayout(입력기 표시) 확장은 nvim 이면 무조건 켜지고, 상태줄을
 " 그릴 때마다 require'ime' / require'fcitx5-ui' 를 찾다 실패한다 (둘 다 없다).
@@ -2201,6 +2364,83 @@ let g:airline_section_error  = ''
 let g:airline_section_warning = ''
 let g:airline_symbols.notexists = ''
 autocmd BufDelete * call airline#extensions#tabline#buflist#invalidate()
+
+" 상태줄의 branch·hunks 자리는 잠깐 담아 두고 쓴다.
+"
+" 상태줄은 커서가 움직일 때마다(j 한 번에도) 다시 그린다. 그때마다 airline 의
+" branch 자리는 FugitiveHead(.git/HEAD stat)와 untracked 검사(expand, isdirectory)를,
+" hunks 자리는 gitsigns/signify 의 값을 다시 푼다 - 개발서버 실측 0.83ms + 0.34ms,
+" 상태줄 한 번(4-5ms)의 1/4. 둘 다 거의 바뀌지 않는다.
+"   branch: 버퍼마다 담아 두고 이 초가 지나거나, 버퍼에 들어오거나, 저장·셸 명령·
+"           포커스·cwd·fugitive·터미널(:terminal 에서 나옴, 끝남)이 바뀌면 다시 묻는다.
+"           창 폭이 달라도 (폭 따라 줄인다). airline 이 b:airline_head 를 지우면
+"           (뒤에서 돌린 git 결과 - 고친 표시가 왔다) 그 자리에서 다시 묻는다.
+"           바깥(다른 셸)에서 바꾼 브랜치는 이 초만큼 늦게 보일 수 있다
+"   hunks : 버퍼의 changedtick·창 폭·gitsigns 가 준 값(b:gitsigns_status_dict)이
+"           그대로이고 이 초가 안 지났으면 앞의 글자를 그대로 쓴다
+" airline 은 섹션을 만들 때 자리의 함수 이름을 글자로 박아 넣는다 (위 tagbar 설명).
+" 그래서 다 만든 뒤(AirlineAfterInit) 섹션 b 의 글자에서 함수 이름만 바꿔 넣는다 -
+" 섹션 글자는 창마다 상태줄을 짤 때 읽으므로 그때 바꿔도 처음부터 맞다.
+"   let g:vimide_airline_cache_sec = 0   " 담지 않는다 (airline 그대로, 예전)
+let g:vimide_airline_cache_sec = 2
+let s:stl_gen = 0
+function! s:VimIdeBranchKey() abort
+    return s:stl_gen . ':' . winwidth(0) . ':' . empty(get(b:, 'airline_hunks', ''))
+                \ . ':' . exists('b:airline_head')
+endfunction
+function! VimIdeBranchHead() abort
+    let l:sec = get(g:, 'vimide_airline_cache_sec', 2)
+    if l:sec <= 0
+        return airline#extensions#branch#get_head()
+    endif
+    let l:c = get(b:, 'vimide_branch_cache', [])
+    let l:now = localtime()
+    if len(l:c) == 3 && l:c[0] ==# s:VimIdeBranchKey() && l:now - l:c[1] < l:sec
+        return l:c[2]
+    endif
+    let l:head = airline#extensions#branch#get_head()
+    " 열쇠는 물은 뒤에 만든다 (get_head 가 b:airline_head 를 다시 채운다)
+    let b:vimide_branch_cache = [s:VimIdeBranchKey(), l:now, l:head]
+    return l:head
+endfunction
+function! VimIdeHunks() abort
+    let l:sec = get(g:, 'vimide_airline_cache_sec', 2)
+    " 비활성 창은 airline 도 빈 글자다 (같은 버퍼가 다른 창에 떠 있어도)
+    if l:sec <= 0 || !get(w:, 'airline_active', 0)
+        return airline#extensions#hunks#get_hunks()
+    endif
+    let l:d = get(b:, 'gitsigns_status_dict', 0)
+    let l:c = get(b:, 'vimide_hunks_cache', [])
+    let l:now = localtime()
+    if len(l:c) == 6 && l:c[0] == s:stl_gen && l:c[1] == b:changedtick
+                \ && l:c[2] == winwidth(0) && l:c[3] is l:d && l:now - l:c[4] < l:sec
+        return l:c[5]
+    endif
+    let l:s = airline#extensions#hunks#get_hunks()
+    let b:vimide_hunks_cache = [s:stl_gen, b:changedtick, winwidth(0), l:d, l:now, l:s]
+    return l:s
+endfunction
+function! s:VimIdeAirlineCacheParts() abort
+    if get(g:, 'vimide_airline_cache_sec', 2) <= 0 || !exists('g:airline_section_b')
+        return
+    endif
+    let g:airline_section_b = substitute(g:airline_section_b,
+                \ 'airline#extensions#branch#get_head()', 'VimIdeBranchHead()', 'g')
+    let g:airline_section_b = substitute(g:airline_section_b,
+                \ 'airline#extensions#hunks#get_hunks()', 'VimIdeHunks()', 'g')
+endfunction
+augroup VimIdeAirlineCache
+    autocmd!
+    autocmd User AirlineAfterInit call s:VimIdeAirlineCacheParts()
+    autocmd BufEnter,BufWritePost,FileChangedShellPost,ShellCmdPost,FocusGained,CmdwinLeave * let s:stl_gen += 1
+    autocmd User FugitiveChanged let s:stl_gen += 1
+    if exists('##DirChanged')
+        autocmd DirChanged * let s:stl_gen += 1
+    endif
+    if exists('##TermLeave') && exists('##TermClose')
+        autocmd TermLeave,TermClose * let s:stl_gen += 1
+    endif
+augroup END
 
 " Nerd Font 가 없는 터미널(Tera Term)에서는 airline 의 powerline 글자를 끈다.
 " 위쪽 g:vimide_ascii_icons 판정을 그대로 쓴다. 앞의 설정은 건드리지 않고
