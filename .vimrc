@@ -1275,22 +1275,22 @@ _G.rv_setup('neo-tree', {
     hijack_netrw_behavior = 'disabled',
     use_libuv_file_watcher = false,
     follow_current_file = { enabled = true },
-    -- H 로 숨김 파일을 켜고 끈다.
+    -- I (또는 H) 로 숨김 파일을 켜고 끈다.
     --
-    -- H(toggle_hidden)는 filtered_items.visible 만 뒤집는데, 그 값은
+    -- I·H(toggle_hidden)는 filtered_items.visible 만 뒤집는데, 그 값은
     -- '걸러진 항목을 흐리게라도 보여줄까'라는 뜻이다. hide_dotfiles 가
-    -- false 면 애초에 걸러지는 것이 없어서 H 를 눌러도 화면이 그대로다 -
+    -- false 면 애초에 걸러지는 것이 없어서 눌러도 화면이 그대로다 -
     -- 토글이 안 듣는 것처럼 보였던 이유다.
     --
-    -- 그래서 거르기는 켜 두고(hide_dotfiles), 기본은 보이게 둔다
-    -- (visible = true, 흐리게 표시). 그러면 H 가 '흐리게 보임 <-> 숨김'
-    -- 을 오간다. .tags 나 .git 처럼 이 설정에서 자주 보는 것들이 기본
-    -- 화면에서 사라지지 않는다.
+    -- 그래서 거르기는 켜 두고(hide_dotfiles), 기본은 숨긴다 (visible =
+    -- false - 트리를 열면 . 으로 시작하는 것은 안 보이고, 볼 때만 I).
+    -- 누르면 흐리게 보임 <-> 숨김 을 오간다. 트리(창)마다 따로라 F9
+    -- 트리에서 켜도 RelationView 열·DirDiff 선택 창의 트리는 숨긴 채다.
     --
     -- gitignore 쪽은 건드리지 않는다(hide_gitignored = false): 빌드
     -- 산출물이 많은 트리에서 그것까지 걸면 화면이 크게 달라진다.
     filtered_items = {
-      visible = true,
+      visible = false,
       hide_dotfiles = true,
       hide_gitignored = false,
     },

@@ -3955,9 +3955,11 @@ leaves you in normal mode.
 `filtered_items.visible` - "show the filtered items, just differently".
 With `hide_dotfiles = false` nothing was ever filtered, so the flag flipped
 and the screen did not change. Filtering is on now (`hide_dotfiles = true`)
-with `visible = true`, so dotfiles still show by default, dimmed, and `H`
-takes them away and brings them back - with a `(2 hidden items)` line where
-they were. `hide_gitignored` stays off: turning that on in a tree full of
+with `visible = false`, so a tree opens with dotfiles hidden - a `(2 hidden
+items)` line stands where they are - and `I` (or `H`) brings them back,
+dimmed, and takes them away again. The toggle belongs to that tree: showing
+them in the F9 tree leaves the RelationView column's tree and the DirDiff
+launcher's trees as they were. `hide_gitignored` stays off: turning that on in a tree full of
 build output changes the view far more than the key is worth.
 
 **Opening a file could fail** with
