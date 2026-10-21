@@ -1221,7 +1221,7 @@ end
 -- 반쪽의 칸 (Beyond Compare 의 폴더 비교): 이름(안내선 + 아이콘 + 이름) | 크기 | 날짜 | 시각. 좁으면
 -- 시각, 날짜, 크기 순으로 뺀다 (이름 칸이 크기 18, 날짜 22, 시각 24 칸은 남게)
 local function layout(s)
-  local W = api.nvim_win_get_width(s.win_l)
+  local W = api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_width(s.win_l) or vim.o.columns
   local half = math.floor((W - 3) / 2)
   local f = tr.datefmt()
   local SZ = 12   -- ' ' + 11 칸 (9,999,999,999)
@@ -1686,6 +1686,51 @@ function tr.plain_extra(w)
     fillchars = 'eob: ', statusline = ' ', winfixbuf = true }) do
     set_wo(w, k, v)
   end
+  tr.fresh(w)
+end
+
+-- 창의 점프 목록·태그 스택을 비운다 (QA-09). 갈라 만든 창·:tabnew 의 창은 연 창의 것을 물려받아, 트리·비교 창의
+-- Ctrl+O / Ctrl+T 가 그 창의 파일(사용자 버퍼, 트리 버퍼)을 이 자리에 열었다 (트리가 파일로 바뀌어 비교가 사라졌다).
+-- 트리 창에서 갈라 연 F9 트리도 그 목록을 물려받아 Ctrl+O 가 트리 버퍼를 F9 트리에 실었다 (QA-03)
+function tr.fresh(w)
+  pcall(api.nvim_win_call, w, function()
+    vim.cmd('clearjumps')
+  end)
+  pcall(vim.fn.settagstack, w, { items = {} }, 'r')
+end
+
+-- 우리 버퍼의 이름: 'DirDiff:<무엇>:<버퍼 번호>' - 빈칸·#·%·<> 없는 한 낱말 (QA-03). 예전 'DirDiff dA <> dB #4' 는
+-- neo-tree 가 F9 트리에 실린 이 버퍼를 치우며 친 ':bdelete <이름>' 에서 여러 인자로 갈려(# 는 대체 버퍼) 사용자의
+-- 버퍼를 지우고 그 탭을 닫았다 - 다음 :close 에 nvim 이 꺼졌다. 우리 버퍼는 목록에 없어(unlisted) 한 낱말 이름의
+-- :bdelete 는 아무것도 지우지 않는다. 무엇(디렉터리 이름)의 빈칸·특수 글자는 _ 로.
+-- 'dirdiff://…' 꼴(URL)은 쓰지 않는다: 지금 디렉터리 밖의 이름이라 F9 가 이 창에서 '지금 파일 드러내기' 로 'File not
+-- in cwd. Change cwd to dirdiff:/…?' 를 물었다 (지금 디렉터리 아래로 붙는 보통 이름은 예전처럼 묻지 않는다)
+function tr.bufname(what, b)
+  return ('DirDiff:%s:%d'):format((tostring(what):gsub('[^%w%._%-+=,@\128-\255]', '_')), b)
+end
+
+-- neo-tree 창에 우리 버퍼가 실리면 (그 창의 Ctrl+O 등) neo-tree 는 제 버퍼로 되돌리고(b#) 그 이름의 버퍼를 지운 뒤
+-- '다시 연다' (setup/init.lua 의 buffer_enter_event -> utils.open_file): 그대로 두면 트리 옆에 이 버퍼를 든 창을
+-- 하나 갈라 세웠다. 그 열기를 받아 버린다 (FILE_OPEN_REQUESTED 에 { handled = true }). neo-tree 의 setup 은 구독을
+-- 모두 지우므로 부를 때마다 다시 건다 (id 로 빼고 넣는다 - 겹치지 않는다). tr.stray 가 부른다
+function tr.nt_hook()
+  local ev = package.loaded['neo-tree.events']
+  if type(ev) ~= 'table' or type(ev.subscribe) ~= 'function' then
+    return
+  end
+  local h = {
+    event = ev.FILE_OPEN_REQUESTED or 'file_open_requested',
+    id = 'vimide_dirdiff_own_buf',
+    handler = function(args)
+      local b = type(args) == 'table' and args.bufnr
+      if type(b) == 'number' and b > 0 and api.nvim_buf_is_valid(b)
+          and vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':t'):find('^DirDiff:[^/]*:%d+$') then
+        return { handled = true }
+      end
+    end,
+  }
+  pcall(ev.unsubscribe, h)
+  pcall(ev.subscribe, h)
 end
 
 function tr.head_ensure(s)
@@ -1704,7 +1749,7 @@ function tr.head_ensure(s)
     vim.bo[b].bufhidden = 'wipe'
     vim.b[b].airline_disable_statusline = 1   -- airline 이 칸 제목(상태줄)을 제 것으로 바꾸지 않게
     vim.bo[b].filetype = 'vimidedirdiffhead'
-    pcall(api.nvim_buf_set_name, b, 'DirDiff 경로 #' .. b)
+    pcall(api.nvim_buf_set_name, b, tr.bufname('head', b))
     -- 두 번 누르기는 누른 쪽의 경로 바꾸기 (tr.head_click). 보통은 첫 누르기에 트리로 돌아가(cmp.bounce) 트리의
     -- <2-LeftMouse> 가 받지만, 돌아가기(vim.schedule) 앞에 둘째가 오면 여기서 받는다 (그대로면 낱말 고르기 - 비주얼)
     vim.keymap.set('n', '<2-LeftMouse>', function()
@@ -2065,6 +2110,8 @@ local function plain_window(win)
   end
   -- 맨 글자의 이름 공간도 (옵션이 아니라 setlocal < 로 걷히지 않는다 - cmp.plain)
   cmp.plain_win(win, nil)
+  -- 물려받은 점프 목록도 (QA-09 - 트리 창에서 연 비교 탭의 Ctrl+O 가 트리 버퍼를 비교 창에 실었다)
+  tr.fresh(win)
 end
 
 -- :diffoff 는 foldmethod 가 manual 로 돌아오면 diff 가 만든 접기를 manual 접기로 남겨 두고 'foldenable' 을
@@ -2094,7 +2141,7 @@ local function scratch(v, side, text)
     b = api.nvim_create_buf(false, true)
     vim.bo[b].bufhidden = 'hide'
     vim.bo[b].swapfile = false
-    pcall(api.nvim_buf_set_name, b, ('DirDiff %s #%d'):format(side:upper(), b))
+    pcall(api.nvim_buf_set_name, b, tr.bufname(side:upper(), b))
     v['empty_' .. side] = b
   end
   vim.bo[b].modifiable = true
@@ -3415,7 +3462,11 @@ end
 -- ---------------------------------------------------------------------------
 
 local function cursor_side(s)
-  -- 커서가 트리의 오른쪽 반(B)에 있는지 - 마우스로 눌렀거나 l/w 로 옮겼을 때
+  -- 커서가 트리의 오른쪽 반(B)에 있는지 - 마우스로 눌렀거나 l/w 로 옮겼을 때. 트리 창이 닫혔으면 그대로 (QA-20 -
+  -- 트리 버퍼를 보이는 남은 창은 tr.adopt 가 넘겨받는다)
+  if not api.nvim_win_is_valid(s.win_l) then
+    return
+  end
   local pos = api.nvim_win_get_cursor(s.win_l)
   local ob = s.offb and s.offb[pos[1]]
   if ob then
@@ -3424,6 +3475,9 @@ local function cursor_side(s)
 end
 
 local function act_side(s)
+  if not api.nvim_win_is_valid(s.win_l) then
+    return
+  end
   s.side = s.side == 'a' and 'b' or 'a'
   goto_row(s, api.nvim_win_get_cursor(s.win_l)[1])
   mark_side(s)
@@ -3452,8 +3506,8 @@ local function act_mark(s)
       say(('%s 쪽에 없는 항목입니다'):format(side:upper()))
     end
   end
-  local i = api.nvim_win_get_cursor(s.win_l)[1]
-  if i < api.nvim_buf_line_count(s.buf_l) then
+  local i = api.nvim_win_is_valid(s.win_l) and api.nvim_win_get_cursor(s.win_l)[1]
+  if i and i < api.nvim_buf_line_count(s.buf_l) then
     goto_row(s, i + 1)
     mark_side(s)
   end
@@ -4757,7 +4811,7 @@ local function open_menu(s)
   vim.bo[buf].bufhidden = 'wipe'
   -- 이름·filetype 이 없으면 단축키 도움말(F1)이 이 창을 '이 창 · ' 으로만 불렀다
   vim.bo[buf].filetype = 'vimidedirdiffmenu'
-  pcall(api.nvim_buf_set_name, buf, 'DirDiff 보기 #' .. buf)
+  pcall(api.nvim_buf_set_name, buf, tr.bufname('menu', buf))
   local footer = ' Enter 고르기 · q 닫기 '
   local h = #MODES + 2   -- 보기들, 가름줄, 제외 목록 끄기 / 켜기 (menu_fill)
   local border = ascii() and { '+', '-', '+', '|', '+', '-', '+', '|' } or 'rounded'
@@ -5041,7 +5095,7 @@ local function open_fmenu(v)
   vim.bo[buf].bufhidden = 'wipe'
   -- 이름·filetype: 단축키 도움말(F1)이 이 창을 이름으로 부른다 (keyhelp.lua 의 WIN_NAME)
   vim.bo[buf].filetype = 'vimidedirdifffile'
-  pcall(api.nvim_buf_set_name, buf, 'DirDiff 비교 보기 #' .. buf)
+  pcall(api.nvim_buf_set_name, buf, tr.bufname('filemenu', buf))
   local dot = ascii() and '*' or '●'
   -- 줄마다 { 보기 } 또는 { 일 } (가름줄은 false). 바이너리·큰 파일은 보기가 없다 - 일만
   local items, lines, width = {}, {}, 0
@@ -5687,10 +5741,38 @@ local function map_list(s)
   if on(vim.g.vimide_dirdiff_swap_keys, 1) then
     m('S', function() tr.swap(s) end, '양측 교환 (A·B 뿌리를 바꾸고 다시 비교)')
   end
+  -- 트리 버퍼를 보이는 다른 창 (QA-20, QA-03): 들어간 창은 트리 창으로 (tr.adopt), 다른 창에 실린 것은 남의 창으로
+  -- 적는다 (tr.stray). 들어간 창은 다음 틱에 본다: 플러그인이 트리 창에서 갈라(그 순간 새 창도 트리 버퍼다 - 여기
+  -- WinEnter 가 뜬다) 제 버퍼를 넣는 사이에 트리 창으로 삼으면 winfixbuf 에 막혔다 (F9 의 nui split: E1513). 다음
+  -- 틱에도 지금 창이고 트리 버퍼면 사용자가 :vs 로 가른 것이다. 창을 옮기면 WinEnter 가 BufEnter 보다 먼저다 - 그
+  -- BufEnter 는 '실린' 것이 아니다 (s.entering)
+  api.nvim_create_autocmd({ 'WinEnter', 'BufEnter' }, {
+    buffer = b,
+    callback = function(ev)
+      local w = api.nvim_get_current_win()
+      if ev.event == 'BufEnter' then
+        if s.entering ~= w then
+          tr.stray(s)
+        end
+        return
+      end
+      if w == s.win_l then
+        return
+      end
+      s.entering = w
+      vim.schedule(function()
+        s.entering = nil
+        if api.nvim_get_current_win() == w then
+          tr.adopt(s, w)
+        end
+      end)
+    end,
+  })
   api.nvim_create_autocmd('CursorMoved', {
     buffer = b,
     callback = function()
       local old = s.side
+      tr.adopt(s, api.nvim_get_current_win())
       cursor_side(s)
       mark_side(s)
       mark_open(s)
@@ -5722,12 +5804,18 @@ end
 -- 연두로 칠한다 (mark_side - Beyond Compare 처럼 그쪽만 골라진다. 줄 전체를 칠했더니 어느 쪽을 고른
 -- 것인지 밑줄로만 보였다).
 -- colorcolumn(vim-ide 는 80)·statuscolumn 은 끈다 - 칸 제목(winbar·경로 줄 창의 상태줄)이 0 칸부터라
--- 줄 앞에 무엇이 붙으면 칸이 어긋난다
+-- 줄 앞에 무엇이 붙으면 칸이 어긋난다.
+-- winfixbuf: Ctrl+O·Ctrl+^·:b 가 트리 자리에 파일을 열지 않게 (경로 줄 창처럼 - tr.plain_extra. QA-09). 점프 목록·
+-- 태그 스택은 비운다 (tr.fresh - :tabnew 가 편집 창의 것을 물려준다)
 local function tree_opts(s)
   for k, v in pairs({ number = false, relativenumber = false, wrap = false, cursorline = false,
     winfixheight = not s.pair_tab, signcolumn = 'no', foldcolumn = '0', list = false, spell = false,
-    colorcolumn = '', statuscolumn = '', winhighlight = '' }) do
+    colorcolumn = '', statuscolumn = '', winhighlight = '', winfixbuf = true }) do
     pcall(api.nvim_set_option_value, k, v, { scope = 'local', win = s.win_l })
+  end
+  tr.fresh(s.win_l)
+  if s.stray then
+    s.stray[s.win_l] = nil
   end
 end
 
@@ -5735,6 +5823,39 @@ end
 local function open_tree_win(s)
   s.win_l = api.nvim_open_win(s.buf_l, true, { split = 'below', win = -1, height = not s.pair_tab and s.list_h or nil })
   tree_opts(s)
+end
+
+-- 트리 버퍼를 보이는 다른 창을 트리 창으로 삼는다 (QA-20). 트리에서 :vs 로 가른 창에서 움직이거나 처음 창을
+-- :close 하면 s.win_l 이 남의 창·닫힌 창이라, 커서가 움직일 때마다 'Invalid window id' 와 Press ENTER 가 났다
+-- (cursor_side). 키는 모두 트리 버퍼에 걸려 있으니 그 키를 누른 창이 트리 창이다. 같은 탭의 부동 아닌 창만 - 다른
+-- 창에 '실린'(그 창의 Ctrl+O·:b - tr.stray) 것은 아니다. 들어간 창(WinEnter), 닫히는 트리 창의 짝(WinClosed)
+function tr.adopt(s, w)
+  if s.done or w == s.win_l or not api.nvim_win_is_valid(w) or api.nvim_win_get_buf(w) ~= s.buf_l
+      or (s.stray and s.stray[w]) or api.nvim_win_get_tabpage(w) ~= s.tab
+      or api.nvim_win_get_config(w).relative ~= '' then
+    return false
+  end
+  s.win_l = w
+  tree_opts(s)
+  s.need_full = true   -- 너비가 다를 수 있다 (반쪽 칸)
+  schedule_render(s)
+  return true
+end
+
+-- 트리 버퍼가 다른 창에 '실렸다' (BufEnter - 갈라 만든 창은 BufEnter 없이 WinEnter 뿐이다): F9 트리의 Ctrl+O 등
+-- (neo-tree 가 트리 창에서 갈라 제 버퍼를 넣을 때 트리 버퍼가 그 창의 점프 목록에 들어간다). 그 창은 트리 창으로
+-- 삼지 않고, neo-tree 창이면 neo-tree 가 되돌린 뒤의 '다시 열기' 를 받는다 (tr.nt_hook). 점프·:b 로 실린 버퍼는
+-- nvim 이 목록에 넣는다(buflisted) - 그대로면 neo-tree 의 ':bdelete <이름>' 이 이 버퍼를 지워 트리 창과 경로 줄이
+-- 닫혔다. 도로 뺀다 (목록에 없는 버퍼는 :bdelete <이름> 이 찾지 않는다)
+function tr.stray(s)
+  local w = api.nvim_get_current_win()
+  if s.done or w == s.win_l then
+    return
+  end
+  s.stray = s.stray or {}
+  s.stray[w] = true
+  pcall(api.nvim_set_option_value, 'buflisted', false, { buf = s.buf_l })
+  tr.nt_hook()
 end
 
 function M.open(a, b)
@@ -5802,7 +5923,7 @@ function M.open(a, b)
   -- airline 이 창을 옮길 때마다 상태줄을 제 것으로 바꿔 진행·합계가 사라졌다
   vim.b[s.buf_l].airline_disable_statusline = 1
   vim.bo[s.buf_l].filetype = 'vimidedirdiff'
-  api.nvim_buf_set_name(s.buf_l, 'DirDiff ' .. vim.fn.fnamemodify(a, ':t') .. ' <> ' .. vim.fn.fnamemodify(b, ':t') .. ' #' .. s.buf_l)
+  api.nvim_buf_set_name(s.buf_l, tr.bufname(vim.fn.fnamemodify(a, ':t') .. '..' .. vim.fn.fnamemodify(b, ':t'), s.buf_l))
   if s.pair_tab then
     -- 트리만 (탭 전체). 짝은 비교 탭에서 본다 (open_pair)
     s.win_l = api.nvim_get_current_win()
@@ -5820,6 +5941,7 @@ function M.open(a, b)
     vim.cmd('rightbelow vsplit')
     v.win_b = api.nvim_get_current_win()
     api.nvim_win_set_buf(v.win_b, scratch(v, 'b', { '' }))
+    tr.fresh(v.win_b)   -- 갈라 온 A 의 빈 버퍼가 점프 목록에 들어갔다
     s.list_h = tonumber(vim.g.vimide_dirdiff_list_height) or math.max(10, math.floor(vim.o.lines * 0.4))
     open_tree_win(s)
   end
@@ -6805,7 +6927,7 @@ function tr.set_root(s, side, path)
   if api.nvim_tabpage_is_valid(s.tab) then
     vim.t[s.tab].title = 'DirDiff ' .. name
   end
-  tr.rename_buf(s.buf_l, 'DirDiff ' .. name .. ' #' .. s.buf_l)
+  tr.rename_buf(s.buf_l, tr.bufname(vim.fn.fnamemodify(s.a, ':t') .. '..' .. vim.fn.fnamemodify(s.b, ':t'), s.buf_l))
   restart(s)
   say(('%s 쪽 경로를 바꾸었습니다: %s → %s%s'):format(S, shown(vim.fn.fnamemodify(was, ':~')),
     shown(vim.fn.fnamemodify(d, ':~')), #mods > 0 and (' (고친 채 남겨 둔 버퍼: %s)'):format(table.concat(mods, ', ')) or ''),
@@ -7198,7 +7320,7 @@ function tr.swap(s)
   if api.nvim_tabpage_is_valid(s.tab) then
     vim.t[s.tab].title = 'DirDiff ' .. name
   end
-  tr.rename_buf(s.buf_l, 'DirDiff ' .. name .. ' #' .. s.buf_l)
+  tr.rename_buf(s.buf_l, tr.bufname(vim.fn.fnamemodify(s.a, ':t') .. '..' .. vim.fn.fnamemodify(s.b, ':t'), s.buf_l))
   restart(s, true)
   for _, v in ipairs(views_of(s)) do
     if not v.closed and (v.pick or v.rel) then
@@ -7791,7 +7913,7 @@ function cmp.extra(kind, ft, cfg)
   vim.bo[b].bufhidden = 'wipe'
   vim.b[b].airline_disable_statusline = 1
   vim.bo[b].filetype = ft
-  pcall(api.nvim_buf_set_name, b, ('DirDiff %s #%d'):format(kind, b))
+  pcall(api.nvim_buf_set_name, b, tr.bufname(kind, b))
   local w = cmp.open_extra(b, cfg)
   if not w then
     pcall(api.nvim_buf_delete, b, { force = true })
@@ -7806,7 +7928,7 @@ function cmp.attach(v)
     return
   end
   if on(vim.g.vimide_dirdiff_overview, 1) then
-    v.ov = cmp.extra('개요', 'vimidedirdiffover', { split = 'left', win = v.win_a, width = 3 })
+    v.ov = cmp.extra('overview', 'vimidedirdiffover', { split = 'left', win = v.win_a, width = 3 })
     if v.ov then
       set_wo(v.ov.win, 'winfixwidth', true)
       -- 빈 winbar 한 줄: 막대의 칸이 비교 창의 글 줄과 같은 높이에 서게 (비교 창에는 창 머리가 있다)
@@ -7817,7 +7939,7 @@ function cmp.attach(v)
     end
   end
   if on(vim.g.vimide_dirdiff_line_details, 1) then
-    v.ld = cmp.extra('줄', 'vimidedirdiffline', { split = 'below', win = -1, height = 2 })
+    v.ld = cmp.extra('line', 'vimidedirdiffline', { split = 'below', win = -1, height = 2 })
     if v.ld then
       set_wo(v.ld.win, 'winfixheight', true)
     end
@@ -9910,8 +10032,16 @@ api.nvim_create_autocmd('WinClosed', {
         end)
       end
     end
-    -- 트리 창이 닫히면 그 위의 경로 줄 창도 (경로 줄만 남은 탭이 되지 않게)
+    -- 트리 창이 닫히면 그 위의 경로 줄 창도 (경로 줄만 남은 탭이 되지 않게). 트리 버퍼를 보이는 다른 창(:vs 로
+    -- 가른 것)이 남으면 그 창이 트리 창이고 경로 줄도 그대로다 (QA-20 - tr.adopt)
     for _, s in pairs(sessions) do
+      if w and w == s.win_l then
+        for _, w2 in ipairs(vim.fn.win_findbuf(s.buf_l)) do
+          if w2 ~= w and tr.adopt(s, w2) then
+            break
+          end
+        end
+      end
       if w and w == s.win_l and s.hwin and api.nvim_win_is_valid(s.hwin) then
         vim.schedule(function()
           tr.head_orphan(s)

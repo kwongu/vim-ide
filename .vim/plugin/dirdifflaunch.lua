@@ -521,6 +521,7 @@ end
 -- side 칸의 트리 뿌리를 dir 로 (reveal: 드러낼 경로)
 local function tree_go(L, side, dir, reveal)
   local sd = L[side]
+  sd.first = nil   -- 처음 자리(open_tab 의 first_trees)는 이제 갈 일이 없다 - 이것이 그 뒤의 자리다
   local win = sd.tree_win
   if not valid(win) then
     return
@@ -553,15 +554,16 @@ local function tree_go(L, side, dir, reveal)
   end
 end
 
+-- 아직 그리지 않은 트리(open_tab 뒤 first_trees 가 그린다)는 갈 뿌리
 local function tree_root(sd)
-  return sd.state and sd.state.path
+  return (sd.state and sd.state.path) or (sd.first and sd.first.root)
 end
 
--- 트리 창의 커서 줄의 경로 (\x 뒤에 그 줄로)
+-- 트리 창의 커서 줄의 경로 (\x 뒤에 그 줄로). 아직 그리지 않은 트리는 드러낼 경로
 local function cursor_path(sd)
   local st, win = sd.state, sd.tree_win
   if not (st and st.tree and valid(win)) then
-    return nil
+    return sd.first and sd.first.reveal or nil
   end
   local ok, node = pcall(st.tree.get_node, st.tree, api.nvim_win_get_cursor(win)[1])
   return ok and node and node.path or nil
@@ -1069,7 +1071,9 @@ local function new_prompt(side)
   vim.bo[b].bufhidden = 'wipe'
   vim.bo[b].swapfile = false
   vim.fn.prompt_setprompt(b, PREFIX)
-  pcall(api.nvim_buf_set_name, b, ('DirDiff 선택 %s #%d'):format(side:upper(), b))
+  -- 한 낱말 이름 (dirdiffview.lua 의 tr.bufname 과 같은 꼴 - 빈칸·# 가 든 이름은 neo-tree 의 ':bdelete <이름>' 에서
+  -- 여러 인자로 갈렸다. QA-03)
+  pcall(api.nvim_buf_set_name, b, ('DirDiff:launch-%s:%d'):format(side, b))
   vim.bo[b].filetype = FT
   vim.b[b].vimide_dirdiff_launch = side
   map_prompt(b)
@@ -1108,6 +1112,43 @@ local function start_at(arg, fallback, win)
     say('없는 경로라 지금 디렉터리에서 엽니다: ' .. vim.fn.strtrans(arg), levels.WARN)
   end
   return fallback, nil, fallback
+end
+
+-- 처음 트리 그리기 (QA-24). open_tab 은 경로 칸과 빈 트리('읽는 중…')만 세우고 돌아간다 - 그 화면이 곧바로 뜬다.
+-- neo-tree 싣기(처음이면 manager 모듈, ensure_config - 각각 수십 ms)와 두 트리 그리기(_navigate_internal - 따뜻해도
+-- 트리마다 10~20ms)는 그 뒤 한 틱에 하나씩 (vim.defer_fn 0: 틱 사이에 다시 그리기와 누른 키가 먼저 돈다). 그 사이
+-- 그 칸의 트리를 옮겼으면(경로 칸의 Enter·따라가기, \x - tree_go 가 sd.first 를 비운다) 건너뛴다.
+-- 실측(맥, 부하 14): 키 처리 처음 180~290ms -> 30~50ms, 따뜻할 때 70~170ms -> 20~50ms. 그 뒤 틱은 하나에 25~50ms
+local function first_trees(L)
+  local steps = {
+    function()
+      pcall(require, 'neo-tree.sources.manager')
+    end,
+    function()
+      pcall(require, 'neo-tree.sources.filesystem')
+      pcall(function()
+        require('neo-tree').ensure_config()
+      end)
+    end,
+  }
+  for _, side in ipairs(SIDES) do
+    steps[#steps + 1] = function()
+      local f = L[side].first
+      if f then
+        tree_go(L, side, f.root, f.reveal)
+      end
+    end
+  end
+  local i = 0
+  local function step()
+    i = i + 1
+    if L.closing or not steps[i] or not api.nvim_tabpage_is_valid(L.tab) then
+      return
+    end
+    steps[i]()
+    vim.defer_fn(step, 0)
+  end
+  vim.defer_fn(step, 0)
 end
 
 -- 선택 탭을 하나 연다. spec = { a = { root, reveal, text }, b = { ... }, at = 탭 번호 (그 자리에 - 없으면 지금 탭
@@ -1152,6 +1193,9 @@ local function open_tab(spec)
     local hold = api.nvim_create_buf(false, true)
     vim.bo[hold].bufhidden = 'wipe'
     api.nvim_buf_set_lines(hold, 0, -1, false, { '  (읽는 중…)' })
+    -- 트리는 다음 틱부터 그린다 (first_trees) - 그 사이 이리 와도 q·Ctrl+k·\x 는 듣게, 글은 고칠 수 없게
+    vim.bo[hold].modifiable = false
+    map_common(hold)
     sd.tree_win = api.nvim_open_win(hold, false, { split = 'below', win = sd.prompt_win })
     mark_win(sd.prompt_win, side, 'prompt')
     mark_win(sd.tree_win, side, 'tree')
@@ -1180,8 +1224,9 @@ local function open_tab(spec)
   set_prompt(L, 'a', spec.a.text)
   set_prompt(L, 'b', spec.b.text)
   update_bars(L)
-  tree_go(L, 'a', spec.a.root, spec.a.reveal)
-  tree_go(L, 'b', spec.b.root, spec.b.reveal)
+  L.a.first = { root = spec.a.root, reveal = spec.a.reveal }
+  L.b.first = { root = spec.b.root, reveal = spec.b.reveal }
+  first_trees(L)
   api.nvim_set_current_win(pa)
   if spec.insert then
     vim.cmd('startinsert!')

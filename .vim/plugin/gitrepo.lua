@@ -42,7 +42,7 @@
 --   다른 저장소의 상태 화면이 떠 있으면 그것을 닫고(q 와 같다) 새로 연다. 다만 그
 --   탭에 다른 창(상태 화면 탭에서 :vsplit 한 파일, F9 트리 ...)이 같이 있으면 상태 화면
 --   창만 닫는다 - q 는 탭을 통째로 닫아서 \s 를 누른 창까지 사라졌다 (고친 버퍼도 숨은
---   채로). 트리만 남아도 그 탭은 둔다 (keep_tree).
+--   채로). 트리만 남은 그 탭은 vimidewin.lua 의 탭별 규칙이 닫는다.
 --   Neogit 은 상태 화면을 하나만 가질 수 있다: 버퍼 이름이 늘 'NeogitStatus' 라
 --   둘째 저장소를 열면 첫째의 버퍼를 그대로 집어 와 덮어 그리고, git 명령은 모두
 --   '마지막으로 연 저장소'(neogit.lib.git.repository 의 lastDir)에서 돈다. 둘을
@@ -63,7 +63,7 @@
 --   마운트 위에 있어도 \s 가 그 저장소의 git 을 기다리지 않는다.
 --
 -- \v  Diffview (git 2.31 이상)
---   diffview 탭 안이면              그 view 를 닫는다
+--   diffview 탭 안이면              그 view 를 닫는다 (그 탭에 F9 트리가 있어도 - keep_tree)
 --   같은 저장소의 작업 트리 diff 가  그 탭으로 간다 (diffview 가 들어가면서 새로 고친다)
 --   다른 탭에 떠 있으면
 --   아니면                           :DiffviewOpen -C<맨 위> 로 새 탭에 연다
@@ -88,7 +88,16 @@
 --   Enter(파일 열기)와 diffview 의 gf 는 그 탭을 닫거나 떠나 '앞 탭의 지금 창'에 파일을
 --   여는데, 그것이 곁창이면 거기 열려다 막혔다 (패널이면 아무 데도 열리지 않았다).
 --   편집 창이 없는 탭(help 만 ...)에서는 그 자리에서 열되, winfixbuf 만은 여는 동안
---   잠시 끈다. diffview 탭 안에서는 옮기지 않는다 (예전 그대로).
+--   잠시 끈다. diffview 는 그 자리 밑에 잠깐 가른 빈 창에서 연다 - :tab split 이 누른
+--   창의 버퍼(RelationView 목록 ...)를 새 탭에 싣지 않게 (scratch_split). diffview 탭
+--   안에서는 옮기지 않는다 (예전 그대로).
+--
+-- 바로 뜬다 (\s \v 둘 다)
+--   저장소를 묻는 git(rev-parse --show-toplevel)의 답은 디렉터리마다 적어 둔다 (tops).
+--   이 nvim 에서 처음 여는 저장소면 '여는 중...' 한 줄을 먼저 그린다. Neogit 이 상태
+--   화면을 그리기 전에 하던 git 은 줄이거나 뒤로 돌린다 (neogit_fast). 그래도 일은 이 키
+--   처리 안에서 한다 - 미루면 그사이 누른 키(\s 다음 바로 c c)가 앞 창에 들어간다.
+--   diffview 의 일(모듈 올리기, view 만들기)은 diffview 의 것이라 그대로다.
 --
 -- 전역 함수 (.vimrc 의 <leader>s / <leader>v 가 부른다)
 --   _G.vimide_git_status()      \s
@@ -206,16 +215,55 @@ local function git(argv)
   return vim.trim(r.stdout or '')
 end
 
+-- 디렉터리 -> 맨 위. git 이 준 답을 적어 둔다 (\s \v 를 누를 때마다 git 을 띄우지
+-- 않게 - 맥에서 한 번에 10~15ms, 개발서버는 더). 다시 쓸 때는 stat 몇 번으로 아직
+-- 맞는지만 본다 (in_repo 와 같은 규칙):
+--   <맨 위>/.git 이 없어졌다                 버린다 (저장소를 지웠다)
+--   그 디렉터리와 맨 위 사이에 .git 이 생겼다  버린다 (안쪽 저장소, git init)
+-- 저장소가 아니라는 답(git 의 말)은 적지 않는다 - 거기서 git init 하면 바로 맞게.
+-- 맨 위가 그 디렉터리를 품을 때만 적는다 (GIT_WORK_TREE·core.worktree 로 밖을 가리키면 묻기만).
+local tops = {}
+
+local function cached_top(dir)
+  local root = tops[dir]
+  if not root then
+    return nil
+  end
+  local ok = uv.fs_stat(root .. '/.git') ~= nil
+  local d = dir
+  while ok and #d > #root do
+    if uv.fs_stat(d .. '/.git') then
+      ok = false
+    end
+    d = vim.fs.dirname(d)
+  end
+  if not ok then
+    tops[dir] = nil
+    return nil
+  end
+  return root
+end
+
 -- git 의 답: 맨 위 경로, 아니면 nil 과 git 의 말 (셋째 값은 git() 과 같다).
 -- 빈 답('')은 옛 git 의 '작업 트리 밖' 이다 - git 2.25 전에는 .git 안이나 bare
 -- 에서 --show-toplevel 이 아무것도 찍지 않고 0 으로 끝났다.
+-- gitdir 없이 물은 답은 tops 에 적어 둔다 (위).
 local function toplevel(dir, gitdir)
+  if not gitdir then
+    local hit = cached_top(dir)
+    if hit then
+      return hit
+    end
+  end
   local argv = { 'git', '-C', dir, 'rev-parse', '--show-toplevel' }
   if gitdir then
     table.insert(argv, 4, '--git-dir=' .. gitdir)
   end
   local out, err, slow = git(argv)
   if out and out:sub(1, 1) == '/' then
+    if not gitdir and (dir == out or dir:sub(1, #out + 1) == out .. '/' or out == '/') then
+      tops[dir] = out
+    end
     return out
   end
   return nil, out or err, slow
@@ -613,9 +661,59 @@ local function tab_edit_win()
   end
 end
 
+-- 편집 창이 없는 탭에서 diffview 가 본뜰 빈 창을 w 밑에 잠깐 가른다. diffview 는
+-- :tab split 으로 새 탭을 열어 '지금 창의 버퍼'를 새 탭에 싣는다. 그것이 RelationView
+-- 목록이면 RelationView 가 새 탭의 창들을 제 패널로 거둬 winfixbuf 를 걸고, diffview 가
+-- 제 버퍼를 넣다가 E1513 과 Press ENTER, diff 창마다 목록이 남은 탭이 되었다 (실측:
+-- Neogit 탭의 F12 목록에서 \v). 그 창의 버퍼 대신 아무것도 아닌 빈 버퍼가 따라가게 한다.
+-- 자동명령 없이 열고 닫는다 - 창 지킴이나 패널이 이 창을 볼 일이 없다. 창 옵션은 예전처럼
+-- 누른 창의 것(winfixbuf 만 끔). 닫은 뒤 그 탭의 창 크기는 되돌린다.
+-- 돌려주는 것: 빈 창, 그 탭의 창 크기를 되돌리는 명령. 못 가르면 nil.
+local function scratch_split(w)
+  local rest = vim.fn.winrestcmd()
+  local ok, b = pcall(api.nvim_create_buf, false, true)
+  if not ok or not b or b == 0 then
+    return nil
+  end
+  vim.bo[b].bufhidden = 'wipe'
+  local ok2, s = pcall(api.nvim_open_win, b, true, { split = 'below', win = w, noautocmd = true })
+  if not ok2 or not s or s == 0 then
+    pcall(api.nvim_buf_delete, b, { force = true })
+    return nil
+  end
+  pcall(function() vim.wo[s].winfixbuf = false end)
+  pcall(function() vim.wo[s].previewwindow = false end)
+  return s, rest
+end
+
+local function scratch_close(s, rest, keep)
+  if not api.nvim_win_is_valid(s) then
+    return
+  end
+  local tp = api.nvim_win_get_tabpage(s)
+  local wins = api.nvim_tabpage_list_wins(tp)
+  if #wins > 1 then
+    local ei = vim.o.eventignore
+    vim.o.eventignore = 'all'
+    -- 그 탭으로 돌아오면 누른 창에 있게 (예전처럼 - 빈 창이 닫히면 nvim 이 아무 창이나 고른다)
+    if keep and api.nvim_win_is_valid(keep) and api.nvim_win_get_tabpage(keep) == tp
+        and api.nvim_tabpage_get_win(tp) == s then
+      pcall(api.nvim_tabpage_set_win, tp, keep)
+    end
+    pcall(api.nvim_win_close, s, true)
+    if keep and api.nvim_win_is_valid(keep) then
+      pcall(api.nvim_win_call, keep, function()
+        vim.cmd(rest)
+      end)
+    end
+    vim.o.eventignore = ei
+  end
+end
+
 -- fn(새 탭을 연다)을 이 탭 편집 창에서 부른다 (머리말의 '새 탭은 편집 창에서 연다').
+-- scratch 면 편집 창이 없는 탭에서 빈 창을 본뜨게 한다 (scratch_split - diffview).
 -- 돌려주는 것은 pcall(fn) 과 같다.
-local function open_from_plain(fn)
+local function open_from_plain(fn, scratch)
   local float = api.nvim_win_get_config(0).relative ~= ''
   leave_float()
   local tab = api.nvim_get_current_tabpage()
@@ -624,7 +722,8 @@ local function open_from_plain(fn)
   -- diffview 탭은 그대로 둔다: 거기 창은 모두 diffview 의 것이라 '편집 창'이 없고, 그
   -- 패널에서 연 상태 화면에는 묻어 가는 것도 없다 (실측). 옮기면 q 로 돌아올 때 패널
   -- 대신 diff 창에 떨어진다.
-  if not plain_win(w) and not diffview_here() then
+  local dv = diffview_here()
+  if not plain_win(w) and not dv then
     local e = tab_edit_win()
     if e then
       pcall(api.nvim_set_current_win, e)
@@ -632,6 +731,14 @@ local function open_from_plain(fn)
         back = not float and w or nil -- 뜬 창은 초점을 잃으면 닫힌다
         w = e
       end
+    end
+  end
+  -- 편집 창이 없는 탭: diffview 는 빈 창을 본뜬다 (scratch_split)
+  local tmp, rest, from
+  if scratch and not dv and not plain_win(w) and api.nvim_win_get_config(w).relative == '' then
+    tmp, rest = scratch_split(w)
+    if tmp then
+      from, w = w, tmp
     end
   end
   local buf = api.nvim_win_get_buf(w)
@@ -644,6 +751,14 @@ local function open_from_plain(fn)
   local ok, err = pcall(fn)
   if fixed and api.nvim_win_is_valid(w) then
     pcall(function() vim.wo[w].winfixbuf = true end)
+  end
+  if tmp then
+    -- 열리지 않았으면 지금 창이 그 빈 창이다 - 누른 창으로 돌아간 뒤 닫는다
+    if api.nvim_get_current_win() == tmp and api.nvim_win_is_valid(from) then
+      pcall(api.nvim_set_current_win, from)
+    end
+    scratch_close(tmp, rest, from)
+    w = from
   end
   -- 아무것도 열리지 않았으면(diffview 가 거절 ...) 누른 곁창으로 돌아간다. 열렸으면
   -- 이 탭에서는 편집 창에 남는다 (머리말)
@@ -806,21 +921,41 @@ end
 -- 누르면 앞 상태 화면 창을 닫는 순간 그것이 걸려, 그사이에 연 새 상태 화면이 닫히고, 그
 -- 창이 닫히며 또 걸린 :q! 에 트리의 탭까지 닫혔다 - 알림도 없이 아무것도 남지 않았다
 -- (실측). 여기서 닫는 것은 앞 저장소의 화면뿐이고 같은 탭의 다른 창은 남긴다
--- (close_status) - 트리도 그렇고, \s 를 누른 창이면 더욱 그렇다. 트리만 남은 그 탭도 둔다.
+-- (close_status) - 트리도 그렇고, \s 를 누른 창이면 더욱 그렇다. 트리만 남은 그 탭은
+-- 다음 틱에 vimidewin.lua 의 탭별 규칙이 그 탭만 닫는다 (새 상태 화면 탭은 그대로).
+-- 지금 .vimrc 는 close_if_last_window 를 끄므로 이것은 그 설정을 다시 켠 사람에게만 일한다.
+-- \v 로 diffview 탭을 닫을 때도 같다: 그 탭에 F9 트리를 열어 두었으면 탭이 닫히는 동안
+-- 트리만 남은 순간을 보고 미룬 :q! 가 남은 탭에서 돌아 nvim 이 끝났다 (실측, 종료 코드 0).
+--
+-- 설정은 peek_config 로 본다. ensure_config 는 setup 에 준 설정을 아직 합치지 않았으면
+-- (트리를 한 번도 열지 않았으면) 그 자리에서 합치면서 neo-tree 의 소스 모듈을 모두
+-- 올린다 - 트리 하나 없는 첫 \s 가 그것으로 30~125ms 멈췄다 (실측). 합치기 전이면 그
+-- 규칙이 돌 일도 없지만(트리가 없다), 합치기 전의 표에도 꺼 둔다 - 닫는 동안 누가
+-- ensure_config 를 부르면 꺼 둔 값이 합친 표로 옮겨 가니 그 표도 되돌린다.
 local function keep_tree(fn)
-  local cfg
-  if package.loaded['neo-tree'] then
-    local ok, c = pcall(function()
-      return require('neo-tree').ensure_config()
-    end)
-    cfg = ok and type(c) == 'table' and c.close_if_last_window == true and c or nil
-  end
-  if cfg then
-    cfg.close_if_last_window = false
+  local nt = package.loaded['neo-tree']
+  local off, merged = {}, nil
+  if type(nt) == 'table' then
+    merged = nt.config
+    local c = merged
+    if type(nt.peek_config) == 'function' then
+      local ok, r = pcall(nt.peek_config)
+      c = ok and r or nil
+    end
+    for _, t in ipairs({ c, merged }) do
+      if type(t) == 'table' and t.close_if_last_window == true then
+        t.close_if_last_window = false
+        off[t] = true
+      end
+    end
   end
   local ok, err = pcall(fn)
-  if cfg then
-    cfg.close_if_last_window = true
+  for t in pairs(off) do
+    t.close_if_last_window = true
+  end
+  if next(off) and type(nt.config) == 'table' and nt.config ~= merged
+      and nt.config.close_if_last_window == false then
+    nt.config.close_if_last_window = true
   end
   if not ok then
     error(err, 0)
@@ -864,6 +999,153 @@ local function neogit_wip(root)
       end
     end
   end
+end
+
+-- 무거운 것을 하기 전에 한 줄 띄워 바로 그린다 (기록에는 남기지 않는다). 그다음 일은
+-- 이 키 처리 안에서 그대로 한다 - 미루면 그사이 누른 키(\s 다음 바로 c c ...)가 새 탭이
+-- 아니라 앞 창(편집 창)에 들어간다. 열고 나면 지운다 (opened_notice).
+local function opening_notice(who, root)
+  pcall(api.nvim_echo, { { ('%s: %s 여는 중...'):format(who, show(root)), 'MoreMsg' } }, false, {})
+  pcall(vim.cmd, 'redraw')
+end
+
+local function opened_notice()
+  pcall(api.nvim_echo, { { '' } }, false, {})
+end
+
+-- ---------------------------------------------------------------------------
+-- Neogit 을 바로 띄운다
+-- ---------------------------------------------------------------------------
+-- 이 nvim 에서 처음 여는 저장소면 Neogit 은 상태 화면 탭을 그리기 전에 git 을 기다린다
+-- (vim.system():wait() 와 Neogit 의 동기 git). 실측(맥, 부하 5):
+--   is_inside_worktree          rev-parse 한 번 (열 때마다)                      9~13ms
+--   저장소 인스턴스(Repo.new)    rev-parse 세 번 + 감시자(Watcher)의 한 번         40~50ms
+--   상태 화면 인스턴스(register) git submodule (셸 스크립트라 느리다) +
+--                               rev-parse --show-superproject-working-tree        95~400ms
+-- 그래서 첫 \s 가 0.2~1.5초 멈췄다. Neogit 을 부르는 동안만 그 함수들에게 답을 준다:
+--   is_inside_worktree(root)    참 - root 는 방금 git 이 준(또는 tops 에서 확인한) 맨 위다
+--   rev-parse 셋과 감시자의 것   한 번에 묻는다. git rev-parse 는 옵션마다 한 줄씩 찍어서 따로
+--                               물은 것과 같은 글자다 - Neogit 과 같은 식(neogit.lib.path 의
+--                               absolute)으로 바꿔 준다. 처음 여는 저장소에서만 불린다.
+--   submodule, superproject     빈 답으로 먼저 그리고, 진짜 답은 탭을 그린 뒤 Neogit 의 async
+--                               로 채운다 (status.register 를 다시 - git 을 기다리며 멈추지
+--                               않는다). 그 답은 키(서브모듈 줄의 Enter, 부모 저장소로 가기)
+--                               에만 쓰이고 화면에는 안 쓰인다.
+-- 답은 dir 가 root 일 때만, 키 처리 쪽(코루틴 밖)에서 부른 것에만 준다 - Neogit 의 async
+-- 일(다른 저장소의 새로 고침 ...)이 그사이 끼어들어도 원래 함수가 돈다. 부르고 나면 원래
+-- 함수로 되돌린다. Neogit 이 바뀌어 그 함수가 없으면 답을 주지 않을 뿐이다 (예전처럼 느리게).
+-- 상태 화면의 내용(git status, 로그 ...)은 원래부터 Neogit 이 async 로 채운다.
+local function fill_submodules(cwd)
+  local oka, async = pcall(require, 'neogit.lib.async')
+  local oks, status = pcall(require, 'neogit.buffers.status')
+  if not (oka and type(async) == 'table' and type(async.void) == 'function'
+      and oks and type(status) == 'table' and type(status.register) == 'function') then
+    return
+  end
+  local inst = status.instance(cwd)
+  if type(inst) ~= 'table' then
+    return
+  end
+  vim.schedule(function()
+    pcall(async.void(function()
+      -- Neogit 의 git 명령은 '마지막 저장소'에서 돈다 - 그사이 다른 저장소를 열었으면 그만둔다
+      local ok, root = pcall(function()
+        return require('neogit.lib.git').repo.worktree_root
+      end)
+      if ok and root == inst.root and status.instance(cwd) == inst then
+        pcall(status.register, inst, cwd)
+      end
+    end))
+  end)
+end
+
+local function neogit_fast(root, cwd, fn)
+  local mods = {}
+  for _, m in ipairs({ 'neogit.lib.git.cli', 'neogit.lib.git.submodule', 'neogit.lib.git.rev_parse' }) do
+    local ok, t = pcall(require, m)
+    mods[#mods + 1] = ok and type(t) == 'table' and t or false
+  end
+  local okp, Path = pcall(require, 'neogit.lib.path') -- cli.lua 가 쓰는 것과 같은 Path
+  local cli, sub, rp = mods[1], mods[2], mods[3]
+  local saved, provisional, revs = {}, false, nil
+  local function main()
+    local co, ismain = coroutine.running()
+    return co == nil or ismain == true
+  end
+  local function mine(d)
+    return main() and type(d) == 'string'
+      and (d == root or vim.fs.normalize(d) == root)
+  end
+  -- rawget: cli 의 메타표는 없는 이름을 물으면 에러를 낸다 (git 하위 명령 만들기)
+  local function put(t, k, f)
+    local orig = t and rawget(t, k)
+    if type(orig) == 'function' then
+      saved[#saved + 1] = { t, k, orig }
+      rawset(t, k, function(...)
+        return f(orig, ...)
+      end)
+    end
+  end
+  local function rev(i, orig, d)
+    if not (okp and type(Path) == 'table' and type(Path.new) == 'function') or not mine(d) then
+      return orig(d)
+    end
+    if revs == nil then
+      local out = git({ 'git', '-C', root, 'rev-parse', '--show-toplevel', '--git-dir', '--git-common-dir' })
+      local l = out and vim.split(out, '\n', { plain = true })
+      revs = l and #l == 3 and l or false
+    end
+    if not revs then
+      return orig(d)
+    end
+    return Path:new(vim.trim(revs[i])):absolute()
+  end
+  put(cli, 'is_inside_worktree', function(orig, d)
+    if mine(d) then
+      return true
+    end
+    return orig(d)
+  end)
+  put(cli, 'worktree_root', function(orig, d) return rev(1, orig, d) end)
+  put(cli, 'worktree_git_dir', function(orig, d) return rev(2, orig, d) end)
+  put(cli, 'git_dir', function(orig, d) return rev(3, orig, d) end)
+  put(sub, 'list', function(orig, ...)
+    if not main() then
+      return orig(...)
+    end
+    provisional = true
+    return {}
+  end)
+  put(rp, 'parent_repo', function(orig, ...)
+    if not main() then
+      return orig(...)
+    end
+    provisional = true
+    return nil
+  end)
+  local ok, err = pcall(fn)
+  for i = #saved, 1, -1 do
+    local s = saved[i]
+    rawset(s[1], s[2], s[3])
+  end
+  if provisional then
+    fill_submodules(cwd)
+  end
+  return ok, err
+end
+
+-- Neogit 이 root 의 상태 화면 인스턴스를 아직 만들지 않았나 (이 nvim 에서 처음 여는 저장소).
+-- 상태 화면 모듈이 아직 안 올라왔으면 물을 것도 없다 - 여기서 올리면 '여는 중' 이 그만큼 늦게 뜬다.
+local function neogit_cold(cwd)
+  local status = package.loaded['neogit.buffers.status']
+  if status == nil then
+    return true
+  end
+  if type(status) ~= 'table' or type(status.instance) ~= 'function' then
+    return false
+  end
+  local ok2, inst = pcall(status.instance, cwd)
+  return ok2 and inst == nil
 end
 
 function _G.vimide_git_status()
@@ -921,14 +1203,29 @@ function _G.vimide_git_status()
     -- 그 창에 초점을 준 채 새로 고친다. 인스턴스는 처음 연 cwd 로 찾으므로 그
     -- cwd 를 넘긴다 (:Neogit 으로 하위 디렉터리에서 연 것도 같은 화면으로).
     pcall(api.nvim_set_current_win, hit.wins[1])
-    ok2, err = pcall(neogit.open, { cwd = hit.cwd, no_expand = true })
+    ok2, err = neogit_fast(root, hit.cwd, function()
+      neogit.open({ cwd = hit.cwd, no_expand = true })
+    end)
   else
     if api.nvim_win_is_valid(origin) then
       pcall(api.nvim_set_current_win, origin)
     end
+    -- 이 nvim 에서 처음 여는 저장소면 한 줄 먼저 그린다 (그래도 git 을 한두 번 기다린다)
+    local cold = neogit_cold(root)
+    if cold then
+      opening_notice('Neogit', root)
+    end
     ok2, err = open_from_plain(function()
-      neogit.open({ cwd = root, no_expand = true })
+      local ok3, e3 = neogit_fast(root, root, function()
+        neogit.open({ cwd = root, no_expand = true })
+      end)
+      if not ok3 then
+        error(e3, 0)
+      end
     end)
+    if cold and ok2 and vim.bo.filetype == 'NeogitStatus' then
+      opened_notice()
+    end
   end
   if not ok2 then
     notify(('Neogit 을 열 수 없습니다 - %s (%s)'):format(show(root),
@@ -994,8 +1291,11 @@ end
 
 function _G.vimide_git_diffview()
   -- diffview 탭 안이면 그 view 를 닫는다 (git 이 낡아도 - 떠 있는 것은 닫혀야 한다)
+  -- 그 탭에 F9 트리가 있어도 nvim 이 끝나지 않게 (keep_tree)
   if diffview_here() then
-    vim.cmd('DiffviewClose')
+    keep_tree(function()
+      vim.cmd('DiffviewClose')
+    end)
     return
   end
   if not diffview_git_ok() then
@@ -1024,12 +1324,18 @@ function _G.vimide_git_diffview()
   if t.file then
     cmd = cmd .. ' --selected-file=' .. esc(t.file)
   end
+  -- diffview 는 여는 동안(처음이면 모듈을 올리며) 0.2~0.4초 멈춘다 - 한 줄 먼저 그린다
+  opening_notice('Diffview', root)
   local wi = vim.o.wildignore
   local ok, err = open_from_plain(function()
     vim.o.wildignore = ''
     vim.cmd(cmd)
-  end)
+  end, true)
   vim.o.wildignore = wi
+  -- 지우는 것은 열렸을 때만 - 안 열렸으면 diffview 가 남긴 말이 그 줄에 있을 수 있다
+  if ok and diffview_here() then
+    opened_notice()
+  end
   if not ok then
     notify(('Diffview 를 열 수 없습니다 - %s (%s)'):format(show(root),
       vim.fn.strcharpart((tostring(err):gsub('^.-:%d+: ', ''):gsub('%s+', ' ')), 0, 60)))

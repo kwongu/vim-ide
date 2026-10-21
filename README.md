@@ -291,7 +291,32 @@ echo '' >> ${HOME}/.profile <br/>
   a tab with no edit window (help only, say) they open where you are, with
   `winfixbuf` off for that moment, and inside a diffview tab - all of its
   windows are diffview's, and they pass nothing on - nothing moves, as
-  before.
+  before. diffview there opens from a blank window split off below yours for
+  that moment (closed again, sizes restored): its `:tab split` copies the
+  current window's buffer into the new tab, and from the RelationView list of
+  a Neogit tab RelationView adopted those copies as its own panels, so
+  diffview failed with E1513, a Press ENTER and diff windows showing the list.
+
+  Both respond at once. The top level git gives for a directory is
+  remembered and re-checked with a few `stat`s (its `.git` still there, no
+  new `.git` between the directory and it) instead of a new `git rev-parse`
+  on every press. The first `<leader>s` for a repository used to freeze nvim
+  for 0.3-1.5 s while Neogit asked git one question after another before
+  drawing anything - `git submodule`, a shell script, alone took 0.1-0.4 s.
+  Now its three `rev-parse` questions go out as one (answered exactly as
+  Neogit would), the tab is drawn in the same keypress, and the submodule /
+  superproject lookup runs in the background right after (only `Enter` on a
+  submodule row and "go to the parent repository" use it); the status itself
+  fills in asynchronously as it always did. Measured on the Mac: first open
+  220-370 ms -> 60-80 ms, later opens 35 ms -> 12-22 ms. A first open (and
+  every `<leader>v`, where diffview's own setup takes 0.1-0.4 s) shows
+  `Neogit: <repo> 여는 중...` on the command line first. Nothing is put off
+  to a later tick, so keys typed ahead (`<leader>s` then `c c`) still land in
+  the new tab, not in the file you came from. Closing a diffview tab with
+  `<leader>v` while the F9 tree is open in that tab no longer quits nvim.
+  When `<leader>s` in the F9 tree of a status tab switches to another
+  repository, the old tab is left holding only the tree, so that tab is
+  closed (the tree-only-tab rule below) and the new status tab stays.
 
   diffview has
   no such limit, hence one tab per repository there. diffview runs the
@@ -710,13 +735,22 @@ Ctrl+] Ctrl+]: open that definition in the context window and focus it
      press (edit window), a double click is the double press (context window).
      Which action the single press does is `g:vimide_jump_target` (`'edit'` by
      default, `'ctx'` for the old behaviour; the double press always does the
-     other one). Binding both costs a little: after `Ctrl+]` vim waits
-     `'timeoutlen'` (1000 ms by default) to see whether a second `Ctrl+]`
-     follows. That wait is `g:vimide_map_timeoutlen`, 800 ms here; `let g:vimide_ctx_jump_seq = 0` drops the two-key binding
-     and the wait with it, and the double click still goes to the context
-     window. The same wait now applies to every leader sequence (`\fr`, `\lt`),
-     so raise it to 400-600 if your hand feels rushed - this setup used to wait
-     forever (`notimeout`), which is what made a single `Ctrl+]` do nothing
+     other one). A single `Ctrl+]` jumps the moment it is pressed: when a
+     second `Ctrl+]` follows within `g:vimide_ctx_jump_seq_ms` (300 ms, counted
+     from the end of the first jump), the first jump is undone - buffer,
+     cursor, tag stack and jump colour, and a file it had just loaded is
+     dropped again - and the definition opens in the context window, which is
+     where the double press always landed. Moving the cursor in between makes
+     the second press a new jump. Before, `Ctrl+] Ctrl+]` was a two-key
+     mapping, so every single `Ctrl+]` waited `'timeoutlen'` (800 ms here)
+     for a second key before it jumped. With `g:vimide_jump_target = 'ctx'`
+     the two-key mapping and its wait are still used (the first press moves
+     the focus to the context window, whose own `Ctrl+]` would take the
+     second); `let g:vimide_ctx_jump_seq = 0` drops the double press, and the
+     double click still goes to the context window. `'timeoutlen'` is
+     `g:vimide_map_timeoutlen` and applies to every leader sequence (`\fr`,
+     `\lt`), so raise it to 400-600 if your hand feels rushed - this setup
+     used to wait forever (`notimeout`)
 Ctrl+9, Ctrl+0: Next/previous quickfix item, always. These two keys only
      reach nvim from a terminal that speaks CSI u (the kitty keyboard
      protocol): iTerm2 3.5+, kitty, WezTerm, Ghostty, foot. ]q / [q do the
@@ -730,6 +764,7 @@ Ctrl+l, Ctrl+k, Ctrl+j:  Move to the split window on the right / above / below.
 ,w: Save and close the current file. *Well~ we call it buffer in Vim*
 ,pa: Toggle paste option. This is useful if you want to cut or copy some text from one window and paste it in Vim. Don't forget to toggle paste again once you finish pastin
 ,ch or ,h: Find and replace options. This is useful if you want to find some text under the cursor and replace it to some text.
+,o / ,c: Open / close the quickfix list. `,c` (and `q` in the list, and `\q`) also closes the `\p` preview the list opened. `,c` closes at once (nvim 0.11+): it no longer waits `'timeoutlen'` to see whether it is the start of `,ch` - an `h` typed within that time still runs `,ch`, and the list `,c` closed comes back. In vim and older nvim `,c` waits as before.
 
 <leader>c<space>: Toggle comment, comments the ranged lines or uncomments
 <leader>g: Find the global by entering keyword, and disaplys the results via quickfix window
@@ -2297,12 +2332,78 @@ up 41 more, and the sweep 14. All are fixed; for `:copen` from the F11 float,
 | F10 with RelationView open left a hidden listed `[No Name]` behind every time, because it closed the column's tree too | F10 closes only the left, right and floating trees |
 | opening the F9 tree, the outline (F10, `\o`) or RelationView (F12) while the cursor was in the quickfix list left a hidden listed `[No Name]` each time (a split from a quickfix window starts with an empty buffer) | the sidebar is split from the edit window instead; closing one from the quickfix list keeps the cursor there |
 | F12 (or `q`) pressed inside the RelationView column put the cursor in the F9 tree when one was open | the cursor goes back to the last edit window |
+| on a narrow terminal the side panels kept their fixed widths (relation column 80, outline 40, tree 32), so the edit window paid for all of it: 6 columns after F12 + F9 at 120x27, 1 column after shrinking the terminal in another tab and coming back, and closing the outline handed its columns to the tree for good (32 -> 65) | a side-panel width budget: the panels shrink in proportion so the edit area keeps 40 columns, get their widths back when there is room, and a panel that took over a closed neighbour's columns returns to its own width (see "Side panels on a narrow screen") |
+| `:RelationViewTree` (or `t`) with no list open, and `T` in the list, split only the edit window under the cursor when the edit area was split with `:sp`, so the "column" covered half the height | they open full height: the tree as a column at the right edge, `T` between the edit area and the column |
+| `q` in the column's neo-tree within 1.5 s of F12 turned the tree window into a second relation list for good (neo-tree hides a "current" tree by putting the window's `#` buffer back) | `q` there closes just that tree, as `t` in the list does; the column is checked again when it has settled |
+| `Ctrl+o` / `Ctrl+i` / `Ctrl+t` (and the mouse side buttons) in the relation list ran every key typed right after them in the edit window: `Ctrl+i` then `ihello` inserted into the file, and `Ctrl+o jjj` moved the edit window instead of the list | the edit window steps through its jumplist without draining typeahead, so the following keys stay in the list; a count works (`3 Ctrl+o`) |
+| F12 pressed in a DirDiff launcher tree gave an E1513 traceback and Press ENTER | the column is split without autocommands (from the edit window when the tab has one) |
+| `\v` / `:DiffviewOpen` from the relation list in a Neogit tab gave an E1513 traceback, and the new Diffview's diff windows were relation lists | windows copied into a Diffview/Neogit/DirDiff tab are no longer taken for the relation panel; a column opened there with F12 is still found again |
+| F12 on a 6,600-line file blocked for 140-600 ms before anything showed (the column's neo-tree is loaded and drawn inside the key) | the column and a `querying gtags …` line show at once; the column's tree is drawn on the next tick and the list fills from the asynchronous gtags result |
 | `:sp`/`:vs`/`:new`/`:vnew <file>` typed in a tab with no edit window (`:tab help`, `:tab terminal`, a quickfix window moved out with `:tab split`) said 'EDIT 창이 없어 실행하지 않았습니다' and opened nothing | with no edit window in the tab, that window is split, as in plain vim; it is still refused from the F11 float when there is no edit window to leave to |
 | a file name with an escaped `\%` or `\#` typed after `:e`/`:sp`/`:vs`/`:new`/`:vnew`/`:view`/`:sview`/`:diffsplit`/`:Ex` in a side window (quickfix, panel, tree) opened a wrong, empty buffer such as `src/psrc/main.cq.c`, because `%`/`#` were expanded twice; `:Ex %:h` there gave E499 | the name is expanded once, in the edit window: `\%`/`\#` open the file you typed, and `%` means the edit window's file |
 | on vim 8.1 (the server) the 'all loaded buffers together exceed g:vimide_acp_max_lines' rule never fired, so ACP's popup still scanned a big hidden buffer (getbufinfo() has no 'linecount' before 8.2.0019) | the lines are counted another way there, reading no more than the limit, so the popup scans only the current buffer, as in nvim |
 | after `:source ~/.vimrc` and reopening the tree, deleting a directory in neo-tree left buffers of its files again, and the git-status check for nested repos stopped running (neo-tree dropped both subscriptions when it re-read its config) | both handlers are part of the neo-tree config, so they survive a re-source |
 | deleting a directory in neo-tree while a modified file inside it was kept could put that kept, now-deleted file into another window (as its `#` buffer), which then said E211 on every entry | windows of wiped files get a file outside the deleted directory, or an empty buffer |
 | with the relation view off, `Ctrl+]` on a word the index does not know (`return`, `endif`) showed `mark-1/\<word\>`, `mark-1 cleared` and the not-found line, then Press ENTER (the jump now paints the word even with the panel off) | the paint and its undo are silent: one line, `정의를 찾지 못했습니다: <word>` |
+
+### Found by the third random QA: keys, pickers, quickfix
+
+| what went wrong | now |
+|---|---|
+| every `Ctrl+]` waited `'timeoutlen'` (0.8 s) before jumping, because `Ctrl+] Ctrl+]` was a two-key mapping (835 ms measured, `g]` 29 ms) | `Ctrl+]` jumps at once (24 ms); a second `Ctrl+]` within 300 ms undoes that jump and opens the definition in the context window, as the double press did (see the `Ctrl+]` line in the key list) |
+| `,c` waited `'timeoutlen'` before closing the quickfix list (820 ms), being the start of `,ch` | `,c` closes at once (11-20 ms); an `h` right after it still runs `,ch` and brings the list back (nvim 0.11+) |
+| `,r`, `,e`, `:bn` and `:bp` stepped onto the quickfix list (nvim 0.12 lists it), loading it into the edit window - two quickfix windows, no edit window, and `,e` could not cycle back | the quickfix and location lists are unlisted, and `,r` / `,e` skip every buffer with a `'buftype'`; `,1`..`,0` refuse a quickfix list |
+| the `\p` preview stayed open after `,c` or `\q`, and took half the rows below the list (15 of 40), squeezing the edit window to one line | `,c`, `\q`, `q` in the list and closing the list any other way also close the preview it opened; `\p` takes a third of the rows, 3 to 12 |
+| `,o` or `:Gtags` with edit windows stacked by `:sp` took all its rows from the bottom one (5/4/3/1) | a squeezed stack of edit windows is evened out when the list or the preview opens; the side panels keep their size |
+| telescope `Ctrl+t` / `Ctrl+v` / `Ctrl+x` from a Neogit tab (or with the F11 tree open there) left a second NeogitStatus window, or put the file into the NeogitStatus window | the picker leaves the float first and no longer copies the side window: Enter gets a new empty edit window right of the left panels, the split and tab keys work from where you are |
+| F3 then Enter from the F11 float in a tab with no edit window (a DirDiff tab, a Neogit tab with the outline) put the file into the DirDiff tree or the outline window, past the tree's `winfixbuf`: neo-tree closed the float and the window split from it in the middle of the `:split` | the float is left first; the file opens in a new window at the bottom of that tab |
+| F9 / F11 in a Diffview tab asked 'File not in cwd. Change cwd to diffview:/panels/0?'; F9, or the tree following the file, after `:e newdir/sub/new.c` printed ENOENT errors and Press ENTER | the tree only reveals real files in existing directories; otherwise it opens without revealing |
+| `:help` typed in an edit window narrower than 80 columns (F12 open) opened across the top of the screen and squeezed the F12 column to one-line panes | it opens above that edit window |
+| `:Neotree reveal` typed in the quickfix window left a hidden `[No Name]` buffer | it leaves the quickfix window first, as F9 does |
+| a tagbar opened with `:TagbarToggle` stayed next to aerial after F10 / `\o` and grew to 81-163 columns | F10 and `\o` close it |
+| `q` in the quickfix list or in the RelationView preview started a macro recording (and then E21) | `q` closes the list (with its preview) / the relation column, as `q` in the panel does |
+| F10 left `E492 ... NERDTreeClose` in `v:errmsg`, the first jump colour `E117 SearchSpecial#DoesNotExist` | neither is left behind |
+| the mouse back/forward buttons and their key aliases (`Alt+Left`, `Shift+F5`, `Alt+b` ...) ran the keys typed right after them first, in the wrong window, and could cut a half-typed command so text went into the file | they move through the jump list in the edit window without touching the keys that follow (a count works: `3` then the key) |
+| closing a Neogit or Diffview tab landed on the tab to its right | closing a tab goes back to the tab used before it (`'tabclose'` `uselast`, nvim 0.10+) |
+| the first `.h` buffer stalled 200-580 ms compiling the C++ highlighting | `.h` opens as C (`g:c_syntax_for_h`; delete that line in `.vimrc` for C++ headers) - 24 ms |
+| after the terminal got shorter (220x60 -> 40), a quickfix list under the F12 column was left 1 line high, and so was the bottom one of stacked edit windows (the column's windows are all `'winfixheight'`, so vim took every row from the bottom) - in other tabs too, once entered | a list or stacked edit window squeezed below 3 lines by a shorter terminal is opened up again (the list to 10 lines, at most a quarter of the screen) the first time its tab is seen at the new size; a list you made small by hand stays |
+| two edit windows side by side with no side panel: shrinking the terminal (220 -> 120 columns) left the right one 9 columns wide | an edit window the narrower terminal squeezed below 10 columns is evened out with its neighbours; one you made narrow (`Ctrl+w \|` on another) stays |
+| `:bd` of the only file in a tab laid out as [outline \| help over quickfix \| F12 column] put the new empty edit window at the far left, outside the outline (the help window was taken for a left side panel) | it goes right of the outline |
+| BufExplorer slipped into every other tab that listed the buffer you entered (`settabvar()`, with no TabEnter) and so re-laid that tab out behind your back | `g:bufExplorerOnlyOneTab = 0` stops that; only BufExplorer's per-tab view (`T`) changes: a buffer shows in every tab it was opened in |
+| `Ctrl+g` on a very long word (a 400-character line) printed the whole word in the 'no result' notice: several lines and Press ENTER | the word is cut to fit one line |
+| `Enter` (or a double click) in an outline whose window is gone from the tab (F10 from the F12 context window, then F12 again) printed aerial's 'Could not find destination window' traceback | one line says so |
+| `q` in a help window started a macro recording | it closes the help window (a `:tab help` tab closes; the last window of the last tab stays); `let g:vimide_help_q = 0` keeps the macro key |
+| with the F11 float tree open, resizing the terminal re-sized the float against the window you were in (neo-tree's own resize handler): from a 1-2 line window the float became one line, or failed with 'Invalid height' and Press ENTER | it is re-sized against the screen, as when it opened |
+| `:only` or `Ctrl+w o` in a side window (the F12 column, the outline) of a DirDiff, Neogit or Diffview tab closed that tab's own windows, and from the F12 column left its tree alone on the screen | refused there with a message; `:only!` still does it |
+
+### What behaves differently after the QA
+
+The fixes above and in the other QA tables change these things you will notice
+(each is described where its feature is):
+
+- **Losing the last edit window no longer quits nvim.** `:bd`, `:bw`, `:close`,
+  `:hide` and `:only` leave an empty edit window in its place; only `:q`, `:wq`,
+  `:x`, `ZZ` quit (or close the tab). A tab left with only the F9 tree is closed
+  (`g:vimide_min_edit_win`).
+- **`Ctrl+]` jumps at once**; pressing it again within 300 ms opens the
+  definition in the context window instead (`g:vimide_ctx_jump_seq_ms`). `,c`
+  closes the list at once.
+- **`q` closes** the quickfix list (with its `\p` preview), the RelationView
+  preview and help windows.
+- **gtags searches run in the background** (`\\s`, `:Gtags`, `:Gtags -r`, the
+  F12 list): a `찾는 중...` line shows at once and the list arrives a moment
+  later, instead of the editor freezing for the search (`g:vimide_gtags_async`).
+- **Warm-up while idle**: after start, while you are not typing, the modules
+  behind F9-F12, `\D`, F1 and `\v` are loaded a few ms at a time, so their
+  first use is as quick as the second (`g:vimide_warmup`, `:VimIdeWarmup`).
+  `\s` draws its Neogit tab in the same keypress and fills it in after.
+- **Side panels share the width**: on a narrow or shrunk terminal the tree,
+  outline and F12 column give up columns (down to 20) so the edit area keeps 40,
+  and get them back when there is room; lists and edit windows squeezed by a
+  shorter terminal are opened up again (`g:vimide_panel_budget`,
+  `g:vimide_edit_min_width`, `g:vimide_panel_min_width`).
+- `.h` files open as C; closing a Neogit or Diffview tab goes back to the tab
+  you came from; `:only` in a side panel of a tab with no edit window is refused.
 
 ### Searching from the repository
 
@@ -2499,8 +2600,11 @@ are and the edit windows move among themselves, however many there are:
 
 Counts work either way (`2 Ctrl-W x`, `Ctrl-W 2 x`), and so does Visual mode.
 Pressed on a side window they do nothing - the side windows are the ones that
-stay put. In a tab without side windows, and in floating windows, they are
-vim's own (including `Ctrl-W T` saying "Already only one window").
+stay put. Pressed on a floating window (the F11 tree, telescope, a popup) they
+do nothing either: vim's `H`/`J`/`K`/`L`/`T` would dock the float as an
+ordinary window - the F11 tree became a full-width split above the edit window
+and its border float stayed behind on screen. In a tab without side windows
+they are vim's own (including `Ctrl-W T` saying "Already only one window").
 
 How: the side windows are turned into hidden floating windows for a moment,
 which leaves only the edit windows in the layout, so vim's own command sees
@@ -2535,6 +2639,34 @@ side window kept its position, size and scroll position.
 
 ```vim
 let g:vimide_edit_winmove = 0   " vim's own behaviour
+```
+
+### Side panels on a narrow screen
+
+The side panels open at fixed widths - the relation column 80, the outline
+40, the F9 tree 32 - and hold them (`winfixwidth`), so on a narrow terminal
+the edit window used to pay for all of it, down to a single column. A width
+budget (`panelbudget.lua`) now looks at the tab whenever its layout changes
+(a window opens or closes, the terminal is resized, you enter the tab):
+
+- when the edit area would be narrower than `g:vimide_edit_min_width` (40
+  columns, 20 per edit window when several stand side by side), the panels
+  beside it shrink in proportion to their own widths, none below
+  `g:vimide_panel_min_width` (20);
+- when there is room again they get their own widths back;
+- a panel that took over the columns of a neighbour that closed (the tree
+  next to the outline) goes back to its own width, and the edit area gets
+  them.
+
+A width you set yourself - `:vertical resize`, dragging the border, `w` in the
+relation list or the tree - is kept: the other panels make room around it,
+and it only shrinks when the terminal itself gets narrower. Diffview,
+Neogit and DirDiff tabs lay out their own windows and are left alone.
+
+```vim
+let g:vimide_panel_budget = 0       " off: panels keep their fixed widths
+let g:vimide_edit_min_width = 40
+let g:vimide_panel_min_width = 20
 ```
 
 ## Comparing directories (DirDiff)
@@ -2641,8 +2773,12 @@ opening files in itself. The window guard (`vimidewin.lua`) leaves the launcher
 tab alone, like a DirDiff tab, and a launcher left as the only tab keeps nvim
 open the way a DirDiff tree does. The prompt windows are `'winfixbuf'` and all
 four windows start with an empty jump list, so `Ctrl+O`, `Ctrl+^` or `:e` cannot
-put another buffer in a prompt's or a tree's place. Sessions never hold a
-launcher (it would come back as a blank tab): `:qa` closes the launchers before
+put another buffer in a prompt's or a tree's place. The tab is drawn first -
+both prompts and two empty trees reading `(읽는 중…)` - and the trees are filled
+in on the following ticks, one step each (neo-tree's first load, then A, then
+B), so the launcher shows up at once and keys typed meanwhile are not held up;
+`q`, `Ctrl+k` and `\x` already work in a tree that is still loading. Sessions
+never hold a launcher (it would come back as a blank tab): `:qa` closes the launchers before
 the session is written, and `:VimIdeSessionSave` closes them while it writes
 and then puts them back where they were - prompts, choices, roots and cursor
 rows included.
@@ -3511,6 +3647,18 @@ Copying in the tree:
   opens its own (so does `Space` / `Space` on two folders in a tree). Any number of
   comparisons can be open side by side, each tab with its own tree, helper and
   buffers; `q` or `:tabclose` on one leaves the others working.
+- The tree window keeps its buffer: it is `'winfixbuf'`, and the tree and the
+  compare windows start with an empty jump list, so `Ctrl+O` / `Ctrl+T` there
+  no longer put a file in the tree's place or the tree in a compare window, and
+  `Ctrl+O` in an F9 tree opened next to it no longer takes the comparison
+  apart (neo-tree puts its own buffer back). `:vsplit` in the tree gives a second view of
+  it; the keys act in whichever one the cursor is in, and closing either one
+  leaves the other in charge, path line included. The comparison's own buffers
+  are named `DirDiff:<what>:<number>` (`DirDiff:dA..dB:4` for the tree), one
+  word without spaces or `#`: neo-tree takes a buffer that lands in its window
+  out again with `:bdelete <name>`, and the old names (`DirDiff dA <> dB #4`)
+  fell apart into several arguments there - `#` is the alternate file - which
+  deleted the file you were editing and closed its tab.
 - `let g:vimide_dirdiff_view = 0` makes `:DirDiff` the plugin's list again
   (and `Space` / `Space` on two files a plain vimdiff, as before);
   `:DirDiffClassic` is always that. `let g:vimide_dirdiff_only_diff = 1`
@@ -3704,6 +3852,8 @@ than on the laptop was not the box. It was measured, not guessed:
 | matchparen | Of the 29 autocommands on `CursorMoved`, the bracket-match highlight cost 2.2 ms a move in a large C file - 90% of the total; all the others together were 0.2 ms. It is off (`g:loaded_matchparen`); `%` still jumps to the match. `let g:vimide_matchparen = 1` brings it back |
 | The relation window | One `global -f` process per referencing file, up to 100 of them: 125 ms for 60 files as separate spawns, 12 ms batched. The tree cache was written and never read. `fetch_callees` cached nothing. A heavy symbol (1607 references) went 916 ms -> 694 ms cold and 129 ms -> 28 ms on a revisit |
 | The pickers | `\fo` re-generated the whole 44,466-file list every press (239 ms -> 116 ms); `\fs` asked gtags for every indexed path before parsing a row, again on every prefix change (95 ms -> 8 ms) |
+| gtags searches | gtags.vim runs `global` with `system()`, so `\\s`, `\\g`, `\\c`, `:Gtags -r`, `:GtagsQf` and `<C-\><C-]>` held the keyboard for the whole search: 50-200 ms on a 154-file index, 1.1 s for the first `:Gtags -r` while the start-up index ran, and more on a kernel tree. In nvim, `gtagsasync.lua` replaces gtags.vim's `s:ExecLoad` (the one place that calls `system()`): `global` runs through `vim.system`, the key returns in 6-10 ms with `Gtags -r foo: 찾는 중...`, and the answer is loaded exactly as gtags.vim would (`botright copen`, `cexpr!`, jump to the first entry) in the edit window the search was started from. A newer search kills the older one; an answer that arrives in insert or command-line mode waits for normal mode; one that arrives after you moved to another tab only fills the quickfix list. A `:Gtags` inside a Vim script function that reads `getqflist()` right after (the `C-]` fallback when the tag is not found) still waits, as before. With a 0.6 s `global` (a stand-in for a big index): 672 ms -> 6 ms. `let g:vimide_gtags_async = 0` restores gtags.vim as it was |
+| First use of a feature | The first F9/F11/F12 tree, `\D`, F10, F1 and `:DiffviewOpen`/`\v` loaded their Lua modules (neo-tree alone is 100+ modules), merged neo-tree's config (`ensure_config`) and compiled treesitter queries inside the key: F9 92 ms the first time and 21 ms the second. `vimidewarm.lua` does that ahead of time, after start-up, while you are idle - one module per timer tick, only in normal mode after 0.6 s without a key, pausing as soon as you type and resuming when you stop. The next few module files are read ahead in libuv's thread pool, so a tick only compiles and runs one module: most ticks take 1-5 ms, the longest (the C++ aerial query) 12 ms, and all 193 together 160-370 ms on the Mac (first-open file scanning by the Mac's antivirus used to put 40-90 ms into single ticks). A tick never runs inside another plugin's `vim.wait` (diffview and Neogit wait inside coroutines; `vim.wait` is wrapped only while the ticks run, to count that depth) and runs with the JIT off, so it does not add to the SIGBUS crashes the Mac's Homebrew LuaJIT build has around Diffview (a JIT fault - `nvim --clean` with only diffview has it too): with `:DiffviewOpen` right after start, 5 of 16 test sessions died with the warm-up and 12 of 16 without it. First use after a few idle seconds, median of paired runs on the Mac (load 5-7): F9 116 -> 42 ms, `\D` 123 -> 65, F12 104 -> 52, `:DiffviewOpen` 180 -> 110, F1 126 -> 78, `:help` 86 -> 68 (under load 15-20: F9 255 -> 39, `\D` 301 -> 57, `:DiffviewOpen` 415 -> 132). The one thing that cannot be cut into ticks - compiling the C++ highlight query, ~145 ms in a single C call, paid by the first `.h` file - runs only while the terminal has lost focus (`FocusLost`; tmux needs `set -g focus-events on` to pass it). `:VimIdeWarmup` lists what was loaded and how long each tick took; `let g:vimide_warmup = 0` turns it off |
 | Not the cause | gtags queries are *faster* on the server than on the Mac (4 ms vs 19 ms). SSH round-trip is 12 ms and cannot be reduced; compression made it worse. Plugin sourcing is 35 ms total, so lazy-loading buys nothing |
 
 ### Long sessions
@@ -4106,8 +4256,54 @@ stays. When there is nowhere to move it - no edit window in the tab, the
 F11 float, a DirDiff or Neogit tab, or `g:vimide_win_guard = 0` - neo-tree
 undoes it as before, but `close_if_last_window` is held off until that is
 done, so the window it closes on the way does not end nvim.
-`close_if_last_window` itself is unchanged: closing the last edit window
-next to the tree still closes the tab, or nvim in the last tab.
+
+**More quits and closed tabs from the same rule.** neo-tree's
+`close_if_last_window` counts the windows of the *current* tab when a window
+closes and queues a `:q!` for the next tick, which then runs in whatever tab
+and window are current by then - the tab being torn down is already gone.
+So `:tabclose` with the cursor in the F9 tree, closing a Diffview that had the
+tree opened in it, or `:only` in the tree of the DirDiff launcher ended nvim
+(exit status 0), and `:close` in the edit window next to the tree closed that
+tab *and* the next one. The rule is now off (`close_if_last_window = false`)
+and the window guard does the same job keyed by tab: when a tab is left with
+only the F9 tree, that tab is closed - never another one - and in the last
+tab nvim ends only on `:q`; otherwise an empty edit window comes back next to
+the tree.
+
+**Losing the last edit window no longer quits nvim unless you quit.** The
+"keep one edit window" rule ended nvim whenever the edit windows of all tabs
+reached zero, so `:bd` in the only edit window with the quickfix list open
+quit nvim, and with several tabs it left a tab with only panels (the next file
+then opened at the far left, outside the tree). Now only `:q` / `:wq` / `:x` /
+`ZZ` / `Ctrl-W q` (the closes that fire `QuitPre`) end things: the tab, or nvim
+when no tab has an edit window left (unsaved buffers and running terminals
+still stop it). `:close`, `:hide`, `:bd`, `:bw`, `:only` in a side window and
+plugins closing windows leave an empty edit window where the edit area was -
+right of the tree or the outline, left of the relation column, above the
+quickfix list - with the sizes the other windows had before; after `:close`
+the closed buffer is its alternate, so `Ctrl-^` brings it back. The same
+happens when a Neogit status window or a DirDiff list closes and leaves only
+vim-ide side windows in its tab (the relation column opened in a Neogit tab,
+`:only!` in the outline of a DirDiff tab - a plain `:only` typed in a side
+window of a tab with no edit window is refused instead). A window the
+guard has to create for a file that landed in a side window goes to the same
+place (it used to be split off at the far left). `g:vimide_min_edit_win = 0`
+turns all of this off.
+
+**Jumps that carried panel buffers around.** A new window copies the jumplist,
+tag stack and alternate buffer of the window it was split from, so
+`Ctrl-O`/`Ctrl-I`/`Ctrl-T`/`Ctrl-^` loaded the wrong buffer: the quickfix
+window became a second tree, a `:tabnew` made from the outline became a
+full-screen outline, the edit window showed the relation context, Neogit's
+status window turned into `main.c`, and the outline in a Neogit tab became a
+second status buffer. Side windows, and windows split or `:tabnew`ed from a
+side window, now start with an empty jumplist and tag stack once their own
+buffer is in, and `Ctrl-^` stays put in them; `:split` of an edit window keeps
+its history as before. And a panel buffer that still reaches the F9 tree
+(the DirDiff list, the relation context, the quickfix list...) is not passed
+on to the edit window any more: the tree is put back and the jump dropped.
+neo-tree's own undo used `:bdelete` with the unescaped buffer name, which for
+`DirDiff dA <> dB #4` deleted the alternate buffer and closed tab 1.
 
 ### Bold means "a function is called here"
 
@@ -4349,8 +4545,10 @@ stayed black, because the plain member is the only one cpp's
 `declarator:` field name. Both halves are fixed: the rule is written without
 a field name, and repeated in the cpp query.
 
-(`let g:c_syntax_for_h = 1` makes `.h` open as C instead, if you would rather
-not have C++ rules near your C headers at all.)
+(`.h` now opens as C: `.vimrc` sets `let g:c_syntax_for_h = 1`, because the
+first cpp buffer stalled 200-580 ms compiling the C++ query. Delete that line
+for C++ headers - the variable is tested for existence, so `0` does not turn
+it off.)
 
 **The underline is down to one job: function parameters.** Everything a
 declaration used to be marked with is now carried by navy bold, and the one
@@ -5092,7 +5290,10 @@ While the panel is open, `:Gtags -d`, `:Gtags -r` and friends (so
 panel** instead of the quickfix window, as a `Gtags -r foo (27)` section
 that behaves like any other list here - Ctrl+n/Ctrl+p, preview, Enter,
 Ctrl+Enter. With the panel closed the original quickfix behaviour is
-untouched (`g:relationview_capture_gtags = 0` turns the capture off).
+untouched (`g:relationview_capture_gtags = 0` turns the capture off), except
+that `global` runs in the background: the key returns at once with
+`Gtags -r foo: 찾는 중...`, and the quickfix window opens and jumps when the
+answer arrives (see "gtags searches" under [When it feels slow](#when-it-feels-slow)).
 
 Keys inside the panel:
 
@@ -5172,8 +5373,13 @@ c:     toggle the context window
 p:     pin - freeze the current symbol (auto update stops until unpinned)
 r:     refresh - drop the cache and query gtags again (use after F2)
 a:     toggle realtime auto update
-q:     close the panel (and its context window)
+q:     close the panel (and its context window). In the column's neo-tree
+       q closes just that tree, the same as t in the list
 ```
+
+`t` (`:RelationViewTree`) with no list open and `T` always open full height,
+even when the edit area is split with `:sp`: the tree as a column at the
+right edge, the `T` preview between the edit area and the column.
 
 `:RelationView {symbol}` looks up an explicit symbol and
 `:RelationViewGraph` exports the graph without focusing the panel.

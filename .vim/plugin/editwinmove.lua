@@ -22,7 +22,8 @@
 --      되돌린 전폭 quickfix 가 RelationView 열의 줄을 도로 가져가 한 칸이 0줄이
 --      되었다 (반대 심문). 편집 창은 x/r/R 이면 제 크기를, H/J/K/L 이면 vim 처럼
 --      ('equalalways') 곁창을 잠근 채 고르게. 스크롤 위치(winsaveview)도 되돌린다.
--- 곁창에 서서 누르면 아무것도 하지 않는다(곁창은 제자리). 부동 창, 곁창이 없는 탭
+-- 곁창이나 부동 창에 서서 누르면 아무것도 하지 않는다(곁창은 제자리, 부동 창은 F11
+-- 트리처럼 제 테두리 창과 짝이라 보통 창으로 박으면 짝이 깨진다). 곁창이 없는 탭
 -- 에서는 vim 그대로. Ctrl-W T 는 편집 창을 새 탭으로 옮기되, 곁창이 있는 탭에서
 -- 편집 창이 하나뿐이면 그 자리에 대체 버퍼(없으면 빈 버퍼) 창을 남겨 원래 탭의
 -- 배치를 지킨다. 되돌리다 실패해도 숨은 부동 창은 남기지 않는다.
@@ -413,8 +414,14 @@ function _G.vimide_edit_wincmd(cmd, count)
   count = count or vim.v.count
   local native = (count > 0 and count or '') .. 'wincmd ' .. cmd
   local cur = api.nvim_get_current_win()
-  if vim.g.vimide_edit_winmove == 0 or is_float(cur) then
+  if vim.g.vimide_edit_winmove == 0 then
     return vim.cmd(native)
+  end
+  -- 부동 창(F11 트리, telescope, 막대, popup)은 옮기지 않는다. vim 의 H/J/K/L/T 는 부동
+  -- 창을 화면 가장자리의 보통 창으로 박아 넣는다 - F11 트리가 220칸짜리 가로 창이 되고
+  -- 테두리 부동 창만 남았다 (QA-15). x/r/R 은 부동 창에서 E5602 다.
+  if is_float(cur) then
+    return say('부동 창은 옮기지 않습니다')
   end
   local sides, edits, is_e = {}, {}, {}
   for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do

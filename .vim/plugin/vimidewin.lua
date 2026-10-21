@@ -7,7 +7,10 @@
 --      곁창은 원래 내용으로 되돌린다.
 --
 --   2. EDIT 창은 최소 하나를 지킨다.
---      곁창만 남고 EDIT 창이 0개가 되면 vim 을 끝낸다.
+--      :q(:wq :x ZZ <C-w>q)로 마지막 EDIT 창을 닫으면 그 탭을(마지막 탭이면 vim 을)
+--      끝낸다. :close :bd :bw :only 처럼 다른 길로 EDIT 창이 0개가 되면 끝내지 않고
+--      그 탭의 편집 자리에 빈 EDIT 창을 되살린다. 탭에 F9 트리만 남으면 그 탭을
+--      닫는다(neo-tree 의 close_if_last_window 자리 - 그 규칙은 끄고 여기서 탭 id 로 본다).
 --
 -- 왜 한 파일에 같이 두나: 둘 다 '이 창이 EDIT 창인가'라는 같은 질문에
 -- 매달려 있기 때문이다. 이 설정에는 그 판정기가 서로 다른 기준으로 넷이나
@@ -92,6 +95,23 @@ local function is_plugin_buf(buf)
     end
   end
   return false
+end
+
+local function is_float(w)
+  local ok, conf = pcall(api.nvim_win_get_config, w)
+  return (ok and conf and conf.relative and conf.relative ~= '') and true or false
+end
+
+-- 탭을 가리지 않는 EDIT 창 판정. vimide_is_edit_win 은 '지금 탭' 조건이 붙어 있어,
+-- 닫히는 창(다른 탭일 수 있다)이나 남의 탭을 볼 때는 이것을 쓴다. 잣대는 같다.
+local function edit_any(w)
+  if not (w and api.nvim_win_is_valid(w)) or is_float(w) then
+    return false
+  end
+  if vim.wo[w].previewwindow then
+    return false
+  end
+  return not is_plugin_buf(api.nvim_win_get_buf(w))
 end
 
 --- 이 창을 '파일을 열어도 되는 EDIT 창'으로 볼 수 있는가.
@@ -189,22 +209,14 @@ end
 --- @param skip integer|nil 세지 않을 창
 function _G.vimide_edit_win_count_all(skip)
   local n = 0
-  local cur = api.nvim_get_current_tabpage()
   for _, tab in ipairs(api.nvim_list_tabpages()) do
     for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
-      -- is_edit_win 은 '지금 탭' 조건을 달고 있어 남의 탭을 못 센다.
-      -- 여기서는 그 조건만 빼고 같은 잣대를 쓴다.
-      if w ~= skip and api.nvim_win_is_valid(w) then
-        local ok, conf = pcall(api.nvim_win_get_config, w)
-        local floating = ok and conf and conf.relative and conf.relative ~= ''
-        if not floating and not vim.wo[w].previewwindow
-            and not is_plugin_buf(api.nvim_win_get_buf(w)) then
-          n = n + 1
-        end
+      -- is_edit_win 은 '지금 탭' 조건을 달고 있어 남의 탭을 못 센다 (edit_any)
+      if w ~= skip and edit_any(w) then
+        n = n + 1
       end
     end
   end
-  local _ = cur
   return n
 end
 
@@ -429,14 +441,16 @@ local FOREIGN_FT = {
   vimidedirdifflaunch = true,
 }
 
-local function foreign_tab()
+local function foreign_tab(tab)
+  tab = tab or 0
   -- DirDiff 의 비교 탭(dirdiffview.lua - 짝마다 탭 하나): 두 창에 빈·알림 버퍼(nofile)를 띄웠다가 파일을
   -- 싣는다. 그 창을 곁창으로 적어 두었다가 '곁창에 파일이 실렸다' 고 파일을 새 EDIT 창으로 빼내, 탭에
   -- 창이 셋(A 파일 | 빈 A | 빈 B) 생겼다. 탭 변수로 가린다 - 버퍼로는 파일을 다 실은 뒤에 가릴 수 없다
-  if vim.t.vimide_dirdiff_pair then
+  local okp, pair = pcall(api.nvim_tabpage_get_var, tab, 'vimide_dirdiff_pair')
+  if okp and pair and pair ~= 0 then
     return true
   end
-  local ok, wins = pcall(api.nvim_tabpage_list_wins, 0)
+  local ok, wins = pcall(api.nvim_tabpage_list_wins, tab)
   if not ok then
     return false
   end
@@ -458,6 +472,375 @@ end
 -- 밖에서도 물을 수 있게 (진단용: :lua print(vim.inspect(_G.vimide_foreign_tab())))
 function _G.vimide_foreign_tab()
   return foreign_tab()
+end
+
+-- ---------------------------------------------------------------------------
+-- 창의 이력(점프·태그·#)과 EDIT 창 자리 만들기
+-- ---------------------------------------------------------------------------
+-- 새 창은 갈라 온 창의 점프 목록·태그 스택·대체 버퍼(#)를 물려받는다. 곁창에서 갈라 온
+-- 창(quickfix, aerial, 트리, :tabnew ...)이나 편집 창에서 갈라 곁창이 된 창에서
+-- <C-o>/<C-i>/<C-t>/<C-^> 를 누르면 남의 버퍼가 엉뚱한 창에 실렸다 (QA-08: quickfix 가
+-- 트리 사본이 되고, :tabnew 탭이 aerial 하나가 되고, 편집 창에 RelationView-Context 가
+-- 떴다. QA-07: Neogit 탭의 상태 창이 main.c 가 되고, aerial 이 둘째 NeogitStatus 가
+-- 됐다). 곁창이 된 창과 곁창에서 갈라 온 창은 제 버퍼가 실리면 그 이력을 비운다
+-- (# 는 제 버퍼로 - <C-^> 는 제자리). 편집 창을 :split 한 사본은 그대로다.
+local fresh = {} -- winid -> { buf0 = 갈라질 때 비추던 버퍼, panel = 곁창에서 갈라졌나 }
+-- WinNew 없이(noautocmd) 생긴 창: aerial 은 'noau vertical topleft 1split' 으로 창을 내고
+-- nvim_win_set_buf 로 제 버퍼를 싣는다 - 그 창에 처음 버퍼가 실릴 때(BufWinEnter) 본다.
+-- 한 번이라도 본 창(WinEnter/WinNew/BufWinEnter)은 적어 둔다. BufEnter 는 안 적는다 -
+-- 버퍼를 실을 때 BufEnter 가 BufWinEnter 보다 먼저 뜬다.
+local seen = {}  -- winid -> true
+
+local function clear_history(w)
+  pcall(vim.fn.settagstack, w, { items = {} }, 'r')
+  pcall(api.nvim_win_call, w, function()
+    vim.cmd('clearjumps')
+    pcall(vim.fn.setreg, '#', api.nvim_get_current_buf())
+  end)
+end
+
+local function is_panel_buf(b)
+  return is_plugin_buf(b) and not BORROWED_FT[vim.bo[b].filetype]
+end
+
+local function scrub(w)
+  local r = fresh[w]
+  if not r then
+    return
+  end
+  if not api.nvim_win_is_valid(w) then
+    fresh[w] = nil
+    return
+  end
+  local b = api.nvim_win_get_buf(w)
+  local panel = is_panel_buf(b)
+  if b == r.buf0 then
+    if not panel then
+      return -- 편집 창을 가른 사본, 또는 아직 제 버퍼가 안 실렸다
+    end
+    local tab = api.nvim_win_get_tabpage(w)
+    for _, w2 in ipairs(vim.fn.win_findbuf(b)) do
+      if w2 ~= w and api.nvim_win_get_tabpage(w2) == tab then
+        return -- 곁창을 :split 한 사본 (곧 제 버퍼가 실릴 수도 있다)
+      end
+    end
+  end
+  fresh[w] = nil
+  if is_float(w) and vim.bo[b].filetype ~= 'neo-tree' then
+    return -- telescope / 막대 / popup
+  end
+  if panel or r.panel then
+    clear_history(w)
+  end
+end
+
+-- 처음 보는 창에 버퍼가 실렸다: 곁창 버퍼면, 또는 곁창에서 갈라 온 창(# 가 곁창 버퍼)이면
+-- 이력을 비운다. 이미 쓰던 편집 창에 <C-^> 로 곁창 버퍼가 실린 것은 건드리지 않는다
+-- (그 창의 점프 목록은 사용자 것이다).
+local function noted_quietly(w)
+  if is_float(w) and vim.bo.filetype ~= 'neo-tree' then
+    return
+  end
+  local b = api.nvim_get_current_buf()
+  local alt = vim.fn.bufnr('#')
+  if is_panel_buf(b) or (alt > 0 and alt ~= b and api.nvim_buf_is_loaded(alt)
+      and is_panel_buf(alt)) then
+    vim.schedule(function()
+      if api.nvim_win_is_valid(w) then
+        clear_history(w)
+      end
+    end)
+  end
+end
+
+local function note_new_win()
+  local w = api.nvim_get_current_win()
+  local b = api.nvim_win_get_buf(w)
+  fresh[w] = { buf0 = b, panel = is_panel_buf(b) }
+  vim.schedule(function()
+    scrub(w)
+  end)
+end
+
+-- 곁창이 화면 어느 쪽 것인가: aerial·트리·tagbar 는 왼쪽(aerial 은 default_direction
+-- = 'left'), RelationView 열은 오른쪽, quickfix/location list 는 아래.
+local function side_of(w)
+  local b = api.nvim_win_get_buf(w)
+  if vim.bo[b].buftype == 'quickfix' then
+    return 'bottom'
+  end
+  local okv, rv = pcall(function()
+    return vim.w[w].rv_tree or vim.w[w].rv_big
+  end)
+  if okv and rv then
+    return 'right'
+  end
+  if vim.bo[b].filetype == 'relationview'
+      or vim.fn.fnamemodify(api.nvim_buf_get_name(b), ':t'):match('^RelationView') then
+    return 'right'
+  end
+  if vim.bo[b].filetype == 'neo-tree' and vim.b[b].neo_tree_position == 'right' then
+    return 'right'
+  end
+  return 'left'
+end
+
+local function first_leaf(node)
+  while node[1] ~= 'leaf' do
+    node = node[2][1]
+  end
+  return node[2]
+end
+
+-- 편집 자리를 어디에 낼까: { 기준 창(-1 = 탭 전체), 방향 }.
+-- 왼쪽 곁창(트리·aerial)의 오른쪽, 오른쪽 곁창(RelationView 열)의 왼쪽, quickfix 의 위.
+-- 같은 방향으로 가르면 vim 은 새 창을 기준 창의 틀(row/col) 안에 형제로 넣는다 -
+-- 그래서 '잎' 창을 골라 가른다. 열(col) 전체 왼쪽처럼 잎으로 안 되는 자리는 탭 맨 가.
+local function edit_spot(tab)
+  local lay = vim.fn.winlayout(api.nvim_tabpage_get_number(tab))
+  local function row_spot(node, top)
+    local ch = node[2]
+    for _, c in ipairs(ch) do
+      if c[1] == 'leaf' and side_of(c[2]) == 'bottom' then
+        return c[2], 'above' -- [트리 | quickfix]: 편집 창이 quickfix 위에 있던 배치
+      end
+    end
+    -- 왼쪽 곁창은 폭을 박아 둔 창(트리·aerial·tagbar)만 센다. side_of 는 그 밖의 것을 다
+    -- 'left' 로 보아, 편집 열에 남은 도움말 창까지 곁창으로 쳐서 :bd 뒤의 새 편집 창이
+    -- aerial 왼쪽 맨 가에 섰다 (QA, [aerial | 도움말/quickfix | F12 열])
+    local L = 0
+    for i, c in ipairs(ch) do
+      local w = first_leaf(c)
+      if side_of(w) == 'left' and vim.wo[w].winfixwidth then
+        L = i
+      else
+        break
+      end
+    end
+    if L >= 1 and ch[L][1] == 'leaf' then
+      return ch[L][2], 'right'
+    end
+    if ch[L + 1] and ch[L + 1][1] == 'leaf' then
+      return ch[L + 1][2], 'left'
+    end
+    if top and L == 0 then
+      return -1, 'left'
+    end
+    if top and L == #ch then
+      return -1, 'right'
+    end
+    return nil
+  end
+  if lay[1] == 'leaf' then
+    local s = side_of(lay[2])
+    return lay[2], (s == 'bottom' and 'above') or (s == 'right' and 'left') or 'right'
+  elseif lay[1] == 'row' then
+    return row_spot(lay, true)
+  end
+  local c = lay[2][1]
+  if c[1] == 'row' then
+    return row_spot(c, false)
+  end
+  if c[1] == 'leaf' then
+    local s = side_of(c[2])
+    if s == 'bottom' then
+      return c[2], 'above'
+    elseif s == 'right' then
+      return -1, 'left' -- RelationView 열만 남았다: 열 전체의 왼쪽
+    end
+    return c[2], 'right' -- [aerial] 위 / quickfix 아래: aerial 의 오른쪽
+  end
+  return nil
+end
+
+-- 창 옵션: 곁창에서 가르면 곁창의 것(번호 없음, winhighlight, signcolumn ...)이 따라온다.
+-- 닫힌(또는 살아 있는) EDIT 창의 값을 옮겨 심는다 - 창의 '전역' 값까지(:set 처럼). 안
+-- 그러면 그 창에 처음 여는 파일도 곁창 모양을 물려받는다.
+local OPT_SKIP = {
+  winfixbuf = true, winfixwidth = true, winfixheight = true, previewwindow = true,
+  diff = true, scrollbind = true, cursorbind = true, scroll = true,
+  statusline = true, winbar = true,
+}
+local win_opt_names = nil
+local last_edit_opts = nil
+
+local function win_opts(w)
+  if not win_opt_names then
+    win_opt_names = {}
+    for name, info in pairs(api.nvim_get_all_options_info()) do
+      if info.scope == 'win' and not OPT_SKIP[name] then
+        win_opt_names[#win_opt_names + 1] = name
+      end
+    end
+  end
+  local o = {}
+  for _, n in ipairs(win_opt_names) do
+    local ok, v = pcall(api.nvim_get_option_value, n, { win = w })
+    if ok then
+      o[n] = v
+    end
+  end
+  return o
+end
+
+local function edit_ref_opts()
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if edit_any(w) then
+      return win_opts(w)
+    end
+  end
+  for _, w in ipairs(api.nvim_list_wins()) do
+    if edit_any(w) then
+      return win_opts(w)
+    end
+  end
+  return last_edit_opts
+end
+
+-- 아무 데도 안 뜬 빈 [No Name] 이 있으면 그것을 쓴다 (빈 버퍼가 쌓이지 않게)
+local function empty_buf()
+  for _, b in ipairs(api.nvim_list_bufs()) do
+    -- 읽은 버퍼만 vim.bo 로 본다 (내린 버퍼를 읽으면 shada 마크가 빠진다 - dirty_bufs 와 같다)
+    if api.nvim_buf_is_loaded(b) and vim.fn.buflisted(b) == 1
+        and api.nvim_buf_get_name(b) == '' and vim.bo[b].buftype == ''
+        and not vim.bo[b].modified and api.nvim_buf_line_count(b) == 1
+        and api.nvim_buf_get_lines(b, 0, 1, false)[1] == ''
+        and #vim.fn.win_findbuf(b) == 0 then
+      return b
+    end
+  end
+  return api.nvim_create_buf(true, false)
+end
+
+-- 높이를 되돌려도 되는 창인가: 위아래 이웃이 있는(col 틀 안의) 창만. 화면 높이를 다
+-- 차지한 창의 높이를 줄이면 vim 은 남는 줄을 명령줄에 준다 - DirDiff 탭의 RelationView
+-- 열 트리에서 :only 한 뒤 'cmdheight' 가 49 가 되어 다음 가르기가 E36 이었다 (실측).
+local function height_free(tab, w)
+  local function walk(node, col)
+    if node[1] == 'leaf' then
+      if node[2] == w then
+        return col
+      end
+      return nil
+    end
+    for _, c in ipairs(node[2]) do
+      local r = walk(c, col or node[1] == 'col')
+      if r ~= nil then
+        return r
+      end
+    end
+    return nil
+  end
+  local ok, lay = pcall(vim.fn.winlayout, api.nvim_tabpage_get_number(tab))
+  return ok and walk(lay, false) == true
+end
+
+--- 탭 tab 의 편집 자리에 buf 를 비추는 EDIT 창을 만든다. 만든 창 id (못 만들면 nil).
+--- sizes: { [win] = { 폭, 높이 } } 남은 창들을 되돌릴 크기 (없으면 기준 창만 알맞게)
+--- dead: { 폭, 높이 } 닫힌 EDIT 창의 크기 (있으면 새 창이 그만큼은 받게)
+local function make_edit_win(tab, buf, opts, sizes, dead)
+  local anchor, dir = edit_spot(tab)
+  local wins = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+    if not is_float(w) then
+      wins[#wins + 1] = w
+    end
+  end
+  if #wins == 0 then
+    return nil
+  end
+  if not anchor then
+    local right = false
+    for _, w in ipairs(wins) do
+      right = right or side_of(w) == 'right'
+    end
+    anchor, dir = -1, right and 'left' or 'right'
+  end
+  local before = {}
+  for _, w in ipairs(wins) do
+    before[w] = { api.nvim_win_get_width(w), api.nvim_win_get_height(w) }
+  end
+  local new
+  local function open(a)
+    new = api.nvim_open_win(buf, false, { split = dir, win = a, noautocmd = true })
+  end
+  local cur_tab = tab == api.nvim_get_current_tabpage()
+  if anchor == -1 or not pcall(open, anchor) then
+    -- 탭 전체(-1)는 '지금 탭' 기준이라 남의 탭이면 그 탭 창에서 부른다
+    anchor = -1
+    if cur_tab then
+      pcall(open, -1)
+    else
+      pcall(api.nvim_win_call, wins[1], function()
+        open(-1)
+      end)
+    end
+  end
+  if not (new and api.nvim_win_is_valid(new)) then
+    return nil
+  end
+  -- 다른 값만 심고, 그동안 OptionSet 은 끈다 (옵션 수십 개 x 남의 OptionSet 처리기)
+  local ei = vim.o.eventignore
+  vim.o.eventignore = 'all'
+  for o in pairs(OPT_SKIP) do
+    if o ~= 'scroll' and o ~= 'statusline' and o ~= 'winbar' then
+      pcall(api.nvim_set_option_value, o, false, { win = new })
+    end
+  end
+  for k, v in pairs(opts or {}) do
+    local okg, cur = pcall(api.nvim_get_option_value, k, { win = new })
+    if not okg or cur ~= v then
+      pcall(api.nvim_set_option_value, k, v, { win = new })
+    end
+  end
+  vim.o.eventignore = ei
+  clear_history(new) -- 갈라 온 곁창의 점프 목록이 따라왔다
+  local want = sizes
+  if not want then
+    want = {}
+    if anchor ~= -1 and before[anchor] then
+      if dir == 'above' or dir == 'below' then
+        want[anchor] = { nil, math.min(before[anchor][2], math.max(3, math.floor(vim.o.lines / 5))) }
+      else
+        -- 적어 둔 폭이 지금 폭 이상이면 넓어진 뒤에 적힌 것이다 (편집 창이 닫혀 자리를 받았다)
+        local g = guarded[anchor]
+        local wd = g and g.width
+        if not wd or wd >= before[anchor][1] then
+          wd = math.min(before[anchor][1], math.floor(vim.o.columns / 4))
+        end
+        want[anchor] = { wd, nil }
+      end
+    end
+  end
+  for _ = 1, 2 do
+    for w, sz in pairs(want) do
+      if w ~= new and api.nvim_win_is_valid(w) and api.nvim_win_get_tabpage(w) == tab then
+        if sz[1] then
+          pcall(api.nvim_win_set_width, w, sz[1])
+        end
+        if sz[2] and height_free(tab, w) then
+          pcall(api.nvim_win_set_height, w, sz[2])
+        end
+      end
+    end
+  end
+  -- 닫힌 창이 있던 자리와 다른 곳에 냈으면(예: RelationView 열 위에 있던 편집 창 - 열이
+  -- 화면 폭 전체였다) 적어 둔 크기를 되돌리는 것이 새 창을 한 칸으로 누른다. 그때는 닫힌
+  -- 창 크기와 화면 절반 중 작은 것만큼은 준다.
+  if dead and api.nvim_win_is_valid(new) then
+    if dir == 'left' or dir == 'right' then
+      local need = math.min(dead[1], math.floor(vim.o.columns / 2))
+      if api.nvim_win_get_width(new) < need then
+        pcall(api.nvim_win_set_width, new, need)
+      end
+    else
+      local need = math.min(dead[2], math.floor(vim.o.lines / 2))
+      if api.nvim_win_get_height(new) < need and height_free(tab, new) then
+        pcall(api.nvim_win_set_height, new, need)
+      end
+    end
+  end
+  return new
 end
 
 local function rescue(win)
@@ -586,20 +969,14 @@ local function rescue(win)
   end
   if not target then
     -- EDIT 창이 하나도 없다: 하나 만든다. 여기서 포기하면 사용자가 연
-    -- 파일이 아무 데도 안 뜬 채 사라진다.
-    local ok = pcall(function()
-      vim.cmd('noautocmd topleft vertical split')
-      target = api.nvim_get_current_win()
-    end)
-    if not ok or not target then
+    -- 파일이 아무 데도 안 뜬 채 사라진다. 예전에는 topleft vertical split 이라
+    -- 트리·aerial 의 왼쪽에 생겼다 - 편집 자리(왼쪽 곁창의 오른쪽, quickfix 위)에
+    -- 만든다. 곁창의 창 옵션(winfixbuf 포함)도 떼어 낸다 (make_edit_win).
+    local okm, w = pcall(make_edit_win, api.nvim_win_get_tabpage(win), buf, edit_ref_opts(), nil)
+    if not (okm and w) then
       return
     end
-    -- :split 은 지금 창의 창 옵션을 물려준다. 곁창에서 갈랐으면 winfixbuf
-    -- 까지 따라와, 정작 그 창에 파일을 못 넣는다.
-    for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight',
-      'previewwindow' }) do
-      pcall(function() vim.wo[target][o] = false end)
-    end
+    target = w
   end
   -- 세 번의 pcall 을 따로 두면 안 된다. 버퍼를 못 넣었는데 커서와 포커스만
   -- 옮기면, 사용자는 열려던 파일 대신 엉뚱한 창에 끌려가 있게 된다.
@@ -749,7 +1126,9 @@ end
 -- 편집 자리가 없거나(트리만 남은 탭), F11 부동 트리거나, 남의 탭이거나, 지킴이를
 -- 껐으면 옮기지 않고 neo-tree 에게 맡긴다. 그때도 neo-tree 의 가로채기가 끝날
 -- 때까지는 close_if_last_window 를 꺼 둔다 (hold_tree_quit) - 가로채는 중에 잠깐
--- 닫히는 창을 보고 nvim 을 끝내면 안 된다.
+-- 닫히는 창을 보고 nvim 을 끝내면 안 된다. (그 값은 이제 .vimrc 에서 늘 끈다 - 탭에
+-- 트리만 남는 경우는 아래 2번이 탭 id 로 본다. hold_tree_quit 는 누가 다시 켰을 때 몫.)
+-- 곁창·플러그인 버퍼는 어느 탭에서든 넘기지도 맡기지도 않는다 (divert_tree_buf 첫머리).
 
 -- neo-tree 가 이 BufEnter 를 '제 사이드바를 가로챘다' 로 볼 것인가. 그렇다면 트리
 -- 창, 트리 버퍼, 들어온 버퍼를 돌려준다. 조건은 buffer_enter_event 그대로다.
@@ -828,6 +1207,25 @@ local function divert_tree_buf()
   local win, tree_buf, buf = tree_hijack()
   if not win then
     return
+  end
+  -- 곁창·플러그인 버퍼(DirDiff 목록, RelationView 창, quickfix, NeogitStatus, 다른 트리 ...)는
+  -- 편집 자리로 넘기지 않는다. 트리 창이 물려받은 점프 목록(<C-o>)이나 # 가 실어 온 것이다
+  -- - 트리를 되돌리고 그 이동은 버린다. 편집 창에 RelationView-Context 가 뜨던 것(QA-08)과,
+  -- 남의 탭(DirDiff)에서 neo-tree 에게 맡겼더니 그 버퍼 이름('DirDiff dA <> dB #4')으로
+  -- escape 없이 :bdelete 해서 '#'(= 대체 버퍼, main.c)를 지우고 탭 1 을 닫던 것(QA-03).
+  -- 남의 탭·F11 부동 트리·지킴이를 끈 때도 같다. 터미널·도움말과 편집 자리를 빌려 쓰는
+  -- 것(netrw, BufExplorer)은 예전처럼 넘긴다.
+  if not busy() and is_panel_buf(buf) and vim.bo[buf].buftype ~= 'terminal'
+      and vim.bo[buf].filetype ~= 'help' and vim.bo[buf].filetype ~= 'man'
+      and not TAKEOVER_FT[vim.bo[buf].filetype] then
+    local ei = vim.o.eventignore
+    vim.o.eventignore = 'all'
+    local okb = pcall(api.nvim_win_set_buf, win, tree_buf)
+    vim.o.eventignore = ei
+    if okb then
+      pcall(vim.fn.setreg, '#', tree_buf) -- <C-^> 로 다시 끌려오지 않게
+      return
+    end
   end
   local okc, conf = pcall(api.nvim_win_get_config, win)
   local floating = okc and conf and conf.relative and conf.relative ~= ''
@@ -908,6 +1306,23 @@ api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
     if cfg('win_guard', 1) == 0 then
       return
     end
+    -- 새 창의 이력 정리(clear_history)는 남의 탭에서도 한다 - Neogit 상태 창(tab sb)과
+    -- 그 탭에 연 aerial 이 갈라 온 창의 점프 목록을 물려받는다 (QA-07)
+    if a.event == 'WinNew' then
+      note_new_win()
+    elseif a.event == 'BufWinEnter' then
+      local cw = api.nvim_get_current_win()
+      if fresh[cw] then
+        vim.schedule(function()
+          scrub(cw)
+        end)
+      elseif not seen[cw] then
+        noted_quietly(cw)
+      end
+    end
+    if a.event ~= 'BufEnter' then
+      seen[api.nvim_get_current_win()] = true
+    end
     if foreign_tab() then
       return -- Diffview/Neogit 탭은 통째로 남의 것이다
     end
@@ -953,6 +1368,8 @@ api.nvim_create_autocmd('WinClosed', {
   group = 'VimIdeWinGuard',
   callback = function(a)
     guarded[tonumber(a.match) or -1] = nil
+    fresh[tonumber(a.match) or -1] = nil
+    seen[tonumber(a.match) or -1] = nil
   end,
   desc = '닫힌 창의 기록을 지운다',
 })
@@ -1058,17 +1475,33 @@ api.nvim_create_user_command('VimIdeMouseCheck', function()
 end, { desc = '마우스가 nvim 까지 오는지 본다' })
 
 -- ---------------------------------------------------------------------------
--- 2. EDIT 창이 0개가 되면 끝낸다
+-- 2. EDIT 창을 잃은 탭: :q 면 끝내고, 다른 길이면 EDIT 창을 되살린다
 -- ---------------------------------------------------------------------------
--- 지금은 편집 창을 전부 닫아도 nvim 이 안 죽는다. neo-tree 와 RelationView
--- 만 남은 채로 살아 있고, 그 상태에서는 파일을 열 자리도 없다.
+-- 편집 창을 전부 닫아도 nvim 이 안 죽으면 neo-tree 와 RelationView 만 남은 채로
+-- 살아 있고, 그 상태에서는 파일을 열 자리도 없다. 그래서 EDIT 창이 0개가 되면
+-- 끝냈는데, :bd/:close 로 잃은 것까지 :qa 로 쳐서 quickfix 를 띄운 채 :bd 하면
+-- nvim 이 말없이 꺼졌다 (QA-02, 종료 코드 0).
+--
+--   * 끝내는 것은 :q/:wq/:x/ZZ/<C-w>q 뿐이다 - 닫기 직전에 QuitPre 가 뜬 것.
+--     마지막 탭이면(다른 탭에도 EDIT 창이 없으면) vim 을, 아니면 그 탭만 닫는다.
+--   * :close :hide :bd :bw :only, 남의 플러그인이 창을 닫은 것으로 EDIT 창이 0개가
+--     되면 끝내지 않고, 그 탭의 편집 자리(왼쪽 트리·aerial 의 오른쪽, RelationView
+--     열의 왼쪽, quickfix 위)에 빈 EDIT 창을 되살린다 (make_edit_win). 닫힌 창의
+--     버퍼가 아직 목록에 있으면(:close/:hide) 그것이 # 라 <C-^> 로 돌아간다.
+--   * 탭에 F9 트리만 남으면(neo-tree 의 close_if_last_window 자리) 그 탭을 닫는다.
+--     마지막 탭이면 :q 일 때만 끝내고, 아니면 EDIT 창을 되살린다. neo-tree 의 그
+--     규칙은 WinClosed 에서 :q! 를 한 틱 미뤄 '그때의 지금 창' 에 했다 - 닫히는 탭은
+--     이미 없어서 엉뚱한 창·탭이 닫히거나 nvim 이 꺼졌다 (QA-01: 트리에 선 채
+--     :tabclose, Diffview 닫기, DirDiff 선택 탭에서 :only, 트리 옆 :close 가 다른
+--     탭까지). 그 규칙은 끄고(.vimrc) 여기서 탭 id 로 따진다 - 다른 탭은 안 건드린다.
 --
 -- 함정이 여럿이라 하나씩 막는다(전부 실측으로 확인한 것들이다):
 --
 --   * WinClosed 콜백 '안'에서 :qa 를 부르면 QuitPre/ExitPre/VimLeavePre/
 --     VimLeave 가 통째로 건너뛰어진다. 세션이 저장되지 않고 gtags 자식과
 --     autoindex 락이 고아로 남는데 종료 코드는 0 이라 겉보기엔 멀쩡하다.
---     그래서 반드시 한 틱 이상 미뤄서 부른다.
+--     그래서 반드시 한 틱 이상 미뤄서 부른다. 창을 만드는 것도 WinClosed 안에서는
+--     못 한다 - 탭마다 한 번, 다음 틱에 따진다 (그때 그 탭이 없으면 탭째 닫힌 것).
 --   * 미룬 뒤에는 다시 센다. 그 사이에 relationview 의 트리 재생성이나
 --     세션 복원이 창을 도로 열 수 있다.
 --   * 세션 복원 중에는 정상적으로 'EDIT 0개'인 순간이 생긴다(세션 파일 첫
@@ -1079,7 +1512,9 @@ end, { desc = '마우스가 nvim 까지 오는지 본다' })
 -- :qa / :wqa / :xa 와는 겹치지 않는다. 그 명령들은 창을 하나씩 닫지 않아
 -- WinClosed 를 한 번도 쏘지 않는다(실측).
 
-local pending = false
+local pending = false  -- :qa 를 미뤄 둔 중
+local quit_req = false -- 이 틱에 QuitPre 가 떴다 (:q :wq :x ZZ <C-w>q)
+local tab_rec = {}     -- 탭 id -> 이 틱에 그 탭에서 닫힌 것 (다음 틱에 한 번 따진다)
 
 local function dirty_bufs()
   local out = {}
@@ -1103,8 +1538,8 @@ end
 -- 남았을 때 비교 창 둘을 닫거나 트리에서 :only 하면 nvim 이 꺼졌다 (트리는 nofile 이라
 -- EDIT 으로 세지 않는다) - 비교 창은 트리에서 파일을 고르면 다시 생긴다
 local KEEPER_FT = { vimidedirdiff = true, vimidedirdifflaunch = true }   -- DirDiff 선택 탭의 경로 칸도
-local function has_keeper(dying)
-  for _, w in ipairs(api.nvim_list_wins()) do
+local function has_keeper(dying, tab)
+  for _, w in ipairs(tab and api.nvim_tabpage_list_wins(tab) or api.nvim_list_wins()) do
     if w ~= dying and api.nvim_win_is_valid(w)
         and KEEPER_FT[vim.bo[api.nvim_win_get_buf(w)].filetype] then
       return true
@@ -1113,65 +1548,200 @@ local function has_keeper(dying)
   return false
 end
 
-api.nvim_create_autocmd('WinClosed', {
-  group = api.nvim_create_augroup('VimIdeMinEdit', { clear = true }),
-  callback = function(a)
-    if cfg('min_edit_win', 1) == 0 or pending or busy() then
+local function nonfloat_wins(tab)
+  local out = {}
+  for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+    if not is_float(w) then
+      out[#out + 1] = w
+    end
+  end
+  return out
+end
+
+-- 탭에 F9 트리(사이드바) 하나만 남았나. RelationView 열·DirDiff 선택 창의 트리는
+-- position='current' 라 아니다 (neo-tree 의 규칙도 그것은 뺐다).
+local function tree_alone(wins)
+  if #wins ~= 1 then
+    return false
+  end
+  local b = api.nvim_win_get_buf(wins[1])
+  if vim.bo[b].filetype ~= 'neo-tree' then
+    return false
+  end
+  local pos = vim.b[b].neo_tree_position
+  return pos ~= nil and pos ~= 'current'
+end
+
+-- :qa 로 끝낸다. 120ms: vim.schedule 한 틱으로는 relationview 의 '트리 닫고 다시
+-- 열기' 와 같은 큐에 들어가 순서가 안 정해진다. 조금 더 미뤄 두고 다시 센다.
+local function quit_later(sizes)
+  if pending then
+    return
+  end
+  pending = true
+  vim.defer_fn(function()
+    pending = false
+    if cfg('min_edit_win', 1) == 0 or busy() then
       return
     end
-    -- 닫히는 그 창이 EDIT 창이었을 때만 따진다.
-    --
-    -- 이것이 없으면 'EDIT 창은 이미 0인데 곁창 하나가 닫히는' 아무 순간에도
-    -- 규칙이 깨어난다. 실제로 F6 을 누르면 BufExplorer 가 하나뿐인 편집 창을
-    -- 제자리에서 차지해 EDIT 이 0이 되고, 그 직후 overview 막대(부동 창)가
-    -- 닫히면서 vim 이 통째로 꺼졌다.
-    --
-    -- WinClosed 는 창이 아직 목록에 있을 때 뜨므로 여기서 물어볼 수 있다.
-    local dying = tonumber(a.match)
-    if not (dying and _G.vimide_is_edit_win(dying)) then
+    if _G.vimide_edit_win_count_all() > 0 or has_keeper() then
+      return -- 누가 도로 열어 주었다
+    end
+    -- 돌아가는 터미널이 있으면 끝내지 않는다. 사용자는 편집 창 하나를
+    -- 닫았을 뿐인데 빌드나 ssh 가 말없이 죽으면 안 된다.
+    if _G.vimide_has_live_terminal() then
+      vim.notify('EDIT 창이 없지만 터미널 창이 있어 끝내지 않았습니다',
+        vim.log.levels.WARN)
       return
     end
-    -- 세는 것은 반드시 탭 전체다(지금 탭만 보면 남의 탭까지 끄게 된다).
-    if _G.vimide_edit_win_count_all(dying) > 0 or has_keeper(dying) then
+    local dirty = dirty_bufs()
+    if #dirty > 0 then
+      -- 저장 안 한 것이 있으면 끝내지 않는다. :qa 는 어차피 E37 로
+      -- 막히고, 그 상태로 두면 보여 줄 창조차 없다. 편집 자리에 띄운다.
+      local okm, w = pcall(make_edit_win, api.nvim_get_current_tabpage(), dirty[1],
+        edit_ref_opts(), sizes)
+      if okm and w then
+        pcall(api.nvim_set_current_win, w)
+      end
+      vim.notify(
+        ('EDIT 창이 없지만 저장하지 않은 버퍼가 %d개 있어 끝내지 않았습니다')
+        :format(#dirty), vim.log.levels.WARN)
       return
     end
-    pending = true
-    -- 120ms: vim.schedule 한 틱으로는 relationview 의 '트리 닫고 다시 열기'
-    -- 와 같은 큐에 들어가 순서가 안 정해진다. 조금 더 미뤄 두고 다시 센다.
-    vim.defer_fn(function()
-      pending = false
-      if cfg('min_edit_win', 1) == 0 or busy() then
-        return
-      end
-      if _G.vimide_edit_win_count_all() > 0 or has_keeper() then
-        return -- 누가 도로 열어 주었다
-      end
-      -- 돌아가는 터미널이 있으면 끝내지 않는다. 사용자는 편집 창 하나를
-      -- 닫았을 뿐인데 빌드나 ssh 가 말없이 죽으면 안 된다.
-      if _G.vimide_has_live_terminal() then
-        vim.notify('EDIT 창이 없지만 터미널 창이 있어 끝내지 않았습니다',
-          vim.log.levels.WARN)
-        return
-      end
-      local dirty = dirty_bufs()
-      if #dirty > 0 then
-        -- 저장 안 한 것이 있으면 끝내지 않는다. :qa 는 어차피 E37 로
-        -- 막히고, 그 상태로 두면 보여 줄 창조차 없다.
-        pcall(function()
-          vim.cmd('noautocmd topleft split')
-          api.nvim_win_set_buf(api.nvim_get_current_win(), dirty[1])
-        end)
-        vim.notify(
-          ('EDIT 창이 없지만 저장하지 않은 버퍼가 %d개 있어 끝내지 않았습니다')
-          :format(#dirty), vim.log.levels.WARN)
-        return
-      end
-      -- 여기서의 :qa 는 WinClosed 밖이라 VimLeavePre 가 정상으로 돈다
-      -- (세션 저장, gtags 자식 정리, autoindex 락 해제).
-      pcall(vim.cmd, 'qa')
-    end, 120)
+    -- 여기서의 :qa 는 WinClosed 밖이라 VimLeavePre 가 정상으로 돈다
+    -- (세션 저장, gtags 자식 정리, autoindex 락 해제).
+    pcall(vim.cmd, 'qa')
+  end, 120)
+end
+
+local function settle_tab(tab)
+  local rec = tab_rec[tab]
+  tab_rec[tab] = nil
+  if not rec or cfg('min_edit_win', 1) == 0 or busy() then
+    return
+  end
+  if not api.nvim_tabpage_is_valid(tab) then
+    return -- 탭째 닫혔다 (:tabclose, Diffview/Neogit 닫기)
+  end
+  local wins = nonfloat_wins(tab)
+  if #wins == 0 then
+    return
+  end
+  for _, w in ipairs(wins) do
+    if edit_any(w) then
+      return
+    end
+  end
+  local alone = tree_alone(wins)
+  -- EDIT 창이 닫힌 것도, 트리만 남은 것도, 남의 창(Neogit 상태 창, DirDiff 목록)이 닫혀
+  -- 우리 곁창만 남은 것도 아니면 따지지 않는다. 이것이 없으면 'EDIT 창은 이미 0인데 곁창
+  -- 하나가 닫히는' 아무 순간에도 깨어난다 - F6 의 BufExplorer 가 하나뿐인 편집 창을 차지한
+  -- 직후 overview 막대가 닫히며 vim 이 꺼졌다. 도움말만 띄운 탭(:tab help)도 그대로 둔다.
+  if not (rec.buf or alone or rec.foreign) then
+    return
+  end
+  if has_keeper(nil, tab) then
+    return
+  end
+  if not alone and foreign_tab(tab) then
+    return -- Neogit/Diffview/DirDiff 탭의 배치는 저쪽 몫이다
+  end
+  if rec.buf or alone then
+    if rec.quit and _G.vimide_edit_win_count_all() == 0 and not has_keeper() then
+      return quit_later(tab == api.nvim_get_current_tabpage() and rec.sizes or nil)
+    end
+    if rec.quit or (alone and #api.nvim_list_tabpages() > 1) then
+      pcall(vim.cmd, 'tabclose ' .. api.nvim_tabpage_get_number(tab))
+      return
+    end
+  end
+  -- 남의 창만 닫혔으면(Neogit 탭에 RelationView 열을 띄운 채 q, DirDiff 탭의 aerial 에서
+  -- :only) 그 탭은 이제 우리 곁창뿐인 보통 탭이다 - 끝내거나 닫지 않고 편집 창을 낸다.
+  local okm, new = pcall(make_edit_win, tab, empty_buf(), rec.opts or edit_ref_opts(), rec.sizes,
+    rec.dead)
+  if not (okm and new) then
+    return
+  end
+  -- :close/:hide 로 닫힌 버퍼는 목록에 남아 있다 - <C-^> 로 돌아가게 # 로 둔다
+  -- (:bd 는 목록에서 빠진다. buflisted 로 본다 - 내린 버퍼를 vim.bo 로 읽지 않는다)
+  if rec.buf and api.nvim_buf_is_valid(rec.buf) and vim.fn.buflisted(rec.buf) == 1 then
+    pcall(api.nvim_win_call, new, function()
+      pcall(vim.fn.setreg, '#', rec.buf)
+    end)
+  end
+  if rec.enter and tab == api.nvim_get_current_tabpage() then
+    pcall(api.nvim_set_current_win, new)
+  end
+end
+
+local min_group = api.nvim_create_augroup('VimIdeMinEdit', { clear = true })
+
+api.nvim_create_autocmd('QuitPre', {
+  group = min_group,
+  callback = function()
+    quit_req = true
+    vim.schedule(function()
+      quit_req = false
+    end)
   end,
-  desc = 'EDIT 창이 0개가 되면 vim 을 끝낸다',
+  desc = '이 틱의 창 닫기는 :q 다',
+})
+
+api.nvim_create_autocmd('WinClosed', {
+  group = min_group,
+  callback = function(a)
+    if cfg('min_edit_win', 1) == 0 or busy() then
+      return
+    end
+    -- WinClosed 는 창이 아직 목록에 있을 때 뜨므로 여기서 물어볼 수 있다.
+    -- 부동 창(overview 막대, telescope)은 배치에 없다.
+    local dying = tonumber(a.match)
+    if not (dying and api.nvim_win_is_valid(dying)) or is_float(dying) then
+      return
+    end
+    local okt, tab = pcall(api.nvim_win_get_tabpage, dying)
+    if not okt then
+      return
+    end
+    local rec = tab_rec[tab]
+    if not rec then
+      -- 이 틱에 이 탭에서 처음 닫히는 창: 닫히기 전 크기를 적어 둔다 (되살린 창이
+      -- 그 자리를 그대로 받게). :only 처럼 여럿이 닫혀도 따지는 것은 한 번.
+      rec = { sizes = {} }
+      for _, w in ipairs(nonfloat_wins(tab)) do
+        rec.sizes[w] = { api.nvim_win_get_width(w), api.nvim_win_get_height(w) }
+      end
+      tab_rec[tab] = rec
+      vim.schedule(function()
+        settle_tab(tab)
+      end)
+    end
+    if quit_req then
+      rec.quit = true
+    end
+    if not rec.foreign then
+      local db = api.nvim_win_get_buf(dying)
+      if FOREIGN_FT[vim.bo[db].filetype] then
+        rec.foreign = true
+        rec.enter = rec.enter or api.nvim_get_current_win() == dying
+      end
+    end
+    if not rec.buf and edit_any(dying) then
+      -- 그 탭에 다른 EDIT 창이 남으면 따질 것이 없다 (옵션을 적는 값도 아낀다).
+      -- :only 처럼 여럿이 닫히면 마지막 것이 여기를 지난다.
+      for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+        if w ~= dying and edit_any(w) then
+          return
+        end
+      end
+      rec.buf = api.nvim_win_get_buf(dying)
+      rec.enter = rec.enter or api.nvim_get_current_win() == dying
+      rec.dead = { api.nvim_win_get_width(dying), api.nvim_win_get_height(dying) }
+      rec.opts = win_opts(dying)
+      last_edit_opts = rec.opts
+    end
+  end,
+  desc = 'EDIT 창을 잃은 탭: :q 면 끝내고, 아니면 EDIT 창을 되살린다',
 })
 
 -- ---------------------------------------------------------------------------

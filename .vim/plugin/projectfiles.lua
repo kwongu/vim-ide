@@ -5471,6 +5471,17 @@ local function open_in_edit(root, rel, prefer)
       end
     end
   end
+  -- 편집 창이 없는 탭의 뜬 창(F11 트리)에서 아래의 :split 을 하면 neo-tree 가 그 뜬 창과
+  -- 갈라 낸 창을 같이 닫아, 파일이 그 순간의 지금 창(DirDiff 트리, Neogit 탭의 aerial)에
+  -- 실렸다 - winfixbuf 도 지나서 (QA-06 의 F11 + F3). 뜬 창을 먼저 떠나 그 탭의 창에서 가른다.
+  if not target and api.nvim_win_get_config(0).relative ~= '' then
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if api.nvim_win_get_config(w).relative == '' then
+        pcall(api.nvim_set_current_win, w)
+        break
+      end
+    end
+  end
   local buf = vim.fn.bufadd(abs)
   vim.bo[buf].buflisted = true
   if target then
