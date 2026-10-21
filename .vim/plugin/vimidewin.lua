@@ -723,6 +723,143 @@ local function divert_dir()
   end)
 end
 
+-- F9 트리(neo-tree 사이드바)에 버퍼가 실리려 한다: neo-tree 가 손대기 전에 넘긴다.
+--
+-- neo-tree 는 제 사이드바에 다른 버퍼가 들어오면 '가로채기' 로 보고 되돌린다
+-- (setup/init.lua 의 buffer_enter_event). 그 창을 b# 로 트리로 돌린 뒤, 한 틱
+-- 미뤄서 그 버퍼를 :bdelete 하고 utils.open_file 로 다시 연다. 그 파일이 편집
+-- 창에 떠 있으면 :bdelete 가 그 편집 창을 닫는다 - 탭에 트리만 남은 순간이 생기고,
+-- close_if_last_window(.vimrc)가 그것을 보고 :q! 를 한 틱 미뤄 둔다. 그 :q! 는
+-- '그때의 지금 창' 에서 돈다 = open_file 이 막 갈라 연 새 창. 그 창이 닫히면 또
+-- 트리만 남아 두 번째 :q! 가 nvim 을 끝낸다. 알림도 없이 종료 코드 0 이다.
+-- 실측: F9 트리에 선 채 'A(편집 창의 그 파일에 찍은 전역 마크)를 누르면 바로
+-- 꺼졌다. 약어를 거치지 않는 :edit (:exe 'edit %', 남의 플러그인) 도 같았다.
+-- 곁창이 더 있는 F12 배치에서는 꺼지지는 않았지만 편집 창이 닫혔다가 맨 왼쪽에
+-- 새로 생겼고, :bdelete 가 버퍼를 내려 그 파일의 되돌리기(u) 기록도 사라졌다.
+--
+-- 그래서 neo-tree 의 처리기보다 먼저 같은 조건을 보고, 트리 창은 트리로 되돌리고
+-- 그 버퍼는 편집 자리에 싣는다. 이 augroup 이 neo-tree 것보다 앞이다 - neo-tree 는
+-- F9 를 처음 누를 때 제 자동명령(NeoTreeEvent_vim_buffer_enter)을 만든다 (실측:
+-- :autocmd BufEnter 에서 VimIdeWinGuard 가 위).
+--
+-- 지금 창도 편집 자리로 옮긴다. 이 BufEnter 를 부른 명령(:edit, 'A, :cc ...)은
+-- 돌아가서 나머지 일 - 커서를 마크 줄로, :e +N 의 줄로 - 을 '지금 창' 에 한다.
+-- 그러면 neo-tree 의 처리기는 '지금 창이 트리 창이 아니다' 로 아무것도 안 한다.
+--
+-- 편집 자리가 없거나(트리만 남은 탭), F11 부동 트리거나, 남의 탭이거나, 지킴이를
+-- 껐으면 옮기지 않고 neo-tree 에게 맡긴다. 그때도 neo-tree 의 가로채기가 끝날
+-- 때까지는 close_if_last_window 를 꺼 둔다 (hold_tree_quit) - 가로채는 중에 잠깐
+-- 닫히는 창을 보고 nvim 을 끝내면 안 된다.
+
+-- neo-tree 가 이 BufEnter 를 '제 사이드바를 가로챘다' 로 볼 것인가. 그렇다면 트리
+-- 창, 트리 버퍼, 들어온 버퍼를 돌려준다. 조건은 buffer_enter_event 그대로다.
+local function tree_hijack()
+  local buf = api.nvim_get_current_buf()
+  local ft = vim.bo[buf].filetype
+  if ft == 'neo-tree' or ft == 'neo-tree-popup' then
+    return nil
+  end
+  local prior = vim.fn.bufnr('#')
+  if prior < 1 or prior == buf or not api.nvim_buf_is_valid(prior)
+      or vim.bo[prior].filetype ~= 'neo-tree' then
+    return nil
+  end
+  local pos = vim.b[prior].neo_tree_position
+  -- 'current'(RelationView 열의 트리, DirDiff 선택 창)는 제자리에서 여는 것이 정상이다
+  if pos == nil or pos == 'current' then
+    return nil
+  end
+  local win = api.nvim_get_current_win()
+  if vim.b[prior].neo_tree_winid ~= win
+      or vim.b[prior].neo_tree_tabid ~= api.nvim_get_current_tabpage() then
+    return nil
+  end
+  -- 디렉터리는 divert_dir 와 neo-tree 의 netrw 가로채기 몫이다
+  local name = api.nvim_buf_get_name(buf)
+  if name ~= '' and vim.fn.isdirectory(name) == 1 then
+    return nil
+  end
+  return win, prior, buf
+end
+
+-- neo-tree 의 가로채기가 끝날 때까지 close_if_last_window 를 꺼 둔다.
+-- 가로채기의 :bdelete + open_file 은 neo-tree 가 이 BufEnter 안에서 vim.schedule 로
+-- 미뤄 둔다. 여기서 두 틱을 미루면 그 뒤에 돈다 (vim.schedule 은 들어온 차례대로).
+-- 이미 꺼져 있으면(gitrepo.lua 의 keep_tree 가 끄는 중) 손대지 않는다.
+local function hold_tree_quit()
+  if not package.loaded['neo-tree'] then
+    return
+  end
+  local ok, c = pcall(function()
+    return require('neo-tree').ensure_config()
+  end)
+  if not (ok and type(c) == 'table' and c.close_if_last_window == true) then
+    return
+  end
+  c.close_if_last_window = false
+  vim.schedule(function()
+    vim.schedule(function()
+      c.close_if_last_window = true
+    end)
+  end)
+end
+
+-- 들어온 버퍼를 실을 편집 자리. 트리 창(skip)은 지금 그 파일을 들고 있어 EDIT 창처럼
+-- 보이므로 빼고 고른다 (rescue 와 같은 사정).
+local function edit_target(skip)
+  if type(_G.vimide_last_edit_win) == 'function' then
+    local ok, w = pcall(_G.vimide_last_edit_win)
+    if ok and w and w ~= 0 and w ~= skip and _G.vimide_is_edit_win(w) then
+      return w
+    end
+  end
+  local w = _G.vimide_edit_wins(skip)[1]
+  if w then
+    return w
+  end
+  w = _G.vimide_borrowed_win()
+  if w ~= 0 and w ~= skip then
+    return w
+  end
+  return 0
+end
+
+local function divert_tree_buf()
+  local win, tree_buf, buf = tree_hijack()
+  if not win then
+    return
+  end
+  local okc, conf = pcall(api.nvim_win_get_config, win)
+  local floating = okc and conf and conf.relative and conf.relative ~= ''
+  local target = 0
+  if cfg('win_guard', 1) ~= 0 and not floating and not busy() and not foreign_tab() then
+    target = edit_target(win)
+  end
+  local fixbuf = false
+  if target ~= 0 then
+    pcall(function() fixbuf = vim.wo[target].winfixbuf end)
+  end
+  if target == 0 or fixbuf then
+    hold_tree_quit()
+    return
+  end
+  -- 편집 자리에 먼저 싣는다. 실패하면 아무것도 안 바뀐 채 neo-tree 에게 넘긴다.
+  -- 자동명령은 끈다: 우리가 부른 창·버퍼 바꾸기로 이 처리기가 다시 불리면 안 된다
+  -- (이 콜백은 nested 가 아니라 어차피 대부분 안 뜨지만, 명시해 둔다 - divert_dir 와 같다).
+  local ei = vim.o.eventignore
+  vim.o.eventignore = 'all'
+  local ok = api.nvim_win_get_buf(target) == buf
+      or pcall(api.nvim_win_set_buf, target, buf)
+  if ok then
+    pcall(api.nvim_win_set_buf, win, tree_buf)
+    pcall(api.nvim_set_current_win, target)
+  end
+  vim.o.eventignore = ei
+  if not ok or api.nvim_get_current_win() ~= target then
+    hold_tree_quit()
+  end
+end
+
 -- 지금 무엇을 지키고 있는지. 시험과 문제 추적용이다.
 function _G.vimide_win_guard_state()
   local out = {}
@@ -758,7 +895,16 @@ end
 
 api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter', 'WinNew' }, {
   group = api.nvim_create_augroup('VimIdeWinGuard', { clear = true }),
-  callback = function()
+  callback = function(a)
+    -- F9 트리의 가로채기는 지킴이를 꺼도 본다 - 옮기는 것만 지킴이 몫이고,
+    -- 가로채는 중에 nvim 이 꺼지지 않게 하는 것은 버그 고침이다 (divert_tree_buf).
+    -- neo-tree 의 처리기와 같은 BufEnter 에서만 (그쪽은 BufWinEnter 에도 걸려 있지만
+    -- 그 앞에 늘 BufEnter 가 먼저 뜬다).
+    if a.event == 'BufEnter' and not sweeping then
+      sweeping = true
+      pcall(divert_tree_buf)
+      sweeping = false
+    end
     if cfg('win_guard', 1) == 0 then
       return
     end

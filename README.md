@@ -4053,7 +4053,7 @@ pty: on an 800-line file with a 20-row bar, clicking at 75% goes to line
 to line 81. Clicking in the text at screen row 9 still goes to line 9 and
 leaves you in normal mode.
 
-### Two neo-tree things that were not obvious
+### Three neo-tree things that were not obvious
 
 **`H` looked broken.** It runs `toggle_hidden`, which flips one flag:
 `filtered_items.visible` - "show the filtered items, just differently".
@@ -4081,6 +4081,33 @@ neo-tree does have a winfixbuf recovery path, but an `assert(pcall(...))`
 throws before it is reached. The list matches `buftype` as well as
 `filetype`, so `nofile` in it keeps every scratch window out - which is the
 right rule anyway.
+
+**nvim quit by itself** (exit status 0, no message) when the F9 tree had
+the focus and something opened the file of the edit window there: `'A`
+for a global mark in that file, `:cc`, or an `:edit` that does not go
+through the command-line routing (`:exe 'edit %'`, another plugin). neo-tree
+treats any buffer that lands in its sidebar as a hijack and undoes it: `b#`
+back to the tree, then, one tick later, `:bdelete` the file and open it
+again in a new split. That `:bdelete` also closed the edit window showing
+the file, which left the tab with only the tree, so `close_if_last_window`
+queued a `:q!` - which ran in whatever window was current a tick later: the
+new split. Closing that left the tree alone again, and the second `:q!`
+ended nvim. With more side windows (the F12 column) it did not quit, but
+the edit window was closed and reopened at the far left, and the file was
+unloaded, losing its undo history.
+
+The window guard (`vimidewin.lua`) now acts first - its `BufEnter` runs
+before neo-tree's, which neo-tree only creates on the first F9. When a
+buffer lands in the F9 tree it puts the tree back and the buffer in the
+last edit window, and moves the focus there, so the rest of the command
+(the mark's line, `:e +N`) happens in the edit window and neo-tree sees
+nothing to undo. Nothing is closed or reopened, and the undo history
+stays. When there is nowhere to move it - no edit window in the tab, the
+F11 float, a DirDiff or Neogit tab, or `g:vimide_win_guard = 0` - neo-tree
+undoes it as before, but `close_if_last_window` is held off until that is
+done, so the window it closes on the way does not end nvim.
+`close_if_last_window` itself is unchanged: closing the last edit window
+next to the tree still closes the tab, or nvim in the last tab.
 
 ### Bold means "a function is called here"
 

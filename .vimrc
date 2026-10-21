@@ -1101,6 +1101,14 @@ _G.rv_setup('neo-tree', {
     nt_handler('before_git_status', 'vimide_neotree_git_guard'),
     nt_handler('file_deleted', 'vimide_wipe_bufs_under_deleted_dir'),
   },
+  -- 탭에 트리만 남으면 그 탭을(마지막 탭이면 nvim 을) 닫는다. 이 규칙은 창이
+  -- 닫히는 순간만 보고 :q! 를 한 틱 미뤄 '그때의 지금 창' 에 하므로, 창을 닫았다가
+  -- 곧바로 새로 여는 흐름에서는 엉뚱한 창을 닫는다. neo-tree 자신의 '트리에 들어온
+  -- 버퍼 되돌리기'(:bdelete 한 뒤 새 창에 다시 열기)가 바로 그래서, F9 트리에 선 채
+  -- 'A(전역 마크)나 :exe 'edit %' 로 편집 창의 파일을 열면 nvim 이 말없이 꺼졌다
+  -- (종료 코드 0). 그 버퍼는 vimidewin.lua 가 neo-tree 보다 먼저 편집 창으로 넘기고
+  -- (g:vimide_win_guard), 넘기지 못할 때는 그 되돌리기가 끝날 때까지 이 값을 잠시
+  -- 끈다. gitrepo.lua 의 keep_tree 도 같은 까닭으로 잠시 끈다.
   close_if_last_window = true,
   -- 창 폭 감시(0.5초마다 도는 타이머)는 끈다 - 아래 WinResized 가 대신한다.
   -- neo-tree 는 트리를 그릴 때마다(show_nodes) 감시를 '시작'하는데, 이미 돌고
@@ -4859,6 +4867,10 @@ let g:relationview_lookup_panel = 1
 "
 " 1 (기본) 곁창(패널/aerial/quickfix/neo-tree/NERDTree ...)에 파일이 실리면
 "          그 파일을 '직전에 보던 EDIT 창'으로 옮기고 곁창을 되돌린다.
+"          F9 트리는 neo-tree 가 손대기 전에 옮긴다 - 트리에 선 채 'A 나
+"          :cc 로 편집 창의 파일을 열면 neo-tree 가 그 편집 창을 닫았다가
+"          새로 열면서 nvim 이 꺼지던 것을 막는다. 0 이어도 꺼지지는 않는다
+"          (그때는 neo-tree 가 새 창을 열어 준다).
 let g:vimide_win_guard = 1
 " 1 (기본) 곁창만 남고 EDIT 창이 0개가 되면 vim 을 끝낸다.
 "          저장 안 한 버퍼나 돌아가는 터미널이 있으면 끝내지 않는다.
