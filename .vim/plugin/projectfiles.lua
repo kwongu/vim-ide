@@ -5415,7 +5415,9 @@ end
 -- 이제는 '부를 때 포커스가 있던 창'을 먼저 쓴다. telescope 는 닫을 때
 -- 원래 창으로 돌려주므로 대개 지금 창이 그것이지만, 확실하게 하려고
 -- 픽커가 열릴 때 잡아 둔 창(prefer)을 넘겨받는다.
-local function open_in_edit(root, rel, prefer)
+--
+-- how: nil = 그 창에, 'vsplit' / 'split' = 그 창을 갈라서, 'tab' = 새 탭에 (픽커의 <C-v>/<C-x>/<C-t>)
+local function open_in_edit(root, rel, prefer, how)
   local abs = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
   -- 편집에 쓸 수 있는 창인가.
   --
@@ -5437,6 +5439,70 @@ local function open_in_edit(root, rel, prefer)
     local b = api.nvim_win_get_buf(w)
     return vim.bo[b].buftype == ''
         and not api.nvim_buf_get_name(b):match('RelationView')
+  end
+  -- 남의 탭(DirDiff 선택·비교 탭, Neogit, Diffview)은 그 기능이 창을 짠다. 거기서 고른 파일을
+  -- 그 탭에 열면 DirDiff 선택 탭의 A 칸이 갈리거나(<C-v>) 두 열 밑에 깔려(<CR>) 트리가 1~9 칸으로
+  -- 눌렸다 (QA r2 Q09). 그 탭에 손수 연 편집 창(diff 아닌)이 있으면 거기에, 없으면 그 기능을 연
+  -- 탭(직전 탭, 다음은 앞 탭부터)의 편집 창으로 가서 연다. 그런 탭도 없으면 새 탭에.
+  local function pair_tab(tab)
+    local okp, v = pcall(api.nvim_tabpage_get_var, tab, 'vimide_dirdiff_pair')
+    return okp and v ~= nil and v ~= 0
+  end
+  local okf, foreign = pcall(function()
+    return type(_G.vimide_foreign_tab) == 'function' and _G.vimide_foreign_tab() == true
+  end)
+  local newtab = false
+  if okf and foreign then
+    local function plain(w)
+      return usable(w) and not vim.wo[w].diff
+    end
+    local here
+    if not pair_tab(0) then
+      if plain(prefer) then
+        here = prefer
+      else
+        for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+          if plain(w) then
+            here = w
+            break
+          end
+        end
+      end
+    end
+    if here then
+      prefer = here
+    else
+      -- vimide_is_edit_win 은 지금 탭만 본다: 남의 탭은 buftype·diff 로 가늠하고, 옮긴 뒤
+      -- 아래에서 그 탭 안의 창을 다시 고른다
+      local cur = api.nvim_get_current_tabpage()
+      local tabs = api.nvim_list_tabpages()
+      local alt = vim.fn.tabpagenr('#')
+      if alt > 0 and tabs[alt] then
+        table.insert(tabs, 1, tabs[alt])
+      end
+      local home, hw
+      for _, tab in ipairs(tabs) do
+        if tab ~= cur and not pair_tab(tab) then
+          for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+            if api.nvim_win_get_config(w).relative == '' and not vim.wo[w].diff
+                and not vim.wo[w].previewwindow
+                and vim.bo[api.nvim_win_get_buf(w)].buftype == '' then
+              home, hw = tab, w
+              break
+            end
+          end
+          if home then
+            break
+          end
+        end
+      end
+      if home then
+        api.nvim_set_current_tabpage(home)
+        prefer = hw
+      else
+        newtab = true
+      end
+    end
   end
   -- 어느 창에 열까.
   --
@@ -5484,15 +5550,32 @@ local function open_in_edit(root, rel, prefer)
   end
   local buf = vim.fn.bufadd(abs)
   vim.bo[buf].buflisted = true
-  if target then
+  local fname = vim.fn.fnameescape(abs)
+  if newtab or how == 'tab' then
+    -- 새 탭은 편집 창에서 연다 - 곁창에서 열면 그 창 옵션(winfixbuf 등)을 물려받는다
+    if target and not newtab then
+      api.nvim_set_current_win(target)
+    end
+    vim.cmd('tabedit ' .. fname)
+    if newtab then
+      local w = api.nvim_get_current_win()
+      for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight', 'previewwindow',
+        'diff', 'scrollbind', 'cursorbind' }) do
+        pcall(function() vim.wo[w][o] = false end)
+      end
+    end
+  elseif target and (how == 'vsplit' or how == 'split') then
+    api.nvim_set_current_win(target)
+    vim.cmd(how .. ' ' .. fname)
+  elseif target then
     api.nvim_win_set_buf(target, buf)
     api.nvim_set_current_win(target)
   elseif vim.bo.buftype == '' then
-    vim.cmd('edit ' .. vim.fn.fnameescape(abs))
+    vim.cmd((how == 'vsplit' or how == 'split') and (how .. ' ' .. fname) or ('edit ' .. fname))
   else
     -- every window is a panel/preview/terminal: make one rather than
     -- replacing a special buffer (or failing with a stack traceback)
-    vim.cmd('botright split ' .. vim.fn.fnameescape(abs))
+    vim.cmd('botright ' .. (how == 'vsplit' and 'vsplit ' or 'split ') .. fname)
   end
 end
 
@@ -5961,6 +6044,34 @@ local function pick_find()
   local pend = s.bg_live(root) ~= nil
   local nolist = not pend and m0 ~= MODE_NONE and m0 ~= MODE_UNSET and m0 ~= MODE_AUTO
       and not uv.fs_stat(list_path(root))
+  -- <C-v>/<C-x>/<C-t> 도 <CR> 처럼 open_in_edit 로 연다 (all 이면 <CR> 까지). telescope 의
+  -- 기본은 픽커를 부른 창을 갈라, DirDiff 선택 탭에서는 A 칸의 경로 줄과 트리 사이에 파일 창이
+  -- 끼고 트리가 눌렸다 (QA r2 Q09). 곁창에서 불렀을 때도 곁창이 아니라 편집 창을 가른다.
+  local function route(t, bufnr, from, all)
+    local acts = { select_vertical = 'vsplit', select_horizontal = 'split', select_tab = 'tab' }
+    if all then
+      acts.select_default = 'edit'
+    end
+    for a, how in pairs(acts) do
+      if t.actions[a] then
+        t.actions[a]:replace(function()
+          local function go()
+            local entry = t.state.get_selected_entry()
+            t.actions.close(bufnr)
+            if entry and entry.value then
+              open_in_edit(root, entry.value, from, how ~= 'edit' and how or nil)
+            end
+          end
+          local pk = t.state.get_current_picker(bufnr)
+          if pk and type(_G.vimide_picker_ready) == 'function' then
+            _G.vimide_picker_ready(pk, go)
+          else
+            go()
+          end
+        end)
+      end
+    end
+  end
   if m0 == MODE_NONE or m0 == MODE_UNSET then
     local okb, builtin = pcall(require, 'telescope.builtin')
     if not okb then
@@ -5977,10 +6088,20 @@ local function pick_find()
         end
       end
       local why = m0 == MODE_NONE and 'none' or '모드 미정'
+      -- 남의 탭(DirDiff 선택 탭 등)에서는 고른 파일을 open_in_edit 로 연다 (Q09). 여느 탭은 예전대로
+      local okf, foreign = pcall(function()
+        return type(_G.vimide_foreign_tab) == 'function' and _G.vimide_foreign_tab() == true
+      end)
+      local t0 = okf and foreign and telescope() or nil
+      local from0 = api.nvim_get_current_win()
       builtin.find_files({
         cwd = root,
         prompt_title = ('Project files  →  %s   [%s: 색인 목록 없음 - 전체에서 찾기]')
             :format(target_label(root), why),
+        attach_mappings = t0 and function(bufnr)
+          route(t0, bufnr, from0, true)
+          return true
+        end or nil,
       })
       return
     end
@@ -6092,6 +6213,7 @@ local function pick_find()
           go()
         end
       end)
+      route(t, bufnr, from_win)
       map({ 'i', 'n' }, '<C-d>', function() remove(bufnr) end)
       -- 'd' 는 노멀 모드에서만 (입력 모드에서는 검색할 글자다)
       map('n', 'd', function() remove(bufnr) end)

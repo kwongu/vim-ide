@@ -1630,16 +1630,24 @@ end
 -- 파일 읽기 (미리보기·정의 줄 찾기) - mtime 으로 기억한다
 -- ---------------------------------------------------------------------------
 
--- 두 번째 값은 그 줄들을 읽은 때의 stat_key (보기 창이 다시 채울지 정할 때 쓴다)
+-- 두 번째 값은 그 줄들을 읽은 때의 stat_key (보기 창이 다시 채울지 정할 때 쓴다).
+-- 칸 = { key, lines, data(통째 글), now(본 루프 시각), cmds·offs·memo(find_line 이 채운다) }
+-- 같은 루프 차례(uv.now 가 같다) 안에서는 stat 을 다시 하지 않는다: <C-q> 는 항목 수백 개의 파일·줄을
+-- 한 번에 물어 같은 파일을 수백 번 stat 했다 (Q25)
 local fcache = {}
 local function file_lines(p)
+  local c = p and fcache[p]
+  local now = uv.now()
+  if c and c.now == now then
+    return c.lines, c.key
+  end
   local st = p and uv.fs_stat(p)
   if not st or st.type ~= 'file' then
     return nil
   end
   local key = stat_key(st)
-  local c = fcache[p]
   if c and c.key == key then
+    c.now = now
     return c.lines, key
   end
   local f = io.open(p, 'rb')
@@ -1652,37 +1660,102 @@ local function file_lines(p)
     return nil
   end
   local lines = vim.split(data, '\n', { plain = true })
-  fcache[p] = { key = key, lines = lines }
+  fcache[p] = { key = key, lines = lines, data = data, now = now }
   return lines, key
 end
 
 -- Lua 로 건 매핑·명령은 nvim 이 줄을 적어 두지 않는다('verbose' 0 에서 건 것).
 -- 파일에서 desc 나 키 글자, 명령 이름을 찾아 그 줄로 친다.
+-- F1 의 <C-q> 는 항목 수백 개(명령 110여 개)의 줄을 한 번에 물어서, 명령마다 .vimrc(7.9k 줄)·
+-- relationview.lua(10k 줄)를 줄마다 패턴 둘로 훑던 것이 한 번에 250ms 를 막았다 (Q25). 그래서 파일 판
+-- (fcache 칸 - mtime 이 바뀌면 함께 버린다)마다
+--   * cmds: 명령 정의 줄의 낱말 → 첫 줄 (한 번 훑는다. 명령 이름은 [%w_] 뿐이라 %f 로 찾던 것과 같다)
+--   * memo: 찾은 줄 (F1 을 다시 열어도 - 항목 표는 열 때마다 새로 만들어 d.lfound 는 남지 않는다)
+-- 글자 찾기는 통째 글에서 첫 글자를 뺀 나머지로 찾고 앞 글자를 맞춘다 ('Foo' 의 따옴표는 흔해 줄마다
+-- 찾기보다 몇 배 빠르다). 찾는 것에 줄바꿈이 있으면 예전처럼 못 찾는다.
 local function find_line(p, needles, cmdname)
   local lines = file_lines(p)
   if not lines then
     return 0
   end
+  local c = fcache[p]
+  c.memo = c.memo or {}
+  -- desc 가 없으면 needles[1] 이 nil 이다 - ipairs 는 거기서 멈춰 키 글자도 찾지 않았다. 건너뛴다
+  local n = table.maxn(needles)
+  local mk = { cmdname or '' }
+  for i = 1, n do
+    mk[#mk + 1] = needles[i] or ''
+  end
+  mk = table.concat(mk, '\0')
+  if c.memo[mk] then
+    return c.memo[mk]
+  end
+  local function done(ln)
+    c.memo[mk] = ln
+    return ln
+  end
   -- 명령은 정의하는 줄을 먼저 찾는다. 이름만 찾으면 vim 파일에서는 그 명령을
   -- 부르는 줄(call s:call('DirDiff', ...))에 먼저 걸린다.
-  if cmdname then
-    local pat = '%f[%w_]' .. cmdname .. '%f[^%w_]'
-    for i, l in ipairs(lines) do
-      if (l:find('^%s*com%a*!?%s') or l:find('create_user_command%s*%(')) and l:find(pat) then
-        return i
-      end
-    end
-  end
-  for _, nd in ipairs(needles) do
-    if nd and #nd >= 2 then
+  if cmdname and cmdname:find('^[%w_]+$') then
+    if not c.cmds then
+      local cmds = {}
       for i, l in ipairs(lines) do
-        if l:find(nd, 1, true) then
-          return i
+        if l:find('^%s*com%a*!?%s')
+            or (l:find('create_user_command', 1, true) and l:find('create_user_command%s*%(')) then
+          for w in l:gmatch('[%w_]+') do
+            cmds[w] = cmds[w] or i
+          end
         end
       end
+      c.cmds = cmds
+    end
+    if c.cmds[cmdname] then
+      return done(c.cmds[cmdname])
+    end
+  elseif cmdname then
+    local pat = '%f[%w_]' .. vim.pesc(cmdname) .. '%f[^%w_]'
+    for i, l in ipairs(lines) do
+      if (l:find('^%s*com%a*!?%s') or l:find('create_user_command%s*%(')) and l:find(pat) then
+        return done(i)
+      end
     end
   end
-  return 0
+  local data = c.data
+  for i = 1, n do
+    local nd = needles[i]
+    if nd and #nd >= 2 and not nd:find('\n', 1, true) then
+      local tail, b, init = nd:sub(2), nd:byte(1), 2
+      while true do
+        local s = data:find(tail, init, true)
+        if not s then
+          break
+        end
+        if data:byte(s - 1) == b then
+          -- 바이트 자리 → 줄 번호 (줄 머리 자리를 한 번 세어 두고 이분 찾기)
+          local offs = c.offs
+          if not offs then
+            offs = { 1 }
+            for k = 1, #lines do
+              offs[k + 1] = offs[k] + #lines[k] + 1
+            end
+            c.offs = offs
+          end
+          local lo, hi = 1, #lines
+          while lo < hi do
+            local mid = math.floor((lo + hi + 1) / 2)
+            if offs[mid] <= s - 1 then
+              lo = mid
+            else
+              hi = mid - 1
+            end
+          end
+          return done(lo)
+        end
+        init = s + 1
+      end
+    end
+  end
+  return done(0)
 end
 
 local function def_line(g_or_c, d)
@@ -2840,6 +2913,23 @@ local function open(force, back0)
     unhide()
     error(err, 0)
   end
+  -- <C-q>/<M-q> 가 물을 정의 줄을 쉬는 틈에 미리 찾아 둔다 (Q25): 처음에는 파일 수십 개를 읽고 줄로 나누어
+  -- 명령 정의 낱말을 세느라 <C-q> 한 번에 20~30ms 가 더 들었다. 한 칸 3ms 안쪽씩, 칸 사이에 친 키는 바로
+  -- 처리된다. 찾은 것은 항목(d.lfound)과 파일 판(fcache 의 memo)에 남아 다음 F1 은 거의 할 일이 없다
+  local wi = 1
+  local function warm()
+    local t0 = uv.hrtime()
+    while wi <= #entries do
+      local e = entries[wi]
+      wi = wi + 1
+      pcall(loc_of, e, rd)
+      if uv.hrtime() - t0 > 3e6 then
+        vim.defer_fn(warm, 5)
+        return
+      end
+    end
+  end
+  vim.defer_fn(warm, 50)
   if raise then
     for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
       local ok, cfg = pcall(api.nvim_win_get_config, w)

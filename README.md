@@ -2376,6 +2376,60 @@ up 41 more, and the sweep 14. All are fixed; for `:copen` from the F11 float,
 | with the F11 float tree open, resizing the terminal re-sized the float against the window you were in (neo-tree's own resize handler): from a 1-2 line window the float became one line, or failed with 'Invalid height' and Press ENTER | it is re-sized against the screen, as when it opened |
 | `:only` or `Ctrl+w o` in a side window (the F12 column, the outline) of a DirDiff, Neogit or Diffview tab closed that tab's own windows, and from the F12 column left its tree alone on the screen | refused there with a message; `:only!` still does it |
 
+### Found by the monkey QA, round 2: terminals, help, mouse, feature tabs
+
+A second monkey round drove the same sandboxed nvim through terminals, help
+windows, the README view, mouse clicks and drags, DirDiff and Neogit keys, tab
+and window shuffles and late gtags answers (four areas, about 10,000 steps).
+The 31 problems it found were fixed in four groups; the merged result was then
+replayed against every earlier repro (this round's and the first round's 28)
+and swept with 2,000 new steps, which found three more between the fixes (the
+three rows marked "found after merging"). A last pass fixed the three width
+and height cases that sweep still showed and two more that its own 1,500 steps
+found (the last five rows), then replayed every repro again.
+
+| what went wrong | now |
+|---|---|
+| F3, F1 or any other picker opened from a window with `wrap` + `linebreak` (the F1 README view, with F12 open at 140 columns) froze nvim for good at 100% CPU, so unsaved work was lost: plenary's `truncate` measured the border title with the current window's `linebreak` padding and its character loop never reached the limit | plenary's string width no longer depends on the current window, and `truncate` is bounded by the length of the string (`plenaryguard.lua`, loaded on first use). F3 there opens in 0.03 s |
+| closing the last file window next to a terminal split an empty `[No Name]` window beside the terminal; closing a terminal, help window or README view that was the only window next to the side panels left a tab of panels only, and the next `:Gtags` opened full width under the outline | a terminal in the edit area counts as the edit area, so it simply fills the tab. When a terminal, help window or README view closes and only side panels are left, an empty edit window is rebuilt in its place |
+| `:help` typed in a short, narrow edit window (F12 open) took 20 rows, leaving the edit window 1 row and the quickfix list 4 | help takes at most half of the window it splits |
+| `:close` or `:bd` of the last edit window in a column with help or quickfix rebuilt it right of the help window, or as a full-height column at the far left that squeezed help and the F12 column | the edit window comes back where it was (between the help window and the list), at its old size |
+| with only a terminal, help window or README view in the edit area, `:sp file` from the outline split the outline column, and quickfix, F3 and gtags jumps opened a full-width window under the list or the panels; F9, F12 or `,o` there made a tab of panels only | that window is the tab's edit slot. A file sent to it opens in a new edit window beside it (below help, left of a wide terminal, above a narrow one) |
+| F11, F1, `Ctrl+q` turned the edit window (or the NeogitStatus window) into the quickfix list and set `cmdheight` to 48 | the picker leaves the float before it opens the list |
+| a file opened from the F9 tree in a tab with no edit window (Neogit, terminal or README tab) opened left of the tree, so the tree ended up in the middle | it opens right of the tree (left of the F12 column for the column's tree) |
+| `\D` with F9, F10 or F12 open: leaving the tab and coming back gave column A half the screen and B 1 column | A and B split the width they actually have |
+| F3 in the `\D` launcher split the launcher's columns (`Ctrl+v`) or opened under both (`Enter`), leaving the trees 1-9 columns wide | F3's `Enter`, `Ctrl+v`, `Ctrl+x` and `Ctrl+t` in a DirDiff, Neogit or Diffview tab open the file in the tab you came from, or in a new tab |
+| `:DirDiff` for a pair whose tree had been closed drew the header and tree as a full-width strip under the outline and an empty edit window | the stale comparison is ended and a fresh tab opens; a tab that holds your files stays as a normal tab |
+| after `:bd!` of the last edit window next to the F12 column, the width the window guard put back was taken as set by hand, so the next F10 left the edit window 17-19 columns | widths restored while the layout is being rebuilt are not taken as manual |
+| in Neogit, Diffview and DirDiff tabs the outline, the F9 tree and the F12 column crushed that tab's own windows (and a file you opened there) to 1 column | when a window there falls under 10 columns, our side panels shrink (not below 20); the feature's own windows are never resized |
+| the `\p` preview stayed open after `,c`, `q` or `:cclose` once the list had been refilled (`:copen`, `,o`, a new search) | the preview `\p` opened is closed with its list |
+| `,o` after `:sp` + `:vs` left the bottom edit window 2 rows, and an edit window under a terminal dropped to 1 row after a resize in another tab | the whole stack is evened out, split rows and terminals included |
+| `:sp` in the outline made a copy that the width budget counted as edit area: at 90 columns the edit window fell to 19 and the F12 column got its width back | copies of the outline, tree and relation panes count as side panels |
+| `\p` took half the column (23 rows at 60 lines) | the 3-12 row cap holds |
+| at 110-120 columns the outline grew back from 20 to 24 columns after the width budget shrank it, leaving the edit window 36 | the outline keeps the width it is given (`resize_to_content` is off); a width you drag stays too |
+| `:bd!` typed in a help or terminal window deleted the edit window's file, unsaved changes included; with no edit window in the tab, `:e`, `:help`, `:terminal`, `:tag` and `:cn` typed there were refused | `:bd`/`:bw` there delete that window's own buffer. With no edit window, commands run in that window; with one, files still open in the edit window |
+| with RelationView open, a late `:Gtags` answer replaced the file in the tab you had moved to | it only fills the list |
+| F9 in a DirDiff compare tab asked 'File not in cwd. Change cwd to ...? y/n', and F10/F12 typed next went into the question | F9 and F11 open the tree without revealing a file outside its root |
+| `:e file` typed in the Diffview file panel was quietly undone by Diffview a second later | buffer commands typed in a Diffview tab open in the edit window of the tab you came from |
+| `:tab help` and `:tab terminal` were refused in a tab with no edit window | anything with `:tab` runs |
+| `Enter`, `o` or a double click on a '(N hidden items)' row opened a `.gitignore_hidden_message` buffer | message rows open nothing |
+| `:only` in the F11 float of a tab with no edit window gave a three-line E5601 | refused with a one-line notice |
+| F1, then `Ctrl+q` blocked 250 ms on a quiet machine (640 ms under load): each entry's definition line was found by scanning big files line by line | one index per file, kept until the file changes, filled in the background after F1 opens: 30-50 ms |
+| F12, `Ctrl+]` or a double click on an `#include <...>` line ran `global -P` in the foreground, up to 3 s | it runs in the background with a cache: `finding header …` shows at once (29 ms with `global` slowed by 1 s) |
+| closing a tab that held the F12 column (`\v` from a Diffview diff window, DirDiff `q`) left a hidden listed `[No Name]` | that buffer is wiped |
+| `:DiffviewOpen`, `\v`, F9, F10, `\o` or F12 typed in the quickfix list of a tab with no edit window left a hidden listed `[No Name]` each time | the list is left first; when there is nowhere to go, the empty buffer is wiped |
+| a double click on a non-tag word in a help window printed a three-line function error | one line, as in plain vim |
+| a late gtags answer took the cursor back after F9, `,o` or `Ctrl+w w`, or replaced a file opened with `:e` meanwhile | if you moved to another window or opened another file, it only fills the list, with a notice |
+| every empty `:Gtags` result said 'Line which matches ... not found', even for tag and reference searches | the message matches the search (`Tag which matches 'x' not found.`) |
+| (found after merging) a file opened from the F9 tree in a tab with no edit window: `Ctrl+o` or the mouse back button in the new window loaded the tree into it | the new window starts with its own jump list |
+| (found after merging) `:e file` typed in a help window of a Neogit tab replaced the help window | the file opens in the edit window, as before |
+| (found after merging) `:sp` then `:vs` in the outline: the width budget put one copy back to 40 columns and left the other 1 column | copies split side by side by hand are left alone, as before |
+| a side-panel width set by hand at 220 columns (`:vertical resize` of the edit window next to the F12 column) came back after the terminal shrank: at 100 columns the next `:sp`, jump or tab switch put the column back to 55 and left the edit area 23 | once a narrower terminal has shrunk a hand-set panel, it shares the width like the others; it gets your width back when there is room |
+| with a `:Gtags` window, the F12 column and F9 open in the `\D` launcher tab, launcher column A was left 9 columns wide: the columns freed by shrinking the F12 column went to column B | column A takes them (up to 20) |
+| when the terminal got taller, a quickfix list under the F12 column took all the new rows (10 -> 16) and the edit windows above stayed 2-3 rows | the list keeps its height and the new rows go to the edit area |
+| F12 typed in the quickfix list of a Neogit tab (no edit window there) left a hidden listed `[No Name]` each time | the empty buffer that split made is wiped |
+| at 160 columns, with two split edit windows next to the F12 column, opening the outline took all its columns from one of them (37 and 8) because the edit area as a whole was still wide enough | when a side panel opening or closing squeezes one of the edit windows under 10 columns, they are evened out; a width you set by hand is kept |
+
 ### What behaves differently after the QA
 
 The fixes above and in the other QA tables change these things you will notice
@@ -2400,10 +2454,22 @@ The fixes above and in the other QA tables change these things you will notice
 - **Side panels share the width**: on a narrow or shrunk terminal the tree,
   outline and F12 column give up columns (down to 20) so the edit area keeps 40,
   and get them back when there is room; lists and edit windows squeezed by a
-  shorter terminal are opened up again (`g:vimide_panel_budget`,
+  shorter terminal are opened up again, and the rows of a taller terminal go to
+  the edit area, not to the list (`g:vimide_panel_budget`,
   `g:vimide_edit_min_width`, `g:vimide_panel_min_width`).
 - `.h` files open as C; closing a Neogit or Diffview tab goes back to the tab
   you came from; `:only` in a side panel of a tab with no edit window is refused.
+- **Terminals, help and the README view belong to the edit area.** Closing the
+  file window next to a terminal leaves the terminal; closing a terminal, help
+  window or README view that was the last one next to the side panels brings
+  back an empty edit window, and a rebuilt edit window goes where the closed
+  one was. In a tab with no file window, a file sent there opens in a new edit
+  window beside it. `:bd`/`:bw` typed there delete that window's own buffer.
+- **F3 in a DirDiff, Neogit or Diffview tab** opens the file in the tab you
+  came from (or a new tab); `:e` and the other buffer commands typed in a
+  Diffview tab do the same.
+- **A late gtags answer only fills the list** when, since the search started,
+  you moved to another window or tab or opened another file in that window.
 
 ### Searching from the repository
 
@@ -2657,10 +2723,15 @@ budget (`panelbudget.lua`) now looks at the tab whenever its layout changes
 - a panel that took over the columns of a neighbour that closed (the tree
   next to the outline) goes back to its own width, and the edit area gets
   them.
+- when a panel opening or closing leaves one of several side-by-side edit
+  windows under 10 columns (vim takes the columns from one window only), the
+  edit windows are evened out.
 
 A width you set yourself - `:vertical resize`, dragging the border, `w` in the
 relation list or the tree - is kept: the other panels make room around it,
-and it only shrinks when the terminal itself gets narrower. Diffview,
+and it only shrinks when the terminal itself gets narrower. From then on it
+shares the width like the other panels and gets your width back when there is
+room again. Diffview,
 Neogit and DirDiff tabs lay out their own windows and are left alone.
 
 ```vim
@@ -3852,7 +3923,7 @@ than on the laptop was not the box. It was measured, not guessed:
 | matchparen | Of the 29 autocommands on `CursorMoved`, the bracket-match highlight cost 2.2 ms a move in a large C file - 90% of the total; all the others together were 0.2 ms. It is off (`g:loaded_matchparen`); `%` still jumps to the match. `let g:vimide_matchparen = 1` brings it back |
 | The relation window | One `global -f` process per referencing file, up to 100 of them: 125 ms for 60 files as separate spawns, 12 ms batched. The tree cache was written and never read. `fetch_callees` cached nothing. A heavy symbol (1607 references) went 916 ms -> 694 ms cold and 129 ms -> 28 ms on a revisit |
 | The pickers | `\fo` re-generated the whole 44,466-file list every press (239 ms -> 116 ms); `\fs` asked gtags for every indexed path before parsing a row, again on every prefix change (95 ms -> 8 ms) |
-| gtags searches | gtags.vim runs `global` with `system()`, so `\\s`, `\\g`, `\\c`, `:Gtags -r`, `:GtagsQf` and `<C-\><C-]>` held the keyboard for the whole search: 50-200 ms on a 154-file index, 1.1 s for the first `:Gtags -r` while the start-up index ran, and more on a kernel tree. In nvim, `gtagsasync.lua` replaces gtags.vim's `s:ExecLoad` (the one place that calls `system()`): `global` runs through `vim.system`, the key returns in 6-10 ms with `Gtags -r foo: 찾는 중...`, and the answer is loaded exactly as gtags.vim would (`botright copen`, `cexpr!`, jump to the first entry) in the edit window the search was started from. A newer search kills the older one; an answer that arrives in insert or command-line mode waits for normal mode; one that arrives after you moved to another tab only fills the quickfix list. A `:Gtags` inside a Vim script function that reads `getqflist()` right after (the `C-]` fallback when the tag is not found) still waits, as before. With a 0.6 s `global` (a stand-in for a big index): 672 ms -> 6 ms. `let g:vimide_gtags_async = 0` restores gtags.vim as it was |
+| gtags searches | gtags.vim runs `global` with `system()`, so `\\s`, `\\g`, `\\c`, `:Gtags -r`, `:GtagsQf` and `<C-\><C-]>` held the keyboard for the whole search: 50-200 ms on a 154-file index, 1.1 s for the first `:Gtags -r` while the start-up index ran, and more on a kernel tree. In nvim, `gtagsasync.lua` replaces gtags.vim's `s:ExecLoad` (the one place that calls `system()`): `global` runs through `vim.system`, the key returns in 6-10 ms with `Gtags -r foo: 찾는 중...`, and the answer is loaded exactly as gtags.vim would (`botright copen`, `cexpr!`, jump to the first entry) in the edit window the search was started from. A newer search kills the older one; an answer that arrives in insert or command-line mode waits for normal mode; one that arrives after you moved to another tab or window, or opened another file in the search window, only fills the quickfix list. A `:Gtags` inside a Vim script function that reads `getqflist()` right after (the `C-]` fallback when the tag is not found) still waits, as before. With a 0.6 s `global` (a stand-in for a big index): 672 ms -> 6 ms. `let g:vimide_gtags_async = 0` restores gtags.vim as it was |
 | First use of a feature | The first F9/F11/F12 tree, `\D`, F10, F1 and `:DiffviewOpen`/`\v` loaded their Lua modules (neo-tree alone is 100+ modules), merged neo-tree's config (`ensure_config`) and compiled treesitter queries inside the key: F9 92 ms the first time and 21 ms the second. `vimidewarm.lua` does that ahead of time, after start-up, while you are idle - one module per timer tick, only in normal mode after 0.6 s without a key, pausing as soon as you type and resuming when you stop. The next few module files are read ahead in libuv's thread pool, so a tick only compiles and runs one module: most ticks take 1-5 ms, the longest (the C++ aerial query) 12 ms, and all 193 together 160-370 ms on the Mac (first-open file scanning by the Mac's antivirus used to put 40-90 ms into single ticks). A tick never runs inside another plugin's `vim.wait` (diffview and Neogit wait inside coroutines; `vim.wait` is wrapped only while the ticks run, to count that depth) and runs with the JIT off, so it does not add to the SIGBUS crashes the Mac's Homebrew LuaJIT build has around Diffview (a JIT fault - `nvim --clean` with only diffview has it too): with `:DiffviewOpen` right after start, 5 of 16 test sessions died with the warm-up and 12 of 16 without it. First use after a few idle seconds, median of paired runs on the Mac (load 5-7): F9 116 -> 42 ms, `\D` 123 -> 65, F12 104 -> 52, `:DiffviewOpen` 180 -> 110, F1 126 -> 78, `:help` 86 -> 68 (under load 15-20: F9 255 -> 39, `\D` 301 -> 57, `:DiffviewOpen` 415 -> 132). The one thing that cannot be cut into ticks - compiling the C++ highlight query, ~145 ms in a single C call, paid by the first `.h` file - runs only while the terminal has lost focus (`FocusLost`; tmux needs `set -g focus-events on` to pass it). `:VimIdeWarmup` lists what was loaded and how long each tick took; `let g:vimide_warmup = 0` turns it off |
 | Not the cause | gtags queries are *faster* on the server than on the Mac (4 ms vs 19 ms). SSH round-trip is 12 ms and cannot be reduced; compression made it worse. Plugin sourcing is 35 ms total, so lazy-loading buys nothing |
 
@@ -4287,8 +4358,13 @@ vim-ide side windows in its tab (the relation column opened in a Neogit tab,
 `:only!` in the outline of a DirDiff tab - a plain `:only` typed in a side
 window of a tab with no edit window is refused instead). A window the
 guard has to create for a file that landed in a side window goes to the same
-place (it used to be split off at the far left). `g:vimide_min_edit_win = 0`
-turns all of this off.
+place (it used to be split off at the far left). A terminal left in the edit
+area counts as the edit area, so closing the file window beside it adds
+nothing. A terminal, help window or README view that closes as the last window
+next to the side panels is treated like a closing edit window (`:q` there
+closes just that window), and the new edit window takes the closed window's
+place: inside a stacked column (between help and the quickfix list) rather
+than beside it. `g:vimide_min_edit_win = 0` turns all of this off.
 
 **Jumps that carried panel buffers around.** A new window copies the jumplist,
 tag stack and alternate buffer of the window it was split from, so

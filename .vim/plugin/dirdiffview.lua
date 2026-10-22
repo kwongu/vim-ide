@@ -5251,7 +5251,8 @@ end
 -- ---------------------------------------------------------------------------
 
 -- stay: 다른 탭에서 이 비교 탭을 닫았다 - 사용자가 있던 탭에 그대로 둔다
-local function finish(s, stay)
+-- keep: 비교 탭을 닫지 않고 보통 탭으로 남긴다 (트리 창이 닫혀 비교 탭 꼴을 잃은 탭에 사용자 것이 있다 - M.open)
+local function finish(s, stay, keep)
   if s.done then
     return
   end
@@ -5295,7 +5296,10 @@ local function finish(s, stay)
   local m = s.main
   -- 혼자 선 비교(cmp.solo)의 s.tab 은 그 비교 탭이다 - 위에서 닫았다 (마지막 탭이라 남았으면 보통 탭으로 두었다.
   -- 트리 탭처럼 'only | enew' 로 비우면 사용자가 보던 두 파일이 사라진다)
-  if not s.solo and api.nvim_tabpage_is_valid(s.tab) then
+  if keep and api.nvim_tabpage_is_valid(s.tab) then
+    pcall(api.nvim_tabpage_del_var, s.tab, 'vimide_dirdiff_view')
+    pcall(api.nvim_tabpage_del_var, s.tab, 'title')
+  elseif not s.solo and api.nvim_tabpage_is_valid(s.tab) then
     api.nvim_set_current_tabpage(s.tab)
     local was = {}
     for _, w in ipairs(m and { m.win_a, m.win_b } or {}) do
@@ -5873,10 +5877,25 @@ function M.open(a, b)
   end
   -- 같은 두 디렉터리를 이미 비교하고 있으면 그 탭으로 (새로 훑지 않는다 - 다시 훑기는 R)
   for tab, o in pairs(sessions) do
-    if o.a == a and o.b == b and api.nvim_tabpage_is_valid(tab) then
+    -- 트리 창이 닫혀 그 탭이 비교 탭 꼴을 잃었으면 다시 쓰지 않는다 (Q10): pair_tab 의 트리는 탭 전체라 그것을
+    -- :close 하면 창 지킴이가 보통 탭(aerial + 빈 편집 창)으로 만든다 - 거기에 트리를 다시 열면 전체 폭 띠로 그
+    -- 밑에 붙었다. 낡은 비교를 끝내고 아래에서 새 탭에 연다. 그 탭에 사용자 것(이름 있는 파일, 고친 버퍼)이
+    -- 있으면 탭은 닫지 않고 보통 탭으로 남긴다
+    local lost = o.a == a and o.b == b and api.nvim_tabpage_is_valid(tab) and not api.nvim_win_is_valid(o.win_l)
+      and (o.pair_tab or not (o.main and api.nvim_win_is_valid(o.main.win_a) and api.nvim_win_is_valid(o.main.win_b)))
+    if lost then
+      local keep = false
+      for _, w in ipairs(api.nvim_tabpage_list_wins(tab)) do
+        local bw = api.nvim_win_get_buf(w)
+        if vim.bo[bw].modified or (vim.bo[bw].buftype == '' and api.nvim_buf_get_name(bw) ~= '') then
+          keep = true
+        end
+      end
+      finish(o, true, keep)
+    elseif o.a == a and o.b == b and api.nvim_tabpage_is_valid(tab) then
       api.nvim_set_current_tabpage(tab)
       if not api.nvim_win_is_valid(o.win_l) and api.nvim_buf_is_valid(o.buf_l) then
-        open_tree_win(o)   -- 트리 창을 닫아 버렸으면 (키는 모두 트리에 있다) 다시 연다
+        open_tree_win(o)   -- 트리 창을 닫아 버렸으면 (키는 모두 트리에 있다) 다시 연다 - 위 두 편집 창 밑에
         render(o)
       end
       if api.nvim_win_is_valid(o.win_l) then

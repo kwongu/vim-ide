@@ -1094,7 +1094,15 @@ local function relayout(L)
   for _, w in ipairs({ pa, pb }) do
     pcall(api.nvim_win_set_height, w, 1)
   end
-  pcall(api.nvim_win_set_width, pa, math.floor((vim.o.columns - 1) / 2))
+  -- 두 칸이 지금 차지한 폭(A + 경계 + B)을 반씩 - 화면 폭의 반이 아니다. 이 탭에 F9·F10·F12 열이 서
+  -- 있으면 화면 반을 A 에 주어 B 가 1칸으로 눌렸다 (Q08: 160 에서 \D, F12, gt, gT). 나란히 붙어 있을 때만
+  local wa, wb = api.nvim_win_get_width(pa), api.nvim_win_get_width(pb)
+  if api.nvim_win_get_position(pb)[2] == api.nvim_win_get_position(pa)[2] + wa + 1 then
+    local half = math.floor((wa + wb) / 2)
+    if half ~= wa then
+      pcall(api.nvim_win_set_width, pa, half)
+    end
+  end
   update_bars(L)
 end
 

@@ -7,8 +7,8 @@
 -- 그래서 global 을 vim.system 으로 돌린다:
 --   * 누르면 바로 'Gtags -r 낱말: 찾는 중...' 을 띄우고 키를 돌려준다
 --   * 답이 오면 gtags.vim 과 똑같이 quickfix 를 열고(botright copen) 채우고(cexpr!) 첫
---     자리로 뛴다. 찾기를 누른 편집 창 기준이다 - 그 사이 다른 창으로 갔으면 그 창으로
---     돌아와 뛴다 (곁창이 파일로 바뀌지 않게). 다른 탭으로 갔으면 목록만 채우고 알린다
+--     자리로 뛴다. 찾기를 누른 편집 창 기준이다 - 그 사이 다른 창이나 탭으로 갔거나 그
+--     창에 다른 파일을 열었으면 목록만 채우고 알린다 (커서를 도로 끌어오지 않는다)
 --   * 새 찾기가 앞의 것을 끊는다 (앞 프로세스는 죽이고 늦은 답은 버린다)
 --   * insert/명령줄 모드 중에 답이 오면 normal 로 돌아올 때까지 기다린다 (1초 넘게
 --     기다렸으면 뛰지 않고 목록만 채운다)
@@ -120,8 +120,33 @@ local function qf_run(cmd, result)
   return nil
 end
 
--- global 의 답을 quickfix 로 (s:ExecLoad 의 뒷부분 그대로). opt 는 global 에 넘긴
--- 옵션 글자 전체(--result=... 까지) - gtags.vim 이 빈 답의 알림을 그것으로 고른다.
+-- 이 탭에 quickfix 가 뛸 보통 파일 창이 없으면, 편집 자리(터미널·도움말 같은 내용 창 -
+-- vimidewin.lua 의 vimide_edit_slot)로 옮긴다. quickfix 창에서 뛰면 nvim 은 보통 파일 창을
+-- 찾다가 없으면 quickfix 위를 화면 폭 전체로 갈랐다 (QA r2: 트리·터미널 아래 220칸 창).
+-- 내용 창에 실린 파일은 지킴이가 그 옆 EDIT 창으로 옮긴다
+local function from_slot()
+  if vim.bo.buftype ~= 'quickfix' then
+    return
+  end
+  for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local c = api.nvim_win_get_config(w)
+    if (c.relative or '') == '' and vim.bo[api.nvim_win_get_buf(w)].buftype == ''
+        and not vim.wo[w].previewwindow then
+      return -- 뛸 창이 있다 (nvim 이 고른다)
+    end
+  end
+  local ok, w = pcall(function()
+    return _G.vimide_edit_slot and _G.vimide_edit_slot() or 0
+  end)
+  if ok and type(w) == 'number' and w ~= 0 and api.nvim_win_is_valid(w)
+      and api.nvim_win_get_tabpage(w) == api.nvim_get_current_tabpage() then
+    pcall(api.nvim_set_current_win, w)
+  end
+end
+
+-- global 의 답을 quickfix 로 (s:ExecLoad 의 뒷부분 그대로). opt 는 사용자가 준 옵션 글자
+-- (trim_option 뒤 - --result=ctags-mod 같은 것은 빼고): gtags.vim 은 global 에 넘긴 옵션
+-- 전체로 빈 답의 알림을 골라서 'ctags' 의 g 때문에 늘 'Line which matches' 였다 (QA r2).
 -- 돌려주는 것: 실패했으면 그 오류 (cexpr! 의 E37 같은 것)
 local function load(result, opt, pattern, flags, jump)
   if result == '' then
@@ -165,6 +190,9 @@ local function load(result, opt, pattern, flags, jump)
   if jump == 1 then
     cmd = cmd .. '\ncexpr! g:__vimide_gtags_r'
   end
+  if cmd:find('cexpr!', 1, true) then
+    from_slot()
+  end
   return qf_run(cmd, result)
 end
 
@@ -199,7 +227,9 @@ local function land(gen, ctx, out, code)
     return -- 더 새 찾기가 있다
   end
   local m = api.nvim_get_mode()
-  if m.blocking or m.mode ~= 'n' then
+  -- 'nt' 는 터미널 창의 normal 이다 (편집 창 없이 터미널에서 찾으면 그 창에서 기다린다 -
+  -- 'n' 만 보면 터미널을 떠날 때까지 답이 안 왔다)
+  if m.blocking or (m.mode ~= 'n' and m.mode ~= 'nt') then
     -- insert / 명령줄 / 피커 프롬프트 중: 끝날 때까지 기다린다 (새 찾기가 오면 버린다).
     -- 1초 넘게 기다렸으면 그 사이 다른 일을 하고 있었다 - 뛰지 않고 목록만 채운다
     ctx.wait0 = ctx.wait0 or uv.now()
@@ -217,7 +247,11 @@ local function land(gen, ctx, out, code)
   end
   local tab = api.nvim_get_current_tabpage()
   local err
-  if late or tab ~= ctx.tab or not api.nvim_win_is_valid(ctx.win)
+  -- 같은 탭이라도 그 사이 사용자가 다른 창으로 갔거나(F9, ,o, <C-w>w) 찾던 창에 다른 파일을
+  -- 열었으면(:e) 그 뜻을 따른다 - 커서를 도로 끌어오거나 연 파일을 덮지 않는다 (QA r2)
+  local moved = api.nvim_get_current_win() ~= ctx.win
+      or (api.nvim_win_is_valid(ctx.win) and api.nvim_win_get_buf(ctx.win) ~= ctx.buf)
+  if late or moved or tab ~= ctx.tab or not api.nvim_win_is_valid(ctx.win)
       or api.nvim_win_get_tabpage(ctx.win) ~= tab then
     -- 다른 탭으로 갔다 (또는 오래 다른 일을 했다): 창을 열거나 뛰지 않는다. 목록만 채운다
     if out == '' then
@@ -230,10 +264,7 @@ local function land(gen, ctx, out, code)
         count_lines(out)), 'None')
     end
   else
-    -- 찾기를 누른 창에서 (그 사이 곁창으로 갔어도 곁창이 파일로 바뀌지 않게)
-    if api.nvim_get_current_win() ~= ctx.win then
-      pcall(api.nvim_set_current_win, ctx.win)
-    end
+    -- 찾기를 누른 창에서 (위에서 거른 대로 지금 창이 그 창이다)
     -- 성공이면 load 가 돌려준 것(nil 또는 cexpr! 의 오류), 실패면 copen 등의 오류
     local _, e = pcall(load, out, ctx.opt, ctx.pattern, ctx.flags, ctx.jump)
     err = e
@@ -286,14 +317,16 @@ function _G.vimide_gtags_execload(option, long_option, pattern, flags, jump, sta
     cmd = global .. ' ' .. opt .. 'e ' .. q .. pattern .. q
   end
 
+  -- 빈 답의 알림은 사용자가 준 옵션 글자로 고른다 (load)
+  local o = trim_option(option)
   if not (enabled() and interactive(stack)) then
-    return run_sync(cmd, opt, pattern, flags, jump) -- 결과를 곧바로 읽는 호출
+    return run_sync(cmd, o, pattern, flags, jump) -- 결과를 곧바로 읽는 호출
   end
 
-  local o = trim_option(option)
   local ctx = {
-    cmd = cmd, opt = opt, pattern = pattern, flags = flags, jump = jump,
+    cmd = cmd, opt = o, pattern = pattern, flags = flags, jump = jump,
     win = api.nvim_get_current_win(), tab = api.nvim_get_current_tabpage(),
+    buf = api.nvim_get_current_buf(),
     label = (o ~= '' and ('-' .. o .. ' ') or '') .. pattern,
   }
   -- GTAGSROOT/GTAGSDBPATH 는 relationview.lua 의 with_file_db 가 이 호출 동안만 단다.
@@ -311,7 +344,7 @@ function _G.vimide_gtags_execload(option, long_option, pattern, flags, jump, sta
       end)
     end)
   if not ok then
-    return run_sync(cmd, opt, pattern, flags, jump) -- 프로세스를 못 띄웠다
+    return run_sync(cmd, o, pattern, flags, jump) -- 프로세스를 못 띄웠다
   end
   S.job = job
   say('Gtags ' .. ctx.label .. ': 찾는 중...')

@@ -2138,6 +2138,7 @@ local function panel_open()
     end
   end
   local win
+  local nb_max = vim.fn.bufnr('$') -- 가르기 전의 마지막 버퍼 번호 (아래: quickfix 에서 생긴 빈 버퍼)
   if host then
     -- ensure_ctx/ensure_tree 처럼 autocmd 없이, 포커스를 옮기지 않고 가른다.
     -- 예전에는 트리로 들어가 그냥 갈랐다. 새 창이 처음에 neo-tree 버퍼를
@@ -2161,7 +2162,14 @@ local function panel_open()
     vim.notify('RelationView: 패널 창을 만들지 못했습니다', vim.log.levels.WARN)
     return nil
   end
+  local nb = api.nvim_win_get_buf(win)
   api.nvim_win_set_buf(win, buf)
+  -- 편집 창이 없는 탭(Neogit 탭)의 quickfix 에서 F12: 나갈 자리가 없어 목록에서 갈랐고, vim 이
+  -- :split 을 :new 로 바꿔 실은 빈 [No Name] 이 목록에 숨어 남았다 (QA r2 다듬기). 갓 생긴 그것만 지운다
+  if nb ~= buf and nb > nb_max and api.nvim_buf_get_name(nb) == '' and vim.bo[nb].buftype == ''
+      and not vim.bo[nb].modified and #vim.fn.win_findbuf(nb) == 0 then
+    pcall(api.nvim_buf_delete, nb, {})
+  end
   A.airline_soon()
   A.panel_opts(win)
   -- 곁창 폭 예산(panelbudget.lua)이 되돌려 줄 '원래 폭'. 좁을 때 열리면 처음 폭이
@@ -2937,6 +2945,13 @@ local function install_open_hook()
         return
       end
       local from = args.state.winid
+      -- '(N hidden items)' 같은 알림 줄(type=message)은 파일이 아니다. neo-tree 는 그 id
+      -- ('<경로>_hidden_message')를 그대로 열어 없는 파일의 빈 버퍼가 생겼다 (QA r2 Q23)
+      local okn, node = pcall(function() return args.state.tree:get_node() end)
+      if (okn and type(node) == 'table' and node.type == 'message')
+          or (args.path:match('_hidden_message$') and not uv.fs_stat(args.path)) then
+        return { handled = true }
+      end
       -- DirDiff 선택 탭의 트리(dirdifflaunch.lua)는 파일을 열지 않고 그 칸의 선택으로 삼는다
       if _G.vimide_dirdiff_launch_open and _G.vimide_dirdiff_launch_open(args) then
         return { handled = true }
@@ -2978,10 +2993,65 @@ local function install_open_hook()
         end
       end
       if not (target and api.nvim_win_is_valid(target)) then
-        -- 그래도 없으면 편집 창을 하나 만든다
+        -- 그래도 없으면 편집 창을 하나 만든다 - 트리 바로 옆에 (Neogit·터미널·README 탭).
+        -- topleft 로 냈더니 왼쪽 트리보다 더 왼쪽 맨 가에 서서 트리가 가운데로 갔다 (QA r2 Q07).
+        -- 왼쪽 트리는 그 오른쪽, 열(F12) 안의 트리는 열의 왼쪽 이웃의 오른쪽. 위아래로 쌓인
+        -- 틀 안의 창을 세로로 가르면 그 높이만큼의 창이 되므로 줄(row)의 잎만 가른다.
+        -- 뜬 트리(F11)거나 그런 잎이 없으면 예전처럼 탭 맨 왼쪽.
+        local function spot()
+          local okc, c = pcall(api.nvim_win_get_config, from)
+          if not (okc and (c.relative or '') == '') then
+            return nil
+          end
+          local chain = {} -- 뿌리에서 from 까지 { 틀, 그 안의 몇째 }
+          local function walk(nd)
+            if nd[1] == 'leaf' then
+              return nd[2] == from
+            end
+            for i, ch in ipairs(nd[2]) do
+              chain[#chain + 1] = { nd, i }
+              if walk(ch) then
+                return true
+              end
+              chain[#chain] = nil
+            end
+            return false
+          end
+          if not walk(vim.fn.winlayout()) then
+            return nil
+          end
+          local right = from == s.tree_win
+              or vim.b[api.nvim_win_get_buf(from)].neo_tree_position == 'right'
+          local last = chain[#chain]
+          if not last or last[1][1] == 'row' then
+            return from, right and 'leftabove' or 'rightbelow'
+          end
+          local up = chain[#chain - 1]
+          if not (up and up[1][1] == 'row') then
+            return nil
+          end
+          local nb = up[1][2][up[2] + (right and -1 or 1)]
+          if nb and nb[1] == 'leaf' then
+            return nb[2], right and 'rightbelow' or 'leftabove'
+          end
+          return nil
+        end
+        local oks, anchor, how = pcall(spot)
         local ok = pcall(function()
-          vim.cmd('noautocmd topleft vertical split')
-          target = api.nvim_get_current_win()
+          if oks and anchor and api.nvim_win_is_valid(anchor) then
+            -- 기준 창으로 자동명령 없이 옮겨서 가른다. nvim_win_call 안에서 가르면 돌아와
+            -- 새 창으로 들어갈 때 WinEnter 가 떠 '본 창'이 되어, 지킴이가 갈라 온 창(트리)의
+            -- 점프 목록을 못 지웠다 - 새 창에서 <C-o> 가 트리 버퍼를 실었다 (QA r2 합치기)
+            vim.cmd('noautocmd call win_gotoid(' .. anchor .. ')')
+            local okv = pcall(vim.cmd, 'noautocmd ' .. how .. ' vertical split')
+            target = okv and api.nvim_get_current_win() or nil
+            if not okv then
+              vim.cmd('noautocmd call win_gotoid(' .. from .. ')')
+            end
+          else
+            vim.cmd('noautocmd topleft vertical split')
+            target = api.nvim_get_current_win()
+          end
         end)
         if ok and target and api.nvim_win_is_valid(target) then
           for _, o in ipairs({ 'winfixbuf', 'winfixwidth', 'winfixheight',
@@ -3113,6 +3183,15 @@ ensure_tree = function()
     wo.winfixheight = true
     wo.winfixwidth = true
   end)
+  -- 이 창이 닫힐 때 neo-tree(position='current')는 창에 # 버퍼를, # 이 없으면 새로 만든
+  -- 나열된 [No Name] 을 넣어 트리를 숨긴다. 창은 닫히니 그 버퍼만 남는다 - close_tree 는 그것을
+  -- 치우지만 열을 담은 탭째 닫으면(Diffview \v, DirDiff q, :tabclose) :ls 에 빈 버퍼가 쌓였다
+  -- (QA r2 Q27). neo-tree 의 WinClosed 가 먼저 돌았을 수도 있어, 이 열을 세운 뒤에 생긴
+  -- 빈 이름 없는 버퍼 가운데 아무 창에도 없는 것을 한 박자 뒤에 지운다 (close_tree 와 같은 잣대)
+  local hw0 = 0
+  for _, b in ipairs(api.nvim_list_bufs()) do
+    hw0 = math.max(hw0, b)
+  end
   api.nvim_create_autocmd('WinClosed', {
     pattern = tostring(win),
     once = true,
@@ -3120,6 +3199,17 @@ ensure_tree = function()
       if s.tree_win == win then
         s.tree_win = nil
       end
+      vim.schedule(function()
+        for _, b in ipairs(api.nvim_list_bufs()) do
+          if b > hw0 and api.nvim_buf_is_loaded(b) and api.nvim_buf_get_name(b) == ''
+              and vim.bo[b].buftype == '' and vim.bo[b].buflisted and not vim.bo[b].modified
+              and api.nvim_buf_line_count(b) == 1
+              and api.nvim_buf_get_lines(b, 0, 1, false)[1] == ''
+              and #vim.fn.win_findbuf(b) == 0 then
+            pcall(api.nvim_buf_delete, b, { force = true })
+          end
+        end
+      end)
     end,
   })
   if api.nvim_win_is_valid(prev) and api.nvim_get_current_win() ~= prev then
@@ -3762,24 +3852,31 @@ ctx_tag_jump = function(from_mouse)
   -- '#include "foo.h"' is about a file: follow it here, like a symbol
   local inc = include_at(api.nvim_win_get_buf(cw), pos[1])
   if inc then
+    -- global 은 뒤에서 (Q26). 그사이 다른 점프를 했거나 미리보기가 다른 파일로 갔으면 버린다
+    s.ctx_jump_gen = (s.ctx_jump_gen or 0) + 1
+    local jg = s.ctx_jump_gen
     root_for(file, function(root)
-      local path = resolve_include(inc, file, root)
-      if not path then
-        vim.notify('RelationView context: header not found: ' .. inc,
-          vim.log.levels.WARN)
-        return
-      end
-      -- 헤더로 따라가는 것은 심볼이 아니라 파일이다: 칠할 것이 없다.
-      -- 그래도 자리는 쌓는다 - ctx_stack 한 칸 = jump_marks 한 칸 이어야
-      -- <C-t> 를 여러 번 눌러도 짝이 어긋나지 않는다.
-      pcall(_G.vimide_jump_mark_push, nil)
-      if not ctx_visible() then
-        return
-      end
-      table.insert(s.ctx_stack,
-        { path = file, line = pos[1] + off, col = pos[2] })
-      s.ctx_last = nil
-      show_context({ path = path, line = 1 })
+      resolve_include(inc, file, root, function(path)
+        if s.ctx_jump_gen ~= jg or not (s.ctx_file and s.ctx_file.path == file) then
+          return
+        end
+        if not path then
+          vim.notify('RelationView context: header not found: ' .. inc,
+            vim.log.levels.WARN)
+          return
+        end
+        -- 헤더로 따라가는 것은 심볼이 아니라 파일이다: 칠할 것이 없다.
+        -- 그래도 자리는 쌓는다 - ctx_stack 한 칸 = jump_marks 한 칸 이어야
+        -- <C-t> 를 여러 번 눌러도 짝이 어긋나지 않는다.
+        pcall(_G.vimide_jump_mark_push, nil)
+        if not ctx_visible() then
+          return
+        end
+        table.insert(s.ctx_stack,
+          { path = file, line = pos[1] + off, col = pos[2] })
+        s.ctx_last = nil
+        show_context({ path = path, line = 1 })
+      end)
     end)
     return
   end
@@ -5586,38 +5683,85 @@ include_at = function(buf, line)
   return l:match('"([^"]+)"') or l:match('<([^>]+)>')
 end
 
--- absolute path of an included header. Cheap and synchronous: the file next
--- to the including one, then the gtags path index, then 'path'.
-resolve_include = function(name, srcpath, root)
+-- absolute path of an included header: the file next to the including one,
+-- then the gtags path index, then 'path'.
+--
+-- cb(path|nil) 를 주면 global 은 뒤에서 돈다. 예전에는 :wait(3000) 으로 기다려 #include
+-- 줄의 F12·<C-]>·더블클릭이 global 이 답할 때까지(느린 FS 에서 몇 초) 멎었다 (QA r2 Q26).
+-- 옆 파일이거나 기억해 둔 답이면 cb 를 그 자리에서 부른다. 같은 헤더는 색인이 바뀔
+-- 때까지 다시 묻지 않고, 묻는 중이면 그 답을 같이 기다린다. cb 가 없으면 예전처럼 기다린다.
+resolve_include = function(name, srcpath, root, cb)
+  local function answer(p)
+    if cb then
+      cb(p)
+    end
+    return p
+  end
   local dir = srcpath and vim.fs.dirname(srcpath) or nil
   if dir then
     local p = dir .. '/' .. name
     if uv.fs_stat(p) then
-      return p
+      return answer(p)
     end
   end
-  if root then
-    local prog = global_cmd()
-    if prog then
-      -- '-P' matches whole paths, so anchor the tail: 'a/b.h' -> '/a/b%.h$'
-      local pat = '/' .. name:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
-      local ok, o = pcall(function()
-        return vim.system({ prog, '-P', pat },
-          { text = true, cwd = root, env = db_env() }):wait(3000)
-      end)
-      if ok and o and o.stdout then
-        for rel in o.stdout:gmatch('[^\n]+') do
-          local p = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
-          if uv.fs_stat(p) then
-            return p
-          end
-        end
+  -- 'path' 의 '.'·'./include' 는 지금 파일 기준이라 부른 자리에서 본다 (답이 올 때는 지금
+  -- 버퍼가 바뀌어 있을 수 있다). 쓰는 것은 global 이 못 찾았을 때뿐이다.
+  local found = vim.fn.findfile(name, vim.o.path)
+  local by_path = found ~= '' and vim.fn.fnamemodify(found, ':p') or nil
+  local prog = root and global_cmd()
+  if not prog then
+    return answer(by_path)
+  end
+  local function pick(out)
+    for rel in (out or ''):gmatch('[^\n]+') do
+      local p = rel:sub(1, 1) == '/' and rel or (root .. '/' .. rel)
+      if uv.fs_stat(p) then
+        return p
       end
     end
+    return nil
   end
-  local found = vim.fn.findfile(name, vim.o.path)
-  if found ~= '' then
-    return vim.fn.fnamemodify(found, ':p')
+  -- '-P' matches whole paths, so anchor the tail: 'a/b.h' -> '/a/b%.h$'
+  local pat = '/' .. name:gsub('([%.%+%-%*%?%[%]%^%$%(%)%%])', '\\%1') .. '$'
+  local cmd = { prog, '-P', pat }
+  local opts = { text = true, cwd = root, env = db_env(), timeout = 3000 }
+  if not cb then
+    local ok, o = pcall(function() return vim.system(cmd, opts):wait(3000) end)
+    return pick(ok and o and o.stdout) or by_path
+  end
+  local key = 'I\0' .. root .. '\0' .. name
+  local mtime = gtags_mtime(root)
+  local hit = cache_get(key, mtime)
+  if hit == false or (hit and uv.fs_stat(hit)) then
+    return answer(hit or by_path)
+  end
+  s.inc_wait = s.inc_wait or {}
+  local q = s.inc_wait[key]
+  local function mine(p)
+    cb(p or by_path)
+  end
+  if q then
+    q[#q + 1] = mine
+    return nil
+  end
+  s.inc_wait[key] = { mine }
+  local function done(p, keep)
+    if keep then
+      cache_put(key, mtime, p or false)
+    end
+    local waiters = s.inc_wait[key] or {}
+    s.inc_wait[key] = nil
+    for _, f in ipairs(waiters) do
+      pcall(f, p)
+    end
+  end
+  local ok = pcall(vim.system, cmd, opts, function(o)
+    vim.schedule(function()
+      done(pick(o.stdout), o.code == 0)
+    end)
+  end)
+  if not ok then
+    done(nil, false)
   end
   return nil
 end
@@ -6183,12 +6327,22 @@ function update(sym, srcfile, force, manual, ctx)
     if ctx and ctx.buf and api.nvim_buf_is_valid(ctx.buf) then
       local inc = include_at(ctx.buf, ctx.line or 1)
       if inc then
-        local path = resolve_include(inc, api.nvim_buf_get_name(ctx.buf), root)
-        if path then
-          finish_header(gen, inc, root, path)
-        else
-          s.note = nil
-          render_msg(inc, 'header not found: ' .. inc)
+        -- global 은 뒤에서 (Q26): 답이 오기 전에 커서가 옮겨 갔으면(gen) 버린다
+        local waiting = true
+        resolve_include(inc, api.nvim_buf_get_name(ctx.buf), root, function(path)
+          waiting = false
+          if gen ~= s.gen then
+            return
+          end
+          if path then
+            finish_header(gen, inc, root, path)
+          else
+            s.note = nil
+            render_msg(inc, 'header not found: ' .. inc)
+          end
+        end)
+        if waiting then
+          render_msg(inc, 'finding header …')
         end
         return
       end
@@ -9179,7 +9333,10 @@ local function show_results(title, sym, results, truncated, origin, root, nomark
   update_context()
   -- reading the hit is the next thing you do, so land in the preview - and
   -- leave a way back to where the search was started (C-t)
-  if origin and api.nvim_win_is_valid(origin) and #results > 0 then
+  -- 늦게 온 답(비동기 :Gtags)인데 그 사이 다른 탭으로 갔으면 목록만 채운다 - 그 탭의
+  -- 창을 첫 결과로 바꾸지 않는다 (QA r2: :Gtags -r 뒤 :tabnew 의 빈 창에 결과가 실렸다)
+  if origin and api.nvim_win_is_valid(origin) and #results > 0
+      and api.nvim_win_get_tabpage(origin) == api.nvim_get_current_tabpage() then
     if ctx_visible() then
       -- 칸을 하나 늘리므로 색도 하나 칠한다. 안 그러면 그 뒤 <C-t> 가
       -- 한 칸씩 밀려 엉뚱한 색을 지운다.
@@ -9920,20 +10077,32 @@ function _G.relationview_open_include()
   end
   local file = api.nvim_buf_get_name(buf)
   local dir = file ~= '' and vim.fs.dirname(file) or vim.fn.getcwd()
-  local done = false
+  -- global 은 뒤에서 돈다 (Q26: 예전에는 vim.wait 로 답을 기다리며 키를 잡았다). 늦게 온
+  -- 답은 그 창이 아직 지금 창이고 같은 버퍼를 보일 때만 연다 - 그새 옮겨 갔으면 버린다
+  local win = api.nvim_get_current_win()
+  local sync = true
   root_for(file ~= '' and file or (dir .. '/x'), function(root)
-    local path = resolve_include(inc, file, root)
-    if path then
-      pcall(vim.cmd, [[normal! m']])
-      vim.cmd('edit ' .. vim.fn.fnameescape(path))
-      done = true
-    else
-      vim.notify('RelationView: header not found: ' .. inc,
-        vim.log.levels.WARN)
-      done = true
-    end
+    resolve_include(inc, file, root, function(path)
+      if not sync and not (api.nvim_win_is_valid(win)
+          and api.nvim_get_current_win() == win and api.nvim_win_get_buf(win) == buf) then
+        return
+      end
+      if path then
+        pcall(vim.cmd, [[normal! m']])
+        local oke, err = pcall(vim.cmd, 'edit ' .. vim.fn.fnameescape(path))
+        if not oke then
+          if sync then
+            error(err, 0) -- 예전처럼 부른 쪽(.vimrc 의 try)으로
+          end
+          vim.notify(tostring(err), vim.log.levels.ERROR)
+        end
+      else
+        vim.notify('RelationView: header not found: ' .. inc,
+          vim.log.levels.WARN)
+      end
+    end)
   end)
-  vim.wait(3000, function() return done end, 20)
+  sync = false
   return true
 end
 

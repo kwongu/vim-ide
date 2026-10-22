@@ -483,6 +483,33 @@ require'telescope'.setup{
 					a['move_selection_' .. dir](b)
 				end
 			end
+			-- 목록을 닫으면 그 목록을 연 창으로 돌아온다. 그것이 부동 창(F11 트리)이면
+			-- 'botright copen' 이 거기서 갈라지고, 트리가 초점을 잃고 닫히며 새 창까지
+			-- 데려가 편집 창(Neogit 탭이면 상태 창)이 quickfix 로 바뀌고 cmdheight 가 48
+			-- 이 됐다 (QA r2: F11, F1, <C-q>). 편집 자리(없으면 그 탭의 아무 보통 창)로 먼저 나온다.
+			local function out_of_float()
+				local api = vim.api
+				if api.nvim_win_get_config(0).relative == '' then
+					return
+				end
+				local w = 0
+				if type(_G.vimide_edit_slot) == 'function' then
+					local ok, r = pcall(_G.vimide_edit_slot)
+					w = ok and tonumber(r) or 0
+				end
+				if w == 0 or not api.nvim_win_is_valid(w) then
+					w = 0
+					for _, x in ipairs(api.nvim_tabpage_list_wins(0)) do
+						if api.nvim_win_get_config(x).relative == '' then
+							w = x
+							break
+						end
+					end
+				end
+				if w ~= 0 then
+					pcall(api.nvim_set_current_win, w)
+				end
+			end
 			local keys = {
 				['<CR>'] = g('select_default'),
 				['<C-x>'] = g('select_horizontal'),
@@ -496,11 +523,11 @@ require'telescope'.setup{
 				-- 먼저 돌아 빈 목록을 보냈다 (반대 심문)
 				['<C-q>'] = g(function(b)
 					local a = require('telescope.actions')
-					a.send_to_qflist(b); a.open_qflist(b)
+					a.send_to_qflist(b); out_of_float(); a.open_qflist(b)
 				end),
 				['<M-q>'] = g(function(b)
 					local a = require('telescope.actions')
-					a.send_selected_to_qflist(b); a.open_qflist(b)
+					a.send_selected_to_qflist(b); out_of_float(); a.open_qflist(b)
 				end),
 				-- F1 은 여기서도 단축키 도움말이다 (VimIdeKeyHelp, 아래 <F1> 설명).
 				-- 이 프롬프트의 키가 목록 맨 앞에 나온다. 기다리지 않는다(g 없이).
@@ -886,6 +913,12 @@ return {
     default_direction = 'left',
     width = 40,
     placement = outline_global and 'edge' or 'window',
+    -- 폭은 열 때 한 번만 정한다. 켜 두면(aerial 기본) 다시 그릴 때마다 min(40, 화면의 20%)
+    -- 로 되돌려서, 좁은 화면에서 곁창 폭 예산(panelbudget.lua)이 20칸으로 줄여 둔 것을
+    -- 24칸으로 도로 키웠다 - 120칸에서 F12 + F10 이면 편집 창이 36칸 (QA r2). 손으로
+    -- 바꾼 폭(:vertical resize, 경계 끌기)도 다음 그리기에 되돌아가던 것이 이제 남는다.
+    -- (width 를 못박아 두어 내용 폭은 원래 안 따랐다 - 달라지는 것은 되돌리기뿐)
+    resize_to_content = false,
   },
   -- 아웃라인은 F10 으로 켤 때만 연다.
   --
@@ -1863,6 +1896,8 @@ do
   -- 그 둘이면 '드러낼 것 없음'(nil)으로 답한다: 트리는 그냥 열리고 따라가지 않는다.
   -- 세 길이 모두 이 함수 하나를 거치므로 여기만 감싼다. term:// 은 buffers 보기가
   -- 일부러 묻는 것(include_terminals)이라 그대로 둔다.
+  -- F9/F11(NeotreeGuarded)로 열 때는 트리 뿌리 밖의 파일도 드러내지 않는다 (아래).
+  local guarded_open = false
   local function guard_reveal()
     local mgr = package.loaded['neo-tree.sources.manager']
     if type(mgr) ~= 'table' or mgr._vimide_reveal_guarded
@@ -1886,6 +1921,18 @@ do
       if dir and dir ~= '' and not uv.fs_stat(dir) then
         return nil
       end
+      -- F9/F11 로 열 때 트리 뿌리(없으면 cwd) 밖의 진짜 파일: neo-tree 가 'File not in cwd.
+      -- Change cwd to ...? y/n' 을 묻고 멈춰, 다음에 친 F10/F12 가 그 물음에 들어갔다 (QA r2:
+      -- DirDiff 비교 탭에서 F9). 트리는 그냥 열고 따라가지 않는다. 손으로 친 :Neotree reveal
+      -- (reveal_force_cwd ...)과 buffers 보기(include_terminals)는 그대로.
+      if guarded_open and not include_terminals then
+        local okst, st = pcall(mgr.get_state, 'filesystem')
+        local root = (okst and type(st) == 'table' and st.path) or vim.fn.getcwd()
+        local oku, u = pcall(require, 'neo-tree.utils')
+        if oku and type(u.is_subpath) == 'function' and not u.is_subpath(root, p) then
+          return nil
+        end
+      end
       return p
     end
     mgr._vimide_reveal_guarded = true
@@ -1903,7 +1950,12 @@ do
     pcall(apply, nil)
     pcall(require, 'neo-tree.sources.manager')
     pcall(guard_reveal)
-    vim.cmd('Neotree ' .. (o.args ~= '' and o.args or 'toggle'))
+    guarded_open = true
+    local ok, err = pcall(vim.cmd, 'Neotree ' .. (o.args ~= '' and o.args or 'toggle'))
+    guarded_open = false
+    if not ok then
+      error(err, 0)
+    end
   end, { nargs = '*', desc = 'Neotree, with the git-status guard applied' })
 
   -- 스캔 중에 처음 보는 worktree(중첩 repo 등)가 나타나면 그때도 판단한다.
@@ -3673,13 +3725,25 @@ nnoremap <silent> <C-t> :call <SID>JumpBack()<CR>
 "- quickfix, NERDTree, Tagbar, RelationView 등 특수 창은 각자의 동작을 유지한다
 "- (버퍼 로컬 매핑이 우선하고, buftype 이 빈 일반 파일 창에서만 아래가 동작).
 "------------------------------------------------------------------------------
+" 기본 더블클릭. 도움말 창에서 태그가 아닌 낱말이면 E149/E349 가 함수 안에서 나서
+" 'Error in function <SNR>..RvMouseJump' 석 줄이 됐다 (QA r2) - 직접 누른 것처럼 한 줄로.
+function! s:Mouse2Default() abort
+	try
+		execute "normal! \<2-LeftMouse>"
+	catch /^Vim\%((\a\+)\)\=:E/
+		echohl ErrorMsg
+		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+		echohl None
+	endtry
+endfunction
+
 function! s:RvMouseJump() abort
 	" 특수 버퍼(quickfix, help, terminal ...)는 기본 더블클릭 동작 유지.
 	" 미리보기 창(\p)은 buftype 이 비어 있어 예전에는 이 검사를 통과했다 -
 	" 거기서 더블클릭하면 미리보기가 점프한 파일로 바뀌었다.
 	if !s:JumpHere()
 		if !s:JumpFromPeek()
-			execute "normal! \<2-LeftMouse>"
+			call s:Mouse2Default()
 		endif
 		return
 	endif
@@ -3693,7 +3757,7 @@ function! s:RvMouseJump() abort
 	if expand('<cword>') =~# '^[A-Za-z_][A-Za-z0-9_]*$'
 		call s:RvJumpSecondary()
 	else
-		execute "normal! \<2-LeftMouse>"
+		call s:Mouse2Default()
 	endif
 endfunction
 
@@ -6227,11 +6291,25 @@ func! s:QfPreview() abort
 	if str2nr(l:size) <= 0
 		let g:quickr_preview_size = max([3, min([12, (&lines - winheight(0)) / 3])])
 	endif
+	" 10줄 목록 창 밑에 12줄 미리보기는 안 들어가서 vim 이 'equalalways' 로 열 전체를
+	" 고르게 나눴다 - 미리보기가 23줄(60줄 화면)이 됐다 (QA r2). 여는 동안만 끈다.
+	let l:ea = &equalalways
+	set noequalalways
 	try
 		silent call QFList(line('.'))
 	finally
 		let g:quickr_preview_size = l:size
+		let &equalalways = l:ea
 	endtry
+	" 띄운 미리보기 창에 [목록 버퍼, 미리보기 버퍼] 를 적어 둔다. quickr 는 목록이 다시
+	" 채워질 때마다(:copen, ,o, 새 :Gtags) b:prvbufnr 을 0 으로 지워서, 그 뒤 ,c / q /
+	" :cclose 가 미리보기를 못 알아보고 남겼다 (QA r2). 그 창에 :ptag 로 다른 것을 띄우면 안 닫는다.
+	let l:qb = bufnr('%')
+	for l:w in getwininfo()
+		if l:w.tabnr == tabpagenr() && getwinvar(l:w.winid, '&previewwindow')
+			call setwinvar(l:w.winid, 'vimide_qf_preview', [l:qb, l:w.bufnr])
+		endif
+	endfor
 	call s:EditStackFix()
 endfunc
 nnoremap <silent> <leader>p :<C-u>call <SID>QfPreview()<CR>
@@ -6250,9 +6328,10 @@ endif
 "
 " quickfix(,o / :Gtags 의 botright copen)와 미리보기(\p)는 정해진 높이로 열리며 바로
 " 위 창 하나에서 줄을 다 가져간다 - :sp 세 번 뒤 ,o 면 편집 창이 5/4/3/1 줄이 됐다.
-" 같은 열에 맞닿아 쌓인 EDIT 창끼리만 나눈다: 곁창(트리, aerial, F12 열, 목록,
-" 미리보기)과 winfixheight 창은 건드리지 않는다. 가장 작은 창이 3줄 아래이거나
-" 평균의 1/3 아래일 때만 편다 - 그 밖에는 vim 기본 그대로 둔다.
+" 같은 세로 더미에 맞닿아 쌓인 EDIT 창(과 그것이 든 :vs 가로 줄, 터미널, 도움말)끼리만
+" 나눈다: 곁창(트리, aerial, F12 열, 목록, 미리보기)과 winfixheight 창은 건드리지
+" 않는다. 가장 작은 것이 3줄 아래이거나 평균의 1/3 아래일 때만 편다 - 그 밖에는 vim
+" 기본 그대로 둔다.
 func! s:EditStackFix() abort
 	if has('nvim')
 		lua pcall(_G.vimide_edit_stack_fix)
@@ -6262,27 +6341,62 @@ if has('nvim')
 	lua << EOF
 	function _G.vimide_edit_stack_fix()
 	  local api = vim.api
-	  if type(_G.vimide_edit_wins) ~= 'function' then
+	  if type(_G.vimide_is_edit_win) ~= 'function' then
 	    return
 	  end
-	  local cols = {}
-	  for _, w in ipairs(_G.vimide_edit_wins()) do
-	    if not vim.wo[w].winfixheight then
-	      local pos = api.nvim_win_get_position(w)
-	      local key = pos[2] .. ':' .. api.nvim_win_get_width(w)
-	      cols[key] = cols[key] or {}
-	      table.insert(cols[key], { w = w, row = pos[1], h = api.nvim_win_get_height(w) })
+	  -- 더미에 드는 창: EDIT 창, 터미널, 도움말 (winfixheight 창과 미리보기는 빼고)
+	  local function member(w)
+	    if vim.wo[w].winfixheight or vim.wo[w].previewwindow then
+	      return false
 	    end
+	    if _G.vimide_is_edit_win(w) then
+	      return true
+	    end
+	    local bt = vim.bo[api.nvim_win_get_buf(w)].buftype
+	    return bt == 'terminal' or bt == 'help'
 	  end
-	  for _, c in pairs(cols) do
-	    table.sort(c, function(a, b) return a.row < b.row end)
-	    local runs, run = {}, { c[1] }
-	    for i = 2, #c do
-	      local p = c[i - 1]
-	      if c[i].row == p.row + p.h + 1 then
-	        run[#run + 1] = c[i]
+	  -- 틀 하나를 본다: 윗줄, 높이, 더미에 드는 창이 들었나(mem), 그 틀의 높이를 바꿀 창(rep).
+	  -- 세로 더미(col)는 아래 것부터 맞춘다: 맞닿아 쌓인 더미 틀(EDIT 창, 그것이 든 가로
+	  -- 줄(row) - :sp 뒤 :vs 한 위쪽 두 창, 터미널) 중 짓눌린 것이 있으면 고르게 편다 (QA r2:
+	  -- 예전에는 같은 열·같은 폭의 EDIT 창끼리만 묶어서, :vs 줄 밑의 넓은 창이나 터미널 밑의
+	  -- 편집 창이 1~2줄로 남았다).
+	  local function walk(node)
+	    if node[1] == 'leaf' then
+	      local w = node[2]
+	      local m = member(w)
+	      return { top = api.nvim_win_get_position(w)[1], h = api.nvim_win_get_height(w),
+	        mem = m, rep = w }
+	    end
+	    local kids = {}
+	    for i, c in ipairs(node[2]) do
+	      kids[i] = walk(c)
+	    end
+	    local f = { top = math.huge, h = 0, mem = false }
+	    for _, k in ipairs(kids) do
+	      f.top = math.min(f.top, k.top)
+	      f.mem = f.mem or k.mem
+	    end
+	    if node[1] == 'row' then
+	      -- 가로 줄의 높이 = 가장 큰 칸. 그 높이 그대로인 창 하나로 줄 전체 높이를 바꾼다
+	      for _, k in ipairs(kids) do
+	        f.h = math.max(f.h, k.h)
+	      end
+	      for _, k in ipairs(kids) do
+	        if k.rep and k.h == f.h and (k.mem or not f.rep) then
+	          f.rep = k.rep
+	        end
+	      end
+	      return f
+	    end
+	    local last = kids[#kids]
+	    f.h = last.top + last.h - f.top
+	    -- 세로 더미 안에서 맞닿은 더미 틀끼리
+	    local runs, run = {}, {}
+	    for _, k in ipairs(kids) do
+	      if k.mem and k.rep then
+	        run[#run + 1] = k
 	      else
-	        runs[#runs + 1], run = run, { c[i] }
+	        runs[#runs + 1], run = run, {}
 	      end
 	    end
 	    runs[#runs + 1] = run
@@ -6295,11 +6409,17 @@ if has('nvim')
 	        if min < 3 or min * 3 < total / #r then
 	          local base, extra = math.floor(total / #r), total % #r
 	          for i = 1, #r - 1 do
-	            pcall(api.nvim_win_set_height, r[i].w, base + (i <= extra and 1 or 0))
+	            pcall(api.nvim_win_set_height, r[i].rep, base + (i <= extra and 1 or 0))
 	          end
 	        end
 	      end
 	    end
+	    -- 세로 더미 틀은 위쪽 가로 줄의 높이를 바꾸는 창이 될 수 없다 (그 안의 한 칸만 바뀐다)
+	    return f
+	  end
+	  local ok, lay = pcall(vim.fn.winlayout)
+	  if ok and type(lay) == 'table' and lay[1] then
+	    walk(lay)
 	  end
 	end
 
@@ -6328,10 +6448,8 @@ if has('nvim')
 	    if not (b and vim.api.nvim_buf_is_valid(b) and vim.bo[b].buftype == 'quickfix') then
 	      return
 	    end
+	    -- pb 가 0 이어도 본다: 목록을 다시 채우면 quickr 가 지운다 (w:vimide_qf_preview)
 	    local pb = tonumber(vim.b[b].prvbufnr) or 0
-	    if pb <= 0 then
-	      return
-	    end
 	    local okt, tab = pcall(vim.api.nvim_win_get_tabpage, tonumber(ev.match))
 	    vim.schedule(function()
 	      if okt and vim.api.nvim_tabpage_is_valid(tab)
@@ -7019,14 +7137,133 @@ func! s:GotoEditSlot(always) abort
 	return 0
 endfunc
 
+" 터미널·도움말·README 보기(F1) 창인가. 곁창이 아니라 사람이 읽고 치는 '내용' 창이다.
+" (QA r2) 곁창처럼 편집 자리로 돌리면 도움말 창에서 친 :bd! 가 편집 창의 파일을 고친
+" 내용째 내렸고, 편집 창이 없는 탭(터미널만, README 탭)에서는 :e :b :help :terminal
+" :tag :cn 이 모두 거절됐다. 그래서 :bd :bw 는 이 창의 것을 지우고(s:RouteGuardOk 'buf'),
+" 편집 자리가 없으면 이 창에서 돌린다(s:InEditWin). 파일을 여는 것은 편집 창이 있으면
+" 예전처럼 거기로 - 이 창에 열면 Neogit 탭처럼 지킴이가 쉬는 탭에서 도움말이 파일로
+" 바뀌었다 (QA r2 합치기). 부동 창·곁창(winfixwidth)·목록·미리보기는 아니다.
+" (_G.vimide_is_edit_win 은 그대로 - 이 창들은 EDIT 창이 아니다)
+func! s:ContentWin() abort
+	if &previewwindow || &winfixwidth || &buftype ==# 'quickfix'
+		return 0
+	endif
+	if has('nvim') && nvim_win_get_config(0).relative !=# ''
+		return 0
+	endif
+	return &buftype ==# 'terminal' || &buftype ==# 'help'
+				\ || exists('b:vimide_keyhelp_view') || get(b:, 'vimide_keyhelp', 0)
+endfunc
+
+" 명령 앞 수식어에 :tab 이 있나 (:tab help, :3tab terminal). 새 탭에 여는 것이라 편집
+" 자리가 없어도 된다 - 예전에는 Neogit·DirDiff 탭에서 거절됐다 (QA r2).
+func! s:TabMod(cmd) abort
+	return matchstr(substitute(a:cmd, '^\s\+', '', ''), s:mod_pat) =~# '\v%(^|\s)\d*tab!?\s'
+endfunc
+
+" Diffview 탭인가. 그 탭의 창은 모두 Diffview 것이다 - 오른쪽(작업 트리) 창은 진짜
+" 파일이라 편집 자리로 보이지만, 패널에서 친 :e 가 거기에 연 파일을 Diffview 가 1초쯤
+" 뒤 말없이 제 파일로 되돌렸다 (QA r2).
+func! s:DiffviewTab() abort
+	if !has('nvim')
+		return 0
+	endif
+	for l:b in tabpagebuflist()
+		if bufname(l:b) =~# '^diffview://' || getbufvar(l:b, '&filetype') =~# '^Diffview'
+			return 1
+		endif
+	endfor
+	return 0
+endfunc
+
+" Diffview 탭에서 친 것은 편집 창이 있는 보통 탭(직전 탭 먼저)의 편집 자리로 옮겨 연다.
+"   1 = 옮겼다,  0 = 그런 탭이 없다 (제자리)
+func! s:LeaveDiffviewTab() abort
+	let l:t = luaeval('_G.vimide_plain_tab ~= nil and _G.vimide_plain_tab(_A) or 0',
+				\ [tabpagenr(), tabpagenr('#')])
+	if l:t <= 0
+		return 0
+	endif
+	execute 'tabnext ' . l:t
+	return s:GotoEditSlot(1)
+endfunc
+
+if has('nvim')
+	lua << EOF
+	-- s:LeaveDiffviewTab 이 갈 탭: 남의 탭(Diffview, Neogit, DirDiff)이 아니고 보통 파일 창이
+	-- 있는 탭의 번호. 직전 탭부터 본다. 없으면 0. 탭을 옮겨 다니지 않고 본다.
+	function _G.vimide_plain_tab(a)
+	  local api = vim.api
+	  local here, prev = a[1], a[2]
+	  local tabs = api.nvim_list_tabpages()
+	  local function plain(t)
+	    local okp, pair = pcall(api.nvim_tabpage_get_var, t, 'vimide_dirdiff_pair')
+	    if okp and pair and pair ~= 0 and pair ~= '' then
+	      return false
+	    end
+	    local found = false
+	    for _, w in ipairs(api.nvim_tabpage_list_wins(t)) do
+	      local b = api.nvim_win_get_buf(w)
+	      local ft, name = vim.bo[b].filetype, api.nvim_buf_get_name(b)
+	      if ft:find('^Diffview') or ft:find('^Neogit') or ft:find('dirdiff')
+	          or name:find('^diffview://') or name:find('^Neogit') then
+	        return false
+	      end
+	      if api.nvim_win_get_config(w).relative == '' and vim.bo[b].buftype == ''
+	          and not vim.wo[w].previewwindow and not vim.wo[w].winfixwidth then
+	        found = true
+	      end
+	    end
+	    return found
+	  end
+	  local order = { prev }
+	  for i = 1, #tabs do
+	    order[#order + 1] = i
+	  end
+	  for _, i in ipairs(order) do
+	    if i >= 1 and i <= #tabs and i ~= here and plain(tabs[i]) then
+	      return i
+	    end
+	  end
+	  return 0
+	end
+EOF
+endif
+
+" a:cmd 를 돌릴 편집 자리로 옮긴다. Diffview 탭에서 버퍼를 여는 것이면 다른 탭의 편집
+" 자리로 (s:LeaveDiffviewTab). :bd :bw 는 이 탭의 것을 지우는 것이라 예전처럼 이 탭에서 -
+" 보이지도 않는 다른 탭의 파일을 지우면 안 된다.
+func! s:GotoEditSlotOrTab(cmd) abort
+	if s:DiffviewTab() && matchstr(substitute(a:cmd, '^\s\+', '', ''), s:mod_pat . '\zs\a+')
+				\ !~# '^\%(bdelete\|bwipeout\)$'
+		return s:LeaveDiffviewTab()
+	endif
+	return s:GotoEditSlot(1)
+endfunc
+
+" 함수 안에서 난 오류는 'Error in function ...' 석 줄과 Press ENTER 가 된다. 명령을 직접
+" 쳤을 때처럼 한 줄로 (s:OutOfFloat 과 같다).
+func! s:ExecOneLine(cmd) abort
+	try
+		execute a:cmd
+	catch /^Vim\%((\a\+)\)\=:E/
+		echohl ErrorMsg
+		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
+		echohl None
+	endtry
+endfunc
+
+" 편집 자리가 없을 때: :tab 을 붙인 것과 내용 창(터미널·도움말 ...)에서 친 것은 그
+" 자리에서 돌린다. 나머지(곁창)는 거절한다 - 곁창을 부수느니 안 여는 편이 낫다.
 func! s:InEditWin(cmd) abort
-	if !s:GotoEditSlot(1)
+	if !s:GotoEditSlotOrTab(a:cmd) && !s:TabMod(a:cmd) && !s:ContentWin()
 		echohl WarningMsg
 		echo 'vim-ide: EDIT 창이 없어 실행하지 않았습니다'
 		echohl None
 		return
 	endif
-	execute a:cmd
+	call s:ExecOneLine(a:cmd)
 endfunc
 
 " 부동 창(F11 트리, telescope 프롬프트)에 서 있으면 먼저 편집 자리로 나온다.
@@ -7058,9 +7295,25 @@ endfunc
 " 가르지 않으니 초점을 quickfix 에 그대로 둔다. 나갈 편집 창이 없으면 그 자리에서
 " 예전처럼 연다.
 func! s:LeaveQf() abort
-	if &buftype ==# 'quickfix'
-		call s:GotoEditSlot(1)
+	if &buftype !=# 'quickfix'
+		return
 	endif
+	call s:GotoEditSlot(1)
+	" 나갈 편집 자리가 없는 탭(Neogit, DirDiff, README, 터미널만)에서는 그대로 가른다 - 그
+	" 빈 [No Name] 은 곁창이 다 선 뒤에 치운다 (QA r2, 창에 없고 고치지 않은 빈 것만)
+	if &buftype ==# 'quickfix' && has('nvim') && has('timers')
+		call timer_start(300, function('s:WipeNewNoName', [bufnr('$')]))
+	endif
+endfunc
+" a:last 뒤에 생긴 이름 없는 빈 버퍼 중 어느 창에도 없고 고치지 않은 것을 지운다.
+func! s:WipeNewNoName(last, ...) abort
+	for l:b in range(a:last + 1, bufnr('$'))
+		if bufexists(l:b) && buflisted(l:b) && bufname(l:b) ==# ''
+					\ && getbufvar(l:b, '&buftype') ==# '' && !getbufvar(l:b, '&modified')
+					\ && empty(win_findbuf(l:b)) && index([[], ['']], getbufline(l:b, 1, 2)) >= 0
+			silent! execute 'bwipeout ' . l:b
+		endif
+	endfor
 endfunc
 
 " aerial 이 이 탭에 떠 있나. global 이면 어느 창에서 물어도 그 하나를 찾는다.
@@ -7095,7 +7348,7 @@ endfunc
 " 않고 그 창을 가른다 - s:InEditWin 으로 보냈을 때는 거기서 ':sp a.c' 가 아무것도
 " 열지 못했다 (QA). 부동 창에서 나갈 곳이 없을 때만 거절한다 (s:OutOfFloat).
 func! s:InEditOrHere(cmd) abort
-	call s:GotoEditSlot(1)
+	call s:GotoEditSlotOrTab(a:cmd)
 	call s:OutOfFloat(a:cmd)
 endfunc
 
@@ -7185,6 +7438,8 @@ func! s:SideWin() abort
 	if !has('nvim') || !exists('*luaeval')
 		return 0
 	endif
+	" 터미널·도움말·README 보기(s:ContentWin)도 여기서는 곁창이다: 파일은 편집 창에 연다.
+	" 다만 :bd :bw 는 그 창의 것을 지우고('buf'), 편집 자리가 없으면 그 창에서 돌린다
 	return !luaeval('_G.vimide_is_edit_win == nil and true or _G.vimide_is_edit_win()')
 endfunc
 
@@ -7206,7 +7461,7 @@ let s:mod_pat = '\v^%(%(sil%[ent]!?|uns%[ilent]|verb%[ose]|noa%[utocmd]'
 			\ . '|keepa%[lt]|keepj%[umps]|keepm%[arks]|keepp%[atterns]'
 			\ . '|lock%[marks]|hid%[e]|conf%[irm]|bro%[wse]|leg%[acy]'
 			\ . '|vert%[ical]|hor%[izontal]|lefta%[bove]|abo%[veleft]'
-			\ . '|rightb%[elow]|bel%[owright]|to%[pleft]|bo%[tright]|tab)'
+			\ . '|rightb%[elow]|bel%[owright]|to%[pleft]|bo%[tright]|\d*tab)'
 			\ . '!?\s+)*'
 
 " 지금 명령줄이 '수식어들 + 이 낱말' 인가. 약어의 <expr> 에서 부른다.
@@ -7224,7 +7479,9 @@ let s:route_guard = {}
 let s:route_arg = {}
 
 " a:guard 가 글자면 그 이름의 조건으로 거른다 (s:RouteGuardOk): 'help' 는 곁창이거나
-" 좁은 편집 창일 때(:help), 'qf' 는 quickfix 창일 때(:Neotree).
+" 좁은 편집 창, 도움말을 가르면 눌릴 낮은 창일 때(:help), 'qf' 는 quickfix 창일 때
+" (:Neotree, :DiffviewOpen), 'buf' 는 곁창이되 내용 창(터미널·도움말·README 보기)은
+" 아닐 때(:bd :bw - 내용 창에서 친 것은 그 창의 버퍼를 지운다).
 func! s:RouteAbbrev(full, short, target, guard) abort
 	let l:i = len(a:short)
 	while l:i <= len(a:full)
@@ -7244,7 +7501,9 @@ func! s:RouteGuardOk(g) abort
 	if type(a:g) != type('')
 		return !a:g || s:SideWin()
 	elseif a:g ==# 'help'
-		return s:SideWin() || s:HelpNarrow()
+		return s:SideWin() || s:HelpNarrow() || s:HelpSqueeze()
+	elseif a:g ==# 'buf'
+		return s:SideWin() && !s:ContentWin()
 	elseif a:g ==# 'qf'
 		return &buftype ==# 'quickfix'
 	endif
@@ -7350,7 +7609,7 @@ cnoremap <expr> <CR> <SID>RouteCR()
 func! s:OnlyEdit(bang) abort
 	if !empty(a:bang) || !get(g:, 'vimide_only_keeps_sides', 1)
 				\ || !has('nvim') || !exists('*luaeval')
-		execute 'only' . a:bang
+		call s:ExecOneLine('only' . a:bang)
 		return
 	endif
 	" 곁창에 선 채로 쳤으면 먼저 편집 자리로 옮긴다. 안 그러면 '이 창만
@@ -7359,13 +7618,14 @@ func! s:OnlyEdit(bang) abort
 		" 편집 자리가 없는 탭(DirDiff·Neogit·Diffview 탭)의 곁창(F12 열, 트리, aerial)에서
 		" 친 것이면 하지 않는다. 그 탭의 창을 다 닫고 곁창 하나만 남겼다 - DirDiff 탭의 F12
 		" 열 트리에서 :only 하면 목록 없는 열 트리가 화면을 채웠다 (QA). :only! 는 그대로
-		if &winfixwidth && &buftype !=# ''
+		" F11 부동 트리도 같다: 거기서 :only 는 E5601(부동 창만 남는다)을 석 줄로 냈다 (QA r2)
+		if (&winfixwidth && &buftype !=# '') || nvim_win_get_config(0).relative !=# ''
 			echohl WarningMsg
-			echo 'vim-ide: 편집 창이 없는 탭이라 곁창에서는 :only 를 하지 않습니다 (:only! 는 그대로)'
+			echo 'vim-ide: 편집 창이 없는 탭이라 곁창·부동 창에서는 :only 를 하지 않습니다 (:only! 는 그대로)'
 			echohl None
 			return
 		endif
-		execute 'only' . a:bang
+		call s:ExecOneLine('only' . a:bang)
 		return
 	endif
 	let l:keep = win_getid()
@@ -7434,7 +7694,9 @@ for s:r in [
 	execute 'command! -nargs=* -bang '
 				\ . (empty(s:c) ? '' : '-complete=' . s:c . ' ') . s:nm
 				\ . " call s:InEditWin('<mods> " . s:cmd . "<bang> ' . s:CurSpecials(<q-args>))"
-	call s:RouteAbbrev(s:cmd, s:r[1], s:nm, 1)
+	" :bd :bw 는 내용 창(터미널·도움말)에서 치면 그 창의 것 (QA r2: 편집 창 파일이 내려갔다)
+	call s:RouteAbbrev(s:cmd, s:r[1], s:nm,
+				\ index(['bdelete', 'bwipeout'], s:cmd) >= 0 ? 'buf' : 1)
 endfor
 unlet! s:r s:cmd s:nm s:c
 
@@ -7443,7 +7705,9 @@ unlet! s:r s:cmd s:nm s:c
 " vim 의 :help 는 그런 창에서 치면 도움말을 '화면 맨 위, 전체 폭' 으로 띄운다 -
 " F12 를 켜 79칸이 된 편집 창에서 :help 를 치자 160칸짜리 도움말이 위를 다 덮고
 " 오른쪽 F12 열(트리·목록·미리보기)이 1~2줄로 짓눌렸다. 수식어(:vert help,
-" :tab help ...)를 붙여 친 것과 넓은 편집 창에서 친 것은 그대로다.
+" :tab help ...)를 붙여 친 것과 넓은 편집 창에서 친 것은 그대로다. 낮은 창에서 친
+" 것은 도움말 높이만 그 창의 절반으로 줄인다 (s:HelpSqueeze). 터미널·도움말 창에서 친
+" 것은 그 창에서 연다 (s:ContentWin).
 func! s:HelpNarrow() abort
 	if !has('nvim') || !get(g:, 'vimide_edit_route', 1)
 		return 0
@@ -7451,16 +7715,36 @@ func! s:HelpNarrow() abort
 	return winwidth(0) < 80 && winwidth(0) != &columns && empty(filter(getwininfo(),
 				\ 'v:val.tabnr == tabpagenr() && getbufvar(v:val.bufnr, "&buftype") ==# "help"'))
 endfunc
+" 이 창을 갈라 도움말을 열면 'helpheight'(20)만큼 가져가 이 창이 5줄 아래로 남는가. vim 은
+" 가른 뒤 도움말을 그 높이까지 키우며 이 창(모자라면 옆 창들)에서 줄을 뺀다 - 13줄 창에서
+" :help 를 치면 그 창이 1줄로 눌렸다 (QA r2, 터미널·편집 창 모두). 이미 도움말 창이 있으면
+" 그 창을 다시 쓰니 아니다.
+func! s:HelpSqueeze() abort
+	if !has('nvim') || !get(g:, 'vimide_edit_route', 1)
+		return 0
+	endif
+	return winheight(0) - &helpheight - 1 < 5 && empty(filter(getwininfo(),
+				\ 'v:val.tabnr == tabpagenr() && getbufvar(v:val.bufnr, "&buftype") ==# "help"'))
+endfunc
 func! s:Help(mods, bang, args) abort
-	if s:SideWin() && !s:GotoEditSlot(1)
+	" 곁창에서 친 것은 편집 자리로. :tab help 는 그 자리가 없는 탭(Neogit, DirDiff)에서도
+	" 새 탭에 연다 (QA r2). 편집 자리가 없으면 터미널·도움말 창에서 친 것은 그 창에서.
+	if s:SideWin() && !s:GotoEditSlot(1) && !s:TabMod(a:mods . ' ') && !s:ContentWin()
 		echohl WarningMsg
 		echo 'vim-ide: EDIT 창이 없어 실행하지 않았습니다'
 		echohl None
 		return
 	endif
 	let l:mods = a:mods
+	let l:hh = &helpheight
+	let l:src = win_getid()
 	if empty(l:mods) && s:HelpNarrow()
 		let l:mods = &splitbelow ? 'belowright' : 'aboveleft'
+	endif
+	" 이 창을 가를 때 'helpheight'(20) 가 이 창 높이를 넘으면 이 창이 1줄로 눌리고 아래
+	" quickfix 까지 줄었다 (QA r2, F12 를 켠 79칸 창의 :help): 이 창의 절반까지만
+	if empty(a:mods) && s:HelpSqueeze()
+		let &helpheight = min([&helpheight, max([3, winheight(0) / 2])])
 	endif
 	try
 		execute l:mods . ' help' . a:bang . ' ' . a:args
@@ -7468,6 +7752,17 @@ func! s:Help(mods, bang, args) abort
 		echohl ErrorMsg
 		echo substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
 		echohl None
+	finally
+		" 도움말 창에 선 채 'helpheight' 를 되돌리면 vim 이 그 창을 그 높이로 다시 키운다:
+		" 편집 창(갈라 온 창)에서 되돌린다. 바꾸는 것은 nvim 뿐이다 (s:HelpSqueeze - vim 8.1
+		" 에는 win_execute 도 없다)
+		if has('nvim') && &helpheight != l:hh
+			if win_id2win(l:src) > 0
+				call win_execute(l:src, 'let &helpheight = ' . l:hh)
+			else
+				let &helpheight = l:hh
+			endif
+		endif
 	endtry
 endfunc
 command! -nargs=* -bang -complete=help VimIdeHelp
@@ -7518,6 +7813,17 @@ if has('nvim')
 	command! -nargs=* -complete=custom,v:lua.require'neo-tree.command'.complete_args
 				\ VimIdeNeotree call s:NeotreeHere(<q-args>)
 	call s:RouteAbbrev('Neotree', 'Neotree', 'VimIdeNeotree', 'qf')
+	" quickfix 창에서 친 :DiffviewOpen 도 먼저 편집 자리로 나와서 연다 (QA r2). diffview 는
+	" :tab split 으로 새 탭을 여는데 quickfix 창에서는 vim 이 그것을 빈 [No Name] 을 여는
+	" :tab new 로 바꿔, 그 버퍼가 목록에 숨어 남았다. 나갈 자리가 없으면 뒤에 치운다
+	" (s:LeaveQf). 약어 없이 <CR> 에서만 바꾼다 - 이름 완성은 diffview 의 것 그대로.
+	func! s:DiffviewHere(args) abort
+		call s:LeaveQf()
+		call s:ExecOneLine('DiffviewOpen ' . a:args)
+	endfunc
+	command! -nargs=* VimIdeDiffviewOpen call s:DiffviewHere(<q-args>)
+	let s:route_map['DiffviewOpen'] = 'VimIdeDiffviewOpen'
+	let s:route_guard['DiffviewOpen'] = 'qf'
 endif
 " :split / :vsplit / :new / :vnew 에 파일 이름을 붙여 곁창에서 치면 EDIT 자리를
 " 가른다. 그대로 두면 곁창이 갈라져, RelationView 목록에서 친 ':split a.c' 가
@@ -7633,15 +7939,14 @@ func! VimIdeQfClose(which) abort
 	endfor
 endfunc
 
-" 이 탭의 미리보기 창이 목록 a:qb 가 띄운 a:pb 를 보이고 있으면 닫는다.
+" 이 탭의 미리보기 창이 목록 a:qb 가 띄운 a:pb 를 보이고 있으면 닫는다. a:pb 가 0 이어도
+" \p 가 띄워 둔 그대로인 창(w:vimide_qf_preview)이면 닫는다 (s:QfPreview).
 " quickr 는 같은 줄에서 \p 를 다시 누르면 '닫기' 로 알아들으니 그 기억도 지운다.
 func! VimIdeQfPreviewClose(qb, pb) abort
-	if a:pb <= 0
-		return
-	endif
 	for l:w in getwininfo()
-		if l:w.tabnr == tabpagenr() && l:w.bufnr == a:pb
-					\ && getwinvar(l:w.winid, '&previewwindow')
+		if l:w.tabnr == tabpagenr() && getwinvar(l:w.winid, '&previewwindow')
+					\ && ((a:pb > 0 && l:w.bufnr == a:pb)
+					\     || getwinvar(l:w.winid, 'vimide_qf_preview', []) == [a:qb, l:w.bufnr])
 			pclose
 			if bufexists(a:qb)
 				call setbufvar(a:qb, 'prvlinenr', 0)
