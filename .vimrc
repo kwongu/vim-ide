@@ -121,6 +121,17 @@ let &ttimeoutlen = get(g:, 'vimide_esc_wait', 25)
 " Not redraw while executing macros, and commands.
 set lazyredraw
 
+" tmux 안의 nvim 은 동기화 출력(termsync)을 끈다. 켜 두면 tmux 가 동기화 구간이 끝날
+" 때마다 창(pane) 전체를 다시 그려, 키 하나(j)에 바깥으로 나가는 화면 데이터가 약 1KB
+" 에서 28KB 로 30배가 된다 (2026-10-23 서버 실측, 236x60 창). SSH 로는 키마다 패킷 20개
+" 남짓이 오가고 iTerm2 는 화면 전체를 다시 그린다. 바깥 터미널로는 tmux 가 이미 한 번에
+" 내보내므로 화면이 찢어지지 않는다. vim 에는 없는 옵션이라 nvim 만 해당.
+" 띄워 둔 nvim 에서 바로 적용하려면: :set notermsync
+let g:vimide_termsync_in_tmux = 0   " 1 = tmux 안에서도 켜 둔다 (예전 동작)
+if has('nvim') && exists('+termsync') && !empty($TMUX) && !g:vimide_termsync_in_tmux
+	set notermsync
+endif
+
 " 괄호 짝 강조(matchparen)를 끈다. 커서가 움직이거나 글자가 바뀔 때마다 짝 괄호를
 " 찾는데, 큰 C 파일에서 회당 2.2ms - 그 순간 도는 자동명령 29개 비용의 90% 였다
 " (2026-10-03 서버 nvim 실측. 나머지는 다 합쳐 0.2ms). 짝은 % 로 찾아갈 수 있다.
