@@ -340,6 +340,171 @@ local function one_level(kind, o)
   end
 end
 
+-- git 을 뒤에서 돌리고 끝나면 cb(결과)를 본 스레드에서. 경로는 늘 글자 그대로.
+local function git_async(root, args, cb)
+  local cmd = { 'git', '-c', 'core.quotepath=off', '--literal-pathspecs' }
+  vim.list_extend(cmd, args)
+  local ok, err = pcall(vim.system, cmd, { cwd = root, text = true }, function(r)
+    vim.schedule(function()
+      cb(r)
+    end)
+  end)
+  if not ok then
+    vim.schedule(function()
+      cb({ code = -1, stdout = '', stderr = tostring(err) })
+    end)
+  end
+end
+
+local function git_err(r)
+  local m = vim.trim((r.stderr or ''):match('[^\n]*') or ''):gsub('^fatal:%s*', ''):gsub('^error:%s*', '')
+  return vim.fn.strcharpart(m, 0, 60)
+end
+
+-- NUL 로 나눈 글자 -> 표
+local function nul_split(s)
+  local t = {}
+  for p in (s or ''):gmatch('[^%z]+') do
+    t[#t + 1] = p
+  end
+  return t
+end
+
+-- 트리에서 연 \fi 의 Enter: 그 커밋으로 '그 경로만' 체크아웃한다. 저장소의 나머지와
+-- HEAD 는 그대로다 (편집 창의 \fi 의 Enter 는 예전대로 저장소 전체 git checkout).
+--   git restore --source=<커밋> --staged --worktree -- <경로>
+-- 인덱스와 작업 트리의 그 경로를 그 커밋의 내용과 똑같이 만든다 - 그 커밋 뒤에 생긴
+-- (추적 중인) 파일은 지워진다. git checkout <커밋> -- <경로> 는 그런 파일을 남겨서
+-- '그 커밋의 내용'이 되지 않는다. 결과는 HEAD 에 견준 스테이징된 변경으로 보인다.
+-- 덮어쓰기 전에 본다 (git 은 경로 체크아웃에서는 고친 것을 묻지 않고 덮는다):
+--   그 커밋에 그 경로가 없으면    하지 않는다 - 파일은 이름이 바뀌기 전 커밋(목록은
+--                                 --follow 라 나온다), 디렉터리는 통째로 지운 커밋.
+--                                 그대로 하면 지금 것을 지운다.
+--   커밋하지 않은 변경이 있으면   몇 개인지 보이고 묻는다 (기본: 아니오). 추적 중인
+--                                 파일의 변경과, 그 커밋에 있는 이름의 새 파일(덮인다).
+-- git 은 모두 뒤에서 돈다 - 커널 트리의 디렉터리라도 키는 바로 돌아온다.
+-- 알림은 한 줄에 들어가게: 넘치면 Press ENTER 가 떠서 다음 키를 먹는다. 덧붙일 말(hint)은
+-- 자리가 있을 때만 붙인다.
+local function say(msg, hint, level)
+  local room = (tonumber(vim.v.echospace) or 80) - 1
+  if hint and vim.fn.strdisplaywidth(msg .. hint) <= room then
+    msg = msg .. hint
+  end
+  if vim.fn.strdisplaywidth(msg) > room then
+    msg = vim.fn.strcharpart(msg, 0, math.max(10, room - 1)) .. '…'
+  end
+  vim.notify(msg, level or vim.log.levels.INFO)
+end
+
+local function path_checkout(root, rel, commit, subject)
+  local label = commit .. (subject and subject ~= '' and (' "' .. vim.fn.strcharpart(subject, 0, 30) .. '"') or '')
+  -- 알림에는 저장소 안의 경로 (picker 제목과 같다). 저장소는 제목에 이미 보였다.
+  local where = rel
+  local function restore()
+    vim.api.nvim_echo({ { ('%s → %s 체크아웃하는 중...'):format(where, commit) } }, false, {})
+    git_async(root, { 'restore', '--source=' .. commit, '--staged', '--worktree', '--', rel }, function(r)
+      if r.code ~= 0 then
+        say(('체크아웃하지 못했습니다 - %s (%s)'):format(where, git_err(r)), nil, WARN)
+        return
+      end
+      -- 열어 둔 그 파일들을 다시 읽는다 (고친 버퍼는 nvim 이 묻는다)
+      pcall(vim.cmd, 'checktime')
+      say(('%s 만 %s 로 체크아웃 (나머지·HEAD 그대로)'):format(where, commit),
+        ('  되돌리기: git restore -s HEAD -SW -- %s'):format(rel))
+    end)
+  end
+  local function ask(n)
+    if n == 0 then
+      restore()
+      return
+    end
+    local ch = vim.fn.confirm(('%s 에 커밋하지 않은 변경이 %d개 있습니다.\n%s 의 내용으로 덮어쓰면 '
+      .. '그 변경은 사라집니다. 덮어쓸까요?'):format(where, n, label), '&Yes\n&No', 2)
+    -- 묻는 글이 여러 줄이라 그대로 두면 다음 알림이 Press ENTER 를 부른다 - 화면을 다시 그려
+    -- 줄을 거둔다
+    vim.cmd('redraw')
+    if ch == 1 then
+      restore()
+    else
+      say('체크아웃하지 않았습니다 - ' .. where)
+    end
+  end
+  git_async(root, { 'cat-file', '-e', commit .. ':' .. rel }, function(r0)
+    if r0.code ~= 0 then
+      say(('%s 에는 %s 가 없어 체크아웃하지 않았습니다'):format(commit, where),
+        ' (이름이 바뀌기 전이거나 지운 커밋)', WARN)
+      return
+    end
+    git_async(root, { 'status', '--porcelain', '-z', '--untracked-files=all', '--', rel }, function(r)
+      if r.code ~= 0 then
+        say(('체크아웃하지 못했습니다 - %s (%s)'):format(where, git_err(r)), nil, WARN)
+        return
+      end
+      local tracked, untracked = 0, {}
+      local t = nul_split(r.stdout)
+      local i = 1
+      while i <= #t do
+        local xy, name = t[i]:sub(1, 2), t[i]:sub(4)
+        if xy == '??' then
+          untracked[#untracked + 1] = name
+        elseif xy ~= '!!' then
+          tracked = tracked + 1
+          -- 이름 바꿈·복사는 옛 이름이 다음 칸에 따로 온다
+          if xy:find('[RC]') then
+            i = i + 1
+          end
+        end
+        i = i + 1
+      end
+      if #untracked == 0 then
+        ask(tracked)
+        return
+      end
+      -- 새 파일은 그 커밋에 같은 이름이 있을 때만 덮인다
+      git_async(root, { 'ls-tree', '-r', '-z', '--name-only', commit, '--', rel }, function(r2)
+        local hit = 0
+        if r2.code == 0 then
+          local in_tree = {}
+          for _, p in ipairs(nul_split(r2.stdout)) do
+            in_tree[p] = true
+          end
+          for _, p in ipairs(untracked) do
+            if in_tree[p] then
+              hit = hit + 1
+            end
+          end
+        else
+          hit = #untracked
+        end
+        ask(tracked + hit)
+      end)
+    end)
+  end)
+end
+
+-- 트리에서 연 \fi 의 키: Enter 는 위의 경로 체크아웃. <C-r>m/s/h(git reset)는 저장소
+-- 전체를 되돌리는 것이라 이 창에서는 막는다 - 범위만 보는 창에서 범위 밖이 바뀐다.
+local function scoped_commit_keys(root, rel)
+  return function(prompt_bufnr, map)
+    local actions = require('telescope.actions')
+    local astate = require('telescope.actions.state')
+    actions.select_default:replace(function()
+      local e = astate.get_selected_entry()
+      actions.close(prompt_bufnr)
+      if e and type(e.value) == 'string' and e.value ~= '' then
+        path_checkout(root, rel, e.value, e.msg)
+      end
+    end)
+    local function no_reset()
+      say('트리에서 연 \\fi 에서는 <C-r>m/s/h(저장소 전체 reset)를 쓰지 않습니다', ' - 편집 창의 \\fi 에서', WARN)
+    end
+    for _, k in ipairs({ '<c-r>m', '<c-r>s', '<c-r>h' }) do
+      map({ 'i', 'n' }, k, no_reset)
+    end
+    return true
+  end
+end
+
 -- neo-tree 에서: 커서 밑 항목(sc)만 찾는 telescope 옵션.
 -- 돌려주는 것: 옵션, 제목에 보일 경로, 꼬리표. 못 찾으면 알리고 nil.
 local function scoped_opts(kind, sc)
@@ -372,7 +537,8 @@ local function scoped_opts(kind, sc)
     cmd[#cmd + 1] = rel
     o.git_command = cmd
     o.current_file = rel
-    return o, rel, ('[git: %s]'):format(vim.fn.fnamemodify(root, ':~'))
+    o.attach_mappings = scoped_commit_keys(root, rel)
+    return o, rel, ('[git: %s · Enter: 이 경로만 체크아웃]'):format(vim.fn.fnamemodify(root, ':~'))
   end
   if sc.file then
     if not uv.fs_stat(sc.path) then
