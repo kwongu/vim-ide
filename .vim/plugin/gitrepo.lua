@@ -22,6 +22,11 @@
 --                    (예전 그대로). 로그·커밋 화면도 그 화면을 연 상태 화면의 저장소.
 --   Diffview 탭      그 view 의 저장소 - \v 는 그 view 를 닫는다 (아래)
 --
+-- 범위 (neo-tree 에서 누를 때만)
+--   커서 밑 항목의 변경만 보인다 - \ff \fg \fi(reposearch.lua)와 같은 약속. 디렉터리 줄은 그
+--   아래, 파일 줄은 그 파일. 항목이 저장소 맨 위면 전체. \v 는 :DiffviewOpen -- <경로>,
+--   \s 는 상태 화면의 목록을 그 경로로 거른다 ('\s 의 범위' 절). 편집 창에서 누르면 전체.
+--
 -- 저장소
 --   기준 경로를 품은 가장 안쪽 git 작업 트리의 맨 위. git 에게 묻는다
 --   (git -C <디렉터리> rev-parse --show-toplevel) - Neogit 과 diffview 가 자기
@@ -539,11 +544,12 @@ end
 --- 기준 경로와 그 저장소.
 --- @return table { path = 기준 경로, root = 맨 위 (아니면 nil), err = git 의 말,
 ---                 slow = git 이 10초 안에 답하지 않았다,
----                 file = 기준이 보통 파일이면 그 실제 경로, view = diffview 탭의 view }
+---                 file = 기준이 보통 파일이면 그 실제 경로, view = diffview 탭의 view,
+---                 tree = neo-tree 커서 밑 항목이 기준이다 }
 function _G.vimide_git_target()
   local win, buf = api.nvim_get_current_win(), api.nvim_get_current_buf()
   local ft = vim.bo[buf].filetype
-  local path
+  local path, tree
 
   local v = diffview_here()
   if v then
@@ -556,6 +562,7 @@ function _G.vimide_git_target()
     path = neogit_win_dir(win)
   elseif ft == 'neo-tree' then
     path = neotree_path(win, buf)
+    tree = path ~= nil
   elseif vim.bo[buf].buftype == '' then
     -- 편집 창. 이름 없는 버퍼면 지금 디렉터리.
     path = buf_file(buf)
@@ -578,7 +585,43 @@ function _G.vimide_git_target()
   local root, err, slow = toplevel(dir)
   local real = uv.fs_realpath(path)
   local file = real and not is_dir(real) and real or nil
-  return { path = path, root = root, err = err, slow = slow, file = file }
+  return { path = path, root = root, err = err, slow = slow, file = file, tree = tree }
+end
+
+-- 지금 없는 경로(git_status 소스의 지운 파일)도 실제 경로로: 있는 윗 디렉터리를 풀고
+-- 나머지를 붙인다. 링크(맥의 /tmp -> /private/tmp)를 풀어야 git 의 맨 위와 견줄 수 있다.
+local function real_of(p)
+  p = strip(p)
+  local rest = ''
+  for _ = 1, 64 do
+    if not p then
+      return nil
+    end
+    local r = uv.fs_realpath(p)
+    if r then
+      return strip(r) .. rest
+    end
+    local up = vim.fn.fnamemodify(p, ':h')
+    if up == p then
+      return nil
+    end
+    rest = '/' .. vim.fn.fnamemodify(p, ':t') .. rest
+    p = up
+  end
+  return nil
+end
+
+-- neo-tree 에서 불렸으면 저장소 안에서 본 커서 밑 항목의 경로 (\s \v 의 범위).
+-- 저장소의 맨 위 자체(트리 루트가 맨 위인 빈 줄 ...)거나 neo-tree 가 아니면 nil - 전체.
+local function tree_scope(t, root)
+  if not (t.tree and root) then
+    return nil
+  end
+  local p, top = real_of(t.path), real_of(root)
+  if not p or not top or p == top or not vim.startswith(p, top == '/' and '/' or top .. '/') then
+    return nil
+  end
+  return p:sub(#top + (top == '/' and 1 or 2)), p
 end
 
 -- 저장소가 아니면 알린다 (한 줄). 저장소면 맨 위를 돌려준다.
@@ -1148,6 +1191,148 @@ local function neogit_cold(cwd)
   return ok2 and inst == nil
 end
 
+-- ---------------------------------------------------------------------------
+-- \s 의 범위 (neo-tree 에서 누르면 커서 밑 디렉터리·파일의 변경만)
+-- ---------------------------------------------------------------------------
+--
+-- Neogit 에는 상태 화면을 경로로 거르는 기능이 없다. 그래서 상태를 다 읽은 뒤
+-- (Repo:set_state - 모든 갱신이 끝나고 화면을 그리기 직전에 한 번 부른다) 스테이징된 것·
+-- 바뀐 것·새 파일 목록에서 범위 밖의 것을 뺀다. 섹션 머리의 개수도 그 목록에서 나오니 같이
+-- 맞는다. 저장소마다 범위 하나 - 상태 화면이 저장소마다 하나뿐이라서다. 편집 창에서 \s 를
+-- 누르면 범위가 풀린다.
+--
+-- 숨긴 것을 건드리지 않게: Neogit 의 '전부' 명령 셋은 목록이 아니라 저장소 전체에 git 을
+-- 돌린다 - 바뀐 것 섹션에서 s(git add -u), <C-s>(git add -A), 스테이징된 것 섹션에서
+-- U(git reset). 범위가 있으면 그 경로로 좁힌다 - Neogit 은 git 을 늘 --literal-pathspecs 로
+-- 부르니 경로를 그대로 준다 (:(literal) 을 붙이면 그것까지 이름으로 읽어 하나도 안 맞는다).
+-- 섹션째 버리기(x)와 새 파일 스테이징은 원래 목록의 항목만 다룬다.
+-- 커밋(c c)은 인덱스 전체를 커밋한다 - 범위 밖에 스테이징된 것이 있으면 창 머리(winbar)에
+-- 그 수와 함께 '커밋에 들어간다'고 적는다.
+local ng_scope = {}  -- [저장소 맨 위(실제 경로)] = 저장소 안의 경로
+local ng_hidden = {} -- [맨 위] = { staged =, unstaged =, untracked = } 범위 밖이라 뺀 수
+local ng_hooked = false
+
+local function under(name, rel)
+  return type(name) == 'string' and (name == rel or vim.startswith(name, rel .. '/'))
+end
+
+-- 상태 화면 창의 머리줄. 범위가 없으면 지운다 (이 파일이 단 것만).
+local function scope_bar(top)
+  for _, w in ipairs(api.nvim_list_wins()) do
+    local b = api.nvim_win_get_buf(w)
+    if vim.bo[b].filetype == 'NeogitStatus' and real_of(neogit_win_dir(w)) == top then
+      local rel, h = ng_scope[top], ng_hidden[top]
+      if rel then
+        local txt = ' 범위: ' .. rel
+        local n = h and (h.staged + h.unstaged + h.untracked) or 0
+        if n > 0 then
+          txt = txt .. ('   밖에 숨김: 스테이징 %d · 바뀜 %d · 새 파일 %d'):format(h.staged, h.unstaged, h.untracked)
+        end
+        if h and h.staged > 0 then
+          txt = txt .. '   (c c 는 숨긴 스테이징도 커밋합니다)'
+        end
+        pcall(function()
+          vim.wo[w].winbar = '%#Title#' .. txt:gsub('%%', '%%%%') .. '%*'
+          vim.w[w].vimide_scopebar = 1
+        end)
+      elseif vim.w[w].vimide_scopebar then
+        pcall(function()
+          vim.wo[w].winbar = ''
+          vim.w[w].vimide_scopebar = nil
+        end)
+      end
+    end
+  end
+end
+
+local function hook_neogit()
+  if ng_hooked then
+    return true
+  end
+  local okr, Repo = pcall(require, 'neogit.lib.git.repository')
+  local oks, st = pcall(require, 'neogit.lib.git.status')
+  if not (okr and oks and type(Repo) == 'table' and type(Repo.set_state) == 'function'
+      and type(st) == 'table') then
+    return false
+  end
+  ng_hooked = true
+  local set_state = Repo.set_state
+  Repo.set_state = function(self, id)
+    set_state(self, id)
+    local top = real_of(self.worktree_root)
+    local rel = top and ng_scope[top]
+    if not top or (not rel and not ng_hidden[top]) then
+      return
+    end
+    local h = { staged = 0, unstaged = 0, untracked = 0 }
+    if rel then
+      for sec in pairs(h) do
+        local s = self.state and self.state[sec]
+        if type(s) == 'table' and type(s.items) == 'table' then
+          local keep = {}
+          for _, it in ipairs(s.items) do
+            if under(it.name, rel) or under(it.original_name, rel) then
+              keep[#keep + 1] = it
+            else
+              h[sec] = h[sec] + 1
+            end
+          end
+          s.items = keep
+        end
+      end
+    end
+    ng_hidden[top] = rel and h or nil
+    vim.schedule(function()
+      scope_bar(top)
+    end)
+  end
+  local function narrow(name, run)
+    local orig = rawget(st, name)
+    if type(orig) ~= 'function' then
+      return
+    end
+    st[name] = function(...)
+      local okg, git = pcall(require, 'neogit.lib.git')
+      local top = okg and real_of(git.repo.worktree_root)
+      local rel = top and ng_scope[top]
+      if rel then
+        return run(git, rel)
+      end
+      return orig(...)
+    end
+  end
+  narrow('stage_modified', function(git, ps) return git.cli.add.update.files(ps).call({ await = true }) end)
+  narrow('stage_all', function(git, ps) return git.cli.add.all.files(ps).call({ await = true }) end)
+  narrow('unstage_all', function(git, ps) return git.cli.reset.files(ps).call({ await = true }) end)
+  -- 머리줄을 단 창에 다른 버퍼가 들어오면 지운다 (상태 화면 창에서 :e ...)
+  api.nvim_create_autocmd('BufWinEnter', {
+    group = api.nvim_create_augroup('vimide_neogit_scope', { clear = true }),
+    callback = function()
+      local w = api.nvim_get_current_win()
+      if vim.w[w].vimide_scopebar and vim.bo.filetype ~= 'NeogitStatus' then
+        pcall(function()
+          vim.wo[w].winbar = ''
+          vim.w[w].vimide_scopebar = nil
+        end)
+      end
+    end,
+  })
+  return true
+end
+
+-- root 의 상태 화면 범위를 정한다 (nil = 전체). 다음 갱신부터 거른다.
+local function set_neogit_scope(root, rel)
+  local top = real_of(root)
+  if not top then
+    return
+  end
+  if rel and not hook_neogit() then
+    notify('Neogit 의 상태 거르기를 걸 수 없어 저장소 전체를 엽니다')
+    rel = nil
+  end
+  ng_scope[top] = rel
+end
+
 function _G.vimide_git_status()
   local t = _G.vimide_git_target()
   local root = root_or_warn('Neogit', t)
@@ -1159,6 +1344,8 @@ function _G.vimide_git_status()
     notify('Neogit 이 올라와 있지 않습니다 (:PlugInstall)')
     return
   end
+  -- neo-tree 에서면 커서 밑 항목의 변경만, 아니면 전체 (위 '\s 의 범위')
+  set_neogit_scope(root, (tree_scope(t, root)))
 
   local origin = api.nvim_get_current_win()
   -- 떠 있는 상태 화면이 어느 저장소의 것인지는 git 에게 묻지 않는다 (in_repo)
@@ -1289,6 +1476,118 @@ local function is_worktree_view(v)
   return ok and r == true
 end
 
+-- \v 를 neo-tree 에서 누르면 커서 밑 디렉터리·파일의 변경만 연다 (:DiffviewOpen -- <경로>).
+-- 그 경로로 좁혀 연 view 인가: 작업 트리 diff(is_worktree_view 와 같다)인데 경로 하나로
+-- 좁혔고 그것이 abs 다. diffview 는 경로를 맨 위에서 본 상대 경로로 바꿔 둔다.
+local function is_scoped_view(v, root, abs)
+  local ok, r = pcall(function()
+    local RevType = require('diffview.vcs.rev').RevType
+    if not (v.class == require('diffview.scene.views.diff.diff_view').DiffView
+        and v.rev_arg == nil and type(v.path_args) == 'table' and #v.path_args == 1
+        and v.left ~= nil and v.left.type == RevType.STAGE
+        and v.right ~= nil and v.right.type == RevType.LOCAL) then
+      return false
+    end
+    local pa = v.path_args[1]:gsub('^:%b()', '')
+    return real_of(pa:sub(1, 1) == '/' and pa or (root .. '/' .. pa)) == abs
+  end)
+  return ok and r == true
+end
+
+-- diffview 가 경로로 좁힌 view 에서 범위를 지키지 않는 두 곳을 막는다 (\v 의 범위가 처음 쓰일 때):
+--   U(파일 패널에서 전부 내리기)   'git reset --' 로 저장소 전체를 내렸다 - 보이지 않는 곳에
+--                                  스테이징해 둔 것까지 풀렸다. 그 경로만 내린다.
+--   새 파일(untracked) 목록         'git ls-files --others' 를 경로 없이 돌려 저장소 전체의 새
+--                                  파일이 섞여 나왔다 (실측: src/net 으로 좁혔는데 맨 위의
+--                                  top.txt). 목록에 담을 때(FileDict:set_working) 범위 밖의
+--                                  새 파일을 뺀다. 경로가 * ? [ 나 :(magic) 을 쓴 패턴이면
+--                                  글자로 견줄 수 없으니 그대로 둔다.
+-- s 의 전부 올리기는 원래 목록에 보이는 파일만 올린다.
+local dv_hooked = false
+local function hook_diffview()
+  if dv_hooked then
+    return
+  end
+  local ok, m = pcall(require, 'diffview.vcs.adapters.git')
+  local GA = ok and type(m) == 'table' and m.GitAdapter
+  local okf, fd = pcall(require, 'diffview.vcs.file_dict')
+  local FD = okf and type(fd) == 'table' and fd.FileDict
+  if not (GA and type(GA.reset_files) == 'function') then
+    return
+  end
+  dv_hooked = true
+  local function scoped_args(ctx)
+    return type(ctx) == 'table' and type(ctx.path_args) == 'table' and #ctx.path_args > 0
+      and ctx.path_args or nil
+  end
+  local reset_files = GA.reset_files
+  GA.reset_files = function(self, paths)
+    if paths == nil or #paths == 0 then
+      paths = scoped_args(self.ctx) or paths
+    end
+    return reset_files(self, paths)
+  end
+  if not (FD and type(FD.set_working) == 'function') then
+    return
+  end
+  -- 맨 위에서 본 상대 경로들. 패턴이 하나라도 있으면 nil (거르지 않는다).
+  local function plain_rels(ctx)
+    local pa = scoped_args(ctx)
+    local top = pa and type(ctx.toplevel) == 'string' and real_of(ctx.toplevel)
+    if not top then
+      return nil
+    end
+    local rels = {}
+    for _, a in ipairs(pa) do
+      if type(a) ~= 'string' or a:find('^:') or a:find('[%*%?%[]') then
+        return nil
+      end
+      if a:sub(1, 1) == '/' then
+        a = real_of(a) or a
+        if a == top then
+          return nil
+        end
+        if not vim.startswith(a, top .. '/') then
+          return nil
+        end
+        a = a:sub(#top + 2)
+      end
+      rels[#rels + 1] = (a:gsub('/+$', ''))
+    end
+    return rels
+  end
+  local set_working = FD.set_working
+  FD.set_working = function(self, files)
+    if type(files) == 'table' then
+      local keep, cache = {}, {}
+      for _, f in ipairs(files) do
+        local drop = false
+        local ad = type(f) == 'table' and f.status == '?' and f.adapter
+        if ad and type(f.path) == 'string' then
+          if cache[ad] == nil then
+            cache[ad] = plain_rels(ad.ctx) or false
+          end
+          local rels = cache[ad]
+          if rels then
+            drop = true
+            for _, r in ipairs(rels) do
+              if under(f.path, r) then
+                drop = false
+                break
+              end
+            end
+          end
+        end
+        if not drop then
+          keep[#keep + 1] = f
+        end
+      end
+      files = keep
+    end
+    return set_working(self, files)
+  end
+end
+
 function _G.vimide_git_diffview()
   -- diffview 탭 안이면 그 view 를 닫는다 (git 이 낡아도 - 떠 있는 것은 닫혀야 한다)
   -- 그 탭에 F9 트리가 있어도 nvim 이 끝나지 않게 (keep_tree)
@@ -1306,10 +1605,18 @@ function _G.vimide_git_diffview()
   if not root then
     return
   end
+  -- neo-tree 에서면 커서 밑 항목으로 좁힌다 (그 항목이 저장소 맨 위면 전체)
+  local rel, abs = tree_scope(t, root)
   local okl, lib = pcall(require, 'diffview.lib')
   if okl and type(lib.views) == 'table' then
     for _, v in ipairs(lib.views) do
-      if is_worktree_view(v) and v.tabpage and api.nvim_tabpage_is_valid(v.tabpage)
+      local mine
+      if rel then
+        mine = is_scoped_view(v, root, abs)
+      else
+        mine = is_worktree_view(v)
+      end
+      if mine and v.tabpage and api.nvim_tabpage_is_valid(v.tabpage)
           and same(view_root(v), root) then
         api.nvim_set_current_tabpage(v.tabpage)
         return
@@ -1321,7 +1628,10 @@ function _G.vimide_git_diffview()
     return
   end
   local cmd = 'DiffviewOpen -C' .. esc(root)
-  if t.file then
+  if rel then
+    hook_diffview()
+    cmd = cmd .. ' -- ' .. esc(abs)
+  elseif t.file then
     cmd = cmd .. ' --selected-file=' .. esc(t.file)
   end
   -- diffview 는 여는 동안(처음이면 모듈을 올리며) 0.2~0.4초 멈춘다 - 한 줄 먼저 그린다

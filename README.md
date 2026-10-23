@@ -234,6 +234,26 @@ echo '' >> ${HOME}/.profile <br/>
   within 10 seconds - a stalled SMB or network mount - the line says that
   instead of blaming the path.
 
+  **From neo-tree they show only the row under the cursor**, the same as
+  `\ff`/`\fg`/`\fi` there: a directory row is the changes below it, a file
+  row that file's changes (a row that is the top of its repository, or a tree
+  root that is, is the whole repository). `<leader>v` opens `:DiffviewOpen --
+  <that path>`, and pressing it again on the same row goes back to that tab.
+  `<leader>s` opens the usual status screen with its staged, unstaged and
+  untracked lists cut down to that path, and the window bar says `범위:
+  <path>` plus how many changes outside it are hidden. Neogit has no path
+  filter of its own, so the lists are filtered after each refresh
+  (`Repo:set_state`), and the section counts follow. Hidden changes stay
+  untouched: the commands that run git on the whole repository rather than
+  on the listed items - `s` on the unstaged header (`git add -u`), `<C-s>`
+  (`git add -A`), `U` (`git reset`) and diffview's own `U` (`git reset --`)
+  - are narrowed to the path; discarding a section and
+  staging untracked files already work on the listed items only. `c c`
+  commits the whole index, so when something outside the path is staged the
+  window bar says so (`c c 는 숨긴 스테이징도 커밋합니다`). The recent and
+  unpushed commit sections are not filtered. `<leader>s` or `<leader>v` from
+  an edit window opens the whole repository again.
+
   Neogit keeps a single status screen. Its buffer is always named
   `NeogitStatus`, and every git command it runs goes to the last repository
   it opened - so a second status screen would take over the first one's
@@ -781,12 +801,12 @@ Ctrl+l, Ctrl+k, Ctrl+j:  Move to the split window on the right / above / below.
 <leader><leader>e: Find the egrep under the cursor, and disaplys the results via quickfix window
 <leader><leader>a: Find the assignments under the cursor, and disaplys the results via quickfix window
 
-<leader>s: Neogit - Magit style git status in a new tab, for the repo of the file / tree node under the cursor (s stage, u unstage, c commit, P push, ? help)
+<leader>s: Neogit - Magit style git status in a new tab, for the repo of the file / tree node under the cursor (s stage, u unstage, c commit, P push, ? help); from neo-tree only the changes under that row
 <leader>ha / <leader>hr: stage / revert the hunk under the cursor, or the selected lines in visual mode (gitsigns, nvim only)
 <leader>hu / <leader>hv: unstage that hunk / show it in a float
 <leader>ht: toggle the blame of the current line (off by default - it runs git blame on every cursor rest)
 ]h / [h: next / previous hunk (]c and [c stay vim's own diff-mode motions)
-<leader>v: Diffview - side by side diff of the working tree of the repo of the file / tree node under the cursor (in a diffview tab: close it)
+<leader>v: Diffview - side by side diff of the working tree of the repo of the file / tree node under the cursor (in a diffview tab: close it); from neo-tree only the changes under that row
 <leader>D: DirDiff launcher - a new tab with two columns, [A] | [B], each a path prompt over a neo-tree: pick a directory or a file on each side (Space / Tab in a tree, Enter in a prompt) and the comparison opens in a new tab (nvim; also `:DirDiffPick` and `:DirDiff` with no arguments). See "The DirDiff launcher" below
 w (Diffview file panel): widen the panel a step at a time, then back to its normal width; in the :DiffviewFileHistory panel at the bottom, its height (each diffview tab keeps its own). Only the diff windows give way; your own splits in that tab keep their size
 Ctrl+n / Ctrl+p (Neogit commit view, staged diff while committing): next / previous hunk header across files, stays put at the ends
