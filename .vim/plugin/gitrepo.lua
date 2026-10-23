@@ -1208,6 +1208,10 @@ end
 -- 섹션째 버리기(x)와 새 파일 스테이징은 원래 목록의 항목만 다룬다.
 -- 커밋(c c)은 인덱스 전체를 커밋한다 - 범위 밖에 스테이징된 것이 있으면 창 머리(winbar)에
 -- 그 수와 함께 '커밋에 들어간다'고 적는다.
+-- 커밋 섹션(Recent Commits, 당겨 올 것·밀어 낼 것)도 그 경로를 바꾼 커밋만 보인다 - 변경이
+-- 없는 디렉터리에서 \s 를 누르면 화면에 남는 것이 이 섹션들뿐인데, 저장소 전체의 커밋이
+-- 나와서 범위가 안 먹은 것처럼 보였다 (사용자 보고). 그 셋을 만드는 Neogit 의 갱신 함수를
+-- 갱신할 때만 경로를 붙인 판으로 바꿔 끼운다 (Repo:tasks). 그래프는 그리지 않는다.
 local ng_scope = {}  -- [저장소 맨 위(실제 경로)] = 저장소 안의 경로
 local ng_hidden = {} -- [맨 위] = { staged =, unstaged =, untracked = } 범위 밖이라 뺀 수
 local ng_hooked = false
@@ -1245,6 +1249,53 @@ local function scope_bar(top)
   end
 end
 
+-- 커밋 섹션을 경로로 좁혀 다시 만드는 판. Neogit 의 update_recent / update_unpulled /
+-- update_unmerged (lib/git/log.lua, pull.lua, push.lua) 와 같은 일에 files = { rel } 만 더한다.
+local function scoped_commits(rel)
+  local git = require('neogit.lib.git')
+  local util = require('neogit.lib.util')
+  local function list(args)
+    return util.filter_map(git.log.list(args, nil, { rel }, true), git.log.present_commit)
+  end
+  local function ahead_behind(st, key, fmt)
+    local status = git.branch.status()
+    st.upstream[key].items = {}
+    st.pushRemote[key].items = {}
+    if status.detached then
+      return
+    end
+    if status.upstream then
+      st.upstream[key].items = list({ fmt('@{upstream}') })
+    end
+    local pr = git.branch.pushRemote_ref()
+    if pr then
+      st.pushRemote[key].items = list({ fmt(pr) })
+    end
+  end
+  return {
+    update_recent = function(st)
+      st.recent = { items = {} }
+      local okc, config = pcall(require, 'neogit.config')
+      local count = okc and config.values.status.recent_commit_count or 10
+      if count > 0 then
+        local args = { '--max-count=' .. tostring(count) }
+        local oks, state = pcall(require, 'neogit.lib.state')
+        local order = oks and state.get({ 'NeogitMarginPopup', '-order' }, config.values.commit_order)
+        if order and order ~= '' then
+          args[#args + 1] = '--' .. order .. '-order'
+        end
+        st.recent.items = list(args)
+      end
+    end,
+    update_unpulled = function(st)
+      ahead_behind(st, 'unpulled', function(r) return '..' .. r end)
+    end,
+    update_unmerged = function(st)
+      ahead_behind(st, 'unmerged', function(r) return r .. '..' end)
+    end,
+  }
+end
+
 local function hook_neogit()
   if ng_hooked then
     return true
@@ -1256,6 +1307,34 @@ local function hook_neogit()
     return false
   end
   ng_hooked = true
+  -- 갱신 일감을 만들 때만 커밋 섹션 함수를 경로 붙인 판으로 바꾼다. tasks() 가 함수를
+  -- 그 자리에서 잡아 두므로 만든 뒤에는 바로 되돌린다 - 다른 갱신(범위 없는 저장소)은 그대로.
+  local tasks = Repo.tasks
+  if type(tasks) == 'function' then
+    Repo.tasks = function(self, filter, state)
+      local top = real_of(self.worktree_root)
+      local rel = top and ng_scope[top]
+      local lib = type(self.lib) == 'table' and self.lib
+      if not (rel and lib) then
+        return tasks(self, filter, state)
+      end
+      local saved = {}
+      for name, fn in pairs(scoped_commits(rel)) do
+        if type(lib[name]) == 'function' then
+          saved[name] = lib[name]
+          lib[name] = fn
+        end
+      end
+      local ok, t = pcall(tasks, self, filter, state)
+      for name, fn in pairs(saved) do
+        lib[name] = fn
+      end
+      if not ok then
+        error(t, 0)
+      end
+      return t
+    end
+  end
   local set_state = Repo.set_state
   Repo.set_state = function(self, id)
     set_state(self, id)
