@@ -250,9 +250,13 @@ echo '' >> ${HOME}/.profile <br/>
   - are narrowed to the path; discarding a section and
   staging untracked files already work on the listed items only. `c c`
   commits the whole index, so when something outside the path is staged the
-  window bar says so (`c c 는 숨긴 스테이징도 커밋합니다`). The recent and
-  unpushed commit sections are not filtered. `<leader>s` or `<leader>v` from
-  an edit window opens the whole repository again.
+  window bar says so (`c c 는 숨긴 스테이징도 커밋합니다`). The commit
+  sections - Recent Commits, unpulled and unpushed - list only the commits
+  that changed the path (`git log -- <path>`, no graph): on a directory with
+  no pending changes they are all the screen has, and showing the whole
+  repository's commits there looked as if the scope had not been applied.
+  `<leader>s` or `<leader>v` from an edit window opens the whole repository
+  again.
 
   Neogit keeps a single status screen. Its buffer is always named
   `NeogitStatus`, and every git command it runs goes to the last repository
