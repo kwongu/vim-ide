@@ -1367,9 +1367,9 @@ _G.rv_setup('neo-tree', {
       -- 키 글자도 소문자로 쓴다('<C-F>' 는 다른 항목으로 하나 더 생긴다).
       ['<C-g>'] = function(state) _G.vimide_tree_search(state, 'grep') end,
       ['<C-f>'] = function(state) _G.vimide_tree_search(state, 'find') end,
-      -- \ff \fg \fi 도 커서 밑 항목을 기준으로 찾는다: 그 경로를 관리하는
-      -- git 저장소에서, 없으면 그 경로 아래에서 (reposearch.lua). 편집 창의
-      -- 같은 키는 아래 전역 매핑이 지금 파일을 기준으로 한다.
+      -- \ff \fg \fi 는 트리에서 커서 밑 항목 그것만 찾는다 (reposearch.lua):
+      -- 디렉터리 줄은 그 아래만, 파일 줄은 그 파일만 - \fi 는 그 경로를 바꾼
+      -- 커밋만. 저장소 전체는 편집 창에서 (아래 전역 매핑이 지금 파일의 저장소).
       ['<leader>ff'] = function(state) _G.vimide_repo_search('files', state) end,
       ['<leader>fg'] = function(state) _G.vimide_repo_search('grep', state) end,
       ['<leader>fi'] = function(state) _G.vimide_repo_search('commits', state) end,
@@ -2234,12 +2234,18 @@ let g:sihl_index_db = 'root'
 " \ff \fg \fi 는 지금 파일을 관리하는 git 저장소에서 찾는다 (reposearch.lua).
 "   편집 창        그 파일의 저장소 맨 위에서. 저장소가 없으면 그 파일이 든
 "                  디렉터리 아래에서
-"   neo-tree 창    커서 밑 경로의 저장소에서, 없으면 그 경로 아래에서
-"                  (트리 창에서는 neo-tree window.mappings 의 같은 키가 받는다)
 "   그 밖의 창     마지막 편집 창의 파일로
+"   neo-tree 창    커서 밑 항목 그것만 (트리 창에서는 neo-tree window.mappings 의
+"                  같은 키가 받는다). 디렉터리 줄은 그 아래만, 파일 줄은 그 파일만:
+"                  \ff 그 파일 하나, \fg 그 파일 안, \fi 그 경로를 바꾼 커밋만
+"                  (그 경로를 품은 가장 안쪽 저장소의 것). 빈 줄은 트리의 루트.
 " 올라가다 .repo(안드로이드 SDK 맨 위)나 홈에 닿으면 멈춘다 - SDK 전체나 홈
 " 전체를 뒤지지 않게. \fi 는 저장소가 없으면 알리고 끝난다.
 " 예전처럼 지금 디렉터리(cwd) 기준으로 찾으려면 :Telescope find_files 등.
+"
+" 트리의 파일 줄에서 \fi 는 이름이 바뀌기 전 커밋까지 따라간다 (git log --follow).
+" 0 이면 지금 이름으로 커밋된 것만.
+let g:vimide_tree_commits_follow = 1
 nnoremap <silent> <leader>fi <Cmd>VimIdeRepoSearch commits<CR>
 nnoremap <silent> <leader>ff <Cmd>VimIdeRepoSearch files<CR>
 nnoremap <silent> <leader>fg <Cmd>VimIdeRepoSearch grep<CR>

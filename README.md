@@ -724,8 +724,10 @@ gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      (\fp / \fd, the add pickers, are off - slow on a big tree. Add from the
      tree with +, or :ProjectFilesAdd / :ProjectFilesAddDir)
 \ff / \fg / \fi: Find files / live grep / git commits in the git repository
-     that holds the current file - or, in neo-tree, the path under the cursor.
-     No repository: under that file's directory (or that path). See "Searching
+     that holds the current file. No repository: under that file's directory.
+     In neo-tree only the entry under the cursor: a directory line searches
+     below it, a file line just that file - \fi then lists only the commits
+     that changed that directory or file (renames followed). See "Searching
      from the repository" below.
 Ctrl-W H/J/K/L/r/R/x/T: Move edit windows the usual way, but only among the edit windows - the tree, the outline, the relation panel and the quickfix list stay put (nvim only, see [Moving windows](#moving-windows-inside-the-edit-area-nvim-only))
 Ctrl+]: Open the definition in the EDIT window, the same as `g]` and `f]`;
@@ -2480,8 +2482,27 @@ in:
 | pressed in | starts from | no repository |
 |---|---|---|
 | the edit window | the file | under the file's directory |
-| neo-tree (F9, F11, RelationView tree) | the entry under the cursor, as in the table above | under that path |
 | anywhere else (RelationView list, quickfix) | the file in the last edit window | under its directory |
+
+In neo-tree (F9, F11, the RelationView tree, the `\D` pick trees) the keys
+search **only the entry under the cursor** - picking it in the tree is the
+point; the whole repository is one key away in the edit window:
+
+| on a | `\ff` | `\fg` | `\fi` |
+|---|---|---|---|
+| directory line | files below it | text below it | commits that changed something below it |
+| file line | that one file | text in that file | commits that changed that file, across renames (`git log --follow`) |
+| blank or hint line | below the tree root | below the tree root | commits below the tree root |
+
+For `\fi` the repository is the innermost one holding the entry (a submodule or
+a repository inside a repository is the inner one), and the preview's diff is
+cut down to the same path. An entry that is the top of its repository lists
+every commit, the same as the edit window. Commits from before a rename are in
+the list, but their preview can be empty - the preview filters by today's
+name. `let g:vimide_tree_commits_follow = 0` lists only commits under today's
+name. The prompt title shows the path and `[이 아래만]`, `[이 파일만]` or
+`[git: <repository>]`. A file line whose file is gone (a deleted file in the
+git status tree) is reported for `\ff`/`\fg`; `\fi` still lists its history.
 
 From the starting directory it walks up to the first `.git` - a directory, or a
 `gitdir:` file (worktrees, submodules) - that has at least one commit, and
@@ -2505,7 +2526,8 @@ repository it came from. The prompt title shows where it searches
 and `[git]`, `[저장소 없음: 이 아래]` or `[저장소 없음: 맨 위 한 층만]`.
 `\fi` needs a repository and says so when there is none. In neo-tree the keys
 are neo-tree window mappings, so they read the line the cursor is on
-(`reposearch.lua`, the same rule `Ctrl+g` uses). `:VimIdeRepoSearch
+(`reposearch.lua`, the same rule `Ctrl+g` uses). Home, a directory above it or
+`/` as a tree entry still searches that one level only. `:VimIdeRepoSearch
 files|grep|commits` is the same from the command line, and
 `:Telescope find_files` still searches the cwd.
 

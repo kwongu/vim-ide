@@ -6,17 +6,27 @@
 --
 -- 기준 경로
 --   편집 창        그 파일
---   neo-tree 창    커서 밑 항목 - 디렉터리 줄은 그 디렉터리, 파일 줄은 그
---                  파일이 든 디렉터리, 빈 줄은 트리의 루트. F9 왼쪽 트리,
---                  F11 뜬 트리, RelationView 의 트리 셋 다 같다 (.vimrc 의
---                  neo-tree window.mappings 에 건 같은 키가 커서 밑 항목을
---                  넘겨준다 - treesearch.lua 의 <C-g> <C-f> 와 같은 길).
 --   그 밖의 창     마지막 편집 창의 파일 (RelationView 패널, quickfix ...)
 --                  그것도 없으면 지금 디렉터리
 -- 찾는 곳
 --   기준 경로에서 위로 올라가며 처음 만나는 git 저장소의 맨 위.
 --   저장소가 없으면 기준 경로 아래 (파일이면 그 파일이 든 디렉터리).
 --   \fi 는 저장소가 없으면 볼 커밋이 없으니 알리고 끝난다.
+--
+-- neo-tree 창에서는 커서 밑 항목 '그것만' 찾는다 (저장소 전체가 아니다)
+--   디렉터리 줄    \ff \fg 는 그 디렉터리 아래, \fi 는 그 아래를 바꾼 커밋만
+--   파일 줄        \ff 는 그 파일 하나, \fg 는 그 파일 안, \fi 는 그 파일을
+--                  바꾼 커밋만 (이름이 바뀐 것을 따라간다 - --follow)
+--   빈 줄·안내 줄  트리의 루트를 디렉터리 줄처럼
+--   트리에서 항목을 골라 누르는 것 자체가 '여기만 보겠다'는 뜻이다 - 저장소
+--   전체는 편집 창에서 누르면 된다. F9 왼쪽 트리, F11 뜬 트리, RelationView 의
+--   트리, \D 의 고르기 트리 모두 같다 (.vimrc 의 neo-tree window.mappings 에 건
+--   같은 키가 커서 밑 항목을 넘겨준다 - treesearch.lua 의 <C-g> <C-f> 와 같은 길).
+--   \fi 의 저장소는 그 항목을 품은 가장 안쪽 저장소다 (submodule, 저장소 안의
+--   저장소는 그 안쪽 것). 항목이 저장소의 맨 위면 저장소 전체와 같다. 미리보기의
+--   diff 도 그 경로만 보인다 - 다만 이름이 바뀌기 전 커밋은 미리보기가 비어 보일
+--   수 있다 (미리보기는 지금 이름으로 거른다. 목록에는 다 나온다).
+--   찾는 동안 키는 바로 돌아온다 - 목록은 git/rg 가 내놓는 대로 뒤에서 찬다.
 --
 -- 올라가다 멈추는 곳
 --   .repo 가 있는 디렉터리   repo 도구로 받은 트리(안드로이드 SDK)의 맨 위다.
@@ -240,29 +250,47 @@ local function buf_file(buf)
   return vim.fn.fnamemodify(n, ':p')
 end
 
--- 기준 디렉터리. state 는 neo-tree 의 mapping 함수가 넘겨준 것.
-local function base_dir(state)
+-- neo-tree 에서 불렸으면 찾을 범위 = 커서 밑 항목. state 는 neo-tree 의
+-- mapping 함수가 넘겨준 것(:VimIdeRepoSearch 를 트리 창에서 치면 여기서 얻는다).
+--   { path = 항목의 경로(링크면 링크 그대로), dir = 디렉터리 줄이면 그 경로,
+--     파일 줄이면 든 디렉터리, file = 파일 줄이면 true }
+-- 경로가 없는 줄(빈 줄, '(3 hidden items)')은 트리의 루트를 디렉터리 줄처럼.
+-- neo-tree 창이 아니면 nil.
+local function tree_scope(state)
   if not state and vim.bo.filetype == 'neo-tree' then
     pcall(function()
       state = require('neo-tree.sources.manager').get_state_for_window(
         api.nvim_get_current_win())
     end)
   end
-  if state then
-    local d, p
-    if type(_G.vimide_tree_target) == 'function' then
-      local td, _, tp = _G.vimide_tree_target(state)
-      d, p = td, tp
-    else
-      d = state.path
-    end
-    -- 항목 자체의 경로에서 시작한다: 링크 파일(~/.vimrc)이면 풀어서
-    -- 가리키는 파일이 든 디렉터리로. 경로가 없는 줄(빈 줄)은 트리의 루트.
-    d = dir_of(p) or dir_of(d)
-    if d then
-      return d
-    end
+  if not state then
+    return nil
   end
+  local d, p
+  if type(_G.vimide_tree_target) == 'function' then
+    local td, _, tp = _G.vimide_tree_target(state)
+    d, p = td, tp
+  else
+    d = state.path
+  end
+  if type(p) == 'string' and p:sub(1, 1) == '/' then
+    if p ~= '/' then
+      p = (p:gsub('/+$', ''))
+    end
+    -- 디렉터리를 가리키는 링크 줄도 디렉터리다 (isdirectory 는 링크를 따라간다)
+    if vim.fn.isdirectory(p) == 1 then
+      return { path = p, dir = p }
+    end
+    return { path = p, dir = vim.fn.fnamemodify(p, ':h'), file = true }
+  end
+  if type(d) == 'string' and d:sub(1, 1) == '/' and vim.fn.isdirectory(d) == 1 then
+    return { path = d, dir = d }
+  end
+  return nil
+end
+
+-- 기준 디렉터리 (neo-tree 밖에서 부를 때)
+local function base_dir()
   local d = dir_of(buf_file(api.nvim_get_current_buf()))
   if d then
     return d
@@ -295,6 +323,81 @@ local KINDS = {
   commits = { fn = 'git_commits', title = 'Git Commits', need_repo = true },
 }
 
+-- 홈이나 / : 맨 위 한 층만. 숨김 파일(~/.zshrc 같은)이 바로 그 층의 것이다.
+-- hidden 은 find 로 떨어졌을 때 점 파일을 걸러 내지 않게, follow 는 링크인 점
+-- 파일(~/.vimrc -> ~/.vim-ide/.vimrc)도 보이게.
+local function one_level(kind, o)
+  if kind == 'files' then
+    o.hidden = true
+    o.follow = true
+    o.find_command = vim.fn.executable('rg') == 1
+        and { 'rg', '--files', '--max-depth', '1' }
+        or { 'find', '.', '-maxdepth', '1', '(', '-type', 'f', '-o', '-type', 'l', ')' }
+  elseif kind == 'grep' then
+    -- --follow: 링크인 점 파일(~/.vimrc)도 찾는다 (--max-depth 1 이라 링크된
+    -- 디렉터리 안으로 들어가지는 않는다)
+    o.additional_args = { '--hidden', '--follow', '--max-depth', '1' }
+  end
+end
+
+-- neo-tree 에서: 커서 밑 항목(sc)만 찾는 telescope 옵션.
+-- 돌려주는 것: 옵션, 제목에 보일 경로, 꼬리표. 못 찾으면 알리고 nil.
+local function scoped_opts(kind, sc)
+  if kind == 'commits' then
+    -- 링크는 풀어서 가리키는 쪽의 저장소와 경로로 (~/.vimrc -> ~/.vim-ide/.vimrc).
+    -- 저장소는 그 항목을 품은 가장 안쪽 것 - 위로 올라가며 처음 만나는 .git 이다.
+    local real = dir_of(sc.path)
+    if sc.file then
+      local okr, rp = pcall(vim.fn.resolve, sc.path)
+      real = okr and type(rp) == 'string' and rp ~= '' and rp or sc.path
+    end
+    local root = real and repo_root(sc.file and vim.fn.fnamemodify(real, ':h') or real)
+    if not root then
+      vim.notify('git 저장소가 아닙니다 - ' .. short(sc.path), WARN)
+      return nil
+    end
+    local o = { cwd = root }
+    if real == root then
+      return o, vim.fn.fnamemodify(root, ':~'), '[git: 저장소 전체]'
+    end
+    -- 저장소 맨 위에서 본 경로. git 은 맨 위에서 돌고(telescope 가 cwd 를 맨 위로
+    -- 옮긴다) 미리보기도 같은 경로로 거른다(current_file). --literal-pathspecs:
+    -- 이름에 * ? [ 나 맨 앞 : 이 있어도 그 이름 하나만 (pathspec 로 읽히지 않게).
+    local rel = vim.startswith(real, root .. '/') and real:sub(#root + 2) or real
+    local cmd = { 'git', '--literal-pathspecs', 'log', '--pretty=oneline', '--abbrev-commit' }
+    if sc.file and tonumber(vim.g.vimide_tree_commits_follow or 1) ~= 0 then
+      cmd[#cmd + 1] = '--follow'
+    end
+    cmd[#cmd + 1] = '--'
+    cmd[#cmd + 1] = rel
+    o.git_command = cmd
+    o.current_file = rel
+    return o, rel, ('[git: %s]'):format(vim.fn.fnamemodify(root, ':~'))
+  end
+  if sc.file then
+    if not uv.fs_stat(sc.path) then
+      -- git_status 소스의 지운 파일 줄 같은 것
+      vim.notify('그런 파일이 없습니다 - ' .. short(sc.path), WARN)
+      return nil
+    end
+    -- 그 파일이 든 디렉터리에서 그 파일 하나만. rg 는 이름을 직접 주면 숨김·
+    -- .gitignore 와 상관없이 읽는다. 맨 앞 - 는 rg 가 선택지로, 맨 앞 ~ 는
+    -- telescope(search_dirs)가 홈으로 읽으니 ./ 를 붙인다.
+    local name = vim.fn.fnamemodify(sc.path, ':t')
+    if name:match('^[~-]') then
+      name = './' .. name
+    end
+    return { cwd = sc.dir, search_dirs = { name } },
+        vim.fn.fnamemodify(sc.path, ':~'), '[이 파일만]'
+  end
+  local o = { cwd = sc.dir }
+  if top_dir(sc.dir) then
+    one_level(kind, o)
+    return o, vim.fn.fnamemodify(sc.dir, ':~'), '[맨 위 한 층만]'
+  end
+  return o, vim.fn.fnamemodify(sc.dir, ':~'), '[이 아래만]'
+end
+
 --- kind = 'files' | 'grep' | 'commits'. state 는 neo-tree 에서 부를 때만.
 function _G.vimide_repo_search(kind, state)
   local k = KINDS[kind]
@@ -307,38 +410,35 @@ function _G.vimide_repo_search(kind, state)
     vim.notify('telescope 가 올라와 있지 않습니다', WARN)
     return
   end
-  local dir = base_dir(state)
-  local root = repo_root(dir)
-  if k.need_repo and not root then
-    vim.notify('git 저장소가 아닙니다 - ' .. short(dir), WARN)
-    return
+  local o, shown, where
+  local sc = tree_scope(state)
+  if sc then
+    o, shown, where = scoped_opts(kind, sc)
+    if not o then
+      return
+    end
+  else
+    local dir = base_dir()
+    local root = repo_root(dir)
+    if k.need_repo and not root then
+      vim.notify('git 저장소가 아닙니다 - ' .. short(dir), WARN)
+      return
+    end
+    o = { cwd = root or dir }
+    shown = vim.fn.fnamemodify(o.cwd, ':~')
+    where = root and '[git]' or '[저장소 없음: 이 아래]'
+    if not root and top_dir(o.cwd) then
+      one_level(kind, o)
+      where = '[저장소 없음: 맨 위 한 층만]'
+    end
   end
-  local cwd = root or dir
-  local where = root and '[git]' or '[저장소 없음: 이 아래]'
-  local o = { cwd = cwd }
+  local cwd = o.cwd
   if kind == 'commits' then
     -- 점수가 같으면 git log 순서(최신이 위)를 지킨다. 기본 tiebreak 는 짧은
     -- 글자를 앞으로 올려서, 글자를 치는 순간 옛 커밋이 위로 올라왔다.
     o.tiebreak = function() return false end
   end
-  if not root and top_dir(cwd) then
-    -- 홈이나 / : 맨 위 한 층만. 숨김 파일(~/.zshrc 같은)이 바로 그 층의
-    -- 것이다. hidden 은 find 로 떨어졌을 때 점 파일을 걸러 내지 않게,
-    -- follow 는 링크인 점 파일(~/.vimrc -> ~/.vim-ide/.vimrc)도 보이게.
-    where = '[저장소 없음: 맨 위 한 층만]'
-    if kind == 'files' then
-      o.hidden = true
-      o.follow = true
-      o.find_command = vim.fn.executable('rg') == 1
-          and { 'rg', '--files', '--max-depth', '1' }
-          or { 'find', '.', '-maxdepth', '1', '(', '-type', 'f', '-o', '-type', 'l', ')' }
-    elseif kind == 'grep' then
-      -- --follow: 링크인 점 파일(~/.vimrc)도 찾는다 (--max-depth 1 이라 링크된
-      -- 디렉터리 안으로 들어가지는 않는다)
-      o.additional_args = { '--hidden', '--follow', '--max-depth', '1' }
-    end
-  end
-  o.prompt_title = ('%s  →  %s  %s'):format(k.title, vim.fn.fnamemodify(cwd, ':~'), where)
+  o.prompt_title = ('%s  →  %s  %s'):format(k.title, shown, where)
   -- 뜬 트리(F11)에서 불렸으면 편집 창으로 나간 뒤에 연다. telescope 는 부른
   -- 창으로 돌아가는데, 그게 곧 닫힐 뜬 창이면 <C-q>(quickfix 로 보내기)가
   -- 편집 창을 quickfix 로 덮었다 (QA).
