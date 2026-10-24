@@ -752,8 +752,8 @@ gf / Ctrl+]: on an `#include` line, open that header (resolved next to the
      In neo-tree only the entry under the cursor: a directory line searches
      below it, a file line just that file - \fi then lists only the commits
      that changed that directory or file (renames followed), and its Enter
-     checks out only that path at the commit. See "Searching from the
-     repository" below.
+     checks out only that path at the commit (Ctrl+h there: back to HEAD).
+     See "Searching from the repository" below.
 Ctrl-W H/J/K/L/r/R/x/T: Move edit windows the usual way, but only among the edit windows - the tree, the outline, the relation panel and the quickfix list stay put (nvim only, see [Moving windows](#moving-windows-inside-the-edit-area-nvim-only))
 Ctrl+]: Open the definition in the EDIT window, the same as `g]` and `f]`;
      Ctrl+t back
@@ -2531,14 +2531,17 @@ in a path checkout, so this asks first when the path has uncommitted changes
 (tracked changes, plus untracked files the commit has under the same name),
 with "No" as the default, and refuses when the commit does not have the path at
 all - a file before its rename (the list follows renames) or a directory the
-commit deleted. The git calls run in the background. Undo with `git restore
---source=HEAD --staged --worktree -- <path>`. `<C-r>m`/`s`/`h` (git reset of
+commit deleted. The git calls run in the background. **`Ctrl+h` in the same picker puts the
+path back to HEAD** - whichever row is selected - which undoes an Enter
+checkout (and any edits there: it asks first, like Enter, and says so when the
+path already matches HEAD); outside nvim that is `git restore --source=HEAD
+--staged --worktree -- <path>`. `<C-r>m`/`s`/`h` (git reset of
 the whole repository) are blocked in this picker. An entry that is the top of its repository lists
 every commit, the same as the edit window. Commits from before a rename are in
 the list, but their preview can be empty - the preview filters by today's
 name. `let g:vimide_tree_commits_follow = 0` lists only commits under today's
 name. The prompt title shows the path and `[이 아래만]`, `[이 파일만]` or
-`[git: <repository> · Enter: 이 경로만 체크아웃]`. A file line whose file is gone (a deleted file in the
+`[git: <repository> · Enter: 이 경로만 체크아웃 · ^h: HEAD 로]`. A file line whose file is gone (a deleted file in the
 git status tree) is reported for `\ff`/`\fg`; `\fi` still lists its history.
 
 From the starting directory it walks up to the first `.git` - a directory, or a

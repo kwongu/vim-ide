@@ -370,19 +370,6 @@ local function nul_split(s)
   return t
 end
 
--- 트리에서 연 \fi 의 Enter: 그 커밋으로 '그 경로만' 체크아웃한다. 저장소의 나머지와
--- HEAD 는 그대로다 (편집 창의 \fi 의 Enter 는 예전대로 저장소 전체 git checkout).
---   git restore --source=<커밋> --staged --worktree -- <경로>
--- 인덱스와 작업 트리의 그 경로를 그 커밋의 내용과 똑같이 만든다 - 그 커밋 뒤에 생긴
--- (추적 중인) 파일은 지워진다. git checkout <커밋> -- <경로> 는 그런 파일을 남겨서
--- '그 커밋의 내용'이 되지 않는다. 결과는 HEAD 에 견준 스테이징된 변경으로 보인다.
--- 덮어쓰기 전에 본다 (git 은 경로 체크아웃에서는 고친 것을 묻지 않고 덮는다):
---   그 커밋에 그 경로가 없으면    하지 않는다 - 파일은 이름이 바뀌기 전 커밋(목록은
---                                 --follow 라 나온다), 디렉터리는 통째로 지운 커밋.
---                                 그대로 하면 지금 것을 지운다.
---   커밋하지 않은 변경이 있으면   몇 개인지 보이고 묻는다 (기본: 아니오). 추적 중인
---                                 파일의 변경과, 그 커밋에 있는 이름의 새 파일(덮인다).
--- git 은 모두 뒤에서 돈다 - 커널 트리의 디렉터리라도 키는 바로 돌아온다.
 -- 알림은 한 줄에 들어가게: 넘치면 Press ENTER 가 떠서 다음 키를 먹는다. 덧붙일 말(hint)은
 -- 자리가 있을 때만 붙인다.
 local function say(msg, hint, level)
@@ -396,25 +383,50 @@ local function say(msg, hint, level)
   vim.notify(msg, level or vim.log.levels.INFO)
 end
 
-local function path_checkout(root, rel, commit, subject)
+-- 트리에서 연 \fi 의 Enter: 그 커밋으로 '그 경로만' 체크아웃한다. 저장소의 나머지와
+-- HEAD 는 그대로다 (편집 창의 \fi 의 Enter 는 예전대로 저장소 전체 git checkout).
+--   git restore --source=<커밋> --staged --worktree -- <경로>
+-- 인덱스와 작업 트리의 그 경로를 그 커밋의 내용과 똑같이 만든다 - 그 커밋 뒤에 생긴
+-- (추적 중인) 파일은 지워진다. git checkout <커밋> -- <경로> 는 그런 파일을 남겨서
+-- '그 커밋의 내용'이 되지 않는다. 결과는 HEAD 에 견준 스테이징된 변경으로 보인다.
+-- 덮어쓰기 전에 본다 (git 은 경로 체크아웃에서는 고친 것을 묻지 않고 덮는다):
+--   그 커밋에 그 경로가 없으면    하지 않는다 - 파일은 이름이 바뀌기 전 커밋(목록은
+--                                 --follow 라 나온다), 디렉터리는 통째로 지운 커밋.
+--                                 그대로 하면 지금 것을 지운다.
+--   커밋하지 않은 변경이 있으면   몇 개인지 보이고 묻는다 (기본: 아니오). 추적 중인
+--                                 파일의 변경과, 그 커밋에 있는 이름의 새 파일(덮인다).
+-- git 은 모두 뒤에서 돈다 - 커널 트리의 디렉터리라도 키는 바로 돌아온다.
+--
+-- head = true 는 Ctrl+h (HEAD 로 되돌리기): 같은 일을 HEAD 에서 한다. 앞서 Enter 로 바꾼
+-- 것(스테이징된 변경으로 남아 있다)과 그 경로에서 고친 것을 거두고 지금 커밋된 내용으로
+-- 돌린다. 이미 HEAD 와 같으면 아무것도 하지 않는다. 고친 것이 있으면 Enter 와 같이 묻는다.
+local function path_checkout(root, rel, commit, subject, head)
   local label = commit .. (subject and subject ~= '' and (' "' .. vim.fn.strcharpart(subject, 0, 30) .. '"') or '')
   -- 알림에는 저장소 안의 경로 (picker 제목과 같다). 저장소는 제목에 이미 보였다.
   local where = rel
   local function restore()
-    vim.api.nvim_echo({ { ('%s → %s 체크아웃하는 중...'):format(where, commit) } }, false, {})
+    vim.api.nvim_echo({ { ('%s → %s %s하는 중...'):format(where, commit, head and '되돌리기' or '체크아웃') } }, false, {})
     git_async(root, { 'restore', '--source=' .. commit, '--staged', '--worktree', '--', rel }, function(r)
       if r.code ~= 0 then
-        say(('체크아웃하지 못했습니다 - %s (%s)'):format(where, git_err(r)), nil, WARN)
+        say(('%s 못했습니다 - %s (%s)'):format(head and '되돌리지' or '체크아웃하지', where, git_err(r)), nil, WARN)
         return
       end
       -- 열어 둔 그 파일들을 다시 읽는다 (고친 버퍼는 nvim 이 묻는다)
       pcall(vim.cmd, 'checktime')
-      say(('%s 만 %s 로 체크아웃 (나머지·HEAD 그대로)'):format(where, commit),
-        ('  되돌리기: git restore -s HEAD -SW -- %s'):format(rel))
+      if head then
+        say(('%s 를 HEAD 로 되돌렸습니다'):format(where))
+      else
+        say(('%s 만 %s 로 체크아웃 (나머지·HEAD 그대로)'):format(where, commit),
+          '  되돌리기: 이 창에서 Ctrl+h')
+      end
     end)
   end
   local function ask(n)
     if n == 0 then
+      if head then
+        say(('%s 는 이미 HEAD 와 같습니다'):format(where))
+        return
+      end
       restore()
       return
     end
@@ -426,13 +438,17 @@ local function path_checkout(root, rel, commit, subject)
     if ch == 1 then
       restore()
     else
-      say('체크아웃하지 않았습니다 - ' .. where)
+      say((head and '되돌리지 않았습니다 - ' or '체크아웃하지 않았습니다 - ') .. where)
     end
   end
   git_async(root, { 'cat-file', '-e', commit .. ':' .. rel }, function(r0)
     if r0.code ~= 0 then
-      say(('%s 에는 %s 가 없어 체크아웃하지 않았습니다'):format(commit, where),
-        ' (이름이 바뀌기 전이거나 지운 커밋)', WARN)
+      if head then
+        say(('HEAD 에는 %s 가 없어 되돌리지 않았습니다 (아직 커밋된 적 없는 경로)'):format(where), nil, WARN)
+      else
+        say(('%s 에는 %s 가 없어 체크아웃하지 않았습니다'):format(commit, where),
+          ' (이름이 바뀌기 전이거나 지운 커밋)', WARN)
+      end
       return
     end
     git_async(root, { 'status', '--porcelain', '-z', '--untracked-files=all', '--', rel }, function(r)
@@ -482,8 +498,11 @@ local function path_checkout(root, rel, commit, subject)
   end)
 end
 
--- 트리에서 연 \fi 의 키: Enter 는 위의 경로 체크아웃. <C-r>m/s/h(git reset)는 저장소
--- 전체를 되돌리는 것이라 이 창에서는 막는다 - 범위만 보는 창에서 범위 밖이 바뀐다.
+-- 트리에서 연 \fi 의 키: Enter 는 위의 경로 체크아웃, Ctrl+h 는 그 경로를 HEAD 로
+-- 되돌리기 (고른 줄과 상관없다). <C-r>m/s/h(git reset)는 저장소 전체를 되돌리는 것이라
+-- 이 창에서는 막는다 - 범위만 보는 창에서 범위 밖이 바뀐다.
+-- Ctrl+h 는 입력 칸에서도 먹는다. Backspace 가 ^H 를 보내는 터미널이면 지우기 대신 이것이
+-- 되지만, 고친 것이 있으면 묻고 없으면 하는 일이 없다 (iTerm2 기본값은 ^? 라 겹치지 않는다).
 local function scoped_commit_keys(root, rel)
   return function(prompt_bufnr, map)
     local actions = require('telescope.actions')
@@ -495,6 +514,10 @@ local function scoped_commit_keys(root, rel)
         path_checkout(root, rel, e.value, e.msg)
       end
     end)
+    map({ 'i', 'n' }, '<c-h>', function()
+      actions.close(prompt_bufnr)
+      path_checkout(root, rel, 'HEAD', nil, true)
+    end, { desc = '이 경로를 HEAD 로 되돌리기' })
     local function no_reset()
       say('트리에서 연 \\fi 에서는 <C-r>m/s/h(저장소 전체 reset)를 쓰지 않습니다', ' - 편집 창의 \\fi 에서', WARN)
     end
@@ -538,7 +561,7 @@ local function scoped_opts(kind, sc)
     o.git_command = cmd
     o.current_file = rel
     o.attach_mappings = scoped_commit_keys(root, rel)
-    return o, rel, ('[git: %s · Enter: 이 경로만 체크아웃]'):format(vim.fn.fnamemodify(root, ':~'))
+    return o, rel, ('[git: %s · Enter: 이 경로만 체크아웃 · ^h: HEAD 로]'):format(vim.fn.fnamemodify(root, ':~'))
   end
   if sc.file then
     if not uv.fs_stat(sc.path) then
